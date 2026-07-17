@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ZAILON",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "identifier": "io.github.n7t0of.zailon",
   "build": {
     "frontendDist": "../dist",
@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "ZAILON",
-        "width": 960,
-        "height": 580,
-        "minWidth": 800,
-        "minHeight": 480,
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -38,5 +39,16 @@
       "icons/icon.ico"
     ],
     "category": "Utility"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY0MkUzMTI0ODAxOEE0OUIKUldTYnBCaUFKREV1OUY3NmEwODN3LzdtVlMyNVJhQ0FKc2M1QmJhajBxc0lqN1FtbndqSmU0a1AK",
+      "endpoints": [
+        "https://github.com/N7T0-OF/ZAILON/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

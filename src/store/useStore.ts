@@ -1,10 +1,10 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { ExplodMod, Game, LoaderType, Mod, Platform, Profile, ViewType } from '../types'
+import { ExplodMod, Game, LoaderType, Mod, Platform, Profile, UpdateChannel, ViewType } from '../types'
 import { DetectedGame, native, NativeMod, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES } from './gamebanana'
 
-const APP_VERSION = '1.0.0'
+const APP_VERSION = '1.0.1'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -53,6 +53,13 @@ export interface Store {
   nsfw: boolean
   language: string
   discordPresence: boolean
+  autoCheckUpdates: boolean
+  autoInstallUpdates: boolean
+  updateChannel: UpdateChannel
+  lastUpdateCheck?: number
+  lastUpdateVersion?: string
+  lastUpdateError?: string
+  lastInstalledUpdate?: { version: string; notes?: string; date?: string; installedAt: number }
   isPlaying: boolean
   playStartTime?: number
   sessionTime: number
@@ -79,6 +86,12 @@ export interface Store {
   toggleNSFW: () => void
   setLanguage: (language: string) => void
   toggleDiscord: () => void
+  setAutoCheckUpdates: (enabled: boolean) => void
+  setAutoInstallUpdates: (enabled: boolean) => void
+  setUpdateChannel: (channel: UpdateChannel) => void
+  recordUpdateCheck: (version?: string, error?: string) => void
+  prepareInstalledUpdate: (update: { version: string; notes?: string; date?: string }) => void
+  dismissInstalledUpdate: () => void
   launchSelectedGame: () => Promise<void>
   stopPlaying: () => void
   tick: () => void
@@ -99,6 +112,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
   nsfw: false,
   language: 'fr',
   discordPresence: false,
+  autoCheckUpdates: true,
+  autoInstallUpdates: false,
+  updateChannel: 'stable',
   isPlaying: false,
   sessionTime: 0,
   explorePlatform: 'gamebanana',
@@ -222,6 +238,12 @@ export const useStore = create<Store>()(persist((set, get) => ({
   toggleNSFW: () => set(state => ({ nsfw: !state.nsfw })),
   setLanguage: language => set({ language }),
   toggleDiscord: () => set(state => ({ discordPresence: !state.discordPresence })),
+  setAutoCheckUpdates: autoCheckUpdates => set({ autoCheckUpdates }),
+  setAutoInstallUpdates: autoInstallUpdates => set(state => ({ autoInstallUpdates, autoCheckUpdates: autoInstallUpdates ? true : state.autoCheckUpdates })),
+  setUpdateChannel: updateChannel => set({ updateChannel }),
+  recordUpdateCheck: (lastUpdateVersion, lastUpdateError) => set({ lastUpdateCheck: Date.now(), lastUpdateVersion, lastUpdateError }),
+  prepareInstalledUpdate: update => set({ lastInstalledUpdate: { ...update, installedAt: Date.now() } }),
+  dismissInstalledUpdate: () => set({ lastInstalledUpdate: undefined }),
   launchSelectedGame: async () => {
     const { game } = selected(get())
     if (!game?.execPath) { set({ notice: 'Select a game executable before launching.' }); return }
@@ -293,6 +315,13 @@ export const useStore = create<Store>()(persist((set, get) => ({
     nsfw: state.nsfw,
     language: state.language,
     discordPresence: state.discordPresence,
+    autoCheckUpdates: state.autoCheckUpdates,
+    autoInstallUpdates: state.autoInstallUpdates,
+    updateChannel: state.updateChannel,
+    lastUpdateCheck: state.lastUpdateCheck,
+    lastUpdateVersion: state.lastUpdateVersion,
+    lastUpdateError: state.lastUpdateError,
+    lastInstalledUpdate: state.lastInstalledUpdate,
     explorePlatform: state.explorePlatform,
     exploreGameId: state.exploreGameId,
     exploreGrid: state.exploreGrid,

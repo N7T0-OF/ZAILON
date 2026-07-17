@@ -1,5 +1,6 @@
 export type ViewType = 'home' | 'games' | 'explore' | 'news' | 'settings'
 export type Platform = 'gamebanana' | 'nexus' | 'curseforge' | 'ayakamods'
+export type UpdateChannel = 'stable' | 'beta'
 export type LoaderType = 'GIMI' | 'ZZMI' | 'SRMI' | 'WWMI' | 'EFMI' | 'UE5' | 'BepInEx' | 'ASI' | 'CLEO' | 'REF' | 'MelonLoader' | 'DLL' | 'Archive' | 'Folder' | 'Manual'
 
 export interface Mod {

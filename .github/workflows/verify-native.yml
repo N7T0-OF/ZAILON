@@ -43,4 +43,4 @@ jobs:
         run: npm run build
 
       - name: Verify native backend
-        run: npm run tauri build -- --debug --no-bundle
+        run: npm run tauri build -- --debug --no-bundle --no-sign

@@ -20,12 +20,9 @@ export function AppWindow() {
 
   return (
     <div
-      className="relative flex flex-col overflow-hidden rounded-xl shadow-2xl"
+      className="relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden"
       style={{
-        width: 854,
-        height: 480,
         background: 'linear-gradient(135deg, #080710 0%, #0d0c17 100%)',
-        boxShadow: '0 0 0 1px rgba(255,255,255,0.06), 0 32px 80px rgba(0,0,0,0.8), 0 0 40px rgba(232,184,75,0.04)',
       }}
     >
       {/* Subtle grain overlay */}
@@ -34,9 +31,9 @@ export function AppWindow() {
 
       <TitleBar />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
-        <main className="flex-1 overflow-hidden animate-fade-in">
+        <main className="min-h-0 min-w-0 flex-1 overflow-hidden animate-fade-in">
           <View />
         </main>
       </div>

@@ -1,11 +1,20 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::{copy, Cursor},
+    io::{copy, Cursor, Write},
     path::{Path, PathBuf},
     process::Command,
+    time::{SystemTime, UNIX_EPOCH},
 };
+use tauri::{AppHandle, Manager};
 use walkdir::WalkDir;
+
+#[cfg(desktop)]
+use std::sync::Mutex;
+#[cfg(desktop)]
+use tauri::{ipc::Channel, State};
+#[cfg(desktop)]
+use tauri_plugin_updater::{Update, UpdaterExt};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,8 +36,94 @@ struct DetectedGame {
     platform: String,
 }
 
+#[cfg(desktop)]
+struct PendingUpdate(Mutex<Option<Update>>);
+
+#[cfg(desktop)]
+#[derive(Debug, Deserialize)]
+struct GitHubRelease {
+    prerelease: bool,
+    draft: bool,
+    assets: Vec<GitHubReleaseAsset>,
+}
+
+#[cfg(desktop)]
+#[derive(Debug, Deserialize)]
+struct GitHubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+#[cfg(desktop)]
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateMetadata {
+    version: String,
+    current_version: String,
+    date: Option<String>,
+    notes: Option<String>,
+}
+
+#[cfg(desktop)]
+#[derive(Clone, Serialize)]
+#[serde(tag = "event", content = "data")]
+enum UpdateDownloadEvent {
+    #[serde(rename_all = "camelCase")]
+    Started {
+        content_length: Option<u64>,
+    },
+    #[serde(rename_all = "camelCase")]
+    Progress {
+        chunk_length: usize,
+    },
+    Finished,
+}
+
 fn to_error(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+fn unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn update_data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let root = app.path().app_local_data_dir().map_err(to_error)?;
+    fs::create_dir_all(&root).map_err(to_error)?;
+    Ok(root)
+}
+
+fn append_update_log(root: &Path, entry: serde_json::Value) -> Result<(), String> {
+    let log_path = root.join("update-log.jsonl");
+    let mut log = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .map_err(to_error)?;
+    writeln!(log, "{}", serde_json::to_string(&entry).map_err(to_error)?).map_err(to_error)
+}
+
+fn prune_update_backups(backups_path: &Path) -> Result<(), String> {
+    let mut backups = fs::read_dir(backups_path)
+        .map_err(to_error)?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .map(|entry| {
+            let modified = entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .unwrap_or(UNIX_EPOCH);
+            (modified, entry.path())
+        })
+        .collect::<Vec<_>>();
+    backups.sort_by(|left, right| right.0.cmp(&left.0));
+    for (_, path) in backups.into_iter().skip(3) {
+        fs::remove_dir_all(path).map_err(to_error)?;
+    }
+    Ok(())
 }
 
 fn mod_type(path: &Path) -> String {
@@ -333,10 +428,212 @@ async fn install_mod(url: String, file_name: String, mods_path: String) -> Resul
     }
 }
 
+#[tauri::command]
+fn prepare_update_backup(
+    app: AppHandle,
+    snapshot: String,
+    current_version: String,
+    target_version: String,
+) -> Result<String, String> {
+    const MAX_SNAPSHOT_BYTES: usize = 25 * 1024 * 1024;
+    if snapshot.len() > MAX_SNAPSHOT_BYTES {
+        return Err(
+            "The local launcher backup is unexpectedly large. Update was not started.".into(),
+        );
+    }
+
+    let root = update_data_root(&app)?;
+    let backups = root.join("update-backups");
+    fs::create_dir_all(&backups).map_err(to_error)?;
+    let timestamp = unix_timestamp();
+    let backup = backups.join(format!("{timestamp}-{target_version}"));
+    fs::create_dir_all(&backup).map_err(to_error)?;
+    fs::write(backup.join("zailon-store.json"), snapshot).map_err(to_error)?;
+    fs::write(
+        backup.join("metadata.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "createdAt": timestamp,
+            "currentVersion": current_version,
+            "targetVersion": target_version,
+            "system": std::env::consts::OS,
+            "architecture": std::env::consts::ARCH,
+            "purpose": "pre-update launcher configuration backup"
+        }))
+        .map_err(to_error)?,
+    )
+    .map_err(to_error)?;
+    prune_update_backups(&backups)?;
+    append_update_log(
+        &root,
+        serde_json::json!({
+            "at": timestamp,
+            "event": "backup-created",
+            "currentVersion": current_version,
+            "targetVersion": target_version,
+            "system": std::env::consts::OS,
+            "architecture": std::env::consts::ARCH,
+            "result": "ok"
+        }),
+    )?;
+
+    Ok(backup.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn record_update_event(
+    app: AppHandle,
+    event: String,
+    version: String,
+    message: Option<String>,
+) -> Result<(), String> {
+    let root = update_data_root(&app)?;
+    append_update_log(
+        &root,
+        serde_json::json!({
+            "at": unix_timestamp(),
+            "event": event,
+            "version": version,
+            "system": std::env::consts::OS,
+            "architecture": std::env::consts::ARCH,
+            "message": message
+        }),
+    )
+}
+
+#[tauri::command]
+fn open_update_log(app: AppHandle) -> Result<(), String> {
+    let root = update_data_root(&app)?;
+    let log_path = root.join("update-log.jsonl");
+    if !log_path.exists() {
+        fs::write(&log_path, "").map_err(to_error)?;
+    }
+
+    #[cfg(target_os = "windows")]
+    Command::new("explorer")
+        .arg(&log_path)
+        .spawn()
+        .map_err(to_error)?;
+    #[cfg(target_os = "macos")]
+    Command::new("open")
+        .arg(&log_path)
+        .spawn()
+        .map_err(to_error)?;
+    #[cfg(target_os = "linux")]
+    Command::new("xdg-open")
+        .arg(&log_path)
+        .spawn()
+        .map_err(to_error)?;
+
+    Ok(())
+}
+
+#[cfg(desktop)]
+async fn updater_endpoint(channel: &str) -> Result<url::Url, String> {
+    const STABLE_ENDPOINT: &str =
+        "https://github.com/N7T0-OF/ZAILON/releases/latest/download/latest.json";
+    if channel == "stable" {
+        return url::Url::parse(STABLE_ENDPOINT).map_err(to_error);
+    }
+    if channel != "beta" {
+        return Err("Unknown update channel.".into());
+    }
+
+    let releases = reqwest::Client::new()
+        .get("https://api.github.com/repos/N7T0-OF/ZAILON/releases")
+        .header(reqwest::header::USER_AGENT, "ZAILON-Updater")
+        .send()
+        .await
+        .map_err(to_error)?
+        .error_for_status()
+        .map_err(to_error)?
+        .json::<Vec<GitHubRelease>>()
+        .await
+        .map_err(to_error)?;
+    let release = releases
+        .into_iter()
+        .find(|release| release.prerelease && !release.draft)
+        .ok_or_else(|| "No published beta update is available.".to_string())?;
+    let latest_json = release
+        .assets
+        .into_iter()
+        .find(|asset| asset.name == "latest.json")
+        .ok_or_else(|| "The latest beta release has no signed updater metadata.".to_string())?;
+    url::Url::parse(&latest_json.browser_download_url).map_err(to_error)
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+async fn check_for_update(
+    app: AppHandle,
+    pending_update: State<'_, PendingUpdate>,
+    channel: String,
+) -> Result<Option<UpdateMetadata>, String> {
+    let endpoint = updater_endpoint(&channel).await?;
+    let update = app
+        .updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(to_error)?
+        .build()
+        .map_err(to_error)?
+        .check()
+        .await
+        .map_err(to_error)?;
+    let metadata = update.as_ref().map(|update| UpdateMetadata {
+        version: update.version.clone(),
+        current_version: update.current_version.clone(),
+        date: update.date.as_ref().map(ToString::to_string),
+        notes: update.body.clone(),
+    });
+    *pending_update.0.lock().map_err(to_error)? = update;
+    Ok(metadata)
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+async fn install_update(
+    pending_update: State<'_, PendingUpdate>,
+    on_event: Channel<UpdateDownloadEvent>,
+) -> Result<(), String> {
+    let update = pending_update
+        .0
+        .lock()
+        .map_err(to_error)?
+        .take()
+        .ok_or_else(|| "No update is ready to install. Check again first.".to_string())?;
+    let mut started = false;
+    update
+        .download_and_install(
+            |chunk_length, content_length| {
+                if !started {
+                    let _ = on_event.send(UpdateDownloadEvent::Started { content_length });
+                    started = true;
+                }
+                let _ = on_event.send(UpdateDownloadEvent::Progress { chunk_length });
+            },
+            || {
+                let _ = on_event.send(UpdateDownloadEvent::Finished);
+            },
+        )
+        .await
+        .map_err(to_error)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .setup(|app| {
+            #[cfg(desktop)]
+            {
+                app.handle()
+                    .plugin(tauri_plugin_window_state::Builder::default().build())?;
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.manage(PendingUpdate(Mutex::new(None)));
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             scan_mods,
             toggle_mod,
@@ -345,7 +642,14 @@ pub fn run() {
             launch_game,
             guess_mods_path,
             detect_games,
-            install_mod
+            install_mod,
+            prepare_update_backup,
+            record_update_event,
+            open_update_log,
+            #[cfg(desktop)]
+            check_for_update,
+            #[cfg(desktop)]
+            install_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running ZAILON");

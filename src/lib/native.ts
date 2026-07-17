@@ -1,5 +1,6 @@
-import { invoke, isTauri } from '@tauri-apps/api/core'
+import { Channel, invoke, isTauri } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
+import type { UpdateChannel } from '../types'
 
 export interface NativeMod {
   id: string
@@ -16,6 +17,18 @@ export interface DetectedGame {
   modsPath: string
   platform: 'steam' | 'epic' | 'gog' | 'standalone'
 }
+
+export interface UpdateMetadata {
+  version: string
+  currentVersion: string
+  date?: string
+  notes?: string
+}
+
+export type UpdateDownloadEvent =
+  | { event: 'Started'; data: { contentLength?: number } }
+  | { event: 'Progress'; data: { chunkLength: number } }
+  | { event: 'Finished' }
 
 const desktopOnly = <T>(command: string, args?: Record<string, unknown>) => {
   if (!isTauri()) {
@@ -34,6 +47,19 @@ export const native = {
   detectGames: () => desktopOnly<DetectedGame[]>('detect_games'),
   installMod: (url: string, fileName: string, modsPath: string) =>
     desktopOnly<string>('install_mod', { url, fileName, modsPath }),
+  prepareUpdateBackup: (snapshot: string, currentVersion: string, targetVersion: string) =>
+    desktopOnly<string>('prepare_update_backup', { snapshot, currentVersion, targetVersion }),
+  recordUpdateEvent: (event: string, version: string, message?: string) =>
+    desktopOnly<void>('record_update_event', { event, version, message }),
+  openUpdateLog: () => desktopOnly<void>('open_update_log'),
+  checkForUpdate: (channel: UpdateChannel) =>
+    desktopOnly<UpdateMetadata | null>('check_for_update', { channel }),
+  installUpdate: (onEvent: (event: UpdateDownloadEvent) => void) => {
+    if (!isTauri()) return Promise.reject(new Error('Updates are only available in the ZAILON desktop app.'))
+    const channel = new Channel<UpdateDownloadEvent>()
+    channel.onmessage = onEvent
+    return invoke<void>('install_update', { onEvent: channel })
+  },
 }
 
 export async function pickExecutable() {

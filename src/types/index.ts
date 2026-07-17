@@ -1,6 +1,6 @@
 export type ViewType = 'home' | 'games' | 'explore' | 'news' | 'settings'
 export type Platform = 'gamebanana' | 'nexus' | 'curseforge' | 'ayakamods'
-export type LoaderType = 'GIMI' | 'ZZMI' | 'SRMI' | 'WWMI' | 'EFMI' | 'UE5' | 'BepInEx' | 'ASI' | 'CLEO' | 'REF' | 'MelonLoader' | 'Manual'
+export type LoaderType = 'GIMI' | 'ZZMI' | 'SRMI' | 'WWMI' | 'EFMI' | 'UE5' | 'BepInEx' | 'ASI' | 'CLEO' | 'REF' | 'MelonLoader' | 'DLL' | 'Archive' | 'Folder' | 'Manual'
 
 export interface Mod {
   id: string
@@ -16,7 +16,9 @@ export interface Mod {
   nsfw?: boolean
   description?: string
   size?: string
-  installedAt?: Date
+  sizeBytes?: number
+  path?: string
+  installedAt?: number
 }
 
 export interface Profile {
@@ -25,7 +27,7 @@ export interface Profile {
   name: string
   mods: Mod[]
   playtime: number
-  lastPlayed?: Date
+  lastPlayed?: number
   bypass?: string
 }
 
@@ -39,7 +41,7 @@ export interface Game {
   modsPath?: string
   profiles: Profile[]
   totalPlaytime: number
-  lastPlayed?: Date
+  lastPlayed?: number
   platform?: 'steam' | 'epic' | 'gog' | 'standalone'
   detected?: boolean
 }
@@ -57,6 +59,9 @@ export interface ExplodMod {
   platform: Platform
   url: string
   description: string
+  downloadUrl?: string
+  fileName?: string
+  modId?: number
 }
 
 export interface NewsItem {

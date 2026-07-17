@@ -1,0 +1,44 @@
+name: Build iOS IPA
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  ios:
+    # Enable only after adding the Apple signing secrets described in docs/IOS_SIGNING.md.
+    if: vars.IOS_RELEASE_ENABLED == 'true'
+    runs-on: macos-14
+    env:
+      IOS_CERTIFICATE: ${{ secrets.IOS_CERTIFICATE }}
+      IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      IOS_MOBILE_PROVISION: ${{ secrets.IOS_MOBILE_PROVISION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Generate iOS project
+        run: npm run tauri ios init -- --ci
+
+      - name: Build signed Ad Hoc IPA
+        run: npm run tauri ios build -- --export-method ad-hoc
+
+      - name: Attach IPA to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src-tauri/gen/apple/build/arm64/*.ipa

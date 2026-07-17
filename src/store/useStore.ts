@@ -1,90 +1,55 @@
 import { create } from 'zustand'
-import { Game, Profile, Mod, ViewType, Platform, ExplodMod } from '../types'
+import { persist } from 'zustand/middleware'
+import { ExplodMod, Game, LoaderType, Mod, Platform, Profile, ViewType } from '../types'
+import { DetectedGame, native, NativeMod, pickExecutable } from '../lib/native'
+import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES } from './gamebanana'
 
-const MOCK_MODS_NTE: Mod[] = [
-  { id: 'm1', name: 'HD Character Textures', enabled: true, loader: 'UE5', author: 'ArtMod', autoUpdate: true, version: '2.1', source: 'gamebanana', size: '340 MB', description: 'Ultra HD retexture pack for all playable characters.' },
-  { id: 'm2', name: 'Better Lighting FX', enabled: true, loader: 'UE5', author: 'FXDev', autoUpdate: false, version: '1.3', source: 'nexus', size: '120 MB' },
-  { id: 'm3', name: 'UI Overhaul v2', enabled: false, loader: 'UE5', author: 'UIModder', autoUpdate: true, version: '2.0', source: 'local', size: '28 MB' },
-  { id: 'm4', name: 'FOV Unlocker', enabled: true, loader: 'Manual', author: 'ToolDev', autoUpdate: false, version: '1.0', source: 'gamebanana', size: '2 MB' },
-]
+const APP_VERSION = '1.0.0'
+const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 
-const MOCK_MODS_GI: Mod[] = [
-  { id: 'g1', name: 'Raiden Shogun — Outfit Royal', enabled: true, loader: 'GIMI', author: 'GIMIUser', autoUpdate: true, version: '3.0', source: 'gamebanana', size: '45 MB' },
-  { id: 'g2', name: 'Hu Tao — Dark Dress', enabled: true, loader: 'GIMI', author: 'ModArtist', autoUpdate: false, version: '1.2', source: 'gamebanana', size: '38 MB' },
-  { id: 'g3', name: 'Improved Sky Textures', enabled: false, loader: 'GIMI', author: 'SkyMod', autoUpdate: false, version: '1.0', source: 'nexus', size: '190 MB' },
-]
+const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
+const asError = (error: unknown) => error instanceof Error ? error.message : String(error)
+const gameNameFromPath = (path: string) => path.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || 'New game'
+const formatBytes = (size: number) => size >= 1024 * 1024
+  ? `${(size / (1024 * 1024)).toFixed(size >= 100 * 1024 * 1024 ? 0 : 1)} MB`
+  : `${Math.max(1, Math.round(size / 1024))} KB`
 
-const MOCK_GAMES: Game[] = [
-  {
-    id: 'nte',
-    name: 'Neverness to Everness',
-    shortName: 'NTE',
-    backgroundArt: 'https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=1200&q=80',
-    profiles: [
-      { id: 'nte-default', gameId: 'nte', name: 'Default', mods: MOCK_MODS_NTE, playtime: 240, lastPlayed: new Date(Date.now() - 3600000) },
-      { id: 'nte-graphics', gameId: 'nte', name: 'Graphics+', mods: MOCK_MODS_NTE.slice(0, 2), playtime: 90, lastPlayed: new Date(Date.now() - 86400000 * 2) },
-    ],
-    totalPlaytime: 330,
-    lastPlayed: new Date(Date.now() - 3600000),
-    detected: true,
-    platform: 'standalone',
-  },
-  {
-    id: 'gi',
-    name: 'Genshin Impact',
-    shortName: 'GI',
-    backgroundArt: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1200&q=80',
-    profiles: [
-      { id: 'gi-default', gameId: 'gi', name: 'Default', mods: MOCK_MODS_GI, playtime: 1200, lastPlayed: new Date(Date.now() - 86400000 * 3) },
-    ],
-    totalPlaytime: 1200,
-    lastPlayed: new Date(Date.now() - 86400000 * 3),
-    detected: true,
-    platform: 'standalone',
-  },
-  {
-    id: 'wuwa',
-    name: 'Wuthering Waves',
-    shortName: 'WW',
-    backgroundArt: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1200&q=80',
-    profiles: [
-      { id: 'ww-default', gameId: 'wuwa', name: 'Default', mods: [], playtime: 560, lastPlayed: new Date(Date.now() - 86400000 * 5) },
-    ],
-    totalPlaytime: 560,
-    lastPlayed: new Date(Date.now() - 86400000 * 5),
-    detected: true,
-    platform: 'standalone',
-  },
-  {
-    id: 'cp',
-    name: 'Cyberpunk 2077',
-    shortName: 'CP',
-    backgroundArt: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=1200&q=80',
-    profiles: [
-      { id: 'cp-default', gameId: 'cp', name: 'Vanilla+', mods: [], playtime: 840, lastPlayed: new Date(Date.now() - 86400000 * 10) },
-    ],
-    totalPlaytime: 840,
-    lastPlayed: new Date(Date.now() - 86400000 * 10),
-    detected: true,
-    platform: 'steam',
-  },
-]
+const nativeModToMod = (mod: NativeMod): Mod => ({
+  id: mod.id,
+  name: mod.name,
+  path: mod.path,
+  enabled: mod.enabled,
+  loader: loaderTypes.has(mod.modType as LoaderType) ? mod.modType as LoaderType : 'Manual',
+  autoUpdate: false,
+  source: 'local',
+  sizeBytes: mod.sizeBytes,
+  size: formatBytes(mod.sizeBytes),
+})
 
-export const MOCK_EXPLORE_MODS: ExplodMod[] = [
-  { id: 'e1', name: 'Lumine — Galaxy Dress', author: 'ArtModder', game: 'Genshin Impact', thumbnail: 'https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=300&q=60', downloads: 48200, rating: 4.9, tags: ['Character', 'Outfit'], nsfw: false, platform: 'gamebanana', url: '#', description: 'Complete galaxy-themed outfit for Lumine.' },
-  { id: 'e2', name: 'Raiden — Oni Armor', author: 'SwordCrafter', game: 'Genshin Impact', thumbnail: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=300&q=60', downloads: 32100, rating: 4.7, tags: ['Character', 'Armor'], nsfw: false, platform: 'gamebanana', url: '#', description: 'Dark samurai armor for Raiden Shogun.' },
-  { id: 'e3', name: 'ReShade Ultra — Cinematic', author: 'FXLab', game: 'All Games', thumbnail: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=300&q=60', downloads: 89400, rating: 4.8, tags: ['Graphics', 'ReShade'], nsfw: false, platform: 'nexus', url: '#', description: 'Cinematic color grading preset.' },
-  { id: 'e4', name: 'HD World Textures 4K', author: 'WorldRebuild', game: 'Wuthering Waves', thumbnail: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=300&q=60', downloads: 21600, rating: 4.6, tags: ['World', 'Textures', '4K'], nsfw: false, platform: 'nexus', url: '#', description: 'Full 4K retexture for all environment assets.' },
-  { id: 'e5', name: 'Combat Overhaul v3', author: 'FightMod', game: 'Cyberpunk 2077', thumbnail: 'https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=300&q=60', downloads: 15300, rating: 4.5, tags: ['Gameplay', 'Combat'], nsfw: false, platform: 'nexus', url: '#', description: 'Completely reworked combat system.' },
-  { id: 'e6', name: 'NTE — Alt Costume Pack', author: 'NTEMod', game: 'Neverness to Everness', thumbnail: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=300&q=60', downloads: 8900, rating: 4.4, tags: ['Character', 'Outfit', 'Pack'], nsfw: false, platform: 'gamebanana', url: '#', description: 'Pack of 12 alternative costumes for NTE characters.' },
-]
+function updateProfile(games: Game[], gameId: string, profileId: string, update: (profile: Profile) => Profile) {
+  return games.map(game => game.id !== gameId ? game : {
+    ...game,
+    profiles: game.profiles.map(profile => profile.id === profileId ? update(profile) : profile),
+  })
+}
 
-interface Store {
-  // State
+function selected(state: Pick<Store, 'games' | 'selectedGameId' | 'selectedProfileId'>) {
+  const game = state.games.find(item => item.id === state.selectedGameId)
+  const profile = game?.profiles.find(item => item.id === state.selectedProfileId) ?? game?.profiles[0]
+  return { game, profile }
+}
+
+function makeGame({ name, execPath, modsPath, platform = 'standalone' }: { name: string; execPath: string; modsPath: string; platform?: Game['platform'] }): Game {
+  const gameId = createId()
+  const profile: Profile = { id: createId(), gameId, name: 'Default', mods: [], playtime: 0 }
+  return { id: gameId, name, execPath, modsPath, profiles: [profile], totalPlaytime: 0, platform, detected: platform !== 'standalone' }
+}
+
+export interface Store {
   currentView: ViewType
   games: Game[]
-  selectedGame: Game
-  selectedProfile: Profile
+  selectedGameId?: string
+  selectedProfileId?: string
   nsfw: boolean
   language: string
   discordPresence: boolean
@@ -92,86 +57,249 @@ interface Store {
   playStartTime?: number
   sessionTime: number
   explorePlatform: Platform
-  exploreGame: string
+  exploreGameId: number
   exploreSearch: string
   exploreGrid: boolean
-  // Actions
-  setView: (v: ViewType) => void
-  setSelectedGame: (g: Game) => void
-  setSelectedProfile: (p: Profile) => void
+  exploreMods: ExplodMod[]
+  exploreLoading: boolean
+  exploreError?: string
+  notice?: string
+  setView: (view: ViewType) => void
+  setSelectedGame: (gameId: string) => void
+  setSelectedProfile: (profileId: string) => Promise<void>
+  addGameFromExecutable: () => Promise<void>
+  addDetectedGames: () => Promise<number>
+  removeGame: (gameId: string) => void
+  setGamePath: (gameId: string, execPath: string) => Promise<void>
+  setModsPath: (gameId: string, modsPath: string) => void
+  addProfile: (name: string) => void
+  scanMods: (gameId?: string) => Promise<void>
+  toggleMod: (modId: string) => Promise<void>
+  deleteMod: (modId: string) => Promise<void>
   toggleNSFW: () => void
-  setLanguage: (l: string) => void
+  setLanguage: (language: string) => void
   toggleDiscord: () => void
-  toggleMod: (modId: string) => void
-  startPlaying: () => void
+  launchSelectedGame: () => Promise<void>
   stopPlaying: () => void
-  setExplorePlatform: (p: Platform) => void
-  setExploreGame: (g: string) => void
-  setExploreSearch: (s: string) => void
-  setExploreGrid: (g: boolean) => void
-  installMod: (mod: ExplodMod) => void
   tick: () => void
+  setExplorePlatform: (platform: Platform) => void
+  setExploreGame: (gameId: number) => void
+  setExploreSearch: (search: string) => void
+  setExploreGrid: (grid: boolean) => void
+  refreshExplore: () => Promise<void>
+  installMod: (mod: ExplodMod) => Promise<void>
+  clearNotice: () => void
 }
 
-export const useStore = create<Store>((set, get) => ({
+export const useStore = create<Store>()(persist((set, get) => ({
   currentView: 'home',
-  games: MOCK_GAMES,
-  selectedGame: MOCK_GAMES[0],
-  selectedProfile: MOCK_GAMES[0].profiles[0],
+  games: [],
+  selectedGameId: undefined,
+  selectedProfileId: undefined,
   nsfw: false,
   language: 'fr',
-  discordPresence: true,
+  discordPresence: false,
   isPlaying: false,
   sessionTime: 0,
   explorePlatform: 'gamebanana',
-  exploreGame: 'all',
+  exploreGameId: GAMEBANANA_GAMES[0].id,
   exploreSearch: '',
   exploreGrid: true,
-
-  setView: (v) => set({ currentView: v }),
-  setSelectedGame: (g) => set({ selectedGame: g, selectedProfile: g.profiles[0] }),
-  setSelectedProfile: (p) => set({ selectedProfile: p }),
-  toggleNSFW: () => set(s => ({ nsfw: !s.nsfw })),
-  setLanguage: (l) => set({ language: l }),
-  toggleDiscord: () => set(s => ({ discordPresence: !s.discordPresence })),
-  toggleMod: (modId) => set(s => ({
-    selectedProfile: {
-      ...s.selectedProfile,
-      mods: s.selectedProfile.mods.map(m => m.id === modId ? { ...m, enabled: !m.enabled } : m),
-    },
-  })),
-  startPlaying: () => set({ isPlaying: true, playStartTime: Date.now(), sessionTime: 0 }),
-  stopPlaying: () => set({ isPlaying: false, playStartTime: undefined }),
-  setExplorePlatform: (p) => set({ explorePlatform: p }),
-  setExploreGame: (g) => set({ exploreGame: g }),
-  setExploreSearch: (s) => set({ exploreSearch: s }),
-  setExploreGrid: (g) => set({ exploreGrid: g }),
-  installMod: (exploMod) => {
-    const s = get()
-    const newMod: Mod = {
-      id: `installed-${exploMod.id}-${Date.now()}`,
-      name: exploMod.name,
-      enabled: true,
-      loader: 'UE5',
-      author: exploMod.author,
-      autoUpdate: true,
-      version: '1.0',
-      source: exploMod.platform,
-      sourceUrl: exploMod.url,
-      nsfw: exploMod.nsfw,
-      thumbnail: exploMod.thumbnail,
+  exploreMods: [],
+  exploreLoading: false,
+  setView: currentView => set({ currentView }),
+  setSelectedGame: selectedGameId => {
+    const game = get().games.find(item => item.id === selectedGameId)
+    set({ selectedGameId, selectedProfileId: game?.profiles[0]?.id })
+  },
+  setSelectedProfile: async selectedProfileId => {
+    const state = get()
+    const { game, profile } = selected({ ...state, selectedProfileId })
+    if (!game || !profile) return
+    if (game.modsPath && native.isDesktop()) {
+      try {
+        const actual = await native.scanMods(game.modsPath)
+        const desired = new Map(profile.mods.map(mod => [mod.name.toLowerCase(), mod.enabled]))
+        for (const mod of actual) {
+          const enabled = desired.get(mod.name.toLowerCase())
+          if (enabled !== undefined && enabled !== mod.enabled) await native.toggleMod(mod.path, enabled)
+        }
+        const refreshed = await native.scanMods(game.modsPath)
+        const games = updateProfile(get().games, game.id, profile.id, current => ({ ...current, mods: refreshed.map(nativeModToMod) }))
+        set({ games, selectedProfileId: profile.id, notice: `Profile “${profile.name}” applied.` })
+        return
+      } catch (error) {
+        set({ notice: asError(error) })
+        return
+      }
     }
-    set({
-      selectedProfile: {
-        ...s.selectedProfile,
-        mods: [...s.selectedProfile.mods, newMod],
-      },
-    })
+    set({ selectedProfileId })
+  },
+  addGameFromExecutable: async () => {
+    const execPath = await pickExecutable()
+    if (!execPath) return
+    try {
+      const modsPath = native.isDesktop() ? await native.guessModsPath(execPath) : ''
+      const game = makeGame({ name: gameNameFromPath(execPath), execPath, modsPath })
+      set(state => ({ games: [...state.games, game], selectedGameId: game.id, selectedProfileId: game.profiles[0].id, currentView: 'games', notice: 'Game added. Choose or create its mods folder, then scan it.' }))
+    } catch (error) {
+      set({ notice: asError(error) })
+    }
+  },
+  addDetectedGames: async () => {
+    try {
+      const detected = await native.detectGames()
+      const existing = new Set(get().games.map(game => game.execPath))
+      const fresh = detected.filter(game => !existing.has(game.execPath)).map((game: DetectedGame) => makeGame(game))
+      if (fresh.length) {
+        set(state => ({ games: [...state.games, ...fresh], selectedGameId: state.selectedGameId ?? fresh[0].id, selectedProfileId: state.selectedProfileId ?? fresh[0].profiles[0].id, notice: `${fresh.length} game${fresh.length > 1 ? 's' : ''} detected.` }))
+      } else {
+        set({ notice: 'No new supported game installation was found.' })
+      }
+      return fresh.length
+    } catch (error) {
+      set({ notice: asError(error) })
+      return 0
+    }
+  },
+  removeGame: gameId => set(state => {
+    const games = state.games.filter(game => game.id !== gameId)
+    const current = games[0]
+    return { games, selectedGameId: current?.id, selectedProfileId: current?.profiles[0]?.id }
+  }),
+  setGamePath: async (gameId, execPath) => {
+    try {
+      const modsPath = execPath && native.isDesktop() ? await native.guessModsPath(execPath) : undefined
+      set(state => ({
+        games: state.games.map(game => game.id !== gameId ? game : { ...game, execPath, modsPath: game.modsPath || modsPath }),
+      }))
+    } catch (error) {
+      set({ notice: asError(error) })
+    }
+  },
+  setModsPath: (gameId, modsPath) => set(state => ({ games: state.games.map(game => game.id === gameId ? { ...game, modsPath } : game) })),
+  addProfile: name => {
+    const { game, profile } = selected(get())
+    if (!game || !profile || !name.trim()) return
+    const next: Profile = { ...profile, id: createId(), name: name.trim(), mods: profile.mods.map(mod => ({ ...mod })), playtime: 0, lastPlayed: undefined }
+    set(state => ({ games: state.games.map(item => item.id === game.id ? { ...item, profiles: [...item.profiles, next] } : item), selectedProfileId: next.id }))
+  },
+  scanMods: async gameId => {
+    const state = get()
+    const game = state.games.find(item => item.id === (gameId ?? state.selectedGameId))
+    const profile = game?.profiles.find(item => item.id === state.selectedProfileId) ?? game?.profiles[0]
+    if (!game || !profile) return
+    if (!game.modsPath) { set({ notice: 'Select a mods folder first.' }); return }
+    try {
+      const mods = await native.scanMods(game.modsPath)
+      set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, mods: mods.map(nativeModToMod) })), notice: `${mods.length} mod${mods.length !== 1 ? 's' : ''} scanned.` }))
+    } catch (error) {
+      set({ notice: asError(error) })
+    }
+  },
+  toggleMod: async modId => {
+    const { game, profile } = selected(get())
+    const mod = profile?.mods.find(item => item.id === modId)
+    if (!game || !profile || !mod) return
+    try {
+      const path = mod.path ? await native.toggleMod(mod.path, !mod.enabled) : undefined
+      set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, mods: current.mods.map(item => item.id === modId ? { ...item, enabled: !item.enabled, path, id: path ?? item.id } : item) })) }))
+    } catch (error) {
+      set({ notice: asError(error) })
+    }
+  },
+  deleteMod: async modId => {
+    const { game, profile } = selected(get())
+    const mod = profile?.mods.find(item => item.id === modId)
+    if (!game || !profile || !mod) return
+    try {
+      if (mod.path) await native.deleteMod(mod.path)
+      set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, mods: current.mods.filter(item => item.id !== modId) })), notice: `${mod.name} removed.` }))
+    } catch (error) {
+      set({ notice: asError(error) })
+    }
+  },
+  toggleNSFW: () => set(state => ({ nsfw: !state.nsfw })),
+  setLanguage: language => set({ language }),
+  toggleDiscord: () => set(state => ({ discordPresence: !state.discordPresence })),
+  launchSelectedGame: async () => {
+    const { game } = selected(get())
+    if (!game?.execPath) { set({ notice: 'Select a game executable before launching.' }); return }
+    try {
+      await native.launchGame(game.execPath)
+      set({ isPlaying: true, playStartTime: Date.now(), sessionTime: 0, notice: `${game.name} launched.` })
+    } catch (error) {
+      set({ notice: asError(error) })
+    }
+  },
+  stopPlaying: () => {
+    const state = get()
+    const { game, profile } = selected(state)
+    if (!game || !profile || !state.playStartTime) { set({ isPlaying: false, playStartTime: undefined, sessionTime: 0 }); return }
+    const minutes = Math.floor((Date.now() - state.playStartTime) / 60_000)
+    const now = Date.now()
+    const games = updateProfile(state.games, game.id, profile.id, current => ({ ...current, playtime: current.playtime + minutes, lastPlayed: now }))
+      .map(item => item.id === game.id ? { ...item, totalPlaytime: item.totalPlaytime + minutes, lastPlayed: now } : item)
+    set({ games, isPlaying: false, playStartTime: undefined, sessionTime: 0 })
   },
   tick: () => {
-    const s = get()
-    if (s.isPlaying && s.playStartTime) {
-      set({ sessionTime: Math.floor((Date.now() - s.playStartTime) / 1000) })
+    const { isPlaying, playStartTime } = get()
+    if (isPlaying && playStartTime) set({ sessionTime: Math.floor((Date.now() - playStartTime) / 1_000) })
+  },
+  setExplorePlatform: explorePlatform => set({ explorePlatform, exploreMods: [], exploreError: undefined }),
+  setExploreGame: exploreGameId => set({ exploreGameId }),
+  setExploreSearch: exploreSearch => set({ exploreSearch }),
+  setExploreGrid: exploreGrid => set({ exploreGrid }),
+  refreshExplore: async () => {
+    const { explorePlatform, exploreGameId, exploreSearch } = get()
+    if (explorePlatform !== 'gamebanana') {
+      set({ exploreMods: [], exploreError: `${explorePlatform} needs its own API credentials and is not enabled in this build.` })
+      return
+    }
+    set({ exploreLoading: true, exploreError: undefined })
+    try {
+      const exploreMods = await fetchGamebananaMods(exploreGameId, exploreSearch)
+      set({ exploreMods, exploreLoading: false })
+    } catch (error) {
+      set({ exploreLoading: false, exploreError: asError(error) })
     }
   },
+  installMod: async mod => {
+    const { game } = selected(get())
+    if (!game?.modsPath) { set({ notice: 'Select the game and its mods folder before installing a mod.' }); return }
+    try {
+      let downloadUrl = mod.downloadUrl
+      let fileName = mod.fileName
+      if (!downloadUrl && mod.platform === 'gamebanana' && mod.modId) {
+        const download = await fetchGamebananaDownload(mod.modId)
+        downloadUrl = download.url
+        fileName = download.fileName
+      }
+      if (!downloadUrl || !fileName) throw new Error('No direct download is available for this mod.')
+      await native.installMod(downloadUrl, fileName, game.modsPath)
+      await get().scanMods(game.id)
+      set({ notice: `${mod.name} installed.` })
+    } catch (error) {
+      set({ notice: asError(error) })
+    }
+  },
+  clearNotice: () => set({ notice: undefined }),
+}), {
+  name: 'zailon-v1',
+  partialize: state => ({
+    games: state.games,
+    selectedGameId: state.selectedGameId,
+    selectedProfileId: state.selectedProfileId,
+    nsfw: state.nsfw,
+    language: state.language,
+    discordPresence: state.discordPresence,
+    explorePlatform: state.explorePlatform,
+    exploreGameId: state.exploreGameId,
+    exploreGrid: state.exploreGrid,
+  }),
+  version: 1,
 }))
+
+export const appVersion = APP_VERSION
+export const getSelectedGame = (state: Pick<Store, 'games' | 'selectedGameId' | 'selectedProfileId'>) => selected(state).game
+export const getSelectedProfile = (state: Pick<Store, 'games' | 'selectedGameId' | 'selectedProfileId'>) => selected(state).profile

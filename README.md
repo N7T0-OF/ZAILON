@@ -27,9 +27,12 @@ npm run dev
 npm run build
 ```
 
-## Deploy
+## Native installers
 
-See [`docs/GITHUB_PAGES.md`](docs/GITHUB_PAGES.md) for the one-time GitHub
-Pages activation step and the deployment URL format.
+ZAILON is a native Tauri application, not a website. Create and push a version
+tag (for example `v1.0.0`) to build a GitHub Release containing Windows,
+Linux, and macOS installers. The workflow is in
+[`release.yml`](.github/workflows/release.yml).
 
-Push to `main` — GitHub Actions deploys automatically to GitHub Pages.
+The optional signed iOS companion workflow requires Apple Developer signing
+material; see [`docs/IOS_SIGNING.md`](docs/IOS_SIGNING.md).

@@ -13,9 +13,9 @@ export function formatSeconds(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-export function timeAgo(date: Date): string {
+export function timeAgo(date: Date | number): string {
   const now = Date.now()
-  const diff = now - date.getTime()
+  const diff = now - (date instanceof Date ? date.getTime() : date)
   const minutes = Math.floor(diff / 60000)
   const hours = Math.floor(diff / 3600000)
   const days = Math.floor(diff / 86400000)
@@ -38,6 +38,9 @@ export const LOADER_COLORS: Record<string, string> = {
   WWMI: '#7ef7b8',
   EFMI: '#f77e7e',
   UE5: '#e8b84b',
+  DLL: '#a9a9f7',
+  Archive: '#f7c37e',
+  Folder: '#7ef7b8',
   BepInEx: '#ff7eb3',
   ASI: '#7ec8f7',
   CLEO: '#c8f77e',

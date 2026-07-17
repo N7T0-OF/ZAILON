@@ -1,6 +1,6 @@
 [package]
 name = "zailon"
-version = "1.1.0"
+version = "1.1.1"
 description = "Universal Mod Launcher"
 authors = ["N7T0-OF"]
 license = "MIT"
@@ -20,7 +20,7 @@ tauri-build = { version = "2" }
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"

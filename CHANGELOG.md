@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1 — Native test compatibility
+
+- Enabled Tauri's asset protocol feature explicitly so native unit tests validate the same local-resource configuration as packaged builds.
+
 ## 1.1.0 — Steam library discovery and game management
 
 - Replaced the directory-only Steam scan with platform Steam discovery, `libraryfolders.vdf` parsing and `appmanifest_*.acf` metadata.

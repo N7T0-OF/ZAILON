@@ -310,7 +310,7 @@ async fn install_mod(url: String, file_name: String, mods_path: String) -> Resul
         fs::create_dir_all(&extract_root).map_err(to_error)?;
         for index in 0..archive.len() {
             let mut entry = archive.by_index(index).map_err(to_error)?;
-            let Some(relative_path) = entry.enclosed_name().map(Path::to_path_buf) else {
+            let Some(relative_path) = entry.enclosed_name() else {
                 continue;
             };
             let output = extract_root.join(relative_path);

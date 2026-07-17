@@ -56,7 +56,9 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: ZAILON v__VERSION__
-          releaseBody: Download the installer for your operating system. Windows: NSIS/MSI. Linux: AppImage, DEB or RPM. macOS: DMG.
+          releaseBody: >-
+            Download the installer for your operating system. Windows: NSIS/MSI.
+            Linux: AppImage, DEB or RPM. macOS: DMG.
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}

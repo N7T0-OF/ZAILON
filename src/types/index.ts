@@ -20,6 +20,11 @@ export interface Mod {
   sizeBytes?: number
   path?: string
   installedAt?: number
+  files?: string[]
+  priority?: number
+  note?: string
+  conflict?: 'none' | 'overwrites' | 'overwritten' | 'mixed'
+  conflictCount?: number
 }
 
 export interface Profile {
@@ -30,6 +35,21 @@ export interface Profile {
   playtime: number
   lastPlayed?: number
   bypass?: string
+}
+
+export interface GameResources {
+  coverPath?: string
+  logoPath?: string
+  iconPath?: string
+  backgroundPath?: string
+  bannerPath?: string
+  videoPath?: string
+  coverPositionX?: number
+  coverPositionY?: number
+  coverZoom?: number
+  backgroundPositionX?: number
+  backgroundPositionY?: number
+  backgroundZoom?: number
 }
 
 export interface Game {
@@ -45,6 +65,18 @@ export interface Game {
   lastPlayed?: number
   platform?: 'steam' | 'epic' | 'gog' | 'standalone'
   detected?: boolean
+  provider?: string
+  providerGameId?: string
+  installDirectory?: string
+  steamLibrary?: string
+  buildId?: string
+  sizeBytes?: number
+  lastProviderUpdate?: number
+  needsExecutable?: boolean
+  resources?: GameResources
+  favorite?: boolean
+  hidden?: boolean
+  categories?: string[]
 }
 
 export interface ExplodMod {

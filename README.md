@@ -6,9 +6,11 @@ profiles locally and ships installers for Windows, Linux and macOS.
 
 ## What works
 
-- Add games manually or detect supported Steam installations.
+- Add games manually or discover Steam through its system location, library list and installed app manifests; review results before adding them.
 - Scan, enable, disable and remove local mods without moving them outside the game folder.
-- Keep separate local mod profiles and playtime statistics.
+- Keep separate local mod profiles, per-profile priority, notes, file-conflict indicators and playtime statistics.
+- Right-click a game card (or use its ellipsis) to play, manage mods, open its folders, mark favorite, hide or remove only its ZAILON entry.
+- Import covers, logos, icons, backgrounds, banners and videos; ZAILON copies them into its own local data directory.
 - Download GameBanana mods through the desktop application.
 - Native frameless window with working move, minimize, maximize/restore and close controls.
 - Restore the last valid native window size, position and maximized state.

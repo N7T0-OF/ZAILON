@@ -1,4 +1,4 @@
-import { Trash2, RefreshCw, ExternalLink } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, ExternalLink, RefreshCw, StickyNote, Trash2 } from 'lucide-react'
 import { Mod } from '../../types'
 import { LOADER_COLORS, PLATFORM_COLORS } from '../../utils'
 import { Toggle } from './Toggle'
@@ -7,9 +7,14 @@ interface ModCardProps {
   mod: Mod
   onToggle: () => void
   onDelete?: () => void
+  onMoveUp?: () => void
+  onMoveDown?: () => void
+  onNoteChange?: (note: string) => void
 }
 
-export function ModCard({ mod, onToggle, onDelete }: ModCardProps) {
+const conflictLabel = { overwrites: 'Écrase', overwritten: 'Écrasé', mixed: 'Conflit mixte' } as const
+
+export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteChange }: ModCardProps) {
   const loaderColor = LOADER_COLORS[mod.loader] || '#8888aa'
   const platformColor = mod.source ? PLATFORM_COLORS[mod.source] : '#8888aa'
 
@@ -27,8 +32,9 @@ export function ModCard({ mod, onToggle, onDelete }: ModCardProps) {
 
       {/* Name + meta */}
       <div className="flex-1 min-w-0">
-        <p className="text-xs font-body font-medium text-white/90 truncate leading-tight">{mod.name}</p>
+        <div className="flex items-center gap-1.5"><p className="text-xs font-body font-medium text-white/90 truncate leading-tight">{mod.name}</p>{mod.conflict && mod.conflict !== 'none' && <span title={`${mod.conflictCount || 0} fichier(s) partagé(s) avec un autre mod actif`} className={`flex items-center gap-0.5 rounded px-1 py-0.5 text-[8px] ${mod.conflict === 'overwrites' ? 'bg-amber-400/10 text-amber-200' : mod.conflict === 'overwritten' ? 'bg-red-400/10 text-red-200' : 'bg-purple-400/10 text-purple-200'}`}><AlertTriangle size={9} /> {conflictLabel[mod.conflict]}</span>}</div>
         <div className="flex items-center gap-2 mt-0.5">
+          <span className="text-[9px] font-mono text-white/30">P{(mod.priority ?? 0) + 1}</span>
           {mod.author && <span className="text-[10px] text-white/35">{mod.author}</span>}
           {mod.version && <span className="text-[10px] text-white/25">v{mod.version}</span>}
           {mod.size && <span className="text-[10px] text-white/25">{mod.size}</span>}
@@ -55,6 +61,8 @@ export function ModCard({ mod, onToggle, onDelete }: ModCardProps) {
             <Trash2 size={11} className="text-white/30 hover:text-red-400" />
           </button>
         )}
+        {onNoteChange && <button onClick={() => { const note = window.prompt(`Note pour ${mod.name}`, mod.note || ''); if (note !== null) onNoteChange(note) }} title={mod.note ? `Note : ${mod.note}` : 'Ajouter une note'} className={`opacity-0 transition-opacity group-hover:opacity-100 ${mod.note ? 'text-gold/70' : 'text-white/30 hover:text-white/60'}`}><StickyNote size={11} /></button>}
+        {(onMoveUp || onMoveDown) && <span className="flex items-center rounded border border-white/[0.07] opacity-0 transition-opacity group-hover:opacity-100"><button onClick={onMoveUp} disabled={!onMoveUp} title="Monter dans l’ordre" className="p-0.5 text-white/35 hover:text-gold disabled:opacity-20"><ArrowUp size={10} /></button><button onClick={onMoveDown} disabled={!onMoveDown} title="Descendre dans l’ordre" className="p-0.5 text-white/35 hover:text-gold disabled:opacity-20"><ArrowDown size={10} /></button></span>}
         <Toggle checked={mod.enabled} onChange={onToggle} size="sm" />
       </div>
     </div>

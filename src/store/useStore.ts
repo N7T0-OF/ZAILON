@@ -1,20 +1,21 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { ExplodMod, Game, LoaderType, Mod, Platform, Profile, UpdateChannel, ViewType } from '../types'
+import { ExplodMod, Game, GameResources, LoaderType, Mod, Platform, Profile, UpdateChannel, ViewType } from '../types'
 import { DetectedGame, native, NativeMod, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES } from './gamebanana'
 
-const APP_VERSION = '1.0.1'
+const APP_VERSION = '1.1.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 const asError = (error: unknown) => error instanceof Error ? error.message : String(error)
 const gameNameFromPath = (path: string) => path.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || 'New game'
+const normalizedPath = (path?: string) => (path || '').trim().replace(/\//g, '\\').toLocaleLowerCase()
 const formatBytes = (size: number) => size >= 1024 * 1024
   ? `${(size / (1024 * 1024)).toFixed(size >= 100 * 1024 * 1024 ? 0 : 1)} MB`
   : `${Math.max(1, Math.round(size / 1024))} KB`
 
-const nativeModToMod = (mod: NativeMod): Mod => ({
+const nativeModToMod = (mod: NativeMod, previous?: Mod, priority = 0): Mod => ({
   id: mod.id,
   name: mod.name,
   path: mod.path,
@@ -24,7 +25,48 @@ const nativeModToMod = (mod: NativeMod): Mod => ({
   source: 'local',
   sizeBytes: mod.sizeBytes,
   size: formatBytes(mod.sizeBytes),
+  files: mod.files,
+  priority: previous?.priority ?? priority,
+  note: previous?.note,
 })
+
+function decorateMods(mods: Mod[]): Mod[] {
+  const ordered = [...mods]
+    .sort((left, right) => (left.priority ?? 0) - (right.priority ?? 0))
+    .map((mod, priority) => ({ ...mod, priority, conflict: 'none' as const, conflictCount: 0 }))
+  const owners = new Map<string, number[]>()
+  ordered.forEach((mod, index) => {
+    if (!mod.enabled) return
+    for (const file of mod.files || []) {
+      const normalized = file.replace(/\\/g, '/').toLocaleLowerCase()
+      const list = owners.get(normalized) || []
+      list.push(index)
+      owners.set(normalized, list)
+    }
+  })
+  const overwritten = new Set<number>()
+  const overwrites = new Set<number>()
+  const counts = new Map<number, number>()
+  for (const indices of owners.values()) {
+    if (indices.length < 2) continue
+    indices.forEach((index, ownerPosition) => {
+      counts.set(index, (counts.get(index) || 0) + 1)
+      if (ownerPosition === 0) overwritten.add(index)
+      else if (ownerPosition === indices.length - 1) overwrites.add(index)
+      else { overwritten.add(index); overwrites.add(index) }
+    })
+  }
+  return ordered.map((mod, index) => {
+    const conflict: NonNullable<Mod['conflict']> = overwritten.has(index) && overwrites.has(index) ? 'mixed' : overwritten.has(index) ? 'overwritten' : overwrites.has(index) ? 'overwrites' : 'none'
+    return { ...mod, conflictCount: counts.get(index) || 0, conflict }
+  })
+}
+
+function scannedMods(nativeMods: NativeMod[], previous: Mod[]) {
+  const byPath = new Map(previous.filter(mod => mod.path).map(mod => [normalizedPath(mod.path), mod]))
+  const byName = new Map(previous.map(mod => [mod.name.toLocaleLowerCase(), mod]))
+  return decorateMods(nativeMods.map((mod, index) => nativeModToMod(mod, byPath.get(normalizedPath(mod.path)) || byName.get(mod.name.toLocaleLowerCase()), index)))
+}
 
 function updateProfile(games: Game[], gameId: string, profileId: string, update: (profile: Profile) => Profile) {
   return games.map(game => game.id !== gameId ? game : {
@@ -39,10 +81,40 @@ function selected(state: Pick<Store, 'games' | 'selectedGameId' | 'selectedProfi
   return { game, profile }
 }
 
-function makeGame({ name, execPath, modsPath, platform = 'standalone' }: { name: string; execPath: string; modsPath: string; platform?: Game['platform'] }): Game {
+function makeGame({ name, execPath, modsPath, platform = 'standalone', provider, providerGameId, installDirectory, steamLibrary, buildId, sizeBytes, lastUpdated, needsExecutable }: {
+  name: string
+  execPath: string
+  modsPath: string
+  platform?: Game['platform']
+  provider?: string
+  providerGameId?: string
+  installDirectory?: string
+  steamLibrary?: string
+  buildId?: string
+  sizeBytes?: number
+  lastUpdated?: number
+  needsExecutable?: boolean
+}): Game {
   const gameId = createId()
   const profile: Profile = { id: createId(), gameId, name: 'Default', mods: [], playtime: 0 }
-  return { id: gameId, name, execPath, modsPath, profiles: [profile], totalPlaytime: 0, platform, detected: platform !== 'standalone' }
+  return {
+    id: gameId,
+    name,
+    execPath,
+    modsPath,
+    profiles: [profile],
+    totalPlaytime: 0,
+    platform,
+    detected: platform !== 'standalone',
+    provider,
+    providerGameId,
+    installDirectory,
+    steamLibrary,
+    buildId,
+    sizeBytes,
+    lastProviderUpdate: lastUpdated,
+    needsExecutable,
+  }
 }
 
 export interface Store {
@@ -76,13 +148,22 @@ export interface Store {
   setSelectedProfile: (profileId: string) => Promise<void>
   addGameFromExecutable: () => Promise<void>
   addDetectedGames: () => Promise<number>
+  importDetectedGames: (detected: DetectedGame[]) => number
   removeGame: (gameId: string) => void
   setGamePath: (gameId: string, execPath: string) => Promise<void>
   setModsPath: (gameId: string, modsPath: string) => void
+  setGameResources: (gameId: string, resources: Partial<GameResources>) => void
+  setGameFavorite: (gameId: string, favorite?: boolean) => void
+  setGameHidden: (gameId: string, hidden?: boolean) => void
+  setGameCategories: (gameId: string, categories: string[]) => void
   addProfile: (name: string) => void
+  renameProfile: (profileId: string, name: string) => void
+  removeProfile: (profileId: string) => void
   scanMods: (gameId?: string) => Promise<void>
   toggleMod: (modId: string) => Promise<void>
   deleteMod: (modId: string) => Promise<void>
+  moveMod: (modId: string, direction: -1 | 1) => void
+  setModNote: (modId: string, note: string) => void
   toggleNSFW: () => void
   setLanguage: (language: string) => void
   toggleDiscord: () => void
@@ -141,7 +222,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
           if (enabled !== undefined && enabled !== mod.enabled) await native.toggleMod(mod.path, enabled)
         }
         const refreshed = await native.scanMods(game.modsPath)
-        const games = updateProfile(get().games, game.id, profile.id, current => ({ ...current, mods: refreshed.map(nativeModToMod) }))
+        const games = updateProfile(get().games, game.id, profile.id, current => ({ ...current, mods: scannedMods(refreshed, current.mods) }))
         set({ games, selectedProfileId: profile.id, notice: `Profile “${profile.name}” applied.` })
         return
       } catch (error) {
@@ -164,19 +245,38 @@ export const useStore = create<Store>()(persist((set, get) => ({
   },
   addDetectedGames: async () => {
     try {
-      const detected = await native.detectGames()
-      const existing = new Set(get().games.map(game => game.execPath))
-      const fresh = detected.filter(game => !existing.has(game.execPath)).map((game: DetectedGame) => makeGame(game))
-      if (fresh.length) {
-        set(state => ({ games: [...state.games, ...fresh], selectedGameId: state.selectedGameId ?? fresh[0].id, selectedProfileId: state.selectedProfileId ?? fresh[0].profiles[0].id, notice: `${fresh.length} game${fresh.length > 1 ? 's' : ''} detected.` }))
-      } else {
-        set({ notice: 'No new supported game installation was found.' })
-      }
-      return fresh.length
+      const scan = await native.scanSteamGames(undefined, () => undefined)
+      return get().importDetectedGames(scan.games)
     } catch (error) {
       set({ notice: asError(error) })
       return 0
     }
+  },
+  importDetectedGames: detected => {
+    const existing = get().games
+    const fresh = detected
+      .filter(game => {
+        const appId = game.providerGameId
+        const installDirectory = normalizedPath(game.installDirectory)
+        const executable = normalizedPath(game.execPath)
+        return !existing.some(current =>
+          (appId && current.provider === game.provider && current.providerGameId === appId)
+          || (installDirectory && normalizedPath(current.installDirectory) === installDirectory)
+          || (executable && normalizedPath(current.execPath) === executable)
+        )
+      })
+      .map(game => makeGame(game))
+    if (fresh.length) {
+      set(state => ({
+        games: [...state.games, ...fresh],
+        selectedGameId: state.selectedGameId ?? fresh[0].id,
+        selectedProfileId: state.selectedProfileId ?? fresh[0].profiles[0].id,
+        notice: `${fresh.length} jeu${fresh.length > 1 ? 'x' : ''} Steam ajouté${fresh.length > 1 ? 's' : ''}.`,
+      }))
+    } else {
+      set({ notice: 'Aucun nouveau jeu Steam sélectionné à ajouter.' })
+    }
+    return fresh.length
   },
   removeGame: gameId => set(state => {
     const games = state.games.filter(game => game.id !== gameId)
@@ -194,11 +294,40 @@ export const useStore = create<Store>()(persist((set, get) => ({
     }
   },
   setModsPath: (gameId, modsPath) => set(state => ({ games: state.games.map(game => game.id === gameId ? { ...game, modsPath } : game) })),
+  setGameResources: (gameId, resources) => set(state => ({
+    games: state.games.map(game => game.id === gameId ? { ...game, resources: { ...game.resources, ...resources } } : game),
+  })),
+  setGameFavorite: (gameId, favorite) => set(state => ({
+    games: state.games.map(game => game.id === gameId ? { ...game, favorite: favorite ?? !game.favorite } : game),
+  })),
+  setGameHidden: (gameId, hidden) => set(state => ({
+    games: state.games.map(game => game.id === gameId ? { ...game, hidden: hidden ?? !game.hidden } : game),
+  })),
+  setGameCategories: (gameId, categories) => set(state => ({
+    games: state.games.map(game => game.id === gameId ? { ...game, categories } : game),
+  })),
   addProfile: name => {
     const { game, profile } = selected(get())
     if (!game || !profile || !name.trim()) return
     const next: Profile = { ...profile, id: createId(), name: name.trim(), mods: profile.mods.map(mod => ({ ...mod })), playtime: 0, lastPlayed: undefined }
     set(state => ({ games: state.games.map(item => item.id === game.id ? { ...item, profiles: [...item.profiles, next] } : item), selectedProfileId: next.id }))
+  },
+  renameProfile: (profileId, name) => {
+    const { game } = selected(get())
+    if (!game || !name.trim()) return
+    set(state => ({ games: updateProfile(state.games, game.id, profileId, profile => ({ ...profile, name: name.trim() })) }))
+  },
+  removeProfile: profileId => {
+    const { game } = selected(get())
+    if (!game || game.profiles.length < 2) { set({ notice: 'Le profil par défaut ne peut pas être le seul profil.' }); return }
+    const profiles = game.profiles.filter(profile => profile.id !== profileId)
+    if (profiles.length === game.profiles.length) return
+    const next = profiles[0]
+    set(state => ({
+      games: state.games.map(item => item.id === game.id ? { ...item, profiles } : item),
+      selectedProfileId: state.selectedProfileId === profileId ? next.id : state.selectedProfileId,
+      notice: 'Profil retiré. Les fichiers de mods ne sont pas supprimés.',
+    }))
   },
   scanMods: async gameId => {
     const state = get()
@@ -208,7 +337,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     if (!game.modsPath) { set({ notice: 'Select a mods folder first.' }); return }
     try {
       const mods = await native.scanMods(game.modsPath)
-      set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, mods: mods.map(nativeModToMod) })), notice: `${mods.length} mod${mods.length !== 1 ? 's' : ''} scanned.` }))
+      set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, mods: scannedMods(mods, current.mods) })), notice: `${mods.length} mod${mods.length !== 1 ? 's' : ''} scanned.` }))
     } catch (error) {
       set({ notice: asError(error) })
     }
@@ -219,7 +348,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     if (!game || !profile || !mod) return
     try {
       const path = mod.path ? await native.toggleMod(mod.path, !mod.enabled) : undefined
-      set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, mods: current.mods.map(item => item.id === modId ? { ...item, enabled: !item.enabled, path, id: path ?? item.id } : item) })) }))
+      set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, mods: decorateMods(current.mods.map(item => item.id === modId ? { ...item, enabled: !item.enabled, path, id: path ?? item.id } : item)) })) }))
     } catch (error) {
       set({ notice: asError(error) })
     }
@@ -230,10 +359,26 @@ export const useStore = create<Store>()(persist((set, get) => ({
     if (!game || !profile || !mod) return
     try {
       if (mod.path) await native.deleteMod(mod.path)
-      set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, mods: current.mods.filter(item => item.id !== modId) })), notice: `${mod.name} removed.` }))
+      set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, mods: decorateMods(current.mods.filter(item => item.id !== modId)) })), notice: `${mod.name} removed.` }))
     } catch (error) {
       set({ notice: asError(error) })
     }
+  },
+  moveMod: (modId, direction) => {
+    const { game, profile } = selected(get())
+    if (!game || !profile) return
+    const mods = decorateMods(profile.mods)
+    const index = mods.findIndex(mod => mod.id === modId)
+    const destination = index + direction
+    if (index < 0 || destination < 0 || destination >= mods.length) return
+    const [moved] = mods.splice(index, 1)
+    mods.splice(destination, 0, moved)
+    set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, mods: decorateMods(mods) })) }))
+  },
+  setModNote: (modId, note) => {
+    const { game, profile } = selected(get())
+    if (!game || !profile) return
+    set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, mods: current.mods.map(mod => mod.id === modId ? { ...mod, note } : mod) })) }))
   },
   toggleNSFW: () => set(state => ({ nsfw: !state.nsfw })),
   setLanguage: language => set({ language }),

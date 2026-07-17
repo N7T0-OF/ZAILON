@@ -42,5 +42,8 @@ jobs:
       - name: Verify frontend
         run: npm run build
 
+      - name: Run native unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
       - name: Verify native backend
         run: npm run tauri build -- --debug --no-bundle --no-sign

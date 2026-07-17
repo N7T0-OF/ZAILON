@@ -1,6 +1,6 @@
 [package]
 name = "zailon"
-version = "1.0.1"
+version = "1.1.0"
 description = "Universal Mod Launcher"
 authors = ["N7T0-OF"]
 license = "MIT"
@@ -30,3 +30,4 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 walkdir = "2"
 zip = "2"
 url = "2"
+steamlocate = "2.1"

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashSet,
     fs,
     io::{copy, Cursor, Write},
     path::{Path, PathBuf},
@@ -11,6 +12,8 @@ use walkdir::WalkDir;
 
 #[cfg(desktop)]
 use std::sync::Mutex;
+#[cfg(desktop)]
+use steamlocate::{Library, SteamDir};
 #[cfg(desktop)]
 use tauri::{ipc::Channel, State};
 #[cfg(desktop)]
@@ -25,15 +28,62 @@ struct NativeMod {
     enabled: bool,
     mod_type: String,
     size_bytes: u64,
+    files: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DetectedGame {
     name: String,
     exec_path: String,
     mods_path: String,
     platform: String,
+    provider: String,
+    provider_game_id: Option<String>,
+    install_directory: String,
+    steam_library: Option<String>,
+    executable_candidates: Vec<DetectedExecutable>,
+    size_bytes: Option<u64>,
+    last_updated: Option<u64>,
+    build_id: Option<String>,
+    needs_executable: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DetectedExecutable {
+    path: String,
+    name: String,
+    size_bytes: u64,
+}
+
+#[cfg(desktop)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SteamScanDiagnostics {
+    steam_path: String,
+    libraries: Vec<String>,
+    manifests_found: usize,
+    manifest_errors: usize,
+    skipped_non_games: usize,
+}
+
+#[cfg(desktop)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SteamScan {
+    games: Vec<DetectedGame>,
+    diagnostics: SteamScanDiagnostics,
+}
+
+#[cfg(desktop)]
+#[derive(Clone, Serialize)]
+#[serde(tag = "event", content = "data")]
+enum SteamScanEvent {
+    #[serde(rename_all = "camelCase")]
+    Stage { stage: String, detail: String },
+    #[serde(rename_all = "camelCase")]
+    Progress { current: usize, total: usize },
 }
 
 #[cfg(desktop)]
@@ -94,6 +144,127 @@ fn update_data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let root = app.path().app_local_data_dir().map_err(to_error)?;
     fs::create_dir_all(&root).map_err(to_error)?;
     Ok(root)
+}
+
+fn safe_game_id(game_id: &str) -> Result<&str, String> {
+    if game_id.is_empty()
+        || game_id.len() > 128
+        || !game_id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+        })
+    {
+        return Err("Invalid game identifier.".into());
+    }
+    Ok(game_id)
+}
+
+fn game_resource_directory(app: &tauri::AppHandle, game_id: &str) -> Result<PathBuf, String> {
+    let game_id = safe_game_id(game_id)?;
+    let directory = update_data_root(app)?
+        .join("games")
+        .join(game_id)
+        .join("resources");
+    fs::create_dir_all(&directory).map_err(to_error)?;
+    Ok(directory)
+}
+
+fn allowed_resource_extension(kind: &str, extension: &str) -> bool {
+    let extension = extension.to_ascii_lowercase();
+    match kind {
+        "cover" | "logo" | "icon" | "background" | "banner" => {
+            matches!(
+                extension.as_str(),
+                "png" | "jpg" | "jpeg" | "webp" | "avif" | "gif"
+            )
+        }
+        "video" => matches!(extension.as_str(), "mp4" | "webm"),
+        _ => false,
+    }
+}
+
+#[tauri::command]
+fn store_game_resource(
+    app: AppHandle,
+    game_id: String,
+    kind: String,
+    source_path: String,
+) -> Result<String, String> {
+    let source = PathBuf::from(source_path);
+    let metadata = fs::metadata(&source).map_err(to_error)?;
+    if !metadata.is_file() {
+        return Err("The selected resource must be a file.".into());
+    }
+    let extension = source
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .ok_or_else(|| "The resource has no supported file extension.".to_string())?;
+    if !allowed_resource_extension(&kind, extension) {
+        return Err("Unsupported resource type for this slot.".into());
+    }
+    let byte_limit = if kind == "video" {
+        350 * 1024 * 1024
+    } else {
+        50 * 1024 * 1024
+    };
+    if metadata.len() > byte_limit {
+        return Err("The selected resource exceeds the allowed local size limit.".into());
+    }
+    let directory = game_resource_directory(&app, &game_id)?;
+    let mut destination = directory.join(format!(
+        "{kind}-{}.{}",
+        unix_timestamp(),
+        extension.to_ascii_lowercase()
+    ));
+    let mut suffix = 1;
+    while destination.exists() {
+        destination = directory.join(format!(
+            "{kind}-{}-{suffix}.{}",
+            unix_timestamp(),
+            extension.to_ascii_lowercase()
+        ));
+        suffix += 1;
+    }
+    fs::copy(source, &destination).map_err(to_error)?;
+    Ok(destination.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn remove_game_resource(
+    app: AppHandle,
+    game_id: String,
+    resource_path: String,
+) -> Result<(), String> {
+    let root = game_resource_directory(&app, &game_id)?
+        .canonicalize()
+        .map_err(to_error)?;
+    let resource = PathBuf::from(resource_path)
+        .canonicalize()
+        .map_err(to_error)?;
+    if !resource.starts_with(&root) || !resource.is_file() {
+        return Err("Resource path is outside of this game's local resource directory.".into());
+    }
+    fs::remove_file(resource).map_err(to_error)
+}
+
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !path.exists() {
+        return Err("The requested path does not exist.".into());
+    }
+    #[cfg(target_os = "windows")]
+    Command::new("explorer")
+        .arg(path)
+        .spawn()
+        .map_err(to_error)?;
+    #[cfg(target_os = "macos")]
+    Command::new("open").arg(path).spawn().map_err(to_error)?;
+    #[cfg(target_os = "linux")]
+    Command::new("xdg-open")
+        .arg(path)
+        .spawn()
+        .map_err(to_error)?;
+    Ok(())
 }
 
 fn append_update_log(root: &Path, entry: serde_json::Value) -> Result<(), String> {
@@ -161,6 +332,29 @@ fn entry_size(path: &Path) -> u64 {
         .sum()
 }
 
+fn mod_files(path: &Path) -> Vec<String> {
+    if path.is_file() {
+        return path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| vec![name.to_string()])
+            .unwrap_or_default();
+    }
+    WalkDir::new(path)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .filter_map(|entry| {
+            entry
+                .path()
+                .strip_prefix(path)
+                .ok()
+                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+        })
+        .collect()
+}
+
 fn normalized_name(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -169,83 +363,326 @@ fn normalized_name(path: &Path) -> String {
         .to_string()
 }
 
-fn steam_common_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    let home = dirs::home_dir();
+#[cfg(desktop)]
+fn steam_installation(input: Option<String>) -> Result<SteamDir, String> {
+    match input.filter(|path| !path.trim().is_empty()) {
+        Some(path) => {
+            let selected = PathBuf::from(path);
+            let root = if selected
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case("steamapps"))
+            {
+                selected.parent().map(Path::to_path_buf).unwrap_or(selected)
+            } else {
+                selected
+            };
+            SteamDir::from_dir(&root).map_err(to_error)
+        }
+        None => SteamDir::locate().map_err(to_error),
+    }
+}
+
+#[cfg(desktop)]
+fn is_steam_runtime_or_tool(name: &str) -> bool {
+    let normalized = name.to_ascii_lowercase();
+    [
+        "steam linux runtime",
+        "steamworks common redistributables",
+        "proton",
+        "steamvr",
+        "directx",
+        "visual c++",
+        "dedicated server",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
+}
+
+#[cfg(desktop)]
+fn executable_score(path: &Path, install_directory: &Path, game_name: &str) -> i32 {
+    let relative_depth = path
+        .strip_prefix(install_directory)
+        .ok()
+        .map(|relative| relative.components().count())
+        .unwrap_or(9) as i32;
+    let file_name = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let compact_game_name: String = game_name
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect();
+    let compact_file_name: String = file_name
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .collect();
+    let mut score = 100 - relative_depth * 12;
+    if relative_depth == 1 {
+        score += 45;
+    }
+    if compact_game_name.len() > 3
+        && (compact_file_name.contains(&compact_game_name)
+            || compact_game_name.contains(&compact_file_name))
+    {
+        score += 80;
+    }
+    if path
+        .to_string_lossy()
+        .to_ascii_lowercase()
+        .contains("binaries\\win64")
+    {
+        score += 20;
+    }
+    score
+}
+
+#[cfg(desktop)]
+fn is_launchable_candidate(path: &Path) -> bool {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if [
+        "unins",
+        "uninstall",
+        "crashreport",
+        "crashpad",
+        "eac_launcher",
+        "easyanticheat",
+    ]
+    .iter()
+    .any(|needle| file_name.contains(needle))
+    {
+        return false;
+    }
 
     #[cfg(target_os = "windows")]
     {
-        roots.push(PathBuf::from(
-            r"C:\Program Files (x86)\Steam\steamapps\common",
-        ));
-        roots.push(PathBuf::from(r"C:\Program Files\Steam\steamapps\common"));
+        path.is_file()
+            && path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
     }
-
-    #[cfg(target_os = "linux")]
-    if let Some(home) = &home {
-        roots.push(home.join(".steam/steam/steamapps/common"));
-        roots.push(home.join(".local/share/Steam/steamapps/common"));
-    }
-
     #[cfg(target_os = "macos")]
-    if let Some(home) = &home {
-        roots.push(home.join("Library/Application Support/Steam/steamapps/common"));
+    {
+        path.is_dir()
+            && path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("app"))
     }
-
-    let libraries: Vec<PathBuf> = roots
-        .iter()
-        .filter_map(|root| root.parent().map(Path::to_path_buf))
-        .collect();
-
-    for library in libraries {
-        let vdf = library.join("libraryfolders.vdf");
-        let Ok(contents) = fs::read_to_string(vdf) else {
-            continue;
-        };
-        for line in contents.lines().filter(|line| line.contains("\"path\"")) {
-            let values: Vec<_> = line
-                .split('"')
-                .filter(|value| !value.trim().is_empty())
-                .collect();
-            if values.len() >= 2 && values[0].trim() == "path" {
-                roots.push(PathBuf::from(values[1].replace("\\\\", "\\")).join("steamapps/common"));
-            }
-        }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        path.is_file()
+            && path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .map(|extension| {
+                    matches!(
+                        extension.to_ascii_lowercase().as_str(),
+                        "x86" | "x86_64" | "sh"
+                    )
+                })
+                .unwrap_or(true)
     }
-
-    roots.sort();
-    roots.dedup();
-    roots
 }
 
-fn first_executable(directory: &Path) -> Option<PathBuf> {
-    WalkDir::new(directory)
-        .max_depth(4)
+#[cfg(desktop)]
+fn executable_candidates(install_directory: &Path, game_name: &str) -> Vec<DetectedExecutable> {
+    let mut seen = HashSet::new();
+    let mut entries = WalkDir::new(install_directory)
+        .max_depth(5)
+        .follow_links(false)
         .into_iter()
         .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_file())
         .map(|entry| entry.into_path())
-        .find(|path| {
-            let file_name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if file_name.contains("unins") || file_name.contains("crashreport") {
-                return false;
-            }
-            #[cfg(target_os = "windows")]
-            {
-                return path
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"));
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                return true;
-            }
+        .filter(|path| is_launchable_candidate(path))
+        .filter(|path| seen.insert(path.to_string_lossy().to_ascii_lowercase()))
+        .map(|path| {
+            let size_bytes = fs::metadata(&path)
+                .map(|metadata| metadata.len())
+                .unwrap_or(0);
+            let score = executable_score(&path, install_directory, game_name);
+            (
+                score,
+                DetectedExecutable {
+                    name: path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("Executable")
+                        .to_string(),
+                    path: path.to_string_lossy().to_string(),
+                    size_bytes,
+                },
+            )
         })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        right
+            .0
+            .cmp(&left.0)
+            .then_with(|| left.1.path.cmp(&right.1.path))
+    });
+    entries
+        .into_iter()
+        .map(|(_, executable)| executable)
+        .collect()
+}
+
+#[cfg(desktop)]
+fn report_steam_stage(channel: Option<&Channel<SteamScanEvent>>, stage: &str, detail: String) {
+    if let Some(channel) = channel {
+        let _ = channel.send(SteamScanEvent::Stage {
+            stage: stage.into(),
+            detail,
+        });
+    }
+}
+
+#[cfg(desktop)]
+fn scan_steam_games_impl(
+    steam_path: Option<String>,
+    channel: Option<&Channel<SteamScanEvent>>,
+) -> Result<SteamScan, String> {
+    report_steam_stage(
+        channel,
+        "locating-steam",
+        "Locating the Steam installation".into(),
+    );
+    let steam = steam_installation(steam_path)?;
+    let mut library_paths = vec![steam.path().to_path_buf()];
+    match steam.library_paths() {
+        Ok(paths) => library_paths.extend(paths),
+        Err(error) => report_steam_stage(
+            channel,
+            "library-warning",
+            format!("Could not parse libraryfolders.vdf: {error}"),
+        ),
+    }
+    library_paths.sort();
+    library_paths.dedup();
+
+    report_steam_stage(
+        channel,
+        "reading-libraries",
+        format!("{} Steam library location(s) found", library_paths.len()),
+    );
+    let mut diagnostics = SteamScanDiagnostics {
+        steam_path: steam.path().to_string_lossy().to_string(),
+        libraries: library_paths
+            .iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect(),
+        manifests_found: 0,
+        manifest_errors: 0,
+        skipped_non_games: 0,
+    };
+    let mut games = Vec::new();
+    let mut seen_apps = HashSet::new();
+    let library_total = library_paths.len();
+
+    for (library_index, library_path) in library_paths.iter().enumerate() {
+        if let Some(channel) = channel {
+            let _ = channel.send(SteamScanEvent::Progress {
+                current: library_index,
+                total: library_total,
+            });
+        }
+        let library = match Library::from_dir(library_path) {
+            Ok(library) => library,
+            Err(error) => {
+                diagnostics.manifest_errors += 1;
+                report_steam_stage(
+                    channel,
+                    "library-warning",
+                    format!("Skipped {}: {error}", library_path.display()),
+                );
+                continue;
+            }
+        };
+        let app_total = library.app_ids().len();
+        report_steam_stage(
+            channel,
+            "reading-manifests",
+            format!("{} manifest(s) in {}", app_total, library_path.display()),
+        );
+
+        for app in library.apps() {
+            diagnostics.manifests_found += 1;
+            let app = match app {
+                Ok(app) => app,
+                Err(_) => {
+                    diagnostics.manifest_errors += 1;
+                    continue;
+                }
+            };
+            if !seen_apps.insert(app.app_id) {
+                continue;
+            }
+            let install_directory = library.resolve_app_dir(&app);
+            if !install_directory.is_dir() {
+                continue;
+            }
+            let name = app.name.clone().unwrap_or_else(|| app.install_dir.clone());
+            if name.trim().is_empty() || is_steam_runtime_or_tool(&name) {
+                diagnostics.skipped_non_games += 1;
+                continue;
+            }
+            let candidates = executable_candidates(&install_directory, &name);
+            let needs_executable = candidates.is_empty();
+            let exec_path = candidates
+                .first()
+                .map(|candidate| candidate.path.clone())
+                .unwrap_or_default();
+            let mods_path = if exec_path.is_empty() {
+                install_directory.join("Mods").to_string_lossy().to_string()
+            } else {
+                guess_mods_path(exec_path.clone())
+            };
+            games.push(DetectedGame {
+                name,
+                exec_path,
+                mods_path,
+                platform: "steam".into(),
+                provider: "Steam".into(),
+                provider_game_id: Some(app.app_id.to_string()),
+                install_directory: install_directory.to_string_lossy().to_string(),
+                steam_library: Some(library.path().to_string_lossy().to_string()),
+                executable_candidates: candidates,
+                size_bytes: app.size_on_disk,
+                last_updated: app.last_updated.and_then(|time| {
+                    time.duration_since(UNIX_EPOCH)
+                        .ok()
+                        .map(|duration| duration.as_secs())
+                }),
+                build_id: app.build_id.map(|value| value.to_string()),
+                needs_executable,
+            });
+        }
+    }
+    games.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+    });
+    if let Some(channel) = channel {
+        let _ = channel.send(SteamScanEvent::Progress {
+            current: library_total,
+            total: library_total,
+        });
+    }
+    report_steam_stage(
+        channel,
+        "finished",
+        format!("{} installed Steam game(s) ready to review", games.len()),
+    );
+    Ok(SteamScan { games, diagnostics })
 }
 
 #[tauri::command]
@@ -272,6 +709,7 @@ fn scan_mods(mods_path: String) -> Result<Vec<NativeMod>, String> {
                 enabled,
                 mod_type: mod_type(&path),
                 size_bytes: entry_size(&path),
+                files: mod_files(&path),
             })
         })
         .collect::<Vec<_>>())
@@ -349,30 +787,13 @@ fn guess_mods_path(exec_path: String) -> String {
         .to_string()
 }
 
+#[cfg(desktop)]
 #[tauri::command]
-fn detect_games() -> Vec<DetectedGame> {
-    steam_common_roots()
-        .into_iter()
-        .filter(|root| root.is_dir())
-        .flat_map(|root| {
-            fs::read_dir(root)
-                .into_iter()
-                .flatten()
-                .filter_map(Result::ok)
-        })
-        .filter_map(|entry| {
-            let directory = entry.path();
-            let executable = first_executable(&directory)?;
-            let name = directory.file_name()?.to_string_lossy().to_string();
-            let mods_path = guess_mods_path(executable.to_string_lossy().to_string());
-            Some(DetectedGame {
-                name,
-                exec_path: executable.to_string_lossy().to_string(),
-                mods_path,
-                platform: "steam".into(),
-            })
-        })
-        .collect()
+fn scan_steam_games(
+    steam_path: Option<String>,
+    on_event: Channel<SteamScanEvent>,
+) -> Result<SteamScan, String> {
+    scan_steam_games_impl(steam_path, Some(&on_event))
 }
 
 #[tauri::command]
@@ -618,6 +1039,34 @@ async fn install_update(
         .map_err(to_error)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_only_safe_game_identifiers() {
+        assert!(safe_game_id("4b2d66ca-5c39-4d35_a").is_ok());
+        assert!(safe_game_id("../outside").is_err());
+        assert!(safe_game_id("").is_err());
+    }
+
+    #[test]
+    fn limits_resource_extensions_by_slot() {
+        assert!(allowed_resource_extension("cover", "webp"));
+        assert!(allowed_resource_extension("video", "MP4"));
+        assert!(!allowed_resource_extension("cover", "exe"));
+        assert!(!allowed_resource_extension("video", "gif"));
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn excludes_known_steam_tools_from_game_results() {
+        assert!(is_steam_runtime_or_tool("Steam Linux Runtime 3.0"));
+        assert!(is_steam_runtime_or_tool("Proton Experimental"));
+        assert!(!is_steam_runtime_or_tool("Baldur's Gate 3"));
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -641,11 +1090,15 @@ pub fn run() {
             ensure_dir,
             launch_game,
             guess_mods_path,
-            detect_games,
             install_mod,
+            store_game_resource,
+            remove_game_resource,
+            open_path,
             prepare_update_backup,
             record_update_event,
             open_update_log,
+            #[cfg(desktop)]
+            scan_steam_games,
             #[cfg(desktop)]
             check_for_update,
             #[cfg(desktop)]

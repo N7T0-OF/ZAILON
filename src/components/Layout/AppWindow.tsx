@@ -18,7 +18,6 @@ export function AppWindow() {
     games: GamesView,
     explore: ExploreView,
     downloads: DownloadsView,
-    mods: GamesView,
     tools: ToolsView,
     news: NewsView,
     settings: SettingsView,

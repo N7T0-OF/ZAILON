@@ -22,7 +22,7 @@ export function GameContextMenu({ game, position, onClose, onEditResources }: Ga
   const [activeIndex, setActiveIndex] = useState(0)
   const [placement, setPlacement] = useState(position)
   const setSelectedGame = useStore(state => state.setSelectedGame)
-  const setView = useStore(state => state.setView)
+  const setActiveGameTab = useStore(state => state.setActiveGameTab)
   const launchSelectedGame = useStore(state => state.launchSelectedGame)
   const removeGame = useStore(state => state.removeGame)
   const setGameFavorite = useStore(state => state.setGameFavorite)
@@ -34,7 +34,7 @@ export function GameContextMenu({ game, position, onClose, onEditResources }: Ga
     { label: 'Jouer', icon: Play, action: () => { setSelectedGame(game.id); void launchSelectedGame(); onClose() } },
     { label: 'Lancer sans mods', icon: X, disabled: true, hint: 'Indisponible tant que le moteur de déploiement ne peut pas restaurer les fichiers sans risque après le lancement.' },
     { separator: true },
-    { label: 'Gérer les mods', icon: Wrench, action: () => { setSelectedGame(game.id); setView('mods'); onClose() } },
+    { label: 'Gérer les mods', icon: Wrench, action: () => { setSelectedGame(game.id); setActiveGameTab('mods'); onClose() } },
     { label: 'Modifier l’apparence', icon: Palette, action: () => { setSelectedGame(game.id); onEditResources(); onClose() } },
     { label: game.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris', icon: Heart, action: () => { setGameFavorite(game.id); onClose() } },
     { label: 'Modifier les catégories', icon: Tag, action: () => { const next = window.prompt('Catégories, séparées par des virgules', (game.categories || []).join(', ')); if (next !== null) setGameCategories(game.id, next.split(',').map(category => category.trim()).filter(Boolean)); onClose() } },

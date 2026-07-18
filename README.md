@@ -8,10 +8,13 @@ profiles locally and ships installers for Windows, Linux and macOS.
 
 - Add games manually or run quick/full local discovery across Steam manifests, Epic Games manifests and Windows installed-application records; review and filter every result before import.
 - Scan, enable, disable and remove local mods without moving them outside the game folder.
-- Keep separate local mod profiles, per-profile priority, notes, file-conflict indicators and playtime statistics.
+- Keep a shared installed-mod catalogue per game and lightweight profiles with activation, priority, notes, file-conflict rules and playtime statistics. Existing v1 data is migrated automatically.
+- Import one or more existing mod folders through the native Generic/Cyberpunk/Bethesda/Unreal Pak/XXMI scanner, then review every detected root before transactional copy.
+- Duplicate profiles and exchange light or complete `.zailon-profile` archives without exporting secrets or personal source paths.
 - Right-click a game card (or use its ellipsis) to play, manage mods, open its folders, mark favorite, hide or remove only its ZAILON entry.
 - Import covers, logos, icons, backgrounds, banners, SVGs and videos; preview, position and resize them before saving. ZAILON copies approved resources into its own local data directory.
-- Browse real GameBanana results in Explorer, search recent mods, hide adult results by default and install a selected file into the explicitly configured target game.
+- Search the remote GameBanana game catalogue, pin/reopen games, browse real paginated results, filter/sort the loaded page, hide adult results by default and install a selected file into the explicitly configured target game.
+- Store Nexus and CurseForge credentials in the operating-system credential vault; register or revoke the Windows `nxm://` association only after explicit consent.
 - Native frameless window with working move, minimize, maximize/restore and close controls.
 - Restore the last valid native window size, position and maximized state.
 - Signed in-app update checks with Stable and Beta channels, progress, local backup and update log.
@@ -48,6 +51,7 @@ npm run desktop:dev
 ```bash
 npm run build
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+cargo test --manifest-path src-tauri/Cargo.toml --lib
 npm run desktop:build
 ```
 

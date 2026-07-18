@@ -2,7 +2,7 @@ import { Boxes, Clock3, FolderPlus, Gamepad2, MoreHorizontal, Palette, Play, Rad
 import { useState } from 'react'
 import { Game } from '../../types'
 import { resourceUrl } from '../../lib/native'
-import { getSelectedGame, getSelectedProfile, useStore } from '../../store/useStore'
+import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
 import { formatSeconds, formatTime, timeAgo } from '../../utils'
 import { GameContextMenu } from '../GameContextMenu'
 import { GameResourcesDialog } from '../GameResourcesDialog'
@@ -21,6 +21,7 @@ export function HomeView() {
   const isPlaying = useStore(state => state.isPlaying)
   const sessionTime = useStore(state => state.sessionTime)
   const setView = useStore(state => state.setView)
+  const setActiveGameTab = useStore(state => state.setActiveGameTab)
   const [discoveryOpen, setDiscoveryOpen] = useState(false)
   const [menu, setMenu] = useState<{ game: Game; position: { x: number; y: number } }>()
   const [resourcesGameId, setResourcesGameId] = useState<string>()
@@ -46,8 +47,9 @@ export function HomeView() {
     </>
   }
 
-  const activeMods = selectedProfile.mods.filter(mod => mod.enabled).length
-  const installedMods = selectedProfile.mods.length
+  const profileMods = resolveProfileMods(selectedGame, selectedProfile)
+  const activeMods = profileMods.filter(mod => mod.enabled).length
+  const installedMods = profileMods.length
   const activePercent = installedMods ? Math.round((activeMods / installedMods) * 100) : 0
   const heroResource = selectedGame.resources?.backgroundPath || selectedGame.resources?.bannerPath || selectedGame.resources?.coverPath
   const background = resourceUrl(heroResource) || selectedGame.backgroundArt
@@ -110,7 +112,7 @@ export function HomeView() {
             <button type="button" onClick={() => void (isPlaying ? Promise.resolve(stopPlaying()) : launchSelectedGame())} className={`flex min-w-28 items-center justify-center gap-2 rounded-full px-5 py-2.5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all ${isPlaying ? 'bg-[#a73b4d] text-white hover:bg-[#bb4559]' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
               {isPlaying ? <Square size={10} fill="currentColor" /> : <Play size={10} fill="currentColor" />}{isPlaying ? 'Arrêter' : 'Jouer'}
             </button>
-            <button type="button" onClick={() => setView('mods')} aria-label="Gérer les mods" title="Gérer les mods" className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.12] bg-black/25 text-white/50 backdrop-blur hover:bg-white/[0.08] hover:text-white"><Settings2 size={12} /></button>
+            <button type="button" onClick={() => setActiveGameTab('mods')} aria-label="Gérer les mods" title="Gérer les mods" className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.12] bg-black/25 text-white/50 backdrop-blur hover:bg-white/[0.08] hover:text-white"><Settings2 size={12} /></button>
           </div>
         </div>
 
@@ -130,7 +132,7 @@ export function HomeView() {
             <p className="mt-1 text-[11px] text-white/26">{profileActivity ? `${formatTime(profileActivity)} sur les profils` : 'Aucune activité enregistrée'}</p>
           </DashboardPanel>
 
-          <DashboardPanel eyebrow="Vos statistiques" footer="Gérer les mods" onFooter={() => setView('mods')}>
+          <DashboardPanel eyebrow="Vos statistiques" footer="Gérer les mods" onFooter={() => setActiveGameTab('mods')}>
             <div className="grid h-[72px] grid-cols-2 divide-x divide-white/[0.07]">
               <MiniStat icon={Boxes} value={`${activePercent}%`} label={`${activeMods}/${installedMods} mods`} />
               <MiniStat icon={Clock3} value={formatTime(selectedGame.totalPlaytime)} label="temps de jeu" />

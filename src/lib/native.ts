@@ -1,6 +1,7 @@
 import { Channel, convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import type { UpdateChannel } from '../types'
+import type { ModImportCandidate, ProfileArchiveManifest } from '../types'
 
 export interface NativeMod {
   id: string
@@ -10,6 +11,11 @@ export interface NativeMod {
   modType: string
   sizeBytes: number
   files: string[]
+  fingerprint: string
+  framework: string
+  manifests: string[]
+  sourceUrl?: string
+  version?: string
 }
 
 export interface DetectedGame {
@@ -81,6 +87,24 @@ export interface UpdateMetadata {
   notes?: string
 }
 
+export interface ProfileImportPreview {
+  manifest: ProfileArchiveManifest
+  archivePath: string
+  embeddedFiles: number
+  missingModNames: string[]
+  warnings: string[]
+}
+
+export interface NxmRequest {
+  rawUrl: string
+  gameDomain: string
+  modId: number
+  fileId: number
+  key?: string
+  expires?: number
+  userId?: number
+}
+
 export type UpdateDownloadEvent =
   | { event: 'Started'; data: { contentLength?: number } }
   | { event: 'Progress'; data: { chunkLength: number } }
@@ -96,8 +120,9 @@ const desktopOnly = <T>(command: string, args?: Record<string, unknown>) => {
 export const native = {
   isDesktop: () => isTauri(),
   scanMods: (modsPath: string) => desktopOnly<NativeMod[]>('scan_mods', { modsPath }),
-  toggleMod: (modPath: string, enable: boolean) => desktopOnly<string>('toggle_mod', { modPath, enable }),
-  deleteMod: (modPath: string) => desktopOnly<void>('delete_mod', { modPath }),
+  scanModImport: (paths: string[], gameName: string) => desktopOnly<ModImportCandidate[]>('scan_mod_import', { paths, gameName }),
+  toggleMod: (modPath: string, modsRoot: string, enable: boolean) => desktopOnly<string>('toggle_mod', { modPath, modsRoot, enable }),
+  deleteMod: (modPath: string, modsRoot: string) => desktopOnly<void>('delete_mod', { modPath, modsRoot }),
   launchGame: (execPath: string) => desktopOnly<void>('launch_game', { execPath }),
   guessModsPath: (execPath: string) => desktopOnly<string>('guess_mods_path', { execPath }),
   scanSteamGames: (steamPath: string | undefined, onEvent: (event: SteamScanEvent) => void) => {
@@ -114,6 +139,23 @@ export const native = {
   },
   installMod: (url: string, fileName: string, modsPath: string) =>
     desktopOnly<string>('install_mod', { url, fileName, modsPath }),
+  exportProfile: (destination: string, manifest: ProfileArchiveManifest, complete: boolean, sources: Array<{ id: string; name: string; path: string }>) =>
+    desktopOnly<string>('export_profile', { destination, manifest, complete, sources }),
+  previewProfileImport: (archivePath: string) =>
+    desktopOnly<ProfileImportPreview>('preview_profile_import', { archivePath }),
+  extractProfileArchive: (archivePath: string, destination: string) =>
+    desktopOnly<string[]>('extract_profile_archive', { archivePath, destination }),
+  importModCandidates: (paths: string[], destination: string) =>
+    desktopOnly<string[]>('import_mod_candidates', { paths, destination }),
+  setProviderSecret: (provider: 'nexus' | 'curseforge', secret: string) =>
+    desktopOnly<void>('set_provider_secret', { provider, secret }),
+  deleteProviderSecret: (provider: 'nexus' | 'curseforge') =>
+    desktopOnly<void>('delete_provider_secret', { provider }),
+  providerSecretStatus: () => desktopOnly<Record<string, boolean>>('provider_secret_status'),
+  setNxmAssociation: (enabled: boolean) => desktopOnly<boolean>('set_nxm_association', { enabled }),
+  nxmAssociationStatus: () => desktopOnly<boolean>('nxm_association_status'),
+  pendingExternalInstalls: () => desktopOnly<NxmRequest[]>('pending_external_installs'),
+  consumeExternalInstall: (rawUrl: string) => desktopOnly<void>('consume_external_install', { rawUrl }),
   storeGameResource: (gameId: string, kind: GameResourceKind, sourcePath: string) =>
     desktopOnly<string>('store_game_resource', { gameId, kind, sourcePath }),
   removeGameResource: (gameId: string, resourcePath: string) =>
@@ -148,6 +190,32 @@ export async function pickExecutable() {
 export async function pickFolder(title = 'Select the mods folder') {
   if (!isTauri()) return null
   const selected = await open({ title, directory: true, multiple: false })
+  return typeof selected === 'string' ? selected : null
+}
+
+export async function pickFolders(title = 'Sélectionnez les dossiers de mods à importer') {
+  if (!isTauri()) return []
+  const selected = await open({ title, directory: true, multiple: true })
+  return Array.isArray(selected) ? selected : typeof selected === 'string' ? [selected] : []
+}
+
+export async function pickProfileArchive() {
+  if (!isTauri()) return null
+  const selected = await open({
+    title: 'Importer un profil ZAILON',
+    multiple: false,
+    filters: [{ name: 'Profil ZAILON', extensions: ['zailon-profile'] }],
+  })
+  return typeof selected === 'string' ? selected : null
+}
+
+export async function saveProfileArchive(defaultName: string) {
+  if (!isTauri()) return null
+  const selected = await save({
+    title: 'Exporter le profil ZAILON',
+    defaultPath: `${defaultName.replace(/[^a-z0-9_-]+/gi, '-')}.zailon-profile`,
+    filters: [{ name: 'Profil ZAILON', extensions: ['zailon-profile'] }],
+  })
   return typeof selected === 'string' ? selected : null
 }
 

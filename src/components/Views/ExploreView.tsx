@@ -2,6 +2,8 @@ import { FormEvent, useEffect, useState } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Compass,
   Download,
   ExternalLink,
@@ -10,11 +12,11 @@ import {
   KeyRound,
   LayoutList,
   Loader2,
+  Pin,
   RefreshCw,
   Search,
   ShieldCheck,
 } from 'lucide-react'
-import { GAMEBANANA_GAMES } from '../../store/gamebanana'
 import { useStore } from '../../store/useStore'
 import type { ExplodMod, Platform } from '../../types'
 import { native } from '../../lib/native'
@@ -34,7 +36,14 @@ const formatCount = (value: number) => new Intl.NumberFormat('fr-FR', {
 export function ExploreView() {
   const platform = useStore(state => state.explorePlatform)
   const gameId = useStore(state => state.exploreGameId)
+  const catalogGames = useStore(state => state.exploreGames)
+  const gameQuery = useStore(state => state.exploreGameQuery)
+  const pinnedGames = useStore(state => state.explorePinnedGames)
+  const recentGames = useStore(state => state.exploreRecentGames)
   const search = useStore(state => state.exploreSearch)
+  const page = useStore(state => state.explorePage)
+  const hasNextPage = useStore(state => state.exploreHasNextPage)
+  const sort = useStore(state => state.exploreSort)
   const grid = useStore(state => state.exploreGrid)
   const mods = useStore(state => state.exploreMods)
   const loading = useStore(state => state.exploreLoading)
@@ -44,7 +53,12 @@ export function ExploreView() {
   const showNsfw = useStore(state => state.nsfw)
   const setPlatform = useStore(state => state.setExplorePlatform)
   const setGame = useStore(state => state.setExploreGame)
+  const setGameQuery = useStore(state => state.setExploreGameQuery)
+  const searchGames = useStore(state => state.searchExploreGames)
+  const pinGame = useStore(state => state.pinExploreGame)
   const setSearch = useStore(state => state.setExploreSearch)
+  const setPage = useStore(state => state.setExplorePage)
+  const setSort = useStore(state => state.setExploreSort)
   const setGrid = useStore(state => state.setExploreGrid)
   const refresh = useStore(state => state.refreshExplore)
   const installMod = useStore(state => state.installMod)
@@ -52,15 +66,22 @@ export function ExploreView() {
   const [installingId, setInstallingId] = useState<string>()
   const selectedGame = games.find(game => game.id === selectedGameId)
   const readyProvider = providers.find(provider => provider.id === platform)?.ready
-  const resolvedGameId = GAMEBANANA_GAMES.some(game => game.id === gameId) ? gameId : GAMEBANANA_GAMES[0].id
+  const gameChoices = [...new Map([...pinnedGames, ...recentGames, ...catalogGames].map(game => [game.id, game])).values()]
+  const selectedCatalogGame = gameChoices.find(game => game.id === gameId) || { id: gameId, name: `GameBanana #${gameId}` }
   const visibleMods = showNsfw ? mods : mods.filter(mod => !mod.nsfw)
   const hiddenNsfw = mods.length - visibleMods.length
 
   useEffect(() => {
     if (platform !== 'gamebanana') return
-    if (resolvedGameId !== gameId) setGame(resolvedGameId)
-    else void refresh()
-  }, [platform, gameId, refresh, resolvedGameId, setGame])
+    const timeout = window.setTimeout(() => void refresh(), search ? 450 : 0)
+    return () => window.clearTimeout(timeout)
+  }, [platform, gameId, page, sort, search, refresh])
+
+  useEffect(() => {
+    if (platform !== 'gamebanana') return
+    const timeout = window.setTimeout(() => void searchGames(), 400)
+    return () => window.clearTimeout(timeout)
+  }, [gameQuery, platform, searchGames])
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault()
@@ -111,14 +132,20 @@ export function ExploreView() {
           <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-white/48">
             <Gamepad2 size={15} className="shrink-0" />
             <span className="sr-only">Jeu du catalogue</span>
-            <select value={resolvedGameId} onChange={event => setGame(Number(event.target.value))} className="min-w-0 flex-1 bg-transparent text-xs text-white/76 outline-none">
-              {GAMEBANANA_GAMES.map(game => <option key={game.id} value={game.id} className="bg-[#101313]">{game.name}</option>)}
+            <select value={gameId} onChange={event => setGame(Number(event.target.value))} className="min-w-0 flex-1 bg-transparent text-xs text-white/76 outline-none">
+              {gameChoices.map(game => <option key={game.id} value={game.id} className="bg-[#101313]">{game.name}</option>)}
             </select>
+            <button type="button" onClick={() => pinGame(selectedCatalogGame)} title="Épingler ou désépingler ce jeu" className={pinnedGames.some(game => game.id === gameId) ? 'text-gold' : 'text-white/30 hover:text-white'}><Pin size={14} /></button>
+          </label>
+
+          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 focus-within:border-gold/26">
+            <Search size={14} className="shrink-0 text-white/32" />
+            <input value={gameQuery} onChange={event => setGameQuery(event.target.value)} placeholder="Chercher n’importe quel jeu…" className="min-w-0 flex-1 bg-transparent text-xs text-white/76 outline-none placeholder:text-white/25" />
           </label>
 
           <form onSubmit={submitSearch} className="flex min-w-0 flex-[1.3] items-center rounded-lg border border-white/[0.08] bg-black/20 focus-within:border-gold/26">
             <Search size={15} className="ml-3 shrink-0 text-white/32" />
-            <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Rechercher dans les nouveautés…" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-xs text-white/78 outline-none placeholder:text-white/25" />
+            <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Filtrer les mods de cette page…" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-xs text-white/78 outline-none placeholder:text-white/25" />
             <button type="submit" disabled={loading} className="mr-1 rounded-md bg-white/[0.06] px-3 py-1.5 text-[11px] font-semibold text-white/62 hover:bg-white/[0.1] disabled:opacity-40">Rechercher</button>
           </form>
 
@@ -127,6 +154,11 @@ export function ExploreView() {
             <button type="button" onClick={() => setGrid(true)} title="Affichage en grille" aria-label="Affichage en grille" className={`flex h-9 w-9 items-center justify-center rounded-lg ${grid ? 'bg-gold text-[#101313]' : 'border border-white/[0.08] text-white/38 hover:text-white'}`}><Grid2X2 size={14} /></button>
             <button type="button" onClick={() => setGrid(false)} title="Affichage en liste" aria-label="Affichage en liste" className={`flex h-9 w-9 items-center justify-center rounded-lg ${!grid ? 'bg-gold text-[#101313]' : 'border border-white/[0.08] text-white/38 hover:text-white'}`}><LayoutList size={15} /></button>
           </div>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <label className="text-[11px] text-white/45">Trier par <select value={sort} onChange={event => setSort(event.target.value as typeof sort)} className="ml-1 rounded border border-white/[0.08] bg-[#101313] px-2 py-1.5 text-[11px] text-white/75"><option value="recent">Récent</option><option value="updated">Récemment mis à jour</option><option value="popular">Mentions J’aime (page)</option><option value="downloaded">Téléchargements (page)</option></select></label>
+          <button type="button" onClick={() => { setSearch(''); setSort('recent'); setPage(1) }} className="rounded border border-white/[0.08] px-2.5 py-1.5 text-[11px] text-white/50 hover:text-white">Réinitialiser les filtres</button>
+          <span className="ml-auto text-[11px] text-white/30">Page {page}</span>
         </div>
       </section>
 
@@ -145,6 +177,11 @@ export function ExploreView() {
         {loading && !mods.length ? <LoadingGrid /> : !visibleMods.length && !error ? <EmptyResults onReset={() => { setSearch(''); void refresh() }} /> : <div className={grid ? 'grid gap-3 md:grid-cols-2 2xl:grid-cols-3' : 'space-y-2'}>
           {visibleMods.map(mod => <ModResult key={mod.id} mod={mod} grid={grid} installing={installingId === mod.id} canInstall={Boolean(selectedGame?.modsPath)} targetName={selectedGame?.name} onInstall={() => void install(mod)} />)}
         </div>}
+        <div className="mt-4 flex items-center justify-center gap-2" aria-label="Pagination GameBanana">
+          <button type="button" disabled={page <= 1 || loading} onClick={() => setPage(page - 1)} className="flex h-9 items-center gap-1 rounded-lg border border-white/[0.08] px-3 text-[11px] text-white/65 hover:bg-white/[0.05] disabled:opacity-25"><ChevronLeft size={14} /> Précédent</button>
+          <span className="flex h-9 min-w-9 items-center justify-center rounded-lg bg-gold text-[11px] font-bold text-[#101313]">{page}</span>
+          <button type="button" disabled={!hasNextPage || loading} onClick={() => setPage(page + 1)} className="flex h-9 items-center gap-1 rounded-lg border border-white/[0.08] px-3 text-[11px] text-white/65 hover:bg-white/[0.05] disabled:opacity-25">Suivant <ChevronRight size={14} /></button>
+        </div>
       </section>
     </>}
   </div>

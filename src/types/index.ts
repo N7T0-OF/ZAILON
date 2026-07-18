@@ -1,7 +1,23 @@
-export type ViewType = 'home' | 'games' | 'explore' | 'downloads' | 'mods' | 'tools' | 'news' | 'settings'
+export type ViewType = 'home' | 'games' | 'explore' | 'downloads' | 'tools' | 'news' | 'settings'
 export type Platform = 'gamebanana' | 'nexus' | 'curseforge' | 'ayakamods'
 export type UpdateChannel = 'stable' | 'beta'
+export type GameTab = 'overview' | 'mods' | 'profiles' | 'downloads' | 'conflicts' | 'tools' | 'backups' | 'appearance' | 'settings'
 export type LoaderType = 'GIMI' | 'ZZMI' | 'SRMI' | 'WWMI' | 'EFMI' | 'UE5' | 'BepInEx' | 'ASI' | 'CLEO' | 'REF' | 'MelonLoader' | 'DLL' | 'Archive' | 'Folder' | 'Manual'
+
+export type MatchConfidence = 'exact' | 'high' | 'medium' | 'low' | 'unknown'
+export type ModUpdateStatus = 'unknown' | 'checking' | 'up-to-date' | 'available' | 'downloaded' | 'manual' | 'error'
+
+export interface ExternalModReference {
+  provider: Exclude<Platform, 'ayakamods'>
+  gameDomain?: string
+  modId: string
+  fileId?: string
+  installedVersion?: string
+  sourceUrl: string
+  confidence: MatchConfidence
+  confirmedByUser: boolean
+  matchedFrom?: 'manifest' | 'readme' | 'metadata' | 'fingerprint' | 'manual'
+}
 
 export interface Mod {
   id: string
@@ -25,16 +41,42 @@ export interface Mod {
   note?: string
   conflict?: 'none' | 'overwrites' | 'overwritten' | 'mixed'
   conflictCount?: number
+  fingerprint?: string
+  framework?: string
+  manifests?: string[]
+  externalReferences?: ExternalModReference[]
+  updateStatus?: ModUpdateStatus
+  availableVersion?: string
+  updateError?: string
+}
+
+export interface ProfileModState {
+  enabled: boolean
+  priority: number
+  note?: string
+  versionId?: string
 }
 
 export interface Profile {
   id: string
   gameId: string
   name: string
-  mods: Mod[]
+  /** Legacy v1 data. Removed automatically by the v3 migration. */
+  mods?: Mod[]
+  modStates: Record<string, ProfileModState>
   playtime: number
   lastPlayed?: number
   bypass?: string
+  createdAt: number
+  lastUsed?: number
+  description?: string
+  color?: string
+  locked?: boolean
+  isDefault?: boolean
+  launchArgs?: string
+  runtime?: string
+  conflictRules?: Array<{ path: string; winnerModId: string }>
+  installOptions?: Record<string, string | boolean | number>
 }
 
 export interface GameResources {
@@ -66,6 +108,7 @@ export interface Game {
   backgroundArt?: string
   execPath?: string
   modsPath?: string
+  installedMods: Mod[]
   profiles: Profile[]
   totalPlaytime: number
   lastPlayed?: number
@@ -106,6 +149,48 @@ export interface ExplodMod {
   downloadUrl?: string
   fileName?: string
   modId?: number
+  updatedAt?: number
+  category?: string
+  gameId?: number
+}
+
+export interface GamebananaGame {
+  id: number
+  name: string
+  image?: string
+  itemCount?: number
+  category?: string
+  platform?: string
+}
+
+export type ExploreSort = 'recent' | 'updated' | 'popular' | 'downloaded'
+
+export interface ModImportCandidate {
+  id: string
+  name: string
+  path: string
+  enabled: boolean
+  modType: string
+  sizeBytes: number
+  files: string[]
+  fingerprint: string
+  framework: string
+  manifests: string[]
+  sourceUrl?: string
+  version?: string
+  confidence: MatchConfidence
+  warnings: string[]
+}
+
+export interface ProfileArchiveManifest {
+  schemaVersion: 1
+  exportedAt: string
+  app: 'ZAILON'
+  appVersion: string
+  exportMode: 'light' | 'complete'
+  game: { name: string; provider?: string; providerGameId?: string }
+  profile: Omit<Profile, 'mods'>
+  mods: Array<Omit<Mod, 'path' | 'files'> & { files?: string[] }>
 }
 
 export interface NewsItem {

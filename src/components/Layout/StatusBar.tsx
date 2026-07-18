@@ -1,6 +1,6 @@
 import { CloudOff, Gamepad2, Radio, ShieldCheck, Wifi } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { appVersion, getSelectedGame, getSelectedProfile, useStore } from '../../store/useStore'
+import { appVersion, getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
 
 export function StatusBar() {
   const games = useStore(state => state.games)
@@ -18,10 +18,11 @@ export function StatusBar() {
     return () => { window.removeEventListener('online', connected); window.removeEventListener('offline', disconnected) }
   }, [])
 
-  const activeMods = selectedProfile?.mods.filter(mod => mod.enabled).length ?? 0
+  const activeMods = resolveProfileMods(selectedGame, selectedProfile).filter(mod => mod.enabled).length
   return <footer className="z-40 flex h-6 flex-shrink-0 items-center gap-1 border-t border-white/[0.04] bg-[#090b0b]/98 px-2 text-[11px] text-white/28">
     <StatusItem icon={Gamepad2} label={`${games.length} jeu${games.length !== 1 ? 'x' : ''}`} />
     <StatusItem icon={ShieldCheck} label={`${activeMods} mod${activeMods !== 1 ? 's' : ''} actif${activeMods !== 1 ? 's' : ''}`} />
+    <StatusItem icon={Radio} label={selectedProfile ? `Profil ${selectedProfile.name}` : 'Aucun profil'} />
     <StatusItem icon={Radio} label={selectedGame?.provider || 'Bibliothèque locale'} />
     <span className="flex-1" />
     <StatusItem icon={Radio} label={`Discord ${discord ? 'actif' : 'désactivé'}`} muted={!discord} />

@@ -1,4 +1,4 @@
-import { ExplodMod } from '../types'
+import { ExplodMod, ExploreSort, GamebananaGame } from '../types'
 
 export const GAMEBANANA_GAMES = [
   { id: 23012, name: 'Neverness To Everness', shortName: 'NTE' },
@@ -53,14 +53,20 @@ function apiError(payload: unknown) {
   return stringValue(record.error) || undefined
 }
 
-async function fetchNewIds(gameId: number, page: number) {
+function requestSignal(signal?: AbortSignal) {
+  if (!signal) return AbortSignal.timeout(15_000)
+  return AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+}
+
+async function fetchNewIds(gameId: number, page: number, includeUpdated: boolean, signal?: AbortSignal) {
   const params = new URLSearchParams({
     itemtype: 'Mod',
     gameid: String(gameId),
     page: String(page),
     format: 'json_min',
+    include_updated: includeUpdated ? '1' : '0',
   })
-  const response = await fetch(`${API}/List/New?${params.toString()}`, { signal: AbortSignal.timeout(15_000) })
+  const response = await fetch(`${API}/List/New?${params.toString()}`, { signal: requestSignal(signal) })
   if (!response.ok) throw new Error(`GameBanana a renvoyé HTTP ${response.status}.`)
   const payload: unknown = await response.json()
   const error = apiError(payload)
@@ -71,7 +77,7 @@ async function fetchNewIds(gameId: number, page: number) {
     .filter(id => Number.isInteger(id) && id > 0)
 }
 
-async function fetchDetails(ids: number[], fallbackGame: string): Promise<ExplodMod[]> {
+async function fetchDetails(ids: number[], fallbackGame: string, fallbackGameId: number, signal?: AbortSignal): Promise<ExplodMod[]> {
   if (!ids.length) return []
   const params = new URLSearchParams()
   for (const id of ids) {
@@ -81,7 +87,7 @@ async function fetchDetails(ids: number[], fallbackGame: string): Promise<Explod
     params.append('return_keys[]', 'true')
   }
   params.set('format', 'json_min')
-  const response = await fetch(`${API}/Item/Data?${params.toString()}`, { signal: AbortSignal.timeout(15_000) })
+  const response = await fetch(`${API}/Item/Data?${params.toString()}`, { signal: requestSignal(signal) })
   if (!response.ok) throw new Error(`GameBanana a renvoyé HTTP ${response.status}.`)
   const payload: unknown = await response.json()
   const error = apiError(payload)
@@ -106,28 +112,50 @@ async function fetchDetails(ids: number[], fallbackGame: string): Promise<Explod
       platform: 'gamebanana',
       url: profileUrl || `https://gamebanana.com/mods/${id}`,
       description: plainText(row[5]),
+      gameId: fallbackGameId,
     }
   }).filter((item): item is ExplodMod => item !== null)
 }
 
-async function loadPage(gameId: number, page: number) {
-  const cacheKey = `${gameId}:${page}`
+async function loadPage(gameId: number, page: number, includeUpdated: boolean, signal?: AbortSignal) {
+  const cacheKey = `${gameId}:${page}:${includeUpdated}`
   const cached = pageCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) return cached.mods
   const game = GAMEBANANA_GAMES.find(item => item.id === gameId)
-  const ids = await fetchNewIds(gameId, page)
-  const mods = await fetchDetails(ids, game?.name || 'GameBanana')
+  const ids = await fetchNewIds(gameId, page, includeUpdated, signal)
+  const mods = await fetchDetails(ids, game?.name || 'GameBanana', gameId, signal)
   pageCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TIME, mods })
   return mods
 }
 
-export async function fetchGamebananaMods(gameId: number, search = '', page = 1): Promise<ExplodMod[]> {
+export async function searchGamebananaGames(query: string, signal?: AbortSignal): Promise<GamebananaGame[]> {
+  const match = query.trim()
+  if (match.length < 2) return []
+  const params = new URLSearchParams({ itemtype: 'Game', field: 'name', match, format: 'json_min' })
+  const response = await fetch(`${API}/List/Like?${params.toString()}`, { signal: requestSignal(signal) })
+  if (!response.ok) throw new Error(`GameBanana a renvoyé HTTP ${response.status}.`)
+  const payload: unknown = await response.json()
+  const error = apiError(payload)
+  if (error) throw new Error(error)
+  if (!Array.isArray(payload)) return []
+  return payload.map(item => {
+    const record = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+    return { id: numberValue(record.id), name: stringValue(record.name) }
+  }).filter(game => game.id > 0 && game.name)
+}
+
+export async function fetchGamebananaMods(gameId: number, search = '', page = 1, sort: ExploreSort = 'recent', signal?: AbortSignal): Promise<{ mods: ExplodMod[]; hasNextPage: boolean }> {
   const query = search.trim().toLocaleLowerCase()
-  const pages = query ? [1, 2, 3] : [page]
-  const loaded = (await Promise.all(pages.map(current => loadPage(gameId, current)))).flat()
-  const unique = [...new Map(loaded.map(mod => [mod.id, mod])).values()]
-  if (!query) return unique
-  return unique.filter(mod => `${mod.name} ${mod.author} ${mod.description}`.toLocaleLowerCase().includes(query))
+  const includeUpdated = sort === 'updated'
+  const [current, nextIds] = await Promise.all([
+    loadPage(gameId, page, includeUpdated, signal),
+    fetchNewIds(gameId, page + 1, includeUpdated, signal),
+  ])
+  let mods = query ? current.filter(mod => `${mod.name} ${mod.author} ${mod.description}`.toLocaleLowerCase().includes(query)) : current
+  const hasNextPage = nextIds.length > 0
+  if (sort === 'popular') mods = [...mods].sort((a, b) => b.rating - a.rating)
+  if (sort === 'downloaded') mods = [...mods].sort((a, b) => b.downloads - a.downloads)
+  return { mods: [...new Map(mods.map(mod => [mod.id, mod])).values()], hasNextPage }
 }
 
 type DownloadCandidate = { url: string; fileName: string; date: number; trusted: boolean }

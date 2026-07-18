@@ -2,6 +2,7 @@ import { AlertTriangle, ArrowDown, ArrowUp, ExternalLink, RefreshCw, StickyNote,
 import { Mod } from '../../types'
 import { LOADER_COLORS, PLATFORM_COLORS } from '../../utils'
 import { Toggle } from './Toggle'
+import { native } from '../../lib/native'
 
 interface ModCardProps {
   mod: Mod
@@ -52,7 +53,7 @@ export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteC
           <RefreshCw size={10} className="text-gold/40" />
         )}
         {mod.sourceUrl && (
-          <button className="opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={() => native.isDesktop() ? void native.openExternalUrl(mod.sourceUrl!) : window.open(mod.sourceUrl, '_blank', 'noopener,noreferrer')} title="Ouvrir la source validée" className="opacity-0 group-hover:opacity-100 transition-opacity">
             <ExternalLink size={11} className="text-white/30 hover:text-white/60" />
           </button>
         )}

@@ -1,4 +1,4 @@
-import { Boxes, Compass, Download, Gamepad2, Home, Plus, Settings, Wrench } from 'lucide-react'
+import { Compass, Download, Gamepad2, Home, Plus, Settings, Wrench } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { ViewType } from '../../types'
@@ -6,7 +6,6 @@ import { ViewType } from '../../types'
 const NAV: Array<{ id: ViewType; icon: LucideIcon; label: string }> = [
   { id: 'home', icon: Home, label: 'Accueil' },
   { id: 'games', icon: Gamepad2, label: 'Bibliothèque' },
-  { id: 'mods', icon: Boxes, label: 'Mods' },
   { id: 'explore', icon: Compass, label: 'Explorer' },
   { id: 'downloads', icon: Download, label: 'Téléchargements' },
   { id: 'tools', icon: Wrench, label: 'Outils' },

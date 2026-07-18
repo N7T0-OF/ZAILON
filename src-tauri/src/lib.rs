@@ -2,12 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::{copy, Cursor, Write},
+    hash::{Hash, Hasher},
+    io::{copy, Cursor, Read, Write},
     path::{Path, PathBuf},
     process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use walkdir::WalkDir;
 
 #[cfg(desktop)]
@@ -35,7 +36,64 @@ struct NativeMod {
     mod_type: String,
     size_bytes: u64,
     files: Vec<String>,
+    fingerprint: String,
+    framework: String,
+    manifests: Vec<String>,
+    source_url: Option<String>,
+    version: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModImportCandidate {
+    id: String,
+    name: String,
+    path: String,
+    enabled: bool,
+    mod_type: String,
+    size_bytes: u64,
+    files: Vec<String>,
+    fingerprint: String,
+    framework: String,
+    manifests: Vec<String>,
+    source_url: Option<String>,
+    version: Option<String>,
+    confidence: String,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ArchiveSource {
+    id: String,
+    name: String,
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProfileImportPreview {
+    manifest: serde_json::Value,
+    archive_path: String,
+    embedded_files: usize,
+    missing_mod_names: Vec<String>,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NxmRequest {
+    raw_url: String,
+    game_domain: String,
+    mod_id: u64,
+    file_id: u64,
+    key: Option<String>,
+    expires: Option<u64>,
+    user_id: Option<u64>,
+}
+
+#[cfg(desktop)]
+struct PendingExternalInstalls(Mutex<Vec<NxmRequest>>);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -440,6 +498,273 @@ fn normalized_name(path: &Path) -> String {
         .unwrap_or_default()
         .trim_start_matches("DISABLED_")
         .to_string()
+}
+
+fn fingerprint_path(path: &Path) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    normalized_name(path).to_ascii_lowercase().hash(&mut hasher);
+    if path.is_file() {
+        path.extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .hash(&mut hasher);
+        fs::metadata(path)
+            .map(|value| value.len())
+            .unwrap_or(0)
+            .hash(&mut hasher);
+    } else {
+        for entry in WalkDir::new(path)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_file())
+            .take(50_000)
+        {
+            if let Ok(relative) = entry.path().strip_prefix(path) {
+                relative
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .to_ascii_lowercase()
+                    .hash(&mut hasher);
+            }
+            entry
+                .metadata()
+                .map(|value| value.len())
+                .unwrap_or(0)
+                .hash(&mut hasher);
+        }
+    }
+    format!("{:016x}", hasher.finish())
+}
+
+fn metadata_files(path: &Path) -> Vec<PathBuf> {
+    let names = [
+        "manifest.json",
+        "mod.json",
+        "info.json",
+        "package.json",
+        "meta.ini",
+        "readme.md",
+        "readme.txt",
+        "fomod/info.xml",
+        "nexusmods.txt",
+    ];
+    if !path.is_dir() {
+        return Vec::new();
+    }
+    names
+        .iter()
+        .map(|name| path.join(name))
+        .filter(|candidate| candidate.is_file())
+        .collect()
+}
+
+fn trusted_source_url(text: &str) -> Option<String> {
+    text.match_indices("https://").find_map(|(start, _)| {
+        let rest = &text[start..];
+        let end = rest
+            .find(|character: char| {
+                character.is_whitespace()
+                    || matches!(character, '"' | '\'' | ')' | ']' | '>' | ',' | ';')
+            })
+            .unwrap_or(rest.len());
+        let candidate = &rest[..end];
+        let parsed = url::Url::parse(candidate).ok()?;
+        if parsed.scheme() != "https" {
+            return None;
+        }
+        let host = parsed.host_str()?.to_ascii_lowercase();
+        let trusted = host == "nexusmods.com"
+            || host.ends_with(".nexusmods.com")
+            || host == "gamebanana.com"
+            || host.ends_with(".gamebanana.com")
+            || host == "curseforge.com"
+            || host.ends_with(".curseforge.com");
+        trusted.then(|| parsed.to_string())
+    })
+}
+
+fn mod_metadata(path: &Path) -> (Vec<String>, Option<String>, Option<String>) {
+    let files = metadata_files(path);
+    let manifests = files
+        .iter()
+        .filter_map(|file| {
+            file.strip_prefix(path)
+                .ok()
+                .map(|value| value.to_string_lossy().replace('\\', "/"))
+        })
+        .collect::<Vec<_>>();
+    let mut source_url = None;
+    let mut version = None;
+    for file in files {
+        let Ok(metadata) = fs::metadata(&file) else {
+            continue;
+        };
+        if metadata.len() > 1024 * 1024 {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&file) else {
+            continue;
+        };
+        source_url = source_url.or_else(|| trusted_source_url(&text));
+        if file
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case("json"))
+        {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+                version = version.or_else(|| {
+                    ["version", "modVersion", "mod_version"]
+                        .iter()
+                        .find_map(|key| {
+                            value
+                                .get(key)
+                                .and_then(|item| item.as_str())
+                                .map(ToOwned::to_owned)
+                        })
+                });
+            }
+        }
+    }
+    (manifests, source_url, version)
+}
+
+fn detect_framework(path: &Path, files: &[String]) -> String {
+    let joined = format!("{} {}", path.to_string_lossy(), files.join(" "))
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    if joined.contains("archive/pc/mod")
+        || joined.contains("r6/scripts")
+        || joined.contains("red4ext/plugins")
+        || joined.contains("bin/x64/plugins")
+    {
+        "Cyberpunk 2077".into()
+    } else if files.iter().any(|file| {
+        matches!(
+            Path::new(file)
+                .extension()
+                .and_then(|value| value.to_str())
+                .map(|value| value.to_ascii_lowercase())
+                .as_deref(),
+            Some("esp" | "esm" | "esl")
+        )
+    }) {
+        "Bethesda Plugin".into()
+    } else if joined.contains("~mods")
+        || files
+            .iter()
+            .any(|file| file.to_ascii_lowercase().ends_with(".pak"))
+    {
+        "Unreal Pak".into()
+    } else if joined.contains("d3dx.ini")
+        || ["gimi", "zzmi", "srmi", "wwmi", "efmi"]
+            .iter()
+            .any(|name| joined.contains(name))
+    {
+        "XXMI".into()
+    } else if joined.contains("bepinex") {
+        "BepInEx".into()
+    } else {
+        "Generic".into()
+    }
+}
+
+fn inspect_native_mod(path: &Path) -> NativeMod {
+    let files = mod_files(path);
+    let (manifests, source_url, version) = mod_metadata(path);
+    let framework = detect_framework(path, &files);
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    NativeMod {
+        id: fingerprint_path(path),
+        name: normalized_name(path),
+        path: path.to_string_lossy().to_string(),
+        enabled: !file_name.starts_with("DISABLED_"),
+        mod_type: mod_type(path),
+        size_bytes: entry_size(path),
+        files,
+        fingerprint: fingerprint_path(path),
+        framework,
+        manifests,
+        source_url,
+        version,
+    }
+}
+
+fn is_probable_mod_root(path: &Path) -> bool {
+    if path.is_file() {
+        return matches!(
+            path.extension()
+                .and_then(|value| value.to_str())
+                .map(|value| value.to_ascii_lowercase())
+                .as_deref(),
+            Some("zip" | "7z" | "rar" | "pak" | "archive" | "esp" | "esm" | "esl" | "dll" | "asi")
+        );
+    }
+    if !metadata_files(path).is_empty() {
+        return true;
+    }
+    WalkDir::new(path)
+        .max_depth(3)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .take(200)
+        .any(|entry| {
+            matches!(
+                entry
+                    .path()
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .map(|value| value.to_ascii_lowercase())
+                    .as_deref(),
+                Some("pak" | "archive" | "esp" | "esm" | "esl" | "dll" | "asi" | "ini")
+            )
+        })
+}
+
+fn import_candidate_roots(path: &Path) -> Vec<PathBuf> {
+    if path.is_file() {
+        return vec![path.to_path_buf()];
+    }
+    let cyberpunk_locations = [
+        "archive/pc/mod",
+        "r6/scripts",
+        "red4ext/plugins",
+        "bin/x64/plugins",
+        "mods",
+    ];
+    let mut specialized = Vec::new();
+    for location in cyberpunk_locations {
+        let directory = path.join(location);
+        if let Ok(entries) = fs::read_dir(directory) {
+            specialized.extend(
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .filter(|entry| is_probable_mod_root(entry)),
+            );
+        }
+    }
+    if !specialized.is_empty() {
+        return specialized;
+    }
+    let direct = fs::read_dir(path)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|entry| is_probable_mod_root(entry))
+        .collect::<Vec<_>>();
+    if direct.len() > 1 && !is_probable_mod_root(path) {
+        direct
+    } else {
+        vec![path.to_path_buf()]
+    }
 }
 
 #[cfg(desktop)]
@@ -1302,23 +1627,80 @@ fn scan_mods(mods_path: String) -> Result<Vec<NativeMod>, String> {
             if file_name.starts_with('.') {
                 return None;
             }
-            let enabled = !file_name.starts_with("DISABLED_");
-            Some(NativeMod {
-                id: path.to_string_lossy().to_string(),
-                name: normalized_name(&path),
-                path: path.to_string_lossy().to_string(),
-                enabled,
-                mod_type: mod_type(&path),
-                size_bytes: entry_size(&path),
-                files: mod_files(&path),
-            })
+            Some(inspect_native_mod(&path))
         })
         .collect::<Vec<_>>())
 }
 
 #[tauri::command]
-fn toggle_mod(mod_path: String, enable: bool) -> Result<String, String> {
-    let source = PathBuf::from(mod_path);
+fn scan_mod_import(
+    paths: Vec<String>,
+    game_name: String,
+) -> Result<Vec<ModImportCandidate>, String> {
+    if paths.is_empty() || paths.len() > 100 {
+        return Err("Select between 1 and 100 import folders.".into());
+    }
+    let mut unique = HashSet::new();
+    let mut candidates = Vec::new();
+    for selected in paths {
+        let path = PathBuf::from(selected);
+        if !path.exists() {
+            continue;
+        }
+        for root in import_candidate_roots(&path) {
+            let canonical = fs::canonicalize(&root).map_err(to_error)?;
+            if !unique.insert(canonical.clone()) {
+                continue;
+            }
+            let inspected = inspect_native_mod(&canonical);
+            let strong = inspected.framework != "Generic" || !inspected.manifests.is_empty();
+            let mut warnings = Vec::new();
+            if inspected.source_url.is_none() {
+                warnings.push("Aucune source exacte détectée : aucune mise à jour automatique ne sera autorisée.".into());
+            }
+            if inspected.framework == "Generic" {
+                warnings.push(format!(
+                    "Structure générique pour {game_name} : vérifiez la destination avant import."
+                ));
+            }
+            candidates.push(ModImportCandidate {
+                id: inspected.id.clone(),
+                name: inspected.name,
+                path: inspected.path,
+                enabled: inspected.enabled,
+                mod_type: inspected.mod_type,
+                size_bytes: inspected.size_bytes,
+                files: inspected.files,
+                fingerprint: inspected.fingerprint,
+                framework: inspected.framework,
+                manifests: inspected.manifests,
+                source_url: inspected.source_url,
+                version: inspected.version,
+                confidence: if strong { "high" } else { "low" }.into(),
+                warnings,
+            });
+        }
+    }
+    candidates.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+    });
+    Ok(candidates)
+}
+
+fn validated_mod_entry(mods_root: &str, mod_path: &str) -> Result<PathBuf, String> {
+    let root = fs::canonicalize(mods_root).map_err(to_error)?;
+    let path = fs::canonicalize(mod_path).map_err(to_error)?;
+    if path == root || !path.starts_with(&root) || path.parent() != Some(root.as_path()) {
+        return Err("The mod entry is outside the configured Mods folder.".into());
+    }
+    Ok(path)
+}
+
+#[tauri::command]
+fn toggle_mod(mod_path: String, mods_root: String, enable: bool) -> Result<String, String> {
+    let source = validated_mod_entry(&mods_root, &mod_path)?;
     let parent = source
         .parent()
         .ok_or_else(|| "Invalid mod path".to_string())?;
@@ -1345,8 +1727,8 @@ fn toggle_mod(mod_path: String, enable: bool) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn delete_mod(mod_path: String) -> Result<(), String> {
-    let path = PathBuf::from(mod_path);
+fn delete_mod(mod_path: String, mods_root: String) -> Result<(), String> {
+    let path = validated_mod_entry(&mods_root, &mod_path)?;
     if path.is_dir() {
         fs::remove_dir_all(path).map_err(to_error)
     } else {
@@ -1388,6 +1770,641 @@ fn guess_mods_path(exec_path: String) -> String {
         .to_string()
 }
 
+fn safe_archive_component(value: &str) -> String {
+    let cleaned = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | ' ' | '.') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches([' ', '.'])
+        .to_string();
+    if cleaned.is_empty() {
+        "mod".into()
+    } else {
+        cleaned.chars().take(100).collect()
+    }
+}
+
+fn windows_reserved_name(value: &str) -> bool {
+    let stem = value
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches([' ', '.'])
+        .to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$")
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem[3..]
+                .parse::<u8>()
+                .is_ok_and(|number| (1..=9).contains(&number)))
+}
+
+fn forbidden_archive_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .is_some_and(|value| {
+            matches!(
+                value.as_str(),
+                "exe" | "com" | "bat" | "cmd" | "ps1" | "msi" | "scr"
+            )
+        })
+}
+
+fn validate_archive_relative(path: &Path) -> Result<(), String> {
+    if path.as_os_str().is_empty() || path.is_absolute() {
+        return Err("Archive contains an absolute or empty path.".into());
+    }
+    for component in path.components() {
+        let std::path::Component::Normal(value) = component else {
+            return Err("Archive contains an unsafe traversal path.".into());
+        };
+        let text = value.to_string_lossy();
+        if text.ends_with(' ')
+            || text.ends_with('.')
+            || text.contains(':')
+            || windows_reserved_name(&text)
+        {
+            return Err(format!(
+                "Archive contains an unsafe Windows path component: {text}"
+            ));
+        }
+    }
+    if forbidden_archive_file(path) {
+        return Err(format!(
+            "Archive contains an unexpected executable file: {}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
+    if source.is_file() {
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(to_error)?;
+        }
+        fs::copy(source, destination).map_err(to_error)?;
+        return Ok(());
+    }
+    for entry in WalkDir::new(source)
+        .follow_links(false)
+        .into_iter()
+        .map(|entry| entry.map_err(to_error))
+    {
+        let entry = entry?;
+        if entry.file_type().is_symlink() {
+            return Err("Symbolic links are not allowed during mod import.".into());
+        }
+        let relative = entry.path().strip_prefix(source).map_err(to_error)?;
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+        validate_archive_relative(relative)?;
+        let output = destination.join(relative);
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&output).map_err(to_error)?;
+        } else if entry.file_type().is_file() {
+            if let Some(parent) = output.parent() {
+                fs::create_dir_all(parent).map_err(to_error)?;
+            }
+            fs::copy(entry.path(), output).map_err(to_error)?;
+        }
+    }
+    Ok(())
+}
+
+fn unique_destination(directory: &Path, name: &str) -> PathBuf {
+    let safe = safe_archive_component(name);
+    let initial = directory.join(&safe);
+    if !initial.exists() {
+        return initial;
+    }
+    (2..10_000)
+        .map(|index| directory.join(format!("{safe}-{index}")))
+        .find(|candidate| !candidate.exists())
+        .unwrap_or_else(|| directory.join(format!("{safe}-{}", unix_timestamp())))
+}
+
+#[tauri::command]
+fn import_mod_candidates(paths: Vec<String>, destination: String) -> Result<Vec<String>, String> {
+    if paths.is_empty() || paths.len() > 100 {
+        return Err("Select between 1 and 100 mods.".into());
+    }
+    let destination = PathBuf::from(destination);
+    fs::create_dir_all(&destination).map_err(to_error)?;
+    let stage = destination.join(format!(".zailon-import-{}", unix_timestamp()));
+    if stage.exists() {
+        return Err("An import staging directory already exists.".into());
+    }
+    fs::create_dir_all(&stage).map_err(to_error)?;
+    let result = (|| {
+        let mut staged = Vec::new();
+        for source in paths {
+            let source = fs::canonicalize(source).map_err(to_error)?;
+            if !source.exists() {
+                return Err(format!(
+                    "Import source does not exist: {}",
+                    source.display()
+                ));
+            }
+            let name = source
+                .file_name()
+                .and_then(|value| value.to_str())
+                .ok_or_else(|| "Invalid import source name.".to_string())?;
+            let target = unique_destination(&stage, name);
+            copy_tree(&source, &target)?;
+            staged.push(target);
+        }
+        let mut installed = Vec::new();
+        for source in staged {
+            let name = source
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("mod");
+            let final_path = unique_destination(&destination, name);
+            fs::rename(&source, &final_path).map_err(to_error)?;
+            installed.push(final_path.to_string_lossy().to_string());
+        }
+        Ok(installed)
+    })();
+    let _ = fs::remove_dir_all(&stage);
+    result
+}
+
+fn zip_options() -> zip::write::SimpleFileOptions {
+    zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o644)
+}
+
+fn add_source_to_zip<W: Write + std::io::Seek>(
+    writer: &mut zip::ZipWriter<W>,
+    source: &Path,
+    archive_root: &str,
+) -> Result<usize, String> {
+    let mut written = 0usize;
+    if source.is_file() {
+        let file_name = source
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| "Invalid mod file name.".to_string())?;
+        let relative = Path::new(file_name);
+        validate_archive_relative(relative)?;
+        writer
+            .start_file(format!("{archive_root}/{file_name}"), zip_options())
+            .map_err(to_error)?;
+        let mut file = fs::File::open(source).map_err(to_error)?;
+        copy(&mut file, writer).map_err(to_error)?;
+        return Ok(1);
+    }
+    for entry in WalkDir::new(source)
+        .follow_links(false)
+        .into_iter()
+        .map(|entry| entry.map_err(to_error))
+    {
+        let entry = entry?;
+        if entry.file_type().is_symlink() {
+            return Err("Symbolic links cannot be exported in a profile.".into());
+        }
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let relative = entry.path().strip_prefix(source).map_err(to_error)?;
+        validate_archive_relative(relative)?;
+        let zip_name = format!(
+            "{archive_root}/{}",
+            relative.to_string_lossy().replace('\\', "/")
+        );
+        writer
+            .start_file(zip_name, zip_options())
+            .map_err(to_error)?;
+        let mut file = fs::File::open(entry.path()).map_err(to_error)?;
+        copy(&mut file, writer).map_err(to_error)?;
+        written += 1;
+        if written > 100_000 {
+            return Err("Profile export exceeds the 100,000 file safety limit.".into());
+        }
+    }
+    Ok(written)
+}
+
+#[tauri::command]
+fn export_profile(
+    destination: String,
+    manifest: serde_json::Value,
+    complete: bool,
+    sources: Vec<ArchiveSource>,
+) -> Result<String, String> {
+    if manifest
+        .get("schemaVersion")
+        .and_then(|value| value.as_u64())
+        != Some(1)
+        || manifest.get("app").and_then(|value| value.as_str()) != Some("ZAILON")
+    {
+        return Err("Invalid ZAILON profile manifest.".into());
+    }
+    let destination = PathBuf::from(destination);
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(to_error)?;
+    }
+    let temporary = destination.with_extension("zailon-profile.tmp");
+    let file = fs::File::create(&temporary).map_err(to_error)?;
+    let mut writer = zip::ZipWriter::new(file);
+    writer
+        .start_file("manifest.json", zip_options())
+        .map_err(to_error)?;
+    writer
+        .write_all(&serde_json::to_vec_pretty(&manifest).map_err(to_error)?)
+        .map_err(to_error)?;
+    for (name, value) in [
+        ("mods.json", manifest.get("mods")),
+        ("load-order.json", manifest.pointer("/profile/modStates")),
+        ("rules.json", manifest.pointer("/profile/conflictRules")),
+        ("settings.json", manifest.pointer("/profile/installOptions")),
+    ] {
+        writer.start_file(name, zip_options()).map_err(to_error)?;
+        writer
+            .write_all(
+                &serde_json::to_vec_pretty(value.unwrap_or(&serde_json::Value::Null))
+                    .map_err(to_error)?,
+            )
+            .map_err(to_error)?;
+    }
+    writer
+        .start_file("notes.txt", zip_options())
+        .map_err(to_error)?;
+    writer
+        .write_all(
+            manifest
+                .pointer("/profile/description")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .as_bytes(),
+        )
+        .map_err(to_error)?;
+    if complete {
+        for source in sources {
+            let path = PathBuf::from(&source.path);
+            if !path.exists() {
+                continue;
+            }
+            let root = format!(
+                "files/{}--{}",
+                safe_archive_component(&source.name),
+                safe_archive_component(&source.id)
+            );
+            add_source_to_zip(&mut writer, &path, &root)?;
+        }
+    }
+    writer.finish().map_err(to_error)?;
+    if destination.exists() {
+        fs::remove_file(&destination).map_err(to_error)?;
+    }
+    fs::rename(&temporary, &destination).map_err(to_error)?;
+    Ok(destination.to_string_lossy().to_string())
+}
+
+fn archive_is_symlink(mode: Option<u32>) -> bool {
+    mode.is_some_and(|value| value & 0o170000 == 0o120000)
+}
+
+#[tauri::command]
+fn preview_profile_import(archive_path: String) -> Result<ProfileImportPreview, String> {
+    let file = fs::File::open(&archive_path).map_err(to_error)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(to_error)?;
+    if archive.len() > 100_000 {
+        return Err("Profile archive contains too many entries.".into());
+    }
+    let mut embedded_files = 0usize;
+    let mut manifest_bytes = Vec::new();
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(to_error)?;
+        if archive_is_symlink(entry.unix_mode()) {
+            return Err("Profile archive contains a symbolic link.".into());
+        }
+        let relative = entry
+            .enclosed_name()
+            .ok_or_else(|| "Profile archive contains an unsafe path.".to_string())?;
+        validate_archive_relative(relative)?;
+        if entry.name() == "manifest.json" {
+            if entry.size() > 5 * 1024 * 1024 {
+                return Err("Profile manifest is unexpectedly large.".into());
+            }
+            entry.read_to_end(&mut manifest_bytes).map_err(to_error)?;
+        }
+        if entry.name().starts_with("files/") && !entry.is_dir() {
+            embedded_files += 1;
+        }
+    }
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).map_err(to_error)?;
+    if manifest
+        .get("schemaVersion")
+        .and_then(|value| value.as_u64())
+        != Some(1)
+        || manifest.get("app").and_then(|value| value.as_str()) != Some("ZAILON")
+    {
+        return Err("Unsupported or invalid ZAILON profile archive.".into());
+    }
+    let warnings = if embedded_files == 0 {
+        vec![
+            "Archive légère : les mods absents devront être téléchargés ou importés séparément."
+                .into(),
+        ]
+    } else {
+        Vec::new()
+    };
+    Ok(ProfileImportPreview {
+        manifest,
+        archive_path,
+        embedded_files,
+        missing_mod_names: Vec::new(),
+        warnings,
+    })
+}
+
+#[tauri::command]
+fn extract_profile_archive(
+    archive_path: String,
+    destination: String,
+) -> Result<Vec<String>, String> {
+    let file = fs::File::open(archive_path).map_err(to_error)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(to_error)?;
+    if archive.len() > 100_000 {
+        return Err("Profile archive contains too many entries.".into());
+    }
+    let destination = PathBuf::from(destination);
+    fs::create_dir_all(&destination).map_err(to_error)?;
+    let stage = destination.join(format!(".zailon-profile-import-{}", unix_timestamp()));
+    fs::create_dir_all(&stage).map_err(to_error)?;
+    let result = (|| {
+        let mut total = 0u64;
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index).map_err(to_error)?;
+            if !entry.name().starts_with("files/") {
+                continue;
+            }
+            if archive_is_symlink(entry.unix_mode()) {
+                return Err("Profile archive contains a symbolic link.".into());
+            }
+            total = total.saturating_add(entry.size());
+            if total > 4 * 1024 * 1024 * 1024 {
+                return Err("Profile archive exceeds the 4 GB extraction limit.".into());
+            }
+            let enclosed = entry
+                .enclosed_name()
+                .ok_or_else(|| "Profile archive contains an unsafe path.".to_string())?;
+            let relative = enclosed.strip_prefix("files").map_err(to_error)?;
+            if relative.as_os_str().is_empty() {
+                continue;
+            }
+            validate_archive_relative(relative)?;
+            let output = stage.join(relative);
+            if entry.is_dir() {
+                fs::create_dir_all(&output).map_err(to_error)?;
+            } else {
+                if let Some(parent) = output.parent() {
+                    fs::create_dir_all(parent).map_err(to_error)?;
+                }
+                let mut output_file = fs::File::create(&output).map_err(to_error)?;
+                copy(&mut entry, &mut output_file).map_err(to_error)?;
+            }
+        }
+        let mut installed = Vec::new();
+        for entry in fs::read_dir(&stage)
+            .map_err(to_error)?
+            .filter_map(Result::ok)
+        {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let target = unique_destination(&destination, &name);
+            fs::rename(entry.path(), &target).map_err(to_error)?;
+            installed.push(target.to_string_lossy().to_string());
+        }
+        Ok(installed)
+    })();
+    let _ = fs::remove_dir_all(&stage);
+    result
+}
+
+fn provider_credential(provider: &str) -> Result<keyring::Entry, String> {
+    if !matches!(provider, "nexus" | "curseforge") {
+        return Err("Unknown provider.".into());
+    }
+    keyring::Entry::new("io.github.n7t0of.zailon", &format!("{provider}-api-key")).map_err(to_error)
+}
+
+#[tauri::command]
+fn set_provider_secret(provider: String, secret: String) -> Result<(), String> {
+    let secret = secret.trim();
+    if secret.len() < 8 || secret.len() > 4096 {
+        return Err("Provider credential has an invalid length.".into());
+    }
+    provider_credential(&provider)?
+        .set_password(secret)
+        .map_err(to_error)
+}
+
+#[tauri::command]
+fn delete_provider_secret(provider: String) -> Result<(), String> {
+    let entry = provider_credential(&provider)?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(to_error(error)),
+    }
+}
+
+#[tauri::command]
+fn provider_secret_status() -> HashMap<String, bool> {
+    ["nexus", "curseforge"]
+        .into_iter()
+        .map(|provider| {
+            let present = provider_credential(provider)
+                .and_then(|entry| entry.get_password().map_err(to_error))
+                .is_ok();
+            (provider.to_string(), present)
+        })
+        .collect()
+}
+
+fn parse_nxm_url(raw: &str) -> Result<NxmRequest, String> {
+    if raw.len() > 4096 {
+        return Err("NXM URL is too long.".into());
+    }
+    let parsed = url::Url::parse(raw).map_err(|_| "Invalid NXM URL.".to_string())?;
+    if parsed.scheme() != "nxm"
+        || parsed.username() != ""
+        || parsed.password().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err("Invalid NXM URL structure.".into());
+    }
+    let game_domain = parsed
+        .host_str()
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 128
+                && value.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+                })
+        })
+        .ok_or_else(|| "NXM URL has an invalid game domain.".to_string())?
+        .to_string();
+    let segments = parsed
+        .path_segments()
+        .map(|items| items.collect::<Vec<_>>())
+        .unwrap_or_default();
+    if segments.len() != 4 || segments[0] != "mods" || segments[2] != "files" {
+        return Err("NXM URL path must match /mods/{modId}/files/{fileId}.".into());
+    }
+    let mod_id = segments[1]
+        .parse::<u64>()
+        .map_err(|_| "NXM mod identifier is invalid.".to_string())?;
+    let file_id = segments[3]
+        .parse::<u64>()
+        .map_err(|_| "NXM file identifier is invalid.".to_string())?;
+    if mod_id == 0 || file_id == 0 {
+        return Err("NXM identifiers must be positive.".into());
+    }
+    let query = parsed.query_pairs().collect::<HashMap<_, _>>();
+    let key = query
+        .get("key")
+        .map(|value| value.to_string())
+        .filter(|value| !value.is_empty() && value.len() <= 512);
+    let expires = query
+        .get("expires")
+        .and_then(|value| value.parse::<u64>().ok());
+    let user_id = query
+        .get("user_id")
+        .and_then(|value| value.parse::<u64>().ok());
+    Ok(NxmRequest {
+        raw_url: raw.into(),
+        game_domain,
+        mod_id,
+        file_id,
+        key,
+        expires,
+        user_id,
+    })
+}
+
+#[cfg(desktop)]
+fn enqueue_nxm(app: &AppHandle, raw: &str) {
+    if let Ok(request) = parse_nxm_url(raw) {
+        if let Ok(mut pending) = app.state::<PendingExternalInstalls>().0.lock() {
+            if !pending.iter().any(|item| item.raw_url == request.raw_url) {
+                pending.push(request.clone());
+            }
+        }
+        let _ = app.emit("nxm-opened", request);
+    }
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn pending_external_installs(state: State<'_, PendingExternalInstalls>) -> Vec<NxmRequest> {
+    state
+        .0
+        .lock()
+        .map(|items| items.clone())
+        .unwrap_or_default()
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn consume_external_install(
+    state: State<'_, PendingExternalInstalls>,
+    raw_url: String,
+) -> Result<(), String> {
+    let mut pending = state.0.lock().map_err(to_error)?;
+    pending.retain(|item| item.raw_url != raw_url);
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn set_nxm_association(enabled: bool) -> Result<bool, String> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    let root = RegKey::predef(HKEY_CURRENT_USER);
+    let classes = root
+        .open_subkey_with_flags(
+            "Software\\Classes",
+            winreg::enums::KEY_READ | winreg::enums::KEY_WRITE,
+        )
+        .or_else(|_| root.create_subkey("Software\\Classes").map(|item| item.0))
+        .map_err(to_error)?;
+    if enabled {
+        let executable = std::env::current_exe().map_err(to_error)?;
+        let (scheme, _) = classes.create_subkey("nxm").map_err(to_error)?;
+        scheme
+            .set_value("", &"URL:Nexus Mods Protocol")
+            .map_err(to_error)?;
+        scheme.set_value("URL Protocol", &"").map_err(to_error)?;
+        let (icon, _) = scheme.create_subkey("DefaultIcon").map_err(to_error)?;
+        icon.set_value("", &format!("\"{}\",0", executable.display()))
+            .map_err(to_error)?;
+        let (command, _) = scheme
+            .create_subkey("shell\\open\\command")
+            .map_err(to_error)?;
+        command
+            .set_value("", &format!("\"{}\" \"%1\"", executable.display()))
+            .map_err(to_error)?;
+    } else if let Ok(command) = classes.open_subkey("nxm\\shell\\open\\command") {
+        let value: String = command.get_value("").unwrap_or_default();
+        let executable = std::env::current_exe()
+            .map_err(to_error)?
+            .to_string_lossy()
+            .to_string();
+        if value
+            .to_ascii_lowercase()
+            .contains(&executable.to_ascii_lowercase())
+        {
+            classes.delete_subkey_all("nxm").map_err(to_error)?;
+        } else {
+            return Err(
+                "The nxm:// association belongs to another application and was not modified."
+                    .into(),
+            );
+        }
+    }
+    nxm_association_status()
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn set_nxm_association(_enabled: bool) -> Result<bool, String> {
+    Err("Runtime nxm:// association is currently available on Windows only.".into())
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn nxm_association_status() -> Result<bool, String> {
+    let root = RegKey::predef(HKEY_CURRENT_USER);
+    let command = match root.open_subkey("Software\\Classes\\nxm\\shell\\open\\command") {
+        Ok(value) => value,
+        Err(_) => return Ok(false),
+    };
+    let value: String = command.get_value("").unwrap_or_default();
+    let executable = std::env::current_exe()
+        .map_err(to_error)?
+        .to_string_lossy()
+        .to_string();
+    Ok(value
+        .to_ascii_lowercase()
+        .contains(&executable.to_ascii_lowercase()))
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn nxm_association_status() -> Result<bool, String> {
+    Ok(false)
+}
+
 #[cfg(desktop)]
 #[tauri::command]
 fn scan_steam_games(
@@ -1399,8 +2416,9 @@ fn scan_steam_games(
 
 #[tauri::command]
 async fn install_mod(url: String, file_name: String, mods_path: String) -> Result<String, String> {
-    if !url.starts_with("https://") {
-        return Err("Only HTTPS mod downloads are allowed.".into());
+    let parsed = url::Url::parse(&url).map_err(to_error)?;
+    if parsed.scheme() != "https" || parsed.host_str().is_none() {
+        return Err("Only valid HTTPS mod downloads are allowed.".into());
     }
     let destination = PathBuf::from(mods_path);
     fs::create_dir_all(&destination).map_err(to_error)?;
@@ -1411,40 +2429,87 @@ async fn install_mod(url: String, file_name: String, mods_path: String) -> Resul
         .filter(|name| !name.is_empty())
         .ok_or_else(|| "Invalid mod file name".to_string())?
         .to_string();
-    let bytes = reqwest::get(url)
+    validate_archive_relative(Path::new(&safe_name))?;
+    let response = reqwest::Client::new()
+        .get(parsed)
         .await
         .map_err(to_error)?
         .error_for_status()
-        .map_err(to_error)?
-        .bytes()
-        .await
         .map_err(to_error)?;
+    if response
+        .content_length()
+        .is_some_and(|length| length > 2 * 1024 * 1024 * 1024)
+    {
+        return Err("Mod download exceeds the 2 GB safety limit.".into());
+    }
+    let bytes = response.bytes().await.map_err(to_error)?;
+    if bytes.len() as u64 > 2 * 1024 * 1024 * 1024 {
+        return Err("Mod download exceeds the 2 GB safety limit.".into());
+    }
 
     if safe_name.to_ascii_lowercase().ends_with(".zip") {
-        let archive_path = destination.join(&safe_name);
         let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(to_error)?;
-        let extract_root = destination.join(Path::new(&safe_name).file_stem().unwrap_or_default());
-        fs::create_dir_all(&extract_root).map_err(to_error)?;
-        for index in 0..archive.len() {
-            let mut entry = archive.by_index(index).map_err(to_error)?;
-            let Some(relative_path) = entry.enclosed_name() else {
-                continue;
-            };
-            let output = extract_root.join(relative_path);
-            if entry.is_dir() {
-                fs::create_dir_all(&output).map_err(to_error)?;
-            } else {
-                if let Some(parent) = output.parent() {
-                    fs::create_dir_all(parent).map_err(to_error)?;
-                }
-                let mut file = fs::File::create(&output).map_err(to_error)?;
-                copy(&mut entry, &mut file).map_err(to_error)?;
-            }
+        if archive.len() > 100_000 {
+            return Err("Mod archive contains too many entries.".into());
         }
-        let _ = archive_path;
-        Ok(extract_root.to_string_lossy().to_string())
+        let stage = destination.join(format!(".zailon-download-{}", unix_timestamp()));
+        let extract_root = stage.join(safe_archive_component(
+            Path::new(&safe_name)
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("mod"),
+        ));
+        fs::create_dir_all(&extract_root).map_err(to_error)?;
+        let extraction = (|| {
+            let mut total = 0u64;
+            for index in 0..archive.len() {
+                let mut entry = archive.by_index(index).map_err(to_error)?;
+                if archive_is_symlink(entry.unix_mode()) {
+                    return Err("Mod archive contains a symbolic link.".into());
+                }
+                let relative_path = entry
+                    .enclosed_name()
+                    .ok_or_else(|| "Mod archive contains an unsafe traversal path.".to_string())?;
+                validate_archive_relative(relative_path)?;
+                total = total.saturating_add(entry.size());
+                if total > 4 * 1024 * 1024 * 1024 {
+                    return Err("Mod archive exceeds the 4 GB extraction limit.".into());
+                }
+                let output = extract_root.join(relative_path);
+                if entry.is_dir() {
+                    fs::create_dir_all(&output).map_err(to_error)?;
+                } else {
+                    if let Some(parent) = output.parent() {
+                        fs::create_dir_all(parent).map_err(to_error)?;
+                    }
+                    let mut file = fs::File::create(&output).map_err(to_error)?;
+                    copy(&mut entry, &mut file).map_err(to_error)?;
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error) = extraction {
+            let _ = fs::remove_dir_all(&stage);
+            return Err(error);
+        }
+        let final_path = unique_destination(
+            &destination,
+            extract_root
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("mod"),
+        );
+        fs::rename(&extract_root, &final_path).map_err(to_error)?;
+        let _ = fs::remove_dir_all(&stage);
+        Ok(final_path.to_string_lossy().to_string())
     } else {
+        if forbidden_archive_file(Path::new(&safe_name)) {
+            return Err("Executable downloads are blocked. Open the provider page and review them manually.".into());
+        }
         let output = destination.join(safe_name);
+        if output.exists() {
+            return Err("A mod archive with the same file name already exists.".into());
+        }
         fs::write(&output, bytes).map_err(to_error)?;
         Ok(output.to_string_lossy().to_string())
     }
@@ -1669,6 +2734,72 @@ mod tests {
         assert!(validate_external_url("file:///C:/Windows/System32/cmd.exe").is_err());
     }
 
+    #[test]
+    fn validates_nxm_urls_without_accepting_ambiguous_paths() {
+        let parsed = parse_nxm_url(
+            "nxm://cyberpunk2077/mods/42/files/99?key=temporary&expires=1999999999&user_id=7",
+        )
+        .expect("valid nxm URL");
+        assert_eq!(parsed.game_domain, "cyberpunk2077");
+        assert_eq!(parsed.mod_id, 42);
+        assert_eq!(parsed.file_id, 99);
+        assert!(parse_nxm_url("https://nexusmods.com/mods/42").is_err());
+        assert!(parse_nxm_url("nxm://game/mods/0/files/2").is_err());
+        assert!(parse_nxm_url("nxm://game/mods/1/files/2/extra").is_err());
+        assert!(parse_nxm_url("nxm://game@evil/mods/1/files/2").is_err());
+    }
+
+    #[test]
+    fn blocks_archive_traversal_reserved_names_and_executables() {
+        assert!(validate_archive_relative(Path::new("safe/mod.archive")).is_ok());
+        assert!(validate_archive_relative(Path::new("../outside.txt")).is_err());
+        assert!(validate_archive_relative(Path::new("CON/readme.txt")).is_err());
+        assert!(validate_archive_relative(Path::new("files/setup.exe")).is_err());
+        assert!(validate_archive_relative(Path::new("folder/name.")).is_err());
+    }
+
+    #[test]
+    fn scanner_detects_cyberpunk_metadata_and_stable_fingerprint() {
+        let root = std::env::temp_dir().join(format!("zailon-scan-test-{}", unix_timestamp()));
+        let mod_root = root.join("archive").join("pc").join("mod").join("example");
+        fs::create_dir_all(&mod_root).expect("create test mod");
+        fs::write(mod_root.join("example.archive"), b"test").expect("write archive");
+        fs::write(
+            mod_root.join("manifest.json"),
+            br#"{"version":"1.2.3","source":"https://www.nexusmods.com/cyberpunk2077/mods/42"}"#,
+        )
+        .expect("write manifest");
+        let first = inspect_native_mod(&mod_root);
+        let second = inspect_native_mod(&mod_root);
+        assert_eq!(first.framework, "Cyberpunk 2077");
+        assert_eq!(first.version.as_deref(), Some("1.2.3"));
+        assert_eq!(first.fingerprint, second.fingerprint);
+        assert!(first
+            .source_url
+            .as_deref()
+            .is_some_and(|url| url.contains("nexusmods.com")));
+        fs::remove_dir_all(root).expect("remove test directory");
+    }
+
+    #[test]
+    fn copy_import_never_overwrites_an_existing_destination() {
+        let root = std::env::temp_dir().join(format!("zailon-copy-test-{}", unix_timestamp()));
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::create_dir_all(&source).expect("source");
+        fs::create_dir_all(&destination).expect("destination");
+        fs::write(source.join("mod.pak"), b"new").expect("source file");
+        fs::write(destination.join("mod.pak"), b"existing").expect("existing file");
+        let unique = unique_destination(&destination, "mod.pak");
+        assert_ne!(unique, destination.join("mod.pak"));
+        copy_tree(&source.join("mod.pak"), &unique).expect("copy");
+        assert_eq!(
+            fs::read(destination.join("mod.pak")).expect("read"),
+            b"existing"
+        );
+        fs::remove_dir_all(root).expect("remove test directory");
+    }
+
     #[cfg(desktop)]
     #[test]
     fn excludes_known_steam_tools_from_game_results() {
@@ -1698,7 +2829,20 @@ mod tests {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder
+        .manage(PendingExternalInstalls(Mutex::new(Vec::new())))
+        .plugin(tauri_plugin_single_instance::init(
+            |app, args, _working_directory| {
+                for argument in args {
+                    if argument.starts_with("nxm://") {
+                        enqueue_nxm(app, &argument);
+                    }
+                }
+            },
+        ));
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
@@ -1709,17 +2853,32 @@ pub fn run() {
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
                 app.manage(PendingUpdate(Mutex::new(None)));
+                for argument in std::env::args() {
+                    if argument.starts_with("nxm://") {
+                        enqueue_nxm(app.handle(), &argument);
+                    }
+                }
             }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             scan_mods,
+            scan_mod_import,
             toggle_mod,
             delete_mod,
             ensure_dir,
             launch_game,
             guess_mods_path,
             install_mod,
+            import_mod_candidates,
+            export_profile,
+            preview_profile_import,
+            extract_profile_archive,
+            set_provider_secret,
+            delete_provider_secret,
+            provider_secret_status,
+            set_nxm_association,
+            nxm_association_status,
             store_game_resource,
             remove_game_resource,
             open_path,
@@ -1731,6 +2890,10 @@ pub fn run() {
             scan_steam_games,
             #[cfg(desktop)]
             scan_library,
+            #[cfg(desktop)]
+            pending_external_installs,
+            #[cfg(desktop)]
+            consume_external_install,
             #[cfg(desktop)]
             check_for_update,
             #[cfg(desktop)]

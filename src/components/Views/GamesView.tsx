@@ -1,8 +1,8 @@
-import { Archive, Boxes, Copy, Download, FileArchive, FolderInput, FolderOpen, FolderPlus, Plus, Radar, RefreshCw, Search, ShieldAlert, Trash2, Upload, Wrench, X } from 'lucide-react'
+import { Archive, Boxes, Copy, Download, FileArchive, FolderInput, FolderOpen, FolderPlus, MonitorDown, Plus, Radar, RefreshCw, Search, ShieldAlert, Trash2, Upload, Wrench, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
-import { native, pickExecutable, pickFolder, pickFolders, pickProfileArchive, saveProfileArchive } from '../../lib/native'
+import { BackgroundTaskSnapshot, native, pickExecutable, pickFolder, pickFolders, pickProfileArchive, saveProfileArchive } from '../../lib/native'
 import { ModCard } from '../UI/ModCard'
 import { formatTime, timeAgo } from '../../utils'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
@@ -79,7 +79,7 @@ export function GamesView() {
       schemaVersion: 1,
       exportedAt: new Date().toISOString(),
       app: 'ZAILON',
-      appVersion: '1.3.1',
+      appVersion: '1.4.0',
       exportMode: complete ? 'complete' : 'light',
       game: { name: selectedGame.name, provider: selectedGame.provider, providerGameId: selectedGame.providerGameId },
       profile,
@@ -149,28 +149,33 @@ export function GamesView() {
       {tab === 'tools' && <div className="grid flex-1 auto-rows-min gap-3 overflow-y-auto p-4 sm:grid-cols-2"><ActionCard icon={RefreshCw} title="Analyser le dossier Mods" detail="Actualise le catalogue, les tailles, les frameworks et les conflits." onClick={() => void scanMods(selectedGame.id)} /><ActionCard icon={FolderOpen} title="Ouvrir le dossier Mods" detail={selectedGame.modsPath || 'Configurez d’abord un dossier.'} disabled={!selectedGame.modsPath} onClick={() => selectedGame.modsPath && void native.openPath(selectedGame.modsPath)} /><ActionCard icon={FolderInput} title="Importer des dossiers" detail="Prévisualise les racines détectées avant toute copie." onClick={() => setImportOpen(true)} /></div>}
       {tab === 'backups' && <div className="grid flex-1 auto-rows-min gap-3 overflow-y-auto p-4 sm:grid-cols-2"><ActionCard icon={FileArchive} title="Exporter un profil léger" detail="Métadonnées, liens, versions, ordre et réglages. Aucun chemin personnel ni secret." onClick={() => void exportProfile(false)} /><ActionCard icon={Archive} title="Exporter un profil complet" detail={`${formatBytes(profileMods.reduce((sum, mod) => sum + (mod.sizeBytes || 0), 0))} maximum avant compression.`} onClick={() => void exportProfile(true)} /><ActionCard icon={Upload} title="Importer un profil" detail="Valide l’archive et affiche un aperçu avant création d’un nouveau profil." onClick={() => void importProfile()} /></div>}
       {tab === 'appearance' && <div className="min-h-0 flex-1 overflow-hidden p-3"><GameAppearanceEditor game={selectedGame} embedded onSave={resources => setGameResources(selectedGame.id, resources)} /></div>}
-      {tab === 'settings' && <div className="flex-1 space-y-4 overflow-y-auto p-4"><Field label="Exécutable du jeu" value={selectedGame.execPath || ''} placeholder="Sélectionnez l’exécutable" onChange={value => void setGamePath(selectedGame.id, value)} onBrowse={() => void browseExecutable()} /><Field label="Dossier Mods" value={selectedGame.modsPath || ''} placeholder="Sélectionnez le dossier Mods" onChange={value => setModsPath(selectedGame.id, value)} onBrowse={() => void browseModsFolder()} /><p className="pt-1 text-[11px] font-mono text-white/35">Temps de jeu total : {formatTime(selectedGame.totalPlaytime)}</p></div>}
+      {tab === 'settings' && <div className="flex-1 space-y-4 overflow-y-auto p-4"><Field label="Exécutable du jeu" value={selectedGame.execPath || ''} placeholder="Sélectionnez l’exécutable" onChange={value => void setGamePath(selectedGame.id, value)} onBrowse={() => void browseExecutable()} /><Field label="Dossier Mods" value={selectedGame.modsPath || ''} placeholder="Sélectionnez le dossier Mods" onChange={value => setModsPath(selectedGame.id, value)} onBrowse={() => void browseModsFolder()} /><div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[11px] font-semibold text-white/68">Raccourci de lancement sécurisé</p><p className="mt-1 text-[11px] leading-relaxed text-white/34">Crée un raccourci bureau ZAILON lié à ce jeu et au profil « {selectedProfile.name} ». Le lien contient uniquement leurs identifiants internes.</p></div><button type="button" onClick={() => void native.createDesktopShortcut(selectedGame.id, selectedProfile.id, selectedGame.name, selectedGame.resources?.iconPath || selectedGame.execPath).then(path => window.alert(`Raccourci créé :\n${path}`)).catch(error => window.alert(String(error)))} className="flex items-center gap-2 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313]"><MonitorDown size={14} />Créer sur le bureau</button></div></div><p className="pt-1 text-[11px] font-mono text-white/35">Temps de jeu total : {formatTime(selectedGame.totalPlaytime)}</p></div>}
     </section>
 
     {steamDialogOpen && <SteamDetectionDialog onClose={() => setSteamDialogOpen(false)} onImport={importDetectedGames} />}
-    {importOpen && <ModImportDialog gameName={selectedGame.name} destination={selectedGame.modsPath} onClose={() => setImportOpen(false)} onImported={() => void scanMods(selectedGame.id)} />}
+    {importOpen && <ModImportDialog gameId={selectedGame.id} profileId={selectedProfile.id} gameName={selectedGame.name} destination={selectedGame.modsPath} onClose={() => setImportOpen(false)} onImported={() => void scanMods(selectedGame.id)} />}
   </div>
 }
 
-function ModImportDialog({ gameName, destination, onClose, onImported }: { gameName: string; destination?: string; onClose: () => void; onImported: () => void }) {
+function ModImportDialog({ gameId, profileId, gameName, destination, onClose, onImported }: { gameId: string; profileId: string; gameName: string; destination?: string; onClose: () => void; onImported: () => void }) {
   const [candidates, setCandidates] = useState<ModImportCandidate[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const [dragActive, setDragActive] = useState(false)
   const [visibleCount, setVisibleCount] = useState(250)
+  const [task, setTask] = useState<BackgroundTaskSnapshot>()
+  const [taskId, setTaskId] = useState<string>()
+  const [deployNow, setDeployNow] = useState(true)
   const visibleCandidates = candidates.slice(0, visibleCount)
 
   const analyze = useCallback(async (paths: string[]) => {
     if (!paths.length) return
     setBusy(true); setError(undefined)
     try {
-      const found = await native.scanModImport(paths, gameName)
+      const nextTaskId = crypto.randomUUID()
+      setTaskId(nextTaskId)
+      const found = await native.scanModImportBackground(nextTaskId, paths, gameName, setTask)
       setCandidates(current => {
         const merged = new Map(current.map(item => [item.path, item]))
         found.forEach(item => merged.set(item.path, item))
@@ -181,7 +186,7 @@ function ModImportDialog({ gameName, destination, onClose, onImported }: { gameN
         found.forEach(item => next.add(item.path))
         return next
       })
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) } finally { setBusy(false) }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) } finally { setBusy(false); setTaskId(undefined) }
   }, [gameName])
 
   const choose = async () => {
@@ -212,18 +217,33 @@ function ModImportDialog({ gameName, destination, onClose, onImported }: { gameN
     const paths = candidates.filter(item => selected.has(item.path)).map(item => item.path)
     if (!paths.length) return
     setBusy(true); setError(undefined)
-    try { await native.importModCandidates(paths, destination); onImported(); onClose() } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); setBusy(false) }
+    try {
+      const nextTaskId = crypto.randomUUID()
+      setTaskId(nextTaskId)
+      await native.importModCandidatesBackground(nextTaskId, gameId, [profileId], paths, destination, deployNow, setTask)
+      onImported()
+      onClose()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+      setBusy(false)
+      setTaskId(undefined)
+    }
   }
+
+  const cancelTask = () => taskId && void native.cancelBackgroundTask(taskId)
+  const progress = task?.total ? Math.min(100, Math.round(task.processed / task.total * 100)) : 0
 
   return <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/70 p-5 backdrop-blur-sm" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
     <section className={`relative flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border bg-[#111414] shadow-2xl transition-colors ${dragActive ? 'border-gold/70 ring-2 ring-gold/20' : 'border-white/[0.1]'}`}>
       {dragActive && <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[#101313]/90 backdrop-blur-sm"><div className="text-center text-gold"><FolderInput size={36} className="mx-auto" /><p className="mt-3 text-sm font-semibold">Déposez le dossier contenant tous vos mods</p><p className="mt-1 text-[11px] text-white/48">Tous les sous-dossiers détectés seront ajoutés, sans limite de nombre.</p></div></div>}
-      <header className="flex items-center gap-3 border-b border-white/[0.07] p-4"><FolderInput size={18} className="text-gold" /><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-white">Import intelligent — {gameName}</h2><p className="mt-0.5 text-[11px] text-white/38">Glissez le dossier racine de votre collection, ou sélectionnez-le. Aucun dossier n’est copié avant confirmation.</p></div><button onClick={onClose} className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><X size={15} /></button></header>
+      <header className="flex items-center gap-3 border-b border-white/[0.07] p-4"><FolderInput size={18} className="text-gold" /><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-white">Import intelligent — {gameName}</h2><p className="mt-0.5 text-[11px] text-white/38">Glissez le dossier racine de votre collection, ou sélectionnez-le. Aucun dossier n’est copié avant confirmation.</p></div><button onClick={onClose} title={busy ? 'Réduire : la tâche continue en arrière-plan' : 'Fermer'} className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><X size={15} /></button></header>
       <div className="min-h-48 flex-1 overflow-y-auto p-4">
         {!candidates.length ? <button onClick={() => void choose()} disabled={busy} className="flex min-h-44 w-full flex-col items-center justify-center rounded-xl border border-dashed border-gold/25 bg-gold/[0.015] text-white/50 hover:bg-gold/[0.035]"><FolderPlus size={26} /><span className="mt-3 text-xs font-semibold">Glissez ici le dossier contenant tous les mods</span><span className="mt-1 text-[11px]">ou cliquez pour sélectionner le dossier racine — aucun maximum de mods</span><span className="mt-1 text-[11px] text-white/28">Générique, Cyberpunk, Bethesda, Unreal Pak, XXMI et BepInEx</span></button> : <div className="space-y-2">{visibleCandidates.map(candidate => <label key={candidate.path} className="flex items-start gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"><input type="checkbox" checked={selected.has(candidate.path)} onChange={() => setSelected(current => { const next = new Set(current); next.has(candidate.path) ? next.delete(candidate.path) : next.add(candidate.path); return next })} className="mt-1 accent-gold" /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-white/78">{candidate.name}</span><span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[11px] text-white/45">{candidate.framework}</span><span className="text-[11px] text-white/30">confiance {candidate.confidence}</span></div><p className="mt-1 truncate font-mono text-[11px] text-white/30" title={candidate.path}>{candidate.path}</p>{candidate.sourceUrl && <p className="mt-1 text-[11px] text-emerald-200/55">Source détectée : {candidate.sourceUrl}</p>}{candidate.warnings.map(warning => <p key={warning} className="mt-1 text-[11px] text-amber-200/55">{warning}</p>)}</div><span className="text-[11px] text-white/30">{formatBytes(candidate.sizeBytes)}</span></label>)}{visibleCount < candidates.length && <button onClick={() => setVisibleCount(count => count + 250)} className="w-full rounded-lg border border-white/[0.08] py-2 text-[11px] text-white/45 hover:bg-white/[0.04]">Afficher 250 résultats supplémentaires ({candidates.length - visibleCount} restants)</button>}</div>}
+        {task && <div className="mt-3 rounded-xl border border-gold/15 bg-gold/[0.025] p-3"><div className="flex items-center justify-between gap-3 text-[11px]"><span className="truncate text-white/62">{task.message}</span><span className="shrink-0 font-mono text-gold/70">{task.total ? `${progress}%` : '…'}</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.06]"><div className="h-full rounded-full bg-gold transition-[width]" style={{ width: `${progress}%` }} /></div><div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-white/32"><span>{task.processed} / {task.total || '?'} · {task.status}</span>{busy && taskId && <button type="button" onClick={cancelTask} className="rounded border border-red-300/15 px-2 py-1 text-red-200/64">Annuler la tâche</button>}</div></div>}
+        {candidates.length > 0 && <label className="mt-3 flex cursor-pointer items-start justify-between gap-3 rounded-xl border border-white/[0.07] bg-white/[0.018] p-3 text-[11px] text-white/58"><span><strong className="block text-white/72">Déployer maintenant avec Direct Copy</strong><span className="mt-1 block leading-relaxed text-white/34">Chaque mod est d’abord copié dans le staging persistant ZAILON avec un manifeste, puis déployé dans un dossier unique. Aucun fichier existant n’est écrasé. Ce backend n’est pas un VFS.</span></span><input type="checkbox" checked={deployNow} onChange={event => setDeployNow(event.target.checked)} className="mt-1 accent-gold" /></label>}
         {error && <p className="mt-3 rounded-lg border border-red-400/15 bg-red-400/[0.04] p-3 text-[11px] text-red-200/70">{error}</p>}
       </div>
-      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] p-4"><div className="flex items-center gap-2"><button onClick={() => void choose()} disabled={busy} className="rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]">Ajouter un dossier racine</button>{candidates.length > 0 && <span className="text-[11px] text-white/32">{candidates.length} mod(s) détecté(s)</span>}</div><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-3 py-2 text-[11px] text-white/45">Annuler</button><button onClick={() => void commit()} disabled={busy || !selected.size} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-ink-400 disabled:opacity-35">{busy ? 'Analyse/import en cours…' : `Importer ${selected.size} mod(s)`}</button></div></footer>
+      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] p-4"><div className="flex items-center gap-2"><button onClick={() => void choose()} disabled={busy} className="rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]">Ajouter un dossier racine</button>{candidates.length > 0 && <span className="text-[11px] text-white/32">{candidates.length} mod(s) détecté(s)</span>}</div><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-3 py-2 text-[11px] text-white/45">{busy ? 'Réduire' : 'Fermer'}</button><button onClick={() => void commit()} disabled={busy || !selected.size} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-ink-400 disabled:opacity-35">{busy ? `${task?.message || 'Tâche en cours…'} ${task?.total ? `${progress}%` : ''}` : `${deployNow ? 'Importer et déployer' : 'Stager'} ${selected.size} mod(s)`}</button></div></footer>
     </section>
   </div>
 }

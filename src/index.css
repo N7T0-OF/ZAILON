@@ -2,6 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --zailon-caption: 15px;
+  --zailon-small: 16px;
+  --zailon-body: 16px;
+  --zailon-control-height: 38px;
+}
+
+:root[data-text-size='small'] {
+  --zailon-caption: 14px;
+  --zailon-small: 15px;
+  --zailon-body: 15px;
+}
+
+:root[data-text-size='large'] {
+  --zailon-caption: 17px;
+  --zailon-small: 18px;
+  --zailon-body: 18px;
+}
+
+:root[data-text-size='very-large'] {
+  --zailon-caption: 19px;
+  --zailon-small: 20px;
+  --zailon-body: 20px;
+}
+
+:root[data-density='compact'] {
+  --zailon-control-height: 32px;
+}
+
 @layer base {
   * {
     box-sizing: border-box;
@@ -20,7 +49,44 @@
     background: #050606;
     color: #f0eff8;
     overflow: hidden;
+    font-size: var(--zailon-body);
   }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button:not([aria-label]),
+  input,
+  select,
+  textarea {
+    min-height: var(--zailon-control-height);
+  }
+
+  :focus-visible {
+    outline: 2px solid rgba(219, 232, 229, 0.72);
+    outline-offset: 2px;
+  }
+}
+
+/* Central accessibility scale. Legacy utility names stay compatible while
+   every readable label and action remains at least 14 px. */
+.text-\[7px\],
+.text-\[8px\],
+.text-\[9px\],
+.text-\[10px\],
+.text-\[11px\],
+.text-xs {
+  font-size: var(--zailon-caption) !important;
+  line-height: 1.35 !important;
+}
+
+.text-sm {
+  font-size: var(--zailon-small) !important;
+  line-height: 1.4 !important;
 }
 
 @layer utilities {

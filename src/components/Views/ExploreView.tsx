@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, PointerEvent, useEffect, useRef, useState } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -16,10 +17,11 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  X,
 } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import type { ExplodMod, Platform } from '../../types'
-import { native } from '../../lib/native'
+import { native, NexusCatalogGame, NexusCatalogMod, ProviderConnectionStatus } from '../../lib/native'
 
 const providers: Array<{ id: Platform; name: string; detail: string; ready: boolean }> = [
   { id: 'gamebanana', name: 'GameBanana', detail: 'Catalogue public connecté', ready: true },
@@ -64,12 +66,24 @@ export function ExploreView() {
   const installMod = useStore(state => state.installMod)
   const setView = useStore(state => state.setView)
   const [installingId, setInstallingId] = useState<string>()
+  const [previewMod, setPreviewMod] = useState<ExplodMod>()
+  const [providerStatuses, setProviderStatuses] = useState<Record<string, ProviderConnectionStatus>>({})
   const selectedGame = games.find(game => game.id === selectedGameId)
-  const readyProvider = providers.find(provider => provider.id === platform)?.ready
+  const readyProvider = platform === 'gamebanana' || (platform === 'nexus' && providerStatuses.nexus?.configured)
   const gameChoices = [...new Map([...pinnedGames, ...recentGames, ...catalogGames].map(game => [game.id, game])).values()]
   const selectedCatalogGame = gameChoices.find(game => game.id === gameId) || { id: gameId, name: `GameBanana #${gameId}` }
   const visibleMods = showNsfw ? mods : mods.filter(mod => !mod.nsfw)
   const hiddenNsfw = mods.length - visibleMods.length
+
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    void native.providerConnectionStatuses().then(setProviderStatuses).catch(() => undefined)
+    let unlisten: (() => void) | undefined
+    void listen<ProviderConnectionStatus>('provider-status-changed', event => {
+      setProviderStatuses(current => ({ ...current, [event.payload.provider]: event.payload }))
+    }).then(listener => { unlisten = listener })
+    return () => unlisten?.()
+  }, [])
 
   useEffect(() => {
     if (platform !== 'gamebanana') return
@@ -112,21 +126,27 @@ export function ExploreView() {
     </header>
 
     <section className="mt-5 grid gap-2 md:grid-cols-2 xl:grid-cols-4" aria-label="Sources de mods">
-      {providers.map(provider => <button
-        key={provider.id}
-        type="button"
-        onClick={() => setPlatform(provider.id)}
-        className={`rounded-xl border p-3 text-left transition-colors ${platform === provider.id ? 'border-gold/28 bg-gold/[0.07]' : 'border-white/[0.07] bg-white/[0.018] hover:border-white/15 hover:bg-white/[0.04]'}`}
-      >
-        <span className="flex items-center justify-between gap-2">
-          <span className="text-xs font-semibold text-white/82">{provider.name}</span>
-          {provider.ready ? <CheckCircle2 size={14} className="text-emerald-300/72" /> : <KeyRound size={14} className="text-white/28" />}
-        </span>
-        <span className="mt-1 block text-[11px] text-white/38">{provider.detail}</span>
-      </button>)}
+      {providers.map(provider => {
+        const connected = provider.ready || (provider.id === 'nexus' && providerStatuses.nexus?.configured)
+        const detail = provider.id === 'nexus' && providerStatuses.nexus?.configured
+          ? providerStatuses.nexus.connected ? `Connecté${providerStatuses.nexus.accountName ? ` · ${providerStatuses.nexus.accountName}` : ''}` : 'Clé sécurisée · test conseillé'
+          : provider.detail
+        return <button
+          key={provider.id}
+          type="button"
+          onClick={() => setPlatform(provider.id)}
+          className={`rounded-xl border p-3 text-left transition-colors ${platform === provider.id ? 'border-gold/28 bg-gold/[0.07]' : 'border-white/[0.07] bg-white/[0.018] hover:border-white/15 hover:bg-white/[0.04]'}`}
+        >
+          <span className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-white/82">{provider.name}</span>
+            {connected ? <CheckCircle2 size={14} className="text-emerald-300/72" /> : <KeyRound size={14} className="text-white/28" />}
+          </span>
+          <span className="mt-1 block text-[11px] text-white/38">{detail}</span>
+        </button>
+      })}
     </section>
 
-    {!readyProvider ? <ProviderUnavailable provider={providers.find(item => item.id === platform)?.name || platform} /> : <>
+    {!readyProvider ? <ProviderUnavailable provider={providers.find(item => item.id === platform)?.name || platform} onConfigure={() => setView('settings')} /> : platform === 'nexus' ? <NexusCatalog selectedGameName={selectedGame?.name} showNsfw={showNsfw} /> : <>
       <section className="mt-4 rounded-xl border border-white/[0.07] bg-black/10 p-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-white/48">
@@ -175,7 +195,7 @@ export function ExploreView() {
         </div>
 
         {loading && !mods.length ? <LoadingGrid /> : !visibleMods.length && !error ? <EmptyResults onReset={() => { setSearch(''); void refresh() }} /> : <div className={grid ? 'grid gap-3 md:grid-cols-2 2xl:grid-cols-3' : 'space-y-2'}>
-          {visibleMods.map(mod => <ModResult key={mod.id} mod={mod} grid={grid} installing={installingId === mod.id} canInstall={Boolean(selectedGame?.modsPath)} targetName={selectedGame?.name} onInstall={() => void install(mod)} />)}
+          {visibleMods.map(mod => <ModResult key={mod.id} mod={mod} grid={grid} installing={installingId === mod.id} canInstall={Boolean(selectedGame?.modsPath)} targetName={selectedGame?.name} onPreview={() => setPreviewMod(mod)} onInstall={() => void install(mod)} />)}
         </div>}
         <div className="mt-4 flex items-center justify-center gap-2" aria-label="Pagination GameBanana">
           <button type="button" disabled={page <= 1 || loading} onClick={() => setPage(page - 1)} className="flex h-9 items-center gap-1 rounded-lg border border-white/[0.08] px-3 text-[11px] text-white/65 hover:bg-white/[0.05] disabled:opacity-25"><ChevronLeft size={14} /> Précédent</button>
@@ -184,6 +204,7 @@ export function ExploreView() {
         </div>
       </section>
     </>}
+    {previewMod && <ModPreviewModal mod={previewMod} canInstall={Boolean(selectedGame?.modsPath)} installing={installingId === previewMod.id} onInstall={() => void install(previewMod)} onClose={() => setPreviewMod(undefined)} />}
   </div>
 }
 
@@ -194,22 +215,194 @@ function TargetGame({ gameName, configured, onConfigure }: { gameName?: string; 
   </button>
 }
 
-function ProviderUnavailable({ provider }: { provider: string }) {
+function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: string; showNsfw: boolean }) {
+  const [games, setGames] = useState<NexusCatalogGame[]>([])
+  const [domain, setDomain] = useState('')
+  const [gameFilter, setGameFilter] = useState(selectedGameName || '')
+  const [feed, setFeed] = useState<'recent' | 'updated' | 'trending'>('trending')
+  const [query, setQuery] = useState('')
+  const [mods, setMods] = useState<NexusCatalogMod[]>([])
+  const [loadingGames, setLoadingGames] = useState(true)
+  const [loadingMods, setLoadingMods] = useState(false)
+  const [error, setError] = useState<string>()
+  const [previewMod, setPreviewMod] = useState<ExplodMod>()
+
+  useEffect(() => {
+    let active = true
+    setLoadingGames(true)
+    void native.nexusCatalogGames().then(items => {
+      if (!active) return
+      setGames(items)
+      const normalized = (selectedGameName || '').toLocaleLowerCase()
+      const match = items.find(game => game.name.toLocaleLowerCase() === normalized)
+        || items.find(game => normalized && (game.name.toLocaleLowerCase().includes(normalized) || normalized.includes(game.name.toLocaleLowerCase())))
+      if (match) {
+        setDomain(match.domain)
+        setGameFilter(match.name)
+      }
+      setLoadingGames(false)
+    }).catch(reason => {
+      if (!active) return
+      setError(reason instanceof Error ? reason.message : String(reason))
+      setLoadingGames(false)
+    })
+    return () => { active = false }
+  }, [selectedGameName])
+
+  const loadMods = async (nextDomain = domain, nextFeed = feed) => {
+    if (!nextDomain) return
+    setLoadingMods(true)
+    setError(undefined)
+    try {
+      setMods(await native.nexusCatalogMods(nextDomain, nextFeed))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setLoadingMods(false)
+    }
+  }
+
+  useEffect(() => {
+    if (domain) void loadMods(domain, feed)
+  }, [domain, feed])
+
+  const gameMatches = gameFilter.trim().length < 2 ? games.slice(0, 25) : games
+    .filter(game => `${game.name} ${game.domain}`.toLocaleLowerCase().includes(gameFilter.trim().toLocaleLowerCase()))
+    .slice(0, 25)
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const visibleMods = mods.filter(mod => (showNsfw || !mod.nsfw) && (!normalizedQuery || `${mod.name} ${mod.author} ${mod.description}`.toLocaleLowerCase().includes(normalizedQuery)))
+  const selectedCatalogGame = games.find(game => game.domain === domain)
+
+  return <section className="mt-4">
+    <div className="rounded-xl border border-white/[0.07] bg-black/10 p-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+        <label className="min-w-0 flex-1 text-[11px] text-white/48">Jeu Nexus
+          <div className="relative mt-1.5">
+            <input value={gameFilter} onChange={event => setGameFilter(event.target.value)} placeholder={loadingGames ? 'Chargement des jeux Nexus…' : 'Nom ou domaine Nexus…'} className="w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-white/78 outline-none focus:border-gold/26" />
+            {gameFilter && gameFilter !== selectedCatalogGame?.name && gameMatches.length > 0 && <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-white/[0.1] bg-[#101313] p-1 shadow-2xl">
+              {gameMatches.map(game => <button key={game.domain} type="button" onClick={() => { setDomain(game.domain); setGameFilter(game.name) }} className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-[11px] text-white/62 hover:bg-white/[0.06] hover:text-white"><span className="truncate">{game.name}</span><span className="shrink-0 font-mono text-white/28">{game.domain}</span></button>)}
+            </div>}
+          </div>
+        </label>
+        <label className="text-[11px] text-white/48">Flux
+          <select value={feed} onChange={event => setFeed(event.target.value as typeof feed)} className="mt-1.5 block w-full rounded-lg border border-white/[0.08] bg-[#101313] px-3 py-2 text-xs text-white/76"><option value="trending">Tendances</option><option value="recent">Nouveautés</option><option value="updated">Mis à jour</option></select>
+        </label>
+        <label className="min-w-0 flex-1 text-[11px] text-white/48">Filtrer les résultats
+          <span className="mt-1.5 flex items-center rounded-lg border border-white/[0.08] bg-black/20 px-3"><Search size={14} className="text-white/30" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Nom, auteur, description…" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-xs text-white/78 outline-none" /></span>
+        </label>
+        <button type="button" onClick={() => void loadMods()} disabled={!domain || loadingMods} className="flex h-9 items-center gap-2 rounded-lg border border-white/[0.1] px-3 text-[11px] font-semibold text-white/62 hover:bg-white/[0.06] disabled:opacity-35"><RefreshCw size={14} className={loadingMods ? 'animate-spin' : ''} />Actualiser</button>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/34"><span>{selectedCatalogGame ? `${selectedCatalogGame.name} · ${formatCount(selectedCatalogGame.modCount)} mods` : 'Choisissez un jeu Nexus pour charger son catalogue.'}</span><span>La clé reste dans le coffre système ; seules les données du catalogue arrivent dans l’interface.</span></div>
+    </div>
+
+    {error && <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-400/18 bg-red-400/[0.04] p-4 text-[11px] text-red-200/70"><AlertTriangle size={15} className="mt-0.5 shrink-0" /><span>{error}</span></div>}
+    {loadingMods ? <LoadingGrid /> : domain && !visibleMods.length && !error ? <EmptyResults onReset={() => { setQuery(''); void loadMods() }} /> : <div className="mt-4 grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+      {visibleMods.map(item => {
+        const mod: ExplodMod = {
+          id: item.id,
+          modId: item.modId,
+          name: item.name,
+          author: item.author || 'Auteur Nexus',
+          game: item.game || selectedCatalogGame?.name || item.gameDomain,
+          thumbnail: item.thumbnail,
+          downloads: item.downloads,
+          rating: item.endorsements,
+          tags: item.version ? [`v${item.version}`] : ['Nexus Mods'],
+          nsfw: item.nsfw,
+          platform: 'nexus',
+          url: item.url,
+          description: item.description,
+          updatedAt: item.updatedAt,
+        }
+        return <ModResult key={mod.id} mod={mod} grid installing={false} canInstall={false} sourceOnly targetName={selectedCatalogGame?.name} onPreview={() => setPreviewMod(mod)} onInstall={() => undefined} />
+      })}
+    </div>}
+    {previewMod && <ModPreviewModal mod={previewMod} canInstall={false} sourceOnly installing={false} onInstall={() => undefined} onClose={() => setPreviewMod(undefined)} />}
+  </section>
+}
+
+function ProviderUnavailable({ provider, onConfigure }: { provider: string; onConfigure: () => void }) {
   return <section className="mt-4 flex min-h-56 flex-col items-center justify-center rounded-2xl border border-white/[0.07] bg-white/[0.018] px-5 text-center">
     <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.025] text-white/34"><KeyRound size={19} /></div>
     <h2 className="mt-3 text-sm font-semibold text-white/72">{provider} n’est pas encore connecté</h2>
     <p className="mt-1 max-w-md text-[11px] leading-relaxed text-white/38">Cette source exige une authentification ou une clé API. ZAILON ne présente aucun résultat fictif : GameBanana reste disponible immédiatement sans compte.</p>
+    <button type="button" onClick={onConfigure} className="mt-4 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[#101313]">Ouvrir les paramètres</button>
   </section>
 }
 
-function ModResult({ mod, grid, installing, canInstall, targetName, onInstall }: { mod: ExplodMod; grid: boolean; installing: boolean; canInstall: boolean; targetName?: string; onInstall: () => void }) {
+function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, onInstall, onClose }: {
+  mod: ExplodMod
+  canInstall: boolean
+  sourceOnly?: boolean
+  installing: boolean
+  onInstall: () => void
+  onClose: () => void
+}) {
+  const images = [...new Set([mod.thumbnail, ...(mod.screenshots || [])].filter(Boolean))]
+  const [imageIndex, setImageIndex] = useState(0)
+  const [origin, setOrigin] = useState('50% 50%')
+  const dialogRef = useRef<HTMLElement>(null)
+  const currentImage = images[imageIndex]
+  const openSource = () => native.isDesktop() ? native.openExternalUrl(mod.url) : window.open(mod.url, '_blank', 'noopener,noreferrer')
+  const previous = () => setImageIndex(index => (index - 1 + images.length) % images.length)
+  const next = () => setImageIndex(index => (index + 1) % images.length)
+
+  useEffect(() => {
+    dialogRef.current?.focus()
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+      if (event.key === 'ArrowLeft' && images.length > 1) previous()
+      if (event.key === 'ArrowRight' && images.length > 1) next()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [images.length, onClose])
+
+  useEffect(() => {
+    if (images.length < 2) return
+    const neighbors = [images[(imageIndex - 1 + images.length) % images.length], images[(imageIndex + 1) % images.length]]
+    neighbors.forEach(source => { const image = new Image(); image.src = source })
+  }, [imageIndex, images.join('|')])
+
+  const pan = (event: PointerEvent<HTMLDivElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const x = Math.max(0, Math.min(100, ((event.clientX - bounds.left) / bounds.width) * 100))
+    const y = Math.max(0, Math.min(100, ((event.clientY - bounds.top) / bounds.height) * 100))
+    setOrigin(`${x}% ${y}%`)
+  }
+
+  return <div className="fixed inset-0 z-[240] flex items-center justify-center bg-black/82 p-3 backdrop-blur-md" onPointerDown={event => { if (event.target === event.currentTarget) onClose() }}>
+    <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="mod-preview-title" className="grid max-h-[94vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-white/[0.11] bg-[#101313] shadow-[0_36px_120px_rgba(0,0,0,.82)] lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,.75fr)]">
+      <div className="min-h-0 border-b border-white/[0.07] lg:border-b-0 lg:border-r">
+        <div onPointerMove={pan} onPointerLeave={() => setOrigin('50% 50%')} className="relative flex min-h-[320px] h-[58vh] max-h-[680px] items-center justify-center overflow-hidden bg-black/45">
+          {currentImage ? <img src={currentImage} alt={`Aperçu ${imageIndex + 1} de ${mod.name}`} className="h-full w-full object-contain transition-transform duration-150 hover:scale-[1.18]" style={{ transformOrigin: origin }} /> : <div className="text-center text-white/24"><Compass size={38} className="mx-auto" /><p className="mt-3 text-[11px]">Aucune capture disponible</p></div>}
+          <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/65 to-transparent p-3"><span className="rounded bg-black/45 px-2 py-1 text-[11px] text-white/56">Zoom panoramique au pointeur</span>{images.length > 0 && <span className="rounded bg-black/45 px-2 py-1 font-mono text-[11px] text-white/56">{imageIndex + 1} / {images.length}</span>}</div>
+          {images.length > 1 && <><button type="button" onClick={previous} aria-label="Image précédente" className="absolute left-3 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 backdrop-blur hover:bg-black/80"><ChevronLeft size={20} /></button><button type="button" onClick={next} aria-label="Image suivante" className="absolute right-3 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 backdrop-blur hover:bg-black/80"><ChevronRight size={20} /></button></>}
+        </div>
+        {images.length > 1 && <div className="flex gap-2 overflow-x-auto border-t border-white/[0.06] p-2">{images.map((image, index) => <button key={image} type="button" onClick={() => setImageIndex(index)} aria-label={`Afficher l’image ${index + 1}`} className={`h-16 w-24 shrink-0 overflow-hidden rounded-lg border ${index === imageIndex ? 'border-gold/70' : 'border-white/[0.08]'}`}><img src={image} alt="" loading={Math.abs(index - imageIndex) <= 1 ? 'eager' : 'lazy'} className="h-full w-full object-cover" /></button>)}</div>}
+      </div>
+      <aside className="flex min-h-0 flex-col">
+        <header className="flex items-start justify-between gap-3 border-b border-white/[0.07] p-4"><div className="min-w-0"><p className="font-mono text-[11px] uppercase tracking-[0.18em] text-gold/60">{mod.platform === 'nexus' ? 'Nexus Mods' : 'GameBanana'} · {mod.game}</p><h2 id="mod-preview-title" className="mt-1 font-display text-2xl font-bold text-white">{mod.name}</h2><p className="mt-1 text-[11px] text-white/42">par {mod.author}</p></div><button type="button" onClick={onClose} aria-label="Fermer l’aperçu" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white/42 hover:bg-white/[0.07] hover:text-white"><X size={17} /></button></header>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div className="grid grid-cols-2 gap-2"><div className="rounded-lg bg-white/[0.025] p-3"><p className="text-[11px] text-white/32">Téléchargements</p><p className="mt-1 text-sm font-semibold text-white/76">{formatCount(mod.downloads)}</p></div><div className="rounded-lg bg-white/[0.025] p-3"><p className="text-[11px] text-white/32">Mentions J’aime</p><p className="mt-1 text-sm font-semibold text-white/76">{formatCount(mod.rating)}</p></div></div>
+          {mod.tags.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{mod.tags.map(tag => <span key={tag} className="rounded-full border border-white/[0.08] bg-white/[0.025] px-2 py-1 text-[11px] text-white/44">{tag}</span>)}{mod.nsfw && <span className="rounded-full border border-red-300/18 bg-red-300/[0.06] px-2 py-1 text-[11px] text-red-200/70">NSFW</span>}</div>}
+          <div className="mt-4"><h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/48">Description</h3><p className="mt-2 whitespace-pre-line text-[11px] leading-relaxed text-white/48">{mod.description || 'Aucune description fournie par la source.'}</p></div>
+          <p className="mt-4 rounded-lg border border-white/[0.07] bg-white/[0.018] p-3 text-[11px] leading-relaxed text-white/34">Source vérifiable : aucune miniature NSFW masquée n’est chargée. Seules l’image courante et ses deux voisines sont préchargées dans cette galerie.</p>
+        </div>
+        <footer className="flex flex-wrap justify-end gap-2 border-t border-white/[0.07] p-4"><button type="button" onClick={() => void openSource()} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/62 hover:bg-white/[0.05]"><ExternalLink size={13} />Voir la page source</button><button type="button" onClick={sourceOnly ? () => void openSource() : onInstall} disabled={installing} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[#101313] disabled:opacity-40">{installing ? <Loader2 size={13} className="animate-spin" /> : sourceOnly ? <ExternalLink size={13} /> : <Download size={13} />}{installing ? 'Installation…' : sourceOnly ? 'Ouvrir Nexus' : canInstall ? 'Installer' : 'Configurer le jeu'}</button></footer>
+      </aside>
+    </section>
+  </div>
+}
+
+function ModResult({ mod, grid, installing, canInstall, sourceOnly = false, targetName, onPreview, onInstall }: { mod: ExplodMod; grid: boolean; installing: boolean; canInstall: boolean; sourceOnly?: boolean; targetName?: string; onPreview: () => void; onInstall: () => void }) {
   const openSource = () => native.isDesktop() ? native.openExternalUrl(mod.url) : window.open(mod.url, '_blank', 'noopener,noreferrer')
   return <article className={`group overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.018] transition-colors hover:border-white/15 hover:bg-white/[0.03] ${grid ? '' : 'flex min-h-28'}`}>
-    <div className={`relative shrink-0 overflow-hidden bg-white/[0.025] ${grid ? 'aspect-[16/7] w-full' : 'w-44'}`}>
+    <button type="button" onClick={onPreview} aria-label={`Aperçu rapide de ${mod.name}`} className={`relative shrink-0 cursor-zoom-in overflow-hidden bg-white/[0.025] text-left ${grid ? 'aspect-[16/7] w-full' : 'w-44'}`}>
       {mod.thumbnail ? <img src={mod.thumbnail} alt="" loading="lazy" className="h-full w-full object-cover opacity-75 transition duration-300 group-hover:scale-[1.02] group-hover:opacity-90" /> : <div className="flex h-full items-center justify-center text-white/16"><Compass size={26} /></div>}
       <div className="absolute inset-0 bg-gradient-to-t from-[#0d1010] via-transparent to-transparent" />
       <span className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-1 text-[11px] font-semibold text-white/62 backdrop-blur-sm">{mod.game}</span>
-    </div>
+    </button>
     <div className="flex min-w-0 flex-1 flex-col p-3.5">
       <div className="flex min-w-0 items-start justify-between gap-2">
         <div className="min-w-0"><h2 className="truncate text-sm font-semibold text-white/82" title={mod.name}>{mod.name}</h2><p className="mt-0.5 truncate text-[11px] text-white/38">par {mod.author}</p></div>
@@ -219,9 +412,9 @@ function ModResult({ mod, grid, installing, canInstall, targetName, onInstall }:
       <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-3">
         <span className="text-[11px] text-white/32">{formatCount(mod.downloads)} téléchargements · {formatCount(mod.rating)} mentions J’aime</span>
         <span className="flex items-center gap-1.5">
-          <button type="button" onClick={() => void openSource()} title="Ouvrir la page GameBanana" aria-label={`Ouvrir ${mod.name} sur GameBanana`} className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] text-white/38 hover:bg-white/[0.06] hover:text-white"><ExternalLink size={13} /></button>
-          <button type="button" onClick={onInstall} disabled={installing} title={canInstall ? `Installer dans ${targetName}` : 'Configurer d’abord le dossier Mods du jeu cible'} className={`flex min-h-8 items-center gap-1.5 rounded-lg px-3 text-[11px] font-semibold transition-colors ${canInstall ? 'bg-[#dbe8e5] text-[#101313] hover:bg-white' : 'border border-amber-200/16 bg-amber-200/[0.04] text-amber-100/64'} disabled:opacity-45`}>
-            {installing ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}{installing ? 'Installation…' : canInstall ? 'Installer' : 'Configurer'}
+          <button type="button" onClick={() => void openSource()} title={`Ouvrir la page ${mod.platform === 'nexus' ? 'Nexus Mods' : 'GameBanana'}`} aria-label={`Ouvrir ${mod.name} sur ${mod.platform === 'nexus' ? 'Nexus Mods' : 'GameBanana'}`} className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] text-white/38 hover:bg-white/[0.06] hover:text-white"><ExternalLink size={13} /></button>
+          <button type="button" onClick={sourceOnly ? () => void openSource() : onInstall} disabled={installing} title={sourceOnly ? `Ouvrir ${mod.name} sur Nexus Mods` : canInstall ? `Installer dans ${targetName}` : 'Configurer d’abord le dossier Mods du jeu cible'} className={`flex min-h-8 items-center gap-1.5 rounded-lg px-3 text-[11px] font-semibold transition-colors ${canInstall || sourceOnly ? 'bg-[#dbe8e5] text-[#101313] hover:bg-white' : 'border border-amber-200/16 bg-amber-200/[0.04] text-amber-100/64'} disabled:opacity-45`}>
+            {installing ? <Loader2 size={13} className="animate-spin" /> : sourceOnly ? <ExternalLink size={13} /> : <Download size={13} />}{installing ? 'Installation…' : sourceOnly ? 'Voir sur Nexus' : canInstall ? 'Installer' : 'Configurer'}
           </button>
         </span>
       </div>

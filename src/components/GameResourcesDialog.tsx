@@ -1,9 +1,9 @@
-import { ImagePlus, Move, RotateCcw, Save, Trash2, Upload, X, ZoomIn } from 'lucide-react'
+import { Check, ImagePlus, Move, RotateCcw, Save, Search, Trash2, Upload, X, ZoomIn } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Game, GameResources } from '../types'
-import { GameResourceKind, native, pickGameResource, resourceUrl } from '../lib/native'
+import { ArtworkCandidate, GameResourceKind, native, pickGameResource, resourceUrl } from '../lib/native'
 
 type ResourceKey = 'coverPath' | 'logoPath' | 'iconPath' | 'backgroundPath' | 'bannerPath' | 'videoPath'
 type ResourceSlot = { kind: GameResourceKind; key: ResourceKey; label: string; hint: string; ratio: string }
@@ -50,12 +50,16 @@ export function GameAppearanceEditor({ game, onSave, onCancel, embedded = false,
   const [activeSlot, setActiveSlot] = useState<ResourceSlot>(resources[0])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  const [artworkCandidates, setArtworkCandidates] = useState<ArtworkCandidate[]>([])
+  const [selectedArtwork, setSelectedArtwork] = useState<ArtworkCandidate>()
   const activePath = draft[activeSlot.key]
   const fields = transformFields[activeSlot.kind as keyof typeof transformFields]
 
   useEffect(() => {
     initial.current = { ...game.resources }
     setDraft({ ...game.resources })
+    setArtworkCandidates([])
+    setSelectedArtwork(undefined)
     stagedPaths.current.clear()
   }, [game.id])
 
@@ -83,7 +87,45 @@ export function GameAppearanceEditor({ game, onSave, onCancel, embedded = false,
 
   const browse = async () => {
     const selected = await pickGameResource(activeSlot.kind)
+    setSelectedArtwork(undefined)
+    setArtworkCandidates([])
     await assign(activeSlot, selected)
+  }
+
+  const searchArtwork = async () => {
+    if (activeSlot.kind === 'video') return
+    setBusy(true)
+    setError(undefined)
+    setSelectedArtwork(undefined)
+    try {
+      const candidates = await native.searchGameArtwork(game.name, game.provider || game.platform, game.providerGameId, activeSlot.kind)
+      setArtworkCandidates(candidates)
+      setSelectedArtwork(candidates[0])
+    } catch (reason) {
+      setArtworkCandidates([])
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const useSelectedArtwork = async () => {
+    if (!selectedArtwork || activeSlot.kind === 'video') return
+    setBusy(true)
+    setError(undefined)
+    try {
+      const localPath = await native.cacheRemoteGameResource(game.id, activeSlot.kind, selectedArtwork.url)
+      const previous = draft[activeSlot.key]
+      if (previous && stagedPaths.current.delete(previous)) await removeStored(previous)
+      stagedPaths.current.add(localPath)
+      setDraft(current => ({ ...current, [activeSlot.key]: localPath }))
+      setSelectedArtwork(undefined)
+      setArtworkCandidates([])
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
   }
 
   const removeActive = async () => {
@@ -153,6 +195,8 @@ export function GameAppearanceEditor({ game, onSave, onCancel, embedded = false,
     return { objectPosition: `${x}% ${y}%`, objectFit: fit, transform: `scale(${zoom / 100})` } as const
   }, [draft, fields])
 
+  const previewSource = selectedArtwork?.url || resourceUrl(activePath)
+
   return <div className={`flex min-h-0 flex-1 flex-col ${embedded ? 'rounded-xl border border-white/[0.07] bg-white/[0.012]' : ''}`}>
     {!embedded && <header className="flex flex-shrink-0 items-center justify-between border-b border-white/[0.065] px-4 py-3"><div><p className="font-mono text-[11px] uppercase tracking-[0.22em] text-gold/55">Apparence du jeu</p><h2 id="game-resources-title" className="mt-0.5 font-display text-lg font-bold text-white">{title || game.name}</h2></div><button type="button" onClick={() => void cancel()} disabled={busy} aria-label="Fermer" className="rounded-lg p-1.5 text-white/38 hover:bg-white/[0.07] hover:text-white disabled:opacity-30"><X size={16} /></button></header>}
     {error && <p className="mx-4 mt-3 rounded-lg border border-red-400/20 bg-red-500/10 px-3 py-2 text-[11px] text-red-200">{error}</p>}
@@ -161,7 +205,7 @@ export function GameAppearanceEditor({ game, onSave, onCancel, embedded = false,
         <div className="grid grid-cols-3 gap-1 lg:grid-cols-1">
           {resources.map(slot => {
             const path = draft[slot.key]
-            return <button type="button" key={slot.key} onClick={() => setActiveSlot(slot)} className={`flex min-w-0 items-center gap-2 rounded-lg p-2 text-left transition-colors ${slot.key === activeSlot.key ? 'bg-white/[0.075] text-white' : 'text-white/40 hover:bg-white/[0.04] hover:text-white/66'}`}>
+            return <button type="button" key={slot.key} onClick={() => { setActiveSlot(slot); setArtworkCandidates([]); setSelectedArtwork(undefined) }} className={`flex min-w-0 items-center gap-2 rounded-lg p-2 text-left transition-colors ${slot.key === activeSlot.key ? 'bg-white/[0.075] text-white' : 'text-white/40 hover:bg-white/[0.04] hover:text-white/66'}`}>
               <ResourceThumb path={path} isVideo={slot.kind === 'video'} />
               <span className="hidden min-w-0 flex-1 lg:block"><span className="block truncate text-[11px] font-medium">{slot.label}</span><span className="mt-0.5 block truncate text-[11px] text-white/28">{path ? 'Personnalisé' : 'Par défaut'}</span></span>
             </button>
@@ -171,12 +215,14 @@ export function GameAppearanceEditor({ game, onSave, onCancel, embedded = false,
 
       <main className="flex min-h-[330px] min-w-0 flex-col p-4">
         <div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold text-white/80">{activeSlot.label}</h3><p className="mt-0.5 text-[11px] text-white/32">{activeSlot.hint}</p></div><span className="rounded border border-white/[0.07] px-1.5 py-0.5 font-mono text-[11px] uppercase text-white/25">{activeSlot.kind === 'video' ? 'MP4 · WEBM' : 'PNG · JPG · WEBP · AVIF · SVG'}</span></div>
+        {activeSlot.kind !== 'video' && <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Fournisseurs d’illustrations"><span className="rounded-full border border-gold/28 bg-gold/[0.07] px-2.5 py-1 text-[11px] font-semibold text-gold/78">Steam officiel</span>{['SteamGridDB', 'IGDB', 'Nexus', 'GameBanana', 'CurseForge'].map(provider => <span key={provider} title="Connecteur non configuré : aucun résultat fictif ne sera affiché" className="cursor-not-allowed rounded-full border border-white/[0.06] px-2.5 py-1 text-[11px] text-white/22">{provider}</span>)}</div>}
         <div className="relative mt-3 flex min-h-52 flex-1 items-center justify-center overflow-hidden rounded-xl border border-white/[0.075] bg-[linear-gradient(45deg,rgba(255,255,255,.022)_25%,transparent_25%,transparent_75%,rgba(255,255,255,.022)_75%),linear-gradient(45deg,rgba(255,255,255,.022)_25%,transparent_25%,transparent_75%,rgba(255,255,255,.022)_75%)] bg-[length:18px_18px] bg-[position:0_0,9px_9px]" style={{ aspectRatio: activeSlot.ratio }}>
-          {activePath ? activeSlot.kind === 'video' ? <video src={resourceUrl(activePath)} controls muted loop className="h-full w-full object-cover" /> : <img src={resourceUrl(activePath)} alt={`Aperçu ${activeSlot.label}`} className="h-full w-full" style={previewStyle} /> : <div className="text-center text-white/24"><ImagePlus size={27} className="mx-auto" /><p className="mt-2 text-[11px]">Aucune ressource locale</p><p className="mt-1 text-[11px] text-white/18">Déposez un fichier ou utilisez Parcourir</p></div>}
+          {previewSource ? activeSlot.kind === 'video' ? <video src={previewSource} controls muted loop className="h-full w-full object-cover" /> : <img src={previewSource} alt={`Aperçu ${activeSlot.label}`} className="h-full w-full" style={previewStyle} /> : <div className="text-center text-white/24"><ImagePlus size={27} className="mx-auto" /><p className="mt-2 text-[11px]">Aucune ressource locale</p><p className="mt-1 text-[11px] text-white/18">Déposez un fichier ou utilisez Parcourir</p></div>}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/55 to-transparent" />
-          <span className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/45 px-1.5 py-1 font-mono text-[11px] text-white/42 backdrop-blur">APERÇU ZAILON</span>
+          <span className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/45 px-1.5 py-1 font-mono text-[11px] text-white/42 backdrop-blur">{selectedArtwork ? `APERÇU · ${selectedArtwork.sourceLabel}` : 'APERÇU ZAILON'}</span>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void browse()} disabled={busy} className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-[11px] font-semibold text-black hover:bg-white/88 disabled:opacity-40"><Upload size={11} /> {activePath ? 'Remplacer' : 'Parcourir'}</button>{activePath && <button type="button" onClick={() => void removeActive()} disabled={busy} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-1.5 text-[11px] text-white/48 hover:bg-white/[0.055] hover:text-white"><Trash2 size={10} /> Retirer</button>}</div>
+        {artworkCandidates.length > 0 && <div className="mt-3"><div className="mb-2 flex items-center justify-between gap-2"><p className="text-[11px] font-semibold text-white/55">Résultats Steam officiels · confirmation requise</p><span className="text-[11px] text-white/30">{artworkCandidates.length} image(s)</span></div><div className="flex gap-2 overflow-x-auto pb-1">{artworkCandidates.map(candidate => <button key={candidate.id} type="button" onClick={() => setSelectedArtwork(candidate)} className={`relative h-20 w-28 shrink-0 overflow-hidden rounded-lg border ${selectedArtwork?.id === candidate.id ? 'border-gold/70 ring-1 ring-gold/30' : 'border-white/[0.08]'}`}><img src={candidate.url} alt={`${candidate.sourceLabel} pour ${candidate.gameName}`} loading="lazy" className="h-full w-full object-cover" />{selectedArtwork?.id === candidate.id && <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-gold text-black"><Check size={11} /></span>}</button>)}</div>{selectedArtwork && <p className="mt-2 text-[11px] leading-relaxed text-white/34">{selectedArtwork.gameName} · {selectedArtwork.sourceLabel}. {selectedArtwork.attribution}</p>}</div>}
+        <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void browse()} disabled={busy} className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-[11px] font-semibold text-black hover:bg-white/88 disabled:opacity-40"><Upload size={11} /> {activePath ? 'Remplacer localement' : 'Parcourir'}</button>{activeSlot.kind !== 'video' && <button type="button" onClick={() => void searchArtwork()} disabled={busy} className="flex items-center gap-1.5 rounded-lg border border-gold/22 bg-gold/[0.05] px-3 py-1.5 text-[11px] font-semibold text-gold/80 hover:bg-gold/[0.09] disabled:opacity-40"><Search size={12} />Rechercher automatiquement</button>}{selectedArtwork && <button type="button" onClick={() => void useSelectedArtwork()} disabled={busy} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-1.5 text-[11px] font-semibold text-black disabled:opacity-40"><Check size={12} />Utiliser cette image</button>}{activePath && <button type="button" onClick={() => void removeActive()} disabled={busy} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-1.5 text-[11px] text-white/48 hover:bg-white/[0.055] hover:text-white"><Trash2 size={10} /> Retirer</button>}</div>
       </main>
 
       <aside className="border-t border-white/[0.06] p-4 lg:border-l lg:border-t-0">

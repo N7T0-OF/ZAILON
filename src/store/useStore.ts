@@ -1,10 +1,10 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { ExplodMod, ExploreSort, Game, GameResources, GameTab, GamebananaGame, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileModState, UpdateChannel, ViewType } from '../types'
+import { ExplodMod, ExploreSort, Game, GameResources, GameTab, GamebananaGame, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileModState, TextSize, UiDensity, UpdateChannel, ViewType } from '../types'
 import { DetectedGame, native, NativeMod, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 
-const APP_VERSION = '1.3.1'
+const APP_VERSION = '1.4.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -163,6 +163,30 @@ function makeGame({ name, execPath, modsPath, platform = 'standalone', provider,
   }
 }
 
+async function automaticArtworkForGame(game: Game): Promise<Partial<GameResources>> {
+  if (!native.isDesktop()) return {}
+  const assignments: Array<{ kind: 'cover' | 'background' | 'banner' | 'logo' | 'icon'; key: 'coverPath' | 'backgroundPath' | 'bannerPath' | 'logoPath' | 'iconPath' }> = [
+    { kind: 'cover', key: 'coverPath' },
+    { kind: 'background', key: 'backgroundPath' },
+    { kind: 'banner', key: 'bannerPath' },
+    { kind: 'logo', key: 'logoPath' },
+    { kind: 'icon', key: 'iconPath' },
+  ]
+  const resources: Partial<GameResources> = {}
+  for (const assignment of assignments) {
+    try {
+      const candidates = await native.searchGameArtwork(game.name, game.provider || game.platform, game.providerGameId, assignment.kind)
+      for (const candidate of candidates) {
+        try {
+          resources[assignment.key] = await native.cacheRemoteGameResource(game.id, assignment.kind, candidate.url)
+          break
+        } catch { /* essayer le candidat officiel suivant */ }
+      }
+    } catch { /* aucun résultat fiable pour cet emplacement */ }
+  }
+  return resources
+}
+
 export interface Store {
   currentView: ViewType
   activeGameTab: GameTab
@@ -172,7 +196,15 @@ export interface Store {
   nsfw: boolean
   hideUnclassifiedNsfw: boolean
   language: string
+  textSize: TextSize
+  uiDensity: UiDensity
+  autoArtwork: boolean
   discordPresence: boolean
+  discordClientId: string
+  discordLargeImageKey: string
+  discordShowProfile: boolean
+  discordShowModCount: boolean
+  discordShowElapsed: boolean
   autoCheckUpdates: boolean
   autoInstallUpdates: boolean
   modUpdateFrequency: 'never' | 'startup' | 'daily' | 'weekly'
@@ -228,7 +260,15 @@ export interface Store {
   toggleNSFW: () => void
   setHideUnclassifiedNsfw: (enabled: boolean) => void
   setLanguage: (language: string) => void
+  setTextSize: (size: TextSize) => void
+  setUiDensity: (density: UiDensity) => void
+  setAutoArtwork: (enabled: boolean) => void
   toggleDiscord: () => void
+  setDiscordClientId: (value: string) => void
+  setDiscordLargeImageKey: (value: string) => void
+  setDiscordShowProfile: (enabled: boolean) => void
+  setDiscordShowModCount: (enabled: boolean) => void
+  setDiscordShowElapsed: (enabled: boolean) => void
   setAutoCheckUpdates: (enabled: boolean) => void
   setAutoInstallUpdates: (enabled: boolean) => void
   setModUpdateFrequency: (frequency: Store['modUpdateFrequency']) => void
@@ -297,6 +337,14 @@ export function migratePersistedState(persisted: unknown) {
     exploreRecentGames: state.exploreRecentGames || [],
     explorePage: state.explorePage || 1,
     exploreSort: state.exploreSort || 'recent',
+    textSize: state.textSize || 'normal',
+    uiDensity: state.uiDensity || 'comfortable',
+    autoArtwork: state.autoArtwork ?? false,
+    discordClientId: state.discordClientId || '',
+    discordLargeImageKey: state.discordLargeImageKey || '',
+    discordShowProfile: state.discordShowProfile ?? true,
+    discordShowModCount: state.discordShowModCount ?? true,
+    discordShowElapsed: state.discordShowElapsed ?? true,
   }
 }
 
@@ -309,7 +357,15 @@ export const useStore = create<Store>()(persist((set, get) => ({
   nsfw: false,
   hideUnclassifiedNsfw: false,
   language: 'fr',
+  textSize: 'normal',
+  uiDensity: 'comfortable',
+  autoArtwork: false,
   discordPresence: false,
+  discordClientId: '',
+  discordLargeImageKey: '',
+  discordShowProfile: true,
+  discordShowModCount: true,
+  discordShowElapsed: true,
   autoCheckUpdates: true,
   autoInstallUpdates: false,
   modUpdateFrequency: 'weekly',
@@ -409,6 +465,16 @@ export const useStore = create<Store>()(persist((set, get) => ({
         selectedProfileId: state.selectedProfileId ?? fresh[0].profiles[0].id,
         notice: `${fresh.length} jeu${fresh.length > 1 ? 'x' : ''} Steam ajouté${fresh.length > 1 ? 's' : ''}.`,
       }))
+      if (get().autoArtwork) {
+        fresh.forEach(game => {
+          void automaticArtworkForGame(game).then(resources => {
+            if (!Object.keys(resources).length) return
+            set(state => ({
+              games: state.games.map(current => current.id === game.id ? { ...current, resources: { ...current.resources, ...resources } } : current),
+            }))
+          })
+        })
+      }
     } else {
       set({ notice: 'Aucun nouveau jeu Steam sélectionné à ajouter.' })
     }
@@ -612,7 +678,15 @@ export const useStore = create<Store>()(persist((set, get) => ({
   toggleNSFW: () => set(state => ({ nsfw: !state.nsfw })),
   setHideUnclassifiedNsfw: hideUnclassifiedNsfw => set({ hideUnclassifiedNsfw }),
   setLanguage: language => set({ language }),
+  setTextSize: textSize => set({ textSize }),
+  setUiDensity: uiDensity => set({ uiDensity }),
+  setAutoArtwork: autoArtwork => set({ autoArtwork }),
   toggleDiscord: () => set(state => ({ discordPresence: !state.discordPresence })),
+  setDiscordClientId: discordClientId => set({ discordClientId }),
+  setDiscordLargeImageKey: discordLargeImageKey => set({ discordLargeImageKey }),
+  setDiscordShowProfile: discordShowProfile => set({ discordShowProfile }),
+  setDiscordShowModCount: discordShowModCount => set({ discordShowModCount }),
+  setDiscordShowElapsed: discordShowElapsed => set({ discordShowElapsed }),
   setAutoCheckUpdates: autoCheckUpdates => set({ autoCheckUpdates }),
   setAutoInstallUpdates: autoInstallUpdates => set(state => ({ autoInstallUpdates, autoCheckUpdates: autoInstallUpdates ? true : state.autoCheckUpdates })),
   setModUpdateFrequency: modUpdateFrequency => set({ modUpdateFrequency }),
@@ -623,11 +697,20 @@ export const useStore = create<Store>()(persist((set, get) => ({
   prepareInstalledUpdate: update => set({ lastInstalledUpdate: { ...update, installedAt: Date.now() } }),
   dismissInstalledUpdate: () => set({ lastInstalledUpdate: undefined }),
   launchSelectedGame: async () => {
-    const { game } = selected(get())
+    const state = get()
+    const { game, profile } = selected(state)
     if (!game?.execPath) { set({ notice: 'Select a game executable before launching.' }); return }
+    if (!profile) { set({ notice: 'Select a profile before launching.' }); return }
     try {
-      await native.launchGame(game.execPath)
-      set({ isPlaying: true, playStartTime: Date.now(), sessionTime: 0, notice: `${game.name} launched.` })
+      const result = await native.launchGame(game.execPath, game.name, profile.name, resolveProfileMods(game, profile).filter(mod => mod.enabled).length, state.discordPresence ? {
+        enabled: true,
+        clientId: state.discordClientId,
+        largeImageKey: state.discordLargeImageKey || undefined,
+        showProfile: state.discordShowProfile,
+        showModCount: state.discordShowModCount,
+        showElapsed: state.discordShowElapsed,
+      } : undefined)
+      set({ isPlaying: true, playStartTime: Date.now(), sessionTime: 0, notice: `${game.name} lancé (PID ${result.pid}). ${result.discordMessage}` })
     } catch (error) {
       set({ notice: asError(error) })
     }
@@ -722,7 +805,15 @@ export const useStore = create<Store>()(persist((set, get) => ({
     nsfw: state.nsfw,
     hideUnclassifiedNsfw: state.hideUnclassifiedNsfw,
     language: state.language,
+    textSize: state.textSize,
+    uiDensity: state.uiDensity,
+    autoArtwork: state.autoArtwork,
     discordPresence: state.discordPresence,
+    discordClientId: state.discordClientId,
+    discordLargeImageKey: state.discordLargeImageKey,
+    discordShowProfile: state.discordShowProfile,
+    discordShowModCount: state.discordShowModCount,
+    discordShowElapsed: state.discordShowElapsed,
     autoCheckUpdates: state.autoCheckUpdates,
     autoInstallUpdates: state.autoInstallUpdates,
     modUpdateFrequency: state.modUpdateFrequency,

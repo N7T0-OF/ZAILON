@@ -22,6 +22,7 @@ const DETAILS_FIELDS = [
   'Nsfw().bIsNsfw()',
   'Game().name',
   'Url().sProfileUrl()',
+  'Preview().aPreviewMedia()',
 ].join(',')
 const CACHE_TIME = 5 * 60_000
 const pageCache = new Map<string, { expiresAt: number; mods: ExplodMod[] }>()
@@ -34,6 +35,25 @@ function thumbnail(value: unknown) {
   const path = stringValue(value)
   if (!path) return ''
   return path.startsWith('http') ? path : `https:${path}`
+}
+
+function previewImages(value: unknown, images: string[] = []): string[] {
+  if (Array.isArray(value)) {
+    value.forEach(item => previewImages(item, images))
+    return [...new Set(images)]
+  }
+  if (!value || typeof value !== 'object') return images
+  const record = value as Record<string, unknown>
+  const base = stringValue(record._sBaseUrl ?? record.baseUrl)
+  const file = stringValue(record._sFile ?? record.file)
+  const direct = stringValue(record._sUrl ?? record.url ?? record._sImageUrl)
+  const candidate = direct || (base && file ? `${base}${base.endsWith('/') ? '' : '/'}${file}` : '')
+  if (candidate) {
+    const normalized = candidate.startsWith('http') ? candidate : candidate.startsWith('//') ? `https:${candidate}` : ''
+    if (normalized && /\.(?:png|jpe?g|webp|gif|avif)(?:\?|$)/i.test(normalized)) images.push(normalized)
+  }
+  Object.values(record).forEach(item => previewImages(item, images))
+  return [...new Set(images)]
 }
 
 function plainText(value: unknown) {
@@ -98,13 +118,16 @@ async function fetchDetails(ids: number[], fallbackGame: string, fallbackGameId:
     if (!Array.isArray(row) || !ids[index]) return null
     const id = ids[index]
     const profileUrl = stringValue(row[8])
+    const thumbnailUrl = thumbnail(row[4])
+    const screenshots = [thumbnailUrl, ...previewImages(row[9])].filter(Boolean)
     return {
       id: `gb-${id}`,
       modId: id,
       name: stringValue(row[0]) || `Mod ${id}`,
       author: stringValue(row[1]) || 'Auteur inconnu',
       game: stringValue(row[7]) || fallbackGame,
-      thumbnail: thumbnail(row[4]),
+      thumbnail: thumbnailUrl,
+      screenshots: [...new Set(screenshots)],
       downloads: numberValue(row[2]),
       rating: numberValue(row[3]),
       tags: ['GameBanana'],

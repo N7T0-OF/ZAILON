@@ -4,7 +4,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { AppWindow } from './components/Layout/AppWindow'
 import { UpdateProvider } from './components/UpdateProvider'
 import { useStore } from './store/useStore'
-import { native, type NxmRequest } from './lib/native'
+import { native, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 
 export default function App() {
   const tick = useStore(s => s.tick)
@@ -13,6 +13,8 @@ export default function App() {
   const games = useStore(s => s.games)
   const setSelectedGame = useStore(s => s.setSelectedGame)
   const setSelectedProfile = useStore(s => s.setSelectedProfile)
+  const textSize = useStore(s => s.textSize)
+  const uiDensity = useStore(s => s.uiDensity)
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
 
   useEffect(() => {
@@ -21,10 +23,41 @@ export default function App() {
   }, [tick])
 
   useEffect(() => {
+    document.documentElement.dataset.textSize = textSize
+    document.documentElement.dataset.density = uiDensity
+  }, [textSize, uiDensity])
+
+  useEffect(() => {
     if (!native.isDesktop()) return
     let unlisten: UnlistenFn | undefined
     void native.pendingExternalInstalls().then(setExternalInstalls).catch(() => undefined)
-    void listen<NxmRequest>('nxm-opened', event => setExternalInstalls(current => current.some(item => item.rawUrl === event.payload.rawUrl) ? current : [...current, event.payload])).then(dispose => { unlisten = dispose })
+    void listen<NxmRequest>('nxm-opened', event => setExternalInstalls(current => current.some(item => item.requestId === event.payload.requestId) ? current : [...current, event.payload])).then(dispose => { unlisten = dispose })
+    return () => unlisten?.()
+  }, [])
+
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    let unlisten: UnlistenFn | undefined
+    void listen<GameProcessEvent>('game-process-stopped', () => useStore.getState().stopPlaying()).then(dispose => { unlisten = dispose })
+    return () => unlisten?.()
+  }, [])
+
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    let unlisten: UnlistenFn | undefined
+    const launchFromShortcut = async (request: ShortcutLaunchRequest) => {
+      const state = useStore.getState()
+      const game = state.games.find(item => item.id === request.gameId)
+      const profile = game?.profiles.find(item => item.id === request.profileId)
+      if (game && profile) {
+        state.setSelectedGame(game.id)
+        await useStore.getState().setSelectedProfile(profile.id)
+        await useStore.getState().launchSelectedGame()
+      }
+      await native.consumeShortcutLaunch(request.rawUrl).catch(() => undefined)
+    }
+    void native.pendingShortcutLaunches().then(requests => requests.forEach(request => void launchFromShortcut(request))).catch(() => undefined)
+    void listen<ShortcutLaunchRequest>('zailon-launch', event => void launchFromShortcut(event.payload)).then(dispose => { unlisten = dispose })
     return () => unlisten?.()
   }, [])
 
@@ -33,8 +66,8 @@ export default function App() {
     await setSelectedProfile(profileId)
     const sourceUrl = `https://www.nexusmods.com/${request.gameDomain}/mods/${request.modId}?tab=files&file_id=${request.fileId}`
     await native.openExternalUrl(sourceUrl)
-    await native.consumeExternalInstall(request.rawUrl)
-    setExternalInstalls(current => current.filter(item => item.rawUrl !== request.rawUrl))
+    await native.consumeExternalInstall(request.requestId)
+    setExternalInstalls(current => current.filter(item => item.requestId !== request.requestId))
   }
 
   return (
@@ -50,7 +83,7 @@ export default function App() {
           {notice}
         </button>
       )}
-      {externalInstalls[0] && <ExternalInstallDialog request={externalInstalls[0]} games={games} onCancel={() => void native.consumeExternalInstall(externalInstalls[0].rawUrl).finally(() => setExternalInstalls(current => current.slice(1)))} onContinue={(gameId, profileId) => void resolveExternalInstall(externalInstalls[0], gameId, profileId)} />}
+      {externalInstalls[0] && <ExternalInstallDialog request={externalInstalls[0]} games={games} onCancel={() => void native.consumeExternalInstall(externalInstalls[0].requestId).finally(() => setExternalInstalls(current => current.slice(1)))} onContinue={(gameId, profileId) => void resolveExternalInstall(externalInstalls[0], gameId, profileId)} />}
     </div>
   )
 }

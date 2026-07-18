@@ -96,13 +96,109 @@ export interface ProfileImportPreview {
 }
 
 export interface NxmRequest {
-  rawUrl: string
+  requestId: string
   gameDomain: string
   modId: number
   fileId: number
-  key?: string
   expires?: number
   userId?: number
+}
+
+export interface ShortcutLaunchRequest {
+  rawUrl: string
+  gameId: string
+  profileId: string
+}
+
+export interface ProviderConnectionStatus {
+  provider: 'nexus' | 'curseforge'
+  configured: boolean
+  connected: boolean
+  maskedSecret?: string
+  accountName?: string
+  lastCheckedAt?: number
+  hourlyRemaining?: number
+  hourlyLimit?: number
+  dailyRemaining?: number
+  dailyLimit?: number
+  message: string
+}
+
+export interface NexusCatalogGame {
+  name: string
+  domain: string
+  modCount: number
+  downloadCount: number
+}
+
+export interface NexusCatalogMod {
+  id: string
+  modId: number
+  name: string
+  author: string
+  game: string
+  gameDomain: string
+  thumbnail: string
+  downloads: number
+  endorsements: number
+  description: string
+  version?: string
+  updatedAt?: number
+  nsfw: boolean
+  url: string
+}
+
+export interface ArtworkCandidate {
+  id: string
+  provider: 'steam'
+  sourceLabel: string
+  gameName: string
+  kind: GameResourceKind
+  url: string
+  width?: number
+  height?: number
+  attribution: string
+}
+
+export interface BackgroundTaskSnapshot {
+  id: string
+  kind: 'mod-scan' | 'mod-import' | string
+  title: string
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+  processed: number
+  total: number
+  message: string
+  startedAt: number
+  updatedAt: number
+  error?: string
+}
+
+export type BackgroundTaskEvent = { event: 'Progress'; data: { task: BackgroundTaskSnapshot } }
+
+export interface DiscordPresenceConfig {
+  enabled: boolean
+  clientId: string
+  largeImageKey?: string
+  showProfile: boolean
+  showModCount: boolean
+  showElapsed: boolean
+}
+
+export interface DiscordConnectionStatus {
+  connected: boolean
+  message: string
+}
+
+export interface LaunchGameResult {
+  pid: number
+  discordConnected: boolean
+  discordMessage: string
+}
+
+export interface GameProcessEvent {
+  pid: number
+  gameName: string
+  exitCode?: number
 }
 
 export type UpdateDownloadEvent =
@@ -121,9 +217,17 @@ export const native = {
   isDesktop: () => isTauri(),
   scanMods: (modsPath: string) => desktopOnly<NativeMod[]>('scan_mods', { modsPath }),
   scanModImport: (paths: string[], gameName: string) => desktopOnly<ModImportCandidate[]>('scan_mod_import', { paths, gameName }),
+  scanModImportBackground: (taskId: string, paths: string[], gameName: string, onProgress: (task: BackgroundTaskSnapshot) => void) => {
+    if (!isTauri()) return Promise.reject(new Error('Background mod analysis is only available in the ZAILON desktop app.'))
+    const channel = new Channel<BackgroundTaskEvent>()
+    channel.onmessage = event => onProgress(event.data.task)
+    return invoke<ModImportCandidate[]>('scan_mod_import_background', { taskId, paths, gameName, onEvent: channel })
+  },
   toggleMod: (modPath: string, modsRoot: string, enable: boolean) => desktopOnly<string>('toggle_mod', { modPath, modsRoot, enable }),
   deleteMod: (modPath: string, modsRoot: string) => desktopOnly<void>('delete_mod', { modPath, modsRoot }),
-  launchGame: (execPath: string) => desktopOnly<void>('launch_game', { execPath }),
+  launchGame: (execPath: string, gameName: string, profileName: string, activeMods: number, discord?: DiscordPresenceConfig) =>
+    desktopOnly<LaunchGameResult>('launch_game', { execPath, gameName, profileName, activeMods, discord }),
+  testDiscordConnection: (clientId: string) => desktopOnly<DiscordConnectionStatus>('test_discord_connection', { clientId }),
   guessModsPath: (execPath: string) => desktopOnly<string>('guess_mods_path', { execPath }),
   scanSteamGames: (steamPath: string | undefined, onEvent: (event: SteamScanEvent) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Steam detection is only available in the ZAILON desktop app.'))
@@ -147,17 +251,38 @@ export const native = {
     desktopOnly<string[]>('extract_profile_archive', { archivePath, destination }),
   importModCandidates: (paths: string[], destination: string) =>
     desktopOnly<string[]>('import_mod_candidates', { paths, destination }),
+  importModCandidatesBackground: (taskId: string, gameId: string, profileIds: string[], paths: string[], destination: string, deployNow: boolean, onProgress: (task: BackgroundTaskSnapshot) => void) => {
+    if (!isTauri()) return Promise.reject(new Error('Background mod import is only available in the ZAILON desktop app.'))
+    const channel = new Channel<BackgroundTaskEvent>()
+    channel.onmessage = event => onProgress(event.data.task)
+    return invoke<string[]>('import_mod_candidates_background', { taskId, gameId, profileIds, paths, destination, deployNow, onEvent: channel })
+  },
+  backgroundTasks: () => desktopOnly<BackgroundTaskSnapshot[]>('background_tasks'),
+  cancelBackgroundTask: (taskId: string) => desktopOnly<void>('cancel_background_task', { taskId }),
   setProviderSecret: (provider: 'nexus' | 'curseforge', secret: string) =>
-    desktopOnly<void>('set_provider_secret', { provider, secret }),
+    desktopOnly<ProviderConnectionStatus>('set_provider_secret', { provider, secret }),
   deleteProviderSecret: (provider: 'nexus' | 'curseforge') =>
-    desktopOnly<void>('delete_provider_secret', { provider }),
-  providerSecretStatus: () => desktopOnly<Record<string, boolean>>('provider_secret_status'),
+    desktopOnly<ProviderConnectionStatus>('delete_provider_secret', { provider }),
+  providerConnectionStatuses: () => desktopOnly<Record<string, ProviderConnectionStatus>>('provider_connection_statuses'),
+  testProviderConnection: (provider: 'nexus' | 'curseforge') =>
+    desktopOnly<ProviderConnectionStatus>('test_provider_connection', { provider }),
+  nexusCatalogGames: () => desktopOnly<NexusCatalogGame[]>('nexus_catalog_games'),
+  nexusCatalogMods: (gameDomain: string, feed: 'recent' | 'updated' | 'trending' | 'popular' | 'downloaded') =>
+    desktopOnly<NexusCatalogMod[]>('nexus_catalog_mods', { gameDomain, feed }),
   setNxmAssociation: (enabled: boolean) => desktopOnly<boolean>('set_nxm_association', { enabled }),
   nxmAssociationStatus: () => desktopOnly<boolean>('nxm_association_status'),
   pendingExternalInstalls: () => desktopOnly<NxmRequest[]>('pending_external_installs'),
-  consumeExternalInstall: (rawUrl: string) => desktopOnly<void>('consume_external_install', { rawUrl }),
+  consumeExternalInstall: (requestId: string) => desktopOnly<void>('consume_external_install', { requestId }),
+  pendingShortcutLaunches: () => desktopOnly<ShortcutLaunchRequest[]>('pending_shortcut_launches'),
+  consumeShortcutLaunch: (rawUrl: string) => desktopOnly<void>('consume_shortcut_launch', { rawUrl }),
+  createDesktopShortcut: (gameId: string, profileId: string, gameName: string, iconPath?: string) =>
+    desktopOnly<string>('create_desktop_shortcut', { gameId, profileId, gameName, iconPath }),
   storeGameResource: (gameId: string, kind: GameResourceKind, sourcePath: string) =>
     desktopOnly<string>('store_game_resource', { gameId, kind, sourcePath }),
+  cacheRemoteGameResource: (gameId: string, kind: Exclude<GameResourceKind, 'video'>, sourceUrl: string) =>
+    desktopOnly<string>('cache_remote_game_resource', { gameId, kind, sourceUrl }),
+  searchGameArtwork: (gameName: string, provider: string | undefined, providerGameId: string | undefined, kind: Exclude<GameResourceKind, 'video'>) =>
+    desktopOnly<ArtworkCandidate[]>('search_game_artwork', { gameName, provider, providerGameId, kind }),
   removeGameResource: (gameId: string, resourcePath: string) =>
     desktopOnly<void>('remove_game_resource', { gameId, resourcePath }),
   openPath: (path: string) => desktopOnly<void>('open_path', { path }),

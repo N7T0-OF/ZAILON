@@ -1,6 +1,8 @@
 export type ViewType = 'home' | 'games' | 'explore' | 'downloads' | 'tools' | 'news' | 'settings'
 export type Platform = 'gamebanana' | 'nexus' | 'curseforge' | 'ayakamods'
 export type UpdateChannel = 'stable' | 'beta'
+export type TextSize = 'small' | 'normal' | 'large' | 'very-large'
+export type UiDensity = 'compact' | 'comfortable'
 export type GameTab = 'overview' | 'mods' | 'profiles' | 'downloads' | 'conflicts' | 'tools' | 'backups' | 'appearance' | 'settings'
 export type LoaderType = 'GIMI' | 'ZZMI' | 'SRMI' | 'WWMI' | 'EFMI' | 'UE5' | 'BepInEx' | 'ASI' | 'CLEO' | 'REF' | 'MelonLoader' | 'DLL' | 'Archive' | 'Folder' | 'Manual'
 
@@ -139,6 +141,7 @@ export interface ExplodMod {
   author: string
   game: string
   thumbnail: string
+  screenshots?: string[]
   downloads: number
   rating: number
   tags: string[]

@@ -6,17 +6,18 @@ use std::{
     io::{copy, Cursor, Read, Write},
     path::{Path, PathBuf},
     process::Command,
-    time::{SystemTime, UNIX_EPOCH},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::ipc::Channel;
+use tauri::{AppHandle, Emitter, Manager, State};
 use walkdir::WalkDir;
 
 #[cfg(desktop)]
-use std::sync::Mutex;
-#[cfg(desktop)]
 use steamlocate::{Library, SteamDir};
-#[cfg(desktop)]
-use tauri::{ipc::Channel, State};
 #[cfg(desktop)]
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -83,10 +84,13 @@ struct ProfileImportPreview {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NxmRequest {
+    #[serde(skip_serializing)]
     raw_url: String,
+    request_id: String,
     game_domain: String,
     mod_id: u64,
     file_id: u64,
+    #[serde(skip_serializing)]
     key: Option<String>,
     expires: Option<u64>,
     user_id: Option<u64>,
@@ -94,6 +98,148 @@ struct NxmRequest {
 
 #[cfg(desktop)]
 struct PendingExternalInstalls(Mutex<Vec<NxmRequest>>);
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ShortcutLaunchRequest {
+    raw_url: String,
+    game_id: String,
+    profile_id: String,
+}
+
+#[cfg(desktop)]
+struct PendingShortcutLaunches(Mutex<Vec<ShortcutLaunchRequest>>);
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderConnectionStatus {
+    provider: String,
+    configured: bool,
+    connected: bool,
+    masked_secret: Option<String>,
+    account_name: Option<String>,
+    last_checked_at: Option<u64>,
+    hourly_remaining: Option<u64>,
+    hourly_limit: Option<u64>,
+    daily_remaining: Option<u64>,
+    daily_limit: Option<u64>,
+    message: String,
+}
+
+struct ProviderConnectionCache(Mutex<HashMap<String, ProviderConnectionStatus>>);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackgroundTaskSnapshot {
+    id: String,
+    kind: String,
+    title: String,
+    status: String,
+    processed: u64,
+    total: u64,
+    message: String,
+    started_at: u64,
+    updated_at: u64,
+    error: Option<String>,
+}
+
+#[derive(Clone)]
+struct BackgroundTaskEntry {
+    snapshot: BackgroundTaskSnapshot,
+    cancel: Arc<AtomicBool>,
+}
+
+#[derive(Clone)]
+struct BackgroundTaskRegistry(Arc<Mutex<HashMap<String, BackgroundTaskEntry>>>);
+
+trait DiscordStream: Read + Write + Send {}
+impl<T: Read + Write + Send> DiscordStream for T {}
+
+#[derive(Clone)]
+struct DiscordRuntime(Arc<Mutex<Option<Box<dyn DiscordStream>>>>);
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscordPresenceConfig {
+    enabled: bool,
+    client_id: String,
+    large_image_key: Option<String>,
+    show_profile: bool,
+    show_mod_count: bool,
+    show_elapsed: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscordConnectionStatus {
+    connected: bool,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LaunchGameResult {
+    pid: u32,
+    discord_connected: bool,
+    discord_message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GameProcessEvent {
+    pid: u32,
+    game_name: String,
+    exit_code: Option<i32>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "event", content = "data")]
+enum BackgroundTaskEvent {
+    #[serde(rename_all = "camelCase")]
+    Progress { task: BackgroundTaskSnapshot },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NexusCatalogGame {
+    name: String,
+    domain: String,
+    mod_count: u64,
+    download_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NexusCatalogMod {
+    id: String,
+    mod_id: u64,
+    name: String,
+    author: String,
+    game: String,
+    game_domain: String,
+    thumbnail: String,
+    downloads: u64,
+    endorsements: u64,
+    description: String,
+    version: Option<String>,
+    updated_at: Option<u64>,
+    nsfw: bool,
+    url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ArtworkCandidate {
+    id: String,
+    provider: String,
+    source_label: String,
+    game_name: String,
+    kind: String,
+    url: String,
+    width: Option<u64>,
+    height: Option<u64>,
+    attribution: String,
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -243,6 +389,205 @@ fn update_data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(root)
 }
 
+fn background_tasks_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(update_data_root(app)?.join("background-tasks.json"))
+}
+
+fn persist_background_tasks(app: &AppHandle, registry: &BackgroundTaskRegistry) {
+    let snapshots = registry
+        .0
+        .lock()
+        .map(|tasks| {
+            tasks
+                .values()
+                .map(|entry| entry.snapshot.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if let (Ok(path), Ok(payload)) = (
+        background_tasks_path(app),
+        serde_json::to_vec_pretty(&snapshots),
+    ) {
+        let _ = fs::write(path, payload);
+    }
+}
+
+fn restore_background_tasks(app: &AppHandle, registry: &BackgroundTaskRegistry) {
+    let Ok(path) = background_tasks_path(app) else {
+        return;
+    };
+    let Ok(payload) = fs::read(path) else { return };
+    let Ok(mut snapshots) = serde_json::from_slice::<Vec<BackgroundTaskSnapshot>>(&payload) else {
+        return;
+    };
+    snapshots.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    snapshots.truncate(100);
+    if let Ok(mut tasks) = registry.0.lock() {
+        for mut snapshot in snapshots {
+            if snapshot.status == "running" {
+                snapshot.status = "interrupted".into();
+                snapshot.message = "Interrompu par la fermeture précédente de ZAILON.".into();
+                snapshot.updated_at = unix_timestamp();
+            }
+            tasks.insert(
+                snapshot.id.clone(),
+                BackgroundTaskEntry {
+                    snapshot,
+                    cancel: Arc::new(AtomicBool::new(false)),
+                },
+            );
+        }
+    }
+}
+
+fn register_background_task(
+    app: &AppHandle,
+    registry: &BackgroundTaskRegistry,
+    id: String,
+    kind: &str,
+    title: &str,
+    total: u64,
+) -> Result<Arc<AtomicBool>, String> {
+    if id.is_empty()
+        || id.len() > 128
+        || !id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+    {
+        return Err("Invalid background task identifier.".into());
+    }
+    let now = unix_timestamp();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let snapshot = BackgroundTaskSnapshot {
+        id: id.clone(),
+        kind: kind.into(),
+        title: title.into(),
+        status: "running".into(),
+        processed: 0,
+        total,
+        message: "Démarrage…".into(),
+        started_at: now,
+        updated_at: now,
+        error: None,
+    };
+    let mut tasks = registry
+        .0
+        .lock()
+        .map_err(|_| "Background task registry is unavailable.".to_string())?;
+    if tasks
+        .get(&id)
+        .is_some_and(|entry| entry.snapshot.status == "running")
+    {
+        return Err("A background task with this identifier is already running.".into());
+    }
+    tasks.insert(
+        id,
+        BackgroundTaskEntry {
+            snapshot: snapshot.clone(),
+            cancel: cancel.clone(),
+        },
+    );
+    drop(tasks);
+    let _ = app.emit("background-task-changed", snapshot);
+    persist_background_tasks(app, registry);
+    Ok(cancel)
+}
+
+fn report_background_task(
+    app: &AppHandle,
+    registry: &BackgroundTaskRegistry,
+    channel: Option<&Channel<BackgroundTaskEvent>>,
+    id: &str,
+    processed: u64,
+    total: u64,
+    message: String,
+) {
+    let snapshot = registry.0.lock().ok().and_then(|mut tasks| {
+        let entry = tasks.get_mut(id)?;
+        entry.snapshot.processed = processed;
+        entry.snapshot.total = total;
+        entry.snapshot.message = message;
+        entry.snapshot.updated_at = unix_timestamp();
+        Some(entry.snapshot.clone())
+    });
+    if let Some(snapshot) = snapshot {
+        if let Some(channel) = channel {
+            let _ = channel.send(BackgroundTaskEvent::Progress {
+                task: snapshot.clone(),
+            });
+        }
+        let _ = app.emit("background-task-changed", snapshot);
+        persist_background_tasks(app, registry);
+    }
+}
+
+fn finish_background_task(
+    app: &AppHandle,
+    registry: &BackgroundTaskRegistry,
+    channel: Option<&Channel<BackgroundTaskEvent>>,
+    id: &str,
+    status: &str,
+    message: String,
+    error: Option<String>,
+) {
+    let snapshot = registry.0.lock().ok().and_then(|mut tasks| {
+        let entry = tasks.get_mut(id)?;
+        entry.snapshot.status = status.into();
+        entry.snapshot.processed = if status == "completed" {
+            entry.snapshot.total
+        } else {
+            entry.snapshot.processed
+        };
+        entry.snapshot.message = message;
+        entry.snapshot.error = error;
+        entry.snapshot.updated_at = unix_timestamp();
+        Some(entry.snapshot.clone())
+    });
+    if let Some(snapshot) = snapshot {
+        if let Some(channel) = channel {
+            let _ = channel.send(BackgroundTaskEvent::Progress {
+                task: snapshot.clone(),
+            });
+        }
+        let _ = app.emit("background-task-changed", snapshot);
+        persist_background_tasks(app, registry);
+    }
+}
+
+#[tauri::command]
+fn background_tasks(state: State<'_, BackgroundTaskRegistry>) -> Vec<BackgroundTaskSnapshot> {
+    let mut snapshots = state
+        .0
+        .lock()
+        .map(|tasks| {
+            tasks
+                .values()
+                .map(|entry| entry.snapshot.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    snapshots.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    snapshots
+}
+
+#[tauri::command]
+fn cancel_background_task(
+    state: State<'_, BackgroundTaskRegistry>,
+    task_id: String,
+) -> Result<(), String> {
+    let tasks = state
+        .0
+        .lock()
+        .map_err(|_| "Background task registry is unavailable.".to_string())?;
+    let task = tasks
+        .get(&task_id)
+        .ok_or_else(|| "Background task not found.".to_string())?;
+    if task.snapshot.status == "running" {
+        task.cancel.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
 fn safe_game_id(game_id: &str) -> Result<&str, String> {
     if game_id.is_empty()
         || game_id.len() > 128
@@ -323,6 +668,378 @@ fn store_game_resource(
     }
     fs::copy(source, &destination).map_err(to_error)?;
     Ok(destination.to_string_lossy().to_string())
+}
+
+fn allowed_artwork_host(host: &str) -> bool {
+    [
+        "steamstatic.com",
+        "steamusercontent.com",
+        "nexusmods.com",
+        "nexus-cdn.com",
+    ]
+    .iter()
+    .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")))
+}
+
+fn image_extension(content_type: Option<&str>, url: &url::Url) -> Option<&'static str> {
+    match content_type
+        .unwrap_or_default()
+        .split(';')
+        .next()
+        .unwrap_or_default()
+    {
+        "image/png" => Some("png"),
+        "image/jpeg" | "image/jpg" => Some("jpg"),
+        "image/webp" => Some("webp"),
+        "image/gif" => Some("gif"),
+        "image/avif" => Some("avif"),
+        _ => match url
+            .path_segments()
+            .and_then(|segments| segments.last())
+            .and_then(|name| name.rsplit('.').next())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "png" => Some("png"),
+            "jpg" | "jpeg" => Some("jpg"),
+            "webp" => Some("webp"),
+            "gif" => Some("gif"),
+            "avif" => Some("avif"),
+            _ => None,
+        },
+    }
+}
+
+fn valid_image_bytes(bytes: &[u8], extension: &str) -> bool {
+    match extension {
+        "png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "jpg" => bytes.starts_with(&[0xff, 0xd8, 0xff]),
+        "gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
+        "webp" => bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP",
+        "avif" => {
+            bytes.len() >= 12
+                && &bytes[4..8] == b"ftyp"
+                && (&bytes[8..12] == b"avif" || &bytes[8..12] == b"avis")
+        }
+        _ => false,
+    }
+}
+
+#[tauri::command]
+async fn cache_remote_game_resource(
+    app: AppHandle,
+    game_id: String,
+    kind: String,
+    source_url: String,
+) -> Result<String, String> {
+    if !matches!(
+        kind.as_str(),
+        "cover" | "logo" | "icon" | "background" | "banner"
+    ) {
+        return Err("Remote artwork is not supported for this resource slot.".into());
+    }
+    let parsed =
+        url::Url::parse(&source_url).map_err(|_| "The artwork URL is invalid.".to_string())?;
+    let host = parsed
+        .host_str()
+        .map(|value| value.to_ascii_lowercase())
+        .ok_or_else(|| "The artwork URL has no host.".to_string())?;
+    if parsed.scheme() != "https" || !allowed_artwork_host(&host) {
+        return Err("This artwork provider is not in ZAILON's trusted source list.".into());
+    }
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(25))
+        .user_agent(format!("ZAILON/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|_| "Unable to initialize the artwork download.".to_string())?
+        .get(parsed.clone())
+        .send()
+        .await
+        .map_err(|error| {
+            if error.is_timeout() {
+                "The artwork download timed out.".to_string()
+            } else {
+                "The artwork provider is unavailable.".to_string()
+            }
+        })?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "The artwork provider returned HTTP {}.",
+            response.status().as_u16()
+        ));
+    }
+    const MAX_IMAGE_SIZE: u64 = 50 * 1024 * 1024;
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_IMAGE_SIZE)
+    {
+        return Err("The remote artwork exceeds the 50 MB safety limit.".into());
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string());
+    let extension = image_extension(content_type.as_deref(), &parsed)
+        .ok_or_else(|| "The remote resource is not a supported image.".to_string())?;
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|_| "Unable to read the remote artwork.".to_string())?;
+    if bytes.len() as u64 > MAX_IMAGE_SIZE || !valid_image_bytes(&bytes, extension) {
+        return Err("The remote resource failed image validation.".into());
+    }
+    let directory = game_resource_directory(&app, &game_id)?;
+    let mut destination =
+        directory.join(format!("{kind}-remote-{}.{}", unix_timestamp(), extension));
+    let mut suffix = 1;
+    while destination.exists() {
+        destination = directory.join(format!(
+            "{kind}-remote-{}-{suffix}.{}",
+            unix_timestamp(),
+            extension
+        ));
+        suffix += 1;
+    }
+    fs::write(&destination, &bytes).map_err(to_error)?;
+    Ok(destination.to_string_lossy().to_string())
+}
+
+fn push_artwork_candidate(
+    candidates: &mut Vec<ArtworkCandidate>,
+    seen: &mut HashSet<String>,
+    game_name: &str,
+    kind: &str,
+    url: String,
+    width: Option<u64>,
+    height: Option<u64>,
+) {
+    let url = safe_remote_image(url);
+    if url.is_empty() || !seen.insert(url.clone()) {
+        return;
+    }
+    candidates.push(ArtworkCandidate {
+        id: format!("steam-{}", candidates.len() + 1),
+        provider: "steam".into(),
+        source_label: "Steam officiel".into(),
+        game_name: game_name.into(),
+        kind: kind.into(),
+        url,
+        width,
+        height,
+        attribution:
+            "Image fournie par le catalogue officiel Steam. Vérifiez l'aperçu avant utilisation."
+                .into(),
+    });
+}
+
+#[tauri::command]
+async fn search_game_artwork(
+    game_name: String,
+    provider: Option<String>,
+    provider_game_id: Option<String>,
+    kind: String,
+) -> Result<Vec<ArtworkCandidate>, String> {
+    if !matches!(
+        kind.as_str(),
+        "cover" | "logo" | "icon" | "background" | "banner"
+    ) {
+        return Err("Automatic search is only available for image slots.".into());
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .user_agent(format!("ZAILON/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|_| "Unable to initialize the Steam artwork search.".to_string())?;
+    let mut app_id = provider_game_id
+        .filter(|value| value.chars().all(|character| character.is_ascii_digit()))
+        .filter(|value| !value.is_empty());
+    let mut matched_name = game_name.trim().to_string();
+    if app_id.is_none()
+        && provider.as_deref().map_or(true, |value| {
+            value.eq_ignore_ascii_case("steam") || value.eq_ignore_ascii_case("standalone")
+        })
+    {
+        let mut search_url =
+            url::Url::parse("https://store.steampowered.com/api/storesearch/").map_err(to_error)?;
+        search_url
+            .query_pairs_mut()
+            .append_pair("term", game_name.trim())
+            .append_pair("l", "french")
+            .append_pair("cc", "FR");
+        if let Ok(response) = client.get(search_url).send().await {
+            if response.status().is_success() {
+                if let Ok(payload) = response.json::<serde_json::Value>().await {
+                    if let Some(item) = payload
+                        .get("items")
+                        .and_then(|value| value.as_array())
+                        .and_then(|items| items.first())
+                    {
+                        app_id = item
+                            .get("id")
+                            .and_then(|value| value.as_u64())
+                            .map(|value| value.to_string());
+                        matched_name = item
+                            .get("name")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or(&matched_name)
+                            .to_string();
+                    }
+                }
+            }
+        }
+    }
+    let app_id = app_id
+        .ok_or_else(|| "Aucun identifiant Steam fiable n'a été trouvé pour ce jeu.".to_string())?;
+    if !app_id.chars().all(|character| character.is_ascii_digit()) {
+        return Err("The Steam application identifier is invalid.".into());
+    }
+    let details = client
+        .get(format!(
+            "https://store.steampowered.com/api/appdetails?appids={app_id}&l=french&cc=FR"
+        ))
+        .send()
+        .await
+        .map_err(|error| {
+            if error.is_timeout() {
+                "La recherche Steam a expiré.".to_string()
+            } else {
+                "Steam est actuellement inaccessible.".to_string()
+            }
+        })?;
+    let payload = if details.status().is_success() {
+        details
+            .json::<serde_json::Value>()
+            .await
+            .unwrap_or_default()
+    } else {
+        serde_json::Value::Null
+    };
+    let data = payload
+        .get(&app_id)
+        .and_then(|value| value.get("data"))
+        .cloned()
+        .unwrap_or_default();
+    if let Some(name) = data.get("name").and_then(|value| value.as_str()) {
+        matched_name = name.to_string();
+    }
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    match kind.as_str() {
+        "cover" => {
+            push_artwork_candidate(&mut candidates, &mut seen, &matched_name, &kind, format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/library_600x900_2x.jpg"), Some(1200), Some(1800));
+            push_artwork_candidate(&mut candidates, &mut seen, &matched_name, &kind, format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/library_600x900.jpg"), Some(600), Some(900));
+            push_artwork_candidate(
+                &mut candidates,
+                &mut seen,
+                &matched_name,
+                &kind,
+                nexus_json_string(&data, &["capsule_image", "header_image"]),
+                None,
+                None,
+            );
+        }
+        "logo" => {
+            push_artwork_candidate(
+                &mut candidates,
+                &mut seen,
+                &matched_name,
+                &kind,
+                format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/logo.png"),
+                None,
+                None,
+            );
+        }
+        "background" => {
+            push_artwork_candidate(
+                &mut candidates,
+                &mut seen,
+                &matched_name,
+                &kind,
+                format!(
+                    "https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/library_hero.jpg"
+                ),
+                Some(1920),
+                Some(620),
+            );
+            push_artwork_candidate(
+                &mut candidates,
+                &mut seen,
+                &matched_name,
+                &kind,
+                nexus_json_string(&data, &["background_raw", "background"]),
+                None,
+                None,
+            );
+            if let Some(url) = data
+                .get("screenshots")
+                .and_then(|value| value.as_array())
+                .and_then(|items| items.first())
+                .and_then(|item| item.get("path_full"))
+                .and_then(|value| value.as_str())
+            {
+                push_artwork_candidate(
+                    &mut candidates,
+                    &mut seen,
+                    &matched_name,
+                    &kind,
+                    url.into(),
+                    None,
+                    None,
+                );
+            }
+        }
+        "banner" => {
+            push_artwork_candidate(
+                &mut candidates,
+                &mut seen,
+                &matched_name,
+                &kind,
+                format!(
+                    "https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/library_hero.jpg"
+                ),
+                Some(1920),
+                Some(620),
+            );
+            push_artwork_candidate(
+                &mut candidates,
+                &mut seen,
+                &matched_name,
+                &kind,
+                nexus_json_string(&data, &["header_image"]),
+                None,
+                None,
+            );
+        }
+        "icon" => {
+            push_artwork_candidate(
+                &mut candidates,
+                &mut seen,
+                &matched_name,
+                &kind,
+                format!(
+                    "https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/capsule_231x87.jpg"
+                ),
+                Some(231),
+                Some(87),
+            );
+            push_artwork_candidate(
+                &mut candidates,
+                &mut seen,
+                &matched_name,
+                &kind,
+                nexus_json_string(&data, &["header_image"]),
+                None,
+                None,
+            );
+        }
+        _ => {}
+    }
+    if candidates.is_empty() {
+        return Err("Steam n'a fourni aucune image pour cet emplacement.".into());
+    }
+    Ok(candidates)
 }
 
 #[tauri::command]
@@ -1723,6 +2440,183 @@ fn scan_mod_import(
     Ok(candidates)
 }
 
+fn scan_mod_import_background_impl(
+    app: &AppHandle,
+    registry: &BackgroundTaskRegistry,
+    channel: &Channel<BackgroundTaskEvent>,
+    task_id: &str,
+    paths: Vec<String>,
+    game_name: String,
+    cancel: &AtomicBool,
+) -> Result<Vec<ModImportCandidate>, String> {
+    if paths.is_empty() {
+        return Err("Select at least one import folder.".into());
+    }
+    let mut unique = HashSet::new();
+    let mut roots = Vec::new();
+    for (index, selected) in paths.iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("TASK_CANCELLED".into());
+        }
+        let path = PathBuf::from(selected);
+        if path.exists() {
+            for root in import_candidate_roots(&path) {
+                let canonical = fs::canonicalize(&root).map_err(to_error)?;
+                if unique.insert(canonical.clone()) {
+                    roots.push(canonical);
+                }
+            }
+        }
+        report_background_task(
+            app,
+            registry,
+            Some(channel),
+            task_id,
+            index as u64 + 1,
+            paths.len() as u64,
+            format!(
+                "Exploration du dossier racine {} / {}",
+                index + 1,
+                paths.len()
+            ),
+        );
+    }
+    let total = roots.len() as u64;
+    report_background_task(
+        app,
+        registry,
+        Some(channel),
+        task_id,
+        0,
+        total,
+        format!("{total} racine(s) de mod détectée(s). Analyse des fichiers…"),
+    );
+    let mut candidates = Vec::with_capacity(roots.len());
+    for (index, canonical) in roots.into_iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("TASK_CANCELLED".into());
+        }
+        let inspected = inspect_native_mod(&canonical);
+        let strong = inspected.framework != "Generic" || !inspected.manifests.is_empty();
+        let mut warnings = Vec::new();
+        if inspected.source_url.is_none() {
+            warnings.push(
+                "Aucune source exacte détectée : aucune mise à jour automatique ne sera autorisée."
+                    .into(),
+            );
+        }
+        if inspected.framework == "Generic" {
+            warnings.push(format!(
+                "Structure générique pour {game_name} : vérifiez la destination avant import."
+            ));
+        }
+        let name = inspected.name.clone();
+        candidates.push(ModImportCandidate {
+            id: inspected.id.clone(),
+            name: inspected.name,
+            path: inspected.path,
+            enabled: inspected.enabled,
+            mod_type: inspected.mod_type,
+            size_bytes: inspected.size_bytes,
+            files: inspected.files,
+            fingerprint: inspected.fingerprint,
+            framework: inspected.framework,
+            manifests: inspected.manifests,
+            source_url: inspected.source_url,
+            version: inspected.version,
+            confidence: if strong { "high" } else { "low" }.into(),
+            warnings,
+        });
+        report_background_task(
+            app,
+            registry,
+            Some(channel),
+            task_id,
+            index as u64 + 1,
+            total,
+            format!("Analyse de {name} ({}/{total})", index + 1),
+        );
+    }
+    candidates.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+    });
+    Ok(candidates)
+}
+
+#[tauri::command]
+async fn scan_mod_import_background(
+    app: AppHandle,
+    state: State<'_, BackgroundTaskRegistry>,
+    task_id: String,
+    paths: Vec<String>,
+    game_name: String,
+    on_event: Channel<BackgroundTaskEvent>,
+) -> Result<Vec<ModImportCandidate>, String> {
+    let registry = state.inner().clone();
+    let cancel = register_background_task(
+        &app,
+        &registry,
+        task_id.clone(),
+        "mod-scan",
+        &format!("Analyse des mods · {game_name}"),
+        paths.len() as u64,
+    )?;
+    let worker_app = app.clone();
+    let worker_registry = registry.clone();
+    let worker_task_id = task_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        scan_mod_import_background_impl(
+            &worker_app,
+            &worker_registry,
+            &on_event,
+            &worker_task_id,
+            paths,
+            game_name,
+            &cancel,
+        )
+    })
+    .await
+    .map_err(|_| "The background scan stopped unexpectedly.".to_string())?;
+    match &result {
+        Ok(candidates) => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            "completed",
+            format!("{} mod(s) analysé(s).", candidates.len()),
+            None,
+        ),
+        Err(error) if error == "TASK_CANCELLED" => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            "cancelled",
+            "Analyse annulée.".into(),
+            None,
+        ),
+        Err(error) => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            "failed",
+            "Échec de l'analyse des mods.".into(),
+            Some(error.clone()),
+        ),
+    }
+    result.map_err(|error| {
+        if error == "TASK_CANCELLED" {
+            "Analyse annulée.".into()
+        } else {
+            error
+        }
+    })
+}
+
 fn validated_mod_entry(mods_root: &str, mod_path: &str) -> Result<PathBuf, String> {
     let root = fs::canonicalize(mods_root).map_err(to_error)?;
     let path = fs::canonicalize(mod_path).map_err(to_error)?;
@@ -1776,16 +2670,252 @@ fn ensure_dir(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn launch_game(exec_path: String) -> Result<(), String> {
+fn discord_write_frame(
+    stream: &mut dyn DiscordStream,
+    opcode: u32,
+    payload: &serde_json::Value,
+) -> Result<(), String> {
+    let body = serde_json::to_vec(payload)
+        .map_err(|_| "Unable to encode the Discord activity.".to_string())?;
+    if body.len() > 64 * 1024 {
+        return Err("Discord activity payload is too large.".into());
+    }
+    stream
+        .write_all(&opcode.to_le_bytes())
+        .map_err(|_| "Unable to write to Discord IPC.".to_string())?;
+    stream
+        .write_all(&(body.len() as u32).to_le_bytes())
+        .map_err(|_| "Unable to write to Discord IPC.".to_string())?;
+    stream
+        .write_all(&body)
+        .map_err(|_| "Unable to write to Discord IPC.".to_string())?;
+    stream
+        .flush()
+        .map_err(|_| "Unable to flush Discord IPC.".to_string())
+}
+
+fn open_discord_stream() -> Result<Box<dyn DiscordStream>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        for index in 0..10 {
+            let path = format!(r"\\.\pipe\discord-ipc-{index}");
+            if let Ok(stream) = fs::OpenOptions::new().read(true).write(true).open(path) {
+                return Ok(Box::new(stream));
+            }
+        }
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use std::os::unix::net::UnixStream;
+        let mut roots = Vec::new();
+        if let Some(path) = std::env::var_os("XDG_RUNTIME_DIR") {
+            roots.push(PathBuf::from(path));
+        }
+        if let Some(path) = std::env::var_os("TMPDIR") {
+            roots.push(PathBuf::from(path));
+        }
+        roots.push(PathBuf::from("/tmp"));
+        for root in roots {
+            for index in 0..10 {
+                for path in [
+                    root.join(format!("discord-ipc-{index}")),
+                    root.join("app/com.discordapp.Discord")
+                        .join(format!("discord-ipc-{index}")),
+                ] {
+                    if let Ok(stream) = UnixStream::connect(path) {
+                        return Ok(Box::new(stream));
+                    }
+                }
+            }
+        }
+    }
+    Err("Discord n'est pas lancé ou son canal IPC est indisponible.".into())
+}
+
+fn valid_discord_identifier(value: &str) -> bool {
+    (5..=32).contains(&value.len()) && value.chars().all(|character| character.is_ascii_digit())
+}
+
+fn discord_handshake(client_id: &str) -> Result<Box<dyn DiscordStream>, String> {
+    if !valid_discord_identifier(client_id) {
+        return Err(
+            "L'identifiant d'application Discord doit contenir uniquement des chiffres.".into(),
+        );
+    }
+    let mut stream = open_discord_stream()?;
+    discord_write_frame(
+        &mut *stream,
+        0,
+        &serde_json::json!({ "v": 1, "client_id": client_id }),
+    )?;
+    Ok(stream)
+}
+
+fn clean_discord_text(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(120)
+        .collect::<String>()
+}
+
+fn set_discord_activity(
+    runtime: &DiscordRuntime,
+    config: &DiscordPresenceConfig,
+    game_name: &str,
+    profile_name: &str,
+    active_mods: usize,
+) -> Result<(), String> {
+    let mut stream = discord_handshake(config.client_id.trim())?;
+    let state = match (config.show_profile, config.show_mod_count) {
+        (true, true) => format!("Profil {profile_name} · {active_mods} mod(s) actif(s)"),
+        (true, false) => format!("Profil {profile_name}"),
+        (false, true) => format!("{active_mods} mod(s) actif(s)"),
+        (false, false) => "Lancé avec ZAILON".into(),
+    };
+    let mut activity = serde_json::json!({
+        "details": clean_discord_text(game_name),
+        "state": clean_discord_text(&state),
+        "instance": false
+    });
+    if config.show_elapsed {
+        activity["timestamps"] = serde_json::json!({ "start": unix_timestamp() });
+    }
+    if let Some(image_key) = config
+        .large_image_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 128
+                && value.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+                })
+        })
+    {
+        activity["assets"] = serde_json::json!({
+            "large_image": image_key,
+            "large_text": clean_discord_text(game_name)
+        });
+    }
+    discord_write_frame(
+        &mut *stream,
+        1,
+        &serde_json::json!({
+            "cmd": "SET_ACTIVITY",
+            "args": { "pid": std::process::id(), "activity": activity },
+            "nonce": format!("{}-{}", unix_timestamp(), std::process::id())
+        }),
+    )?;
+    *runtime
+        .0
+        .lock()
+        .map_err(|_| "Discord runtime is unavailable.".to_string())? = Some(stream);
+    Ok(())
+}
+
+fn clear_discord_activity(runtime: &DiscordRuntime) {
+    if let Ok(mut current) = runtime.0.lock() {
+        if let Some(mut stream) = current.take() {
+            let _ = discord_write_frame(
+                &mut *stream,
+                1,
+                &serde_json::json!({
+                    "cmd": "SET_ACTIVITY",
+                    "args": { "pid": std::process::id(), "activity": null },
+                    "nonce": format!("clear-{}", unix_timestamp())
+                }),
+            );
+        }
+    }
+}
+
+#[tauri::command]
+fn test_discord_connection(
+    app: AppHandle,
+    client_id: String,
+) -> Result<DiscordConnectionStatus, String> {
+    let _stream = discord_handshake(client_id.trim())?;
+    let status = DiscordConnectionStatus {
+        connected: true,
+        message: "Discord IPC détecté. L'identifiant d'application est accepté localement.".into(),
+    };
+    let _ = app.emit("discord-status-changed", status.clone());
+    Ok(status)
+}
+
+#[tauri::command]
+fn launch_game(
+    app: AppHandle,
+    state: State<'_, DiscordRuntime>,
+    exec_path: String,
+    game_name: String,
+    profile_name: String,
+    active_mods: usize,
+    discord: Option<DiscordPresenceConfig>,
+) -> Result<LaunchGameResult, String> {
     let executable = PathBuf::from(exec_path);
     if !executable.is_file() {
         return Err("The game executable was not found.".into());
     }
-    Command::new(&executable)
+    let mut child = Command::new(&executable)
         .current_dir(executable.parent().unwrap_or_else(|| Path::new(".")))
         .spawn()
         .map_err(to_error)?;
-    Ok(())
+    let pid = child.id();
+    let runtime = state.inner().clone();
+    let (discord_connected, discord_message) =
+        match discord.as_ref().filter(|config| config.enabled) {
+            Some(config) => {
+                match set_discord_activity(&runtime, config, &game_name, &profile_name, active_mods)
+                {
+                    Ok(()) => (true, "Discord Rich Presence actif.".to_string()),
+                    Err(error) => (false, error),
+                }
+            }
+            None => (false, "Discord Rich Presence désactivé.".into()),
+        };
+    let discord_status = DiscordConnectionStatus {
+        connected: discord_connected,
+        message: discord_message.clone(),
+    };
+    let _ = app.emit("discord-status-changed", discord_status);
+    let _ = app.emit(
+        "game-process-started",
+        GameProcessEvent {
+            pid,
+            game_name: game_name.clone(),
+            exit_code: None,
+        },
+    );
+    let worker_app = app.clone();
+    let worker_runtime = runtime.clone();
+    let worker_game_name = game_name.clone();
+    std::thread::spawn(move || {
+        let exit_code = child.wait().ok().and_then(|status| status.code());
+        clear_discord_activity(&worker_runtime);
+        let _ = worker_app.emit(
+            "discord-status-changed",
+            DiscordConnectionStatus {
+                connected: false,
+                message: "Le processus du jeu est terminé ; la présence Discord a été nettoyée."
+                    .into(),
+            },
+        );
+        let _ = worker_app.emit(
+            "game-process-stopped",
+            GameProcessEvent {
+                pid,
+                game_name: worker_game_name,
+                exit_code,
+            },
+        );
+    });
+    Ok(LaunchGameResult {
+        pid,
+        discord_connected,
+        discord_message,
+    })
 }
 
 #[tauri::command]
@@ -1970,6 +3100,280 @@ fn import_mod_candidates(paths: Vec<String>, destination: String) -> Result<Vec<
     })();
     let _ = fs::remove_dir_all(&stage);
     result
+}
+
+fn copy_tree_cancellable(
+    source: &Path,
+    destination: &Path,
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err("TASK_CANCELLED".into());
+    }
+    if source.is_file() {
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(to_error)?;
+        }
+        fs::copy(source, destination).map_err(to_error)?;
+        return Ok(());
+    }
+    for entry in WalkDir::new(source)
+        .follow_links(false)
+        .into_iter()
+        .map(|entry| entry.map_err(to_error))
+    {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("TASK_CANCELLED".into());
+        }
+        let entry = entry?;
+        if entry.file_type().is_symlink() {
+            return Err("Symbolic links are not allowed during mod import.".into());
+        }
+        let relative = entry.path().strip_prefix(source).map_err(to_error)?;
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+        validate_archive_relative(relative)?;
+        let output = destination.join(relative);
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&output).map_err(to_error)?;
+        } else if entry.file_type().is_file() {
+            if let Some(parent) = output.parent() {
+                fs::create_dir_all(parent).map_err(to_error)?;
+            }
+            fs::copy(entry.path(), output).map_err(to_error)?;
+        }
+    }
+    Ok(())
+}
+
+fn import_mods_with_staging(
+    app: &AppHandle,
+    registry: &BackgroundTaskRegistry,
+    channel: &Channel<BackgroundTaskEvent>,
+    task_id: &str,
+    game_id: &str,
+    profile_ids: &[String],
+    paths: Vec<String>,
+    destination: String,
+    deploy_now: bool,
+    cancel: &AtomicBool,
+) -> Result<Vec<String>, String> {
+    let game_id = safe_game_id(game_id)?;
+    let destination = PathBuf::from(destination);
+    fs::create_dir_all(&destination).map_err(to_error)?;
+    let staging_root = update_data_root(app)?
+        .join("games")
+        .join(game_id)
+        .join("mods");
+    fs::create_dir_all(&staging_root).map_err(to_error)?;
+    let total = paths.len() as u64;
+    let mut installed = Vec::new();
+    for (index, source) in paths.into_iter().enumerate() {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("TASK_CANCELLED".into());
+        }
+        let source = fs::canonicalize(source).map_err(to_error)?;
+        if !source.exists() {
+            return Err("One of the selected import sources no longer exists.".into());
+        }
+        let inspected = inspect_native_mod(&source);
+        let stage_directory = unique_destination(&staging_root, &inspected.id);
+        let staged_files = stage_directory.join("files");
+        fs::create_dir_all(&staged_files).map_err(to_error)?;
+        report_background_task(
+            app,
+            registry,
+            Some(channel),
+            task_id,
+            index as u64,
+            total,
+            format!(
+                "Staging de {} · {} fichier(s)",
+                inspected.name,
+                inspected.files.len()
+            ),
+        );
+        let stage_target = if source.is_file() {
+            staged_files.join(
+                source
+                    .file_name()
+                    .ok_or_else(|| "Invalid mod file name.".to_string())?,
+            )
+        } else {
+            staged_files.clone()
+        };
+        if let Err(error) = copy_tree_cancellable(&source, &stage_target, cancel) {
+            let _ = fs::remove_dir_all(&stage_directory);
+            return Err(error);
+        }
+        let mut deployment = serde_json::json!({
+            "backend": "Direct Copy",
+            "status": "staged",
+            "destination": destination.to_string_lossy(),
+            "deployedPath": null,
+            "deployedAt": null
+        });
+        let manifest_path = stage_directory.join("manifest.json");
+        let manifest = serde_json::json!({
+            "schemaVersion": 1,
+            "id": inspected.id.clone(),
+            "name": inspected.name.clone(),
+            "fingerprint": inspected.fingerprint.clone(),
+            "framework": inspected.framework.clone(),
+            "version": inspected.version.clone(),
+            "sourceUrl": inspected.source_url.clone(),
+            "profiles": profile_ids,
+            "files": inspected.files.clone(),
+            "stagedAt": unix_timestamp(),
+            "deployment": deployment
+        });
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&manifest).map_err(to_error)?,
+        )
+        .map_err(to_error)?;
+        if deploy_now {
+            if cancel.load(Ordering::Relaxed) {
+                return Err("TASK_CANCELLED".into());
+            }
+            let final_path = unique_destination(&destination, &inspected.name);
+            report_background_task(
+                app,
+                registry,
+                Some(channel),
+                task_id,
+                index as u64,
+                total,
+                format!("Déploiement Direct Copy de {}", inspected.name),
+            );
+            if let Err(error) = copy_tree_cancellable(&staged_files, &final_path, cancel) {
+                if final_path.starts_with(&destination) && final_path != destination {
+                    let _ = fs::remove_dir_all(&final_path);
+                }
+                return Err(error);
+            }
+            deployment = serde_json::json!({
+                "backend": "Direct Copy",
+                "status": "deployed",
+                "destination": destination.to_string_lossy(),
+                "deployedPath": final_path.to_string_lossy(),
+                "deployedAt": unix_timestamp()
+            });
+            let manifest = serde_json::json!({
+                "schemaVersion": 1,
+                "id": inspected.id.clone(),
+                "name": inspected.name.clone(),
+                "fingerprint": inspected.fingerprint.clone(),
+                "framework": inspected.framework.clone(),
+                "version": inspected.version.clone(),
+                "sourceUrl": inspected.source_url.clone(),
+                "profiles": profile_ids,
+                "files": inspected.files.clone(),
+                "stagedAt": unix_timestamp(),
+                "deployment": deployment
+            });
+            fs::write(
+                &manifest_path,
+                serde_json::to_vec_pretty(&manifest).map_err(to_error)?,
+            )
+            .map_err(to_error)?;
+            installed.push(final_path.to_string_lossy().to_string());
+        } else {
+            installed.push(stage_directory.to_string_lossy().to_string());
+        }
+        report_background_task(
+            app,
+            registry,
+            Some(channel),
+            task_id,
+            index as u64 + 1,
+            total,
+            format!("{} prêt ({}/{total})", inspected.name, index + 1),
+        );
+    }
+    Ok(installed)
+}
+
+#[tauri::command]
+async fn import_mod_candidates_background(
+    app: AppHandle,
+    state: State<'_, BackgroundTaskRegistry>,
+    task_id: String,
+    game_id: String,
+    profile_ids: Vec<String>,
+    paths: Vec<String>,
+    destination: String,
+    deploy_now: bool,
+    on_event: Channel<BackgroundTaskEvent>,
+) -> Result<Vec<String>, String> {
+    if paths.is_empty() {
+        return Err("Select at least one mod.".into());
+    }
+    let registry = state.inner().clone();
+    let cancel = register_background_task(
+        &app,
+        &registry,
+        task_id.clone(),
+        "mod-import",
+        "Import et déploiement des mods",
+        paths.len() as u64,
+    )?;
+    let worker_app = app.clone();
+    let worker_registry = registry.clone();
+    let worker_task_id = task_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        import_mods_with_staging(
+            &worker_app,
+            &worker_registry,
+            &on_event,
+            &worker_task_id,
+            &game_id,
+            &profile_ids,
+            paths,
+            destination,
+            deploy_now,
+            &cancel,
+        )
+    })
+    .await
+    .map_err(|_| "The background import stopped unexpectedly.".to_string())?;
+    match &result {
+        Ok(paths) => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            "completed",
+            format!("{} mod(s) traité(s) avec Direct Copy.", paths.len()),
+            None,
+        ),
+        Err(error) if error == "TASK_CANCELLED" => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            "cancelled",
+            "Import annulé ; les éléments déjà staged restent récupérables.".into(),
+            None,
+        ),
+        Err(error) => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            "failed",
+            "Échec de l'import. Aucun fichier existant n'a été écrasé.".into(),
+            Some(error.clone()),
+        ),
+    }
+    result.map_err(|error| {
+        if error == "TASK_CANCELLED" {
+            "Import annulé.".into()
+        } else {
+            error
+        }
+    })
 }
 
 fn zip_options() -> zip::write::SimpleFileOptions {
@@ -2233,37 +3637,664 @@ fn provider_credential(provider: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new("io.github.n7t0of.zailon", &format!("{provider}-api-key")).map_err(to_error)
 }
 
-#[tauri::command]
-fn set_provider_secret(provider: String, secret: String) -> Result<(), String> {
-    let secret = secret.trim();
-    if secret.len() < 8 || secret.len() > 4096 {
+fn validate_provider_secret(provider: &str, secret: &str) -> Result<(), String> {
+    if !matches!(provider, "nexus" | "curseforge") {
+        return Err("Unknown provider.".into());
+    }
+    if secret.len() < 16 || secret.len() > 512 {
         return Err("Provider credential has an invalid length.".into());
     }
-    provider_credential(&provider)?
-        .set_password(secret)
-        .map_err(to_error)
+    if !secret
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'))
+    {
+        return Err("Provider credential contains unsupported characters.".into());
+    }
+    Ok(())
 }
 
-#[tauri::command]
-fn delete_provider_secret(provider: String) -> Result<(), String> {
-    let entry = provider_credential(&provider)?;
-    match entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(error) => Err(to_error(error)),
+fn masked_secret(secret: &str) -> String {
+    let suffix = secret
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    format!("••••••••{suffix}")
+}
+
+fn header_number(headers: &reqwest::header::HeaderMap, names: &[&str]) -> Option<u64> {
+    names.iter().find_map(|name| {
+        headers
+            .get(*name)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+    })
+}
+
+fn provider_disconnected(
+    provider: &str,
+    configured: bool,
+    secret: Option<&str>,
+    message: String,
+) -> ProviderConnectionStatus {
+    ProviderConnectionStatus {
+        provider: provider.into(),
+        configured,
+        connected: false,
+        masked_secret: secret.map(masked_secret),
+        account_name: None,
+        last_checked_at: Some(unix_timestamp()),
+        hourly_remaining: None,
+        hourly_limit: None,
+        daily_remaining: None,
+        daily_limit: None,
+        message,
+    }
+}
+
+async fn validate_nexus_connection(secret: &str) -> ProviderConnectionStatus {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .user_agent(format!("ZAILON/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => {
+            return provider_disconnected(
+                "nexus",
+                true,
+                Some(secret),
+                "Impossible d'initialiser la connexion sécurisée Nexus.".into(),
+            )
+        }
+    };
+    let response = match client
+        .get("https://api.nexusmods.com/v1/users/validate.json")
+        .header("apikey", secret)
+        .header("Application-Name", "ZAILON")
+        .header("Application-Version", env!("CARGO_PKG_VERSION"))
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            let message = if error.is_timeout() {
+                "La vérification Nexus a expiré. La clé reste protégée dans le coffre système."
+            } else if error.is_connect() {
+                "Nexus est inaccessible. Vérifiez la connexion Internet puis réessayez."
+            } else {
+                "La connexion sécurisée à Nexus a échoué."
+            };
+            return provider_disconnected("nexus", true, Some(secret), message.into());
+        }
+    };
+    let status_code = response.status();
+    let headers = response.headers().clone();
+    let hourly_remaining = header_number(
+        &headers,
+        &["x-rl-hourly-remaining", "x-ratelimit-hourly-remaining"],
+    );
+    let hourly_limit = header_number(&headers, &["x-rl-hourly-limit", "x-ratelimit-hourly-limit"]);
+    let daily_remaining = header_number(
+        &headers,
+        &["x-rl-daily-remaining", "x-ratelimit-daily-remaining"],
+    );
+    let daily_limit = header_number(&headers, &["x-rl-daily-limit", "x-ratelimit-daily-limit"]);
+    if !status_code.is_success() {
+        let message = match status_code.as_u16() {
+            401 | 403 => "La clé Nexus a été refusée ou révoquée.",
+            429 => "La limite de requêtes Nexus est atteinte. Réessayez après la réinitialisation du quota.",
+            _ => "Nexus n'a pas accepté la demande de vérification.",
+        };
+        let mut status = provider_disconnected("nexus", true, Some(secret), message.into());
+        status.hourly_remaining = hourly_remaining;
+        status.hourly_limit = hourly_limit;
+        status.daily_remaining = daily_remaining;
+        status.daily_limit = daily_limit;
+        return status;
+    }
+    let payload = response
+        .json::<serde_json::Value>()
+        .await
+        .unwrap_or_default();
+    let account_name = payload
+        .get("name")
+        .or_else(|| payload.get("user_name"))
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.to_string());
+    ProviderConnectionStatus {
+        provider: "nexus".into(),
+        configured: true,
+        connected: true,
+        masked_secret: Some(masked_secret(secret)),
+        account_name,
+        last_checked_at: Some(unix_timestamp()),
+        hourly_remaining,
+        hourly_limit,
+        daily_remaining,
+        daily_limit,
+        message: "Connexion Nexus vérifiée.".into(),
+    }
+}
+
+fn untested_provider_status(provider: &str, secret: Option<&str>) -> ProviderConnectionStatus {
+    ProviderConnectionStatus {
+        provider: provider.into(),
+        configured: secret.is_some(),
+        connected: false,
+        masked_secret: secret.map(masked_secret),
+        account_name: None,
+        last_checked_at: None,
+        hourly_remaining: None,
+        hourly_limit: None,
+        daily_remaining: None,
+        daily_limit: None,
+        message: if secret.is_some() {
+            "Identifiant présent dans le coffre système. Test de connexion requis."
+        } else {
+            "Non configuré."
+        }
+        .into(),
     }
 }
 
 #[tauri::command]
-fn provider_secret_status() -> HashMap<String, bool> {
+async fn set_provider_secret(
+    app: AppHandle,
+    state: State<'_, ProviderConnectionCache>,
+    provider: String,
+    secret: String,
+) -> Result<ProviderConnectionStatus, String> {
+    let secret = secret.trim().to_string();
+    validate_provider_secret(&provider, &secret)?;
+    provider_credential(&provider)?
+        .set_password(&secret)
+        .map_err(|_| {
+            "Impossible d'enregistrer l'identifiant dans le coffre sécurisé du système.".to_string()
+        })?;
+    let status = if provider == "nexus" {
+        validate_nexus_connection(&secret).await
+    } else {
+        untested_provider_status(&provider, Some(&secret))
+    };
+    state
+        .0
+        .lock()
+        .map_err(|_| "Provider status cache is unavailable.".to_string())?
+        .insert(provider.clone(), status.clone());
+    let _ = app.emit("provider-status-changed", status.clone());
+    Ok(status)
+}
+
+#[tauri::command]
+fn delete_provider_secret(
+    app: AppHandle,
+    state: State<'_, ProviderConnectionCache>,
+    provider: String,
+) -> Result<ProviderConnectionStatus, String> {
+    let entry = provider_credential(&provider)?;
+    match entry.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => {}
+        Err(_) => return Err("Impossible de supprimer l'identifiant du coffre système.".into()),
+    };
+    let status = untested_provider_status(&provider, None);
+    state
+        .0
+        .lock()
+        .map_err(|_| "Provider status cache is unavailable.".to_string())?
+        .insert(provider, status.clone());
+    let _ = app.emit("provider-status-changed", status.clone());
+    Ok(status)
+}
+
+#[tauri::command]
+fn provider_connection_statuses(
+    state: State<'_, ProviderConnectionCache>,
+) -> HashMap<String, ProviderConnectionStatus> {
+    let cache = state.0.lock().ok();
     ["nexus", "curseforge"]
         .into_iter()
         .map(|provider| {
-            let present = provider_credential(provider)
-                .and_then(|entry| entry.get_password().map_err(to_error))
-                .is_ok();
-            (provider.to_string(), present)
+            let cached = cache
+                .as_ref()
+                .and_then(|items| items.get(provider))
+                .cloned();
+            let status = cached.unwrap_or_else(|| {
+                let secret = provider_credential(provider)
+                    .and_then(|entry| entry.get_password().map_err(to_error))
+                    .ok();
+                untested_provider_status(provider, secret.as_deref())
+            });
+            (provider.to_string(), status)
         })
         .collect()
+}
+
+#[tauri::command]
+async fn test_provider_connection(
+    app: AppHandle,
+    state: State<'_, ProviderConnectionCache>,
+    provider: String,
+) -> Result<ProviderConnectionStatus, String> {
+    let secret = provider_credential(&provider)?
+        .get_password()
+        .map_err(|_| "Aucun identifiant n'est enregistré pour ce fournisseur.".to_string())?;
+    let status = if provider == "nexus" {
+        validate_nexus_connection(&secret).await
+    } else {
+        untested_provider_status(&provider, Some(&secret))
+    };
+    state
+        .0
+        .lock()
+        .map_err(|_| "Provider status cache is unavailable.".to_string())?
+        .insert(provider, status.clone());
+    let _ = app.emit("provider-status-changed", status.clone());
+    Ok(status)
+}
+
+fn nexus_json_string(value: &serde_json::Value, fields: &[&str]) -> String {
+    fields
+        .iter()
+        .find_map(|field| value.get(*field).and_then(|item| item.as_str()))
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn nexus_json_u64(value: &serde_json::Value, fields: &[&str]) -> u64 {
+    fields
+        .iter()
+        .find_map(|field| {
+            value.get(*field).and_then(|item| {
+                item.as_u64()
+                    .or_else(|| item.as_i64().and_then(|number| u64::try_from(number).ok()))
+                    .or_else(|| item.as_str().and_then(|text| text.parse::<u64>().ok()))
+            })
+        })
+        .unwrap_or_default()
+}
+
+fn nexus_json_bool(value: &serde_json::Value, fields: &[&str]) -> bool {
+    fields.iter().any(|field| {
+        value.get(*field).is_some_and(|item| {
+            item.as_bool().unwrap_or(false)
+                || item.as_u64().is_some_and(|number| number > 0)
+                || item
+                    .as_str()
+                    .is_some_and(|text| matches!(text, "1" | "true" | "yes"))
+        })
+    })
+}
+
+fn safe_remote_image(value: String) -> String {
+    url::Url::parse(&value)
+        .ok()
+        .filter(|url| url.scheme() == "https" && url.host_str().is_some())
+        .map(|url| url.to_string())
+        .unwrap_or_default()
+}
+
+fn valid_nexus_domain(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.chars().all(|character| {
+            character.is_ascii_lowercase()
+                || character.is_ascii_digit()
+                || matches!(character, '-' | '_')
+        })
+}
+
+async fn nexus_api_json(
+    path: &str,
+) -> Result<(serde_json::Value, reqwest::header::HeaderMap), String> {
+    let secret = provider_credential("nexus")?.get_password().map_err(|_| {
+        "Connectez Nexus Mods dans les paramètres avant d'ouvrir le catalogue.".to_string()
+    })?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .user_agent(format!("ZAILON/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|_| "Impossible d'initialiser la connexion sécurisée Nexus.".to_string())?;
+    let response = client
+        .get(format!("https://api.nexusmods.com/v1/{path}"))
+        .header("apikey", secret)
+        .header("Application-Name", "ZAILON")
+        .header("Application-Version", env!("CARGO_PKG_VERSION"))
+        .send()
+        .await
+        .map_err(|error| {
+            if error.is_timeout() {
+                "La requête Nexus a expiré.".to_string()
+            } else {
+                "Nexus est actuellement inaccessible.".to_string()
+            }
+        })?;
+    let status = response.status();
+    let headers = response.headers().clone();
+    if !status.is_success() {
+        return Err(match status.as_u16() {
+            401 | 403 => "La clé Nexus a été refusée ou ne permet pas cette opération.".into(),
+            404 => "Ce jeu ou ce catalogue n'existe pas sur Nexus Mods.".into(),
+            429 => "La limite de requêtes Nexus est atteinte.".into(),
+            _ => format!(
+                "Nexus n'a pas accepté la demande (HTTP {}).",
+                status.as_u16()
+            ),
+        });
+    }
+    let payload = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|_| "Nexus a renvoyé une réponse illisible.".to_string())?;
+    Ok((payload, headers))
+}
+
+fn refresh_nexus_status_from_headers(
+    app: &AppHandle,
+    state: &State<'_, ProviderConnectionCache>,
+    headers: &reqwest::header::HeaderMap,
+) {
+    let Ok(secret) =
+        provider_credential("nexus").and_then(|entry| entry.get_password().map_err(to_error))
+    else {
+        return;
+    };
+    let mut status = state
+        .0
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get("nexus").cloned())
+        .unwrap_or_else(|| untested_provider_status("nexus", Some(&secret)));
+    status.configured = true;
+    status.connected = true;
+    status.masked_secret = Some(masked_secret(&secret));
+    status.last_checked_at = Some(unix_timestamp());
+    status.hourly_remaining = header_number(
+        headers,
+        &["x-rl-hourly-remaining", "x-ratelimit-hourly-remaining"],
+    );
+    status.hourly_limit =
+        header_number(headers, &["x-rl-hourly-limit", "x-ratelimit-hourly-limit"]);
+    status.daily_remaining = header_number(
+        headers,
+        &["x-rl-daily-remaining", "x-ratelimit-daily-remaining"],
+    );
+    status.daily_limit = header_number(headers, &["x-rl-daily-limit", "x-ratelimit-daily-limit"]);
+    status.message = "Catalogue Nexus connecté.".into();
+    if let Ok(mut cache) = state.0.lock() {
+        cache.insert("nexus".into(), status.clone());
+    }
+    let _ = app.emit("provider-status-changed", status);
+}
+
+#[tauri::command]
+async fn nexus_catalog_games(
+    app: AppHandle,
+    state: State<'_, ProviderConnectionCache>,
+) -> Result<Vec<NexusCatalogGame>, String> {
+    let (payload, headers) = nexus_api_json("games.json").await?;
+    refresh_nexus_status_from_headers(&app, &state, &headers);
+    let rows = payload
+        .as_array()
+        .or_else(|| payload.get("games").and_then(|value| value.as_array()))
+        .cloned()
+        .unwrap_or_default();
+    let mut games = rows
+        .iter()
+        .filter_map(|row| {
+            let name = nexus_json_string(row, &["name"]);
+            let domain = nexus_json_string(row, &["domain_name", "domain"]);
+            if name.is_empty() || !valid_nexus_domain(&domain) {
+                return None;
+            }
+            Some(NexusCatalogGame {
+                name,
+                domain,
+                mod_count: nexus_json_u64(row, &["mods", "mod_count"]),
+                download_count: nexus_json_u64(row, &["downloads", "download_count"]),
+            })
+        })
+        .collect::<Vec<_>>();
+    games.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+    });
+    Ok(games)
+}
+
+#[tauri::command]
+async fn nexus_catalog_mods(
+    app: AppHandle,
+    state: State<'_, ProviderConnectionCache>,
+    game_domain: String,
+    feed: String,
+) -> Result<Vec<NexusCatalogMod>, String> {
+    let domain = game_domain.trim().to_ascii_lowercase();
+    if !valid_nexus_domain(&domain) {
+        return Err("Le domaine Nexus du jeu est invalide.".into());
+    }
+    let endpoint = match feed.as_str() {
+        "updated" => "latest_updated",
+        "trending" | "popular" | "downloaded" => "trending",
+        _ => "latest_added",
+    };
+    let (payload, headers) =
+        nexus_api_json(&format!("games/{domain}/mods/{endpoint}.json")).await?;
+    refresh_nexus_status_from_headers(&app, &state, &headers);
+    let rows = payload
+        .as_array()
+        .or_else(|| payload.get("mods").and_then(|value| value.as_array()))
+        .cloned()
+        .unwrap_or_default();
+    Ok(rows
+        .iter()
+        .filter_map(|row| {
+            let mod_id = nexus_json_u64(row, &["mod_id", "game_scoped_id", "id"]);
+            let name = nexus_json_string(row, &["name"]);
+            if mod_id == 0 || name.is_empty() {
+                return None;
+            }
+            Some(NexusCatalogMod {
+                id: format!("nexus-{domain}-{mod_id}"),
+                mod_id,
+                name,
+                author: nexus_json_string(row, &["author", "uploaded_by", "user_name"]),
+                game: nexus_json_string(row, &["game_name", "game"])
+                    .trim()
+                    .to_string(),
+                game_domain: domain.clone(),
+                thumbnail: safe_remote_image(nexus_json_string(
+                    row,
+                    &["picture_url", "thumbnail_url"],
+                )),
+                downloads: nexus_json_u64(row, &["mod_downloads", "downloads", "download_count"]),
+                endorsements: nexus_json_u64(row, &["endorsement_count", "endorsements"]),
+                description: nexus_json_string(row, &["summary", "description"]),
+                version: Some(nexus_json_string(row, &["version"]))
+                    .filter(|value| !value.is_empty()),
+                updated_at: Some(nexus_json_u64(row, &["updated_timestamp", "updated_at"]))
+                    .filter(|value| *value > 0),
+                nsfw: nexus_json_bool(row, &["contains_adult_content", "adult_content", "nsfw"]),
+                url: format!("https://www.nexusmods.com/{domain}/mods/{mod_id}"),
+            })
+        })
+        .collect())
+}
+
+fn parse_shortcut_launch_url(raw: &str) -> Result<ShortcutLaunchRequest, String> {
+    if raw.len() > 1024 {
+        return Err("ZAILON launch URL is too long.".into());
+    }
+    let parsed = url::Url::parse(raw).map_err(|_| "Invalid ZAILON launch URL.".to_string())?;
+    if parsed.scheme() != "zailon"
+        || parsed.host_str() != Some("launch")
+        || parsed.username() != ""
+        || parsed.password().is_some()
+        || parsed.fragment().is_some()
+    {
+        return Err("Invalid ZAILON launch URL structure.".into());
+    }
+    let segments = parsed
+        .path_segments()
+        .map(|items| items.collect::<Vec<_>>())
+        .unwrap_or_default();
+    if segments.len() != 2 || segments[0] != "game" {
+        return Err("ZAILON launch URL must match /game/{gameId}.".into());
+    }
+    let game_id = safe_game_id(segments[1])?.to_string();
+    let profile_id = parsed
+        .query_pairs()
+        .find(|(key, _)| key == "profile")
+        .map(|(_, value)| value.to_string())
+        .ok_or_else(|| "ZAILON launch URL has no profile identifier.".to_string())?;
+    safe_game_id(&profile_id)?;
+    Ok(ShortcutLaunchRequest {
+        raw_url: raw.into(),
+        game_id,
+        profile_id,
+    })
+}
+
+#[cfg(desktop)]
+fn enqueue_shortcut_launch(app: &AppHandle, raw: &str) {
+    if let Ok(request) = parse_shortcut_launch_url(raw) {
+        if let Ok(mut pending) = app.state::<PendingShortcutLaunches>().0.lock() {
+            if !pending.iter().any(|item| item.raw_url == request.raw_url) {
+                pending.push(request.clone());
+            }
+        }
+        let _ = app.emit("zailon-launch", request);
+    }
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn pending_shortcut_launches(
+    state: State<'_, PendingShortcutLaunches>,
+) -> Vec<ShortcutLaunchRequest> {
+    state
+        .0
+        .lock()
+        .map(|items| items.clone())
+        .unwrap_or_default()
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn consume_shortcut_launch(
+    state: State<'_, PendingShortcutLaunches>,
+    raw_url: String,
+) -> Result<(), String> {
+    let mut pending = state.0.lock().map_err(to_error)?;
+    pending.retain(|item| item.raw_url != raw_url);
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn ensure_zailon_association() -> Result<(), String> {
+    let root = RegKey::predef(HKEY_CURRENT_USER);
+    let classes = root
+        .open_subkey_with_flags(
+            "Software\\Classes",
+            winreg::enums::KEY_READ | winreg::enums::KEY_WRITE,
+        )
+        .or_else(|_| root.create_subkey("Software\\Classes").map(|item| item.0))
+        .map_err(to_error)?;
+    let executable = std::env::current_exe().map_err(to_error)?;
+    let (scheme, _) = classes.create_subkey("zailon").map_err(to_error)?;
+    scheme
+        .set_value("", &"URL:ZAILON Launch Protocol")
+        .map_err(to_error)?;
+    scheme.set_value("URL Protocol", &"").map_err(to_error)?;
+    let (icon, _) = scheme.create_subkey("DefaultIcon").map_err(to_error)?;
+    icon.set_value("", &format!("\"{}\",0", executable.display()))
+        .map_err(to_error)?;
+    let (command, _) = scheme
+        .create_subkey("shell\\open\\command")
+        .map_err(to_error)?;
+    command
+        .set_value("", &format!("\"{}\" \"%1\"", executable.display()))
+        .map_err(to_error)?;
+    Ok(())
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn create_desktop_shortcut(
+    game_id: String,
+    profile_id: String,
+    game_name: String,
+    icon_path: Option<String>,
+) -> Result<String, String> {
+    safe_game_id(&game_id)?;
+    safe_game_id(&profile_id)?;
+    let desktop =
+        dirs::desktop_dir().ok_or_else(|| "The desktop folder is unavailable.".to_string())?;
+    let safe_name = safe_archive_component(&game_name);
+    let uri = format!("zailon://launch/game/{game_id}?profile={profile_id}");
+    #[cfg(target_os = "windows")]
+    {
+        ensure_zailon_association()?;
+        let executable = std::env::current_exe().map_err(to_error)?;
+        let icon = icon_path
+            .map(PathBuf::from)
+            .filter(|path| path.is_file())
+            .unwrap_or(executable);
+        let mut shortcut = desktop.join(format!("ZAILON - {safe_name}.url"));
+        let mut suffix = 2;
+        while shortcut.exists() {
+            shortcut = desktop.join(format!("ZAILON - {safe_name} ({suffix}).url"));
+            suffix += 1;
+        }
+        let content = format!(
+            "[InternetShortcut]\r\nURL={uri}\r\nIconFile={}\r\nIconIndex=0\r\n",
+            icon.to_string_lossy()
+        );
+        fs::write(&shortcut, content).map_err(to_error)?;
+        return Ok(shortcut.to_string_lossy().to_string());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let executable = std::env::current_exe().map_err(to_error)?;
+        let mut shortcut = desktop.join(format!("ZAILON - {safe_name}.desktop"));
+        let mut suffix = 2;
+        while shortcut.exists() {
+            shortcut = desktop.join(format!("ZAILON - {safe_name} ({suffix}).desktop"));
+            suffix += 1;
+        }
+        let icon = icon_path
+            .filter(|value| Path::new(value).is_file())
+            .unwrap_or_default();
+        let content = format!(
+            "[Desktop Entry]\nType=Application\nName=ZAILON - {safe_name}\nExec=\"{}\" \"{uri}\"\nIcon={icon}\nTerminal=false\nCategories=Game;\n",
+            executable.display()
+        );
+        fs::write(&shortcut, content).map_err(to_error)?;
+        fs::set_permissions(&shortcut, fs::Permissions::from_mode(0o755)).map_err(to_error)?;
+        return Ok(shortcut.to_string_lossy().to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut shortcut = desktop.join(format!("ZAILON - {safe_name}.webloc"));
+        let mut suffix = 2;
+        while shortcut.exists() {
+            shortcut = desktop.join(format!("ZAILON - {safe_name} ({suffix}).webloc"));
+            suffix += 1;
+        }
+        let escaped_uri = uri.replace('&', "&amp;");
+        let content = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>URL</key><string>{escaped_uri}</string></dict></plist>\n");
+        fs::write(&shortcut, content).map_err(to_error)?;
+        return Ok(shortcut.to_string_lossy().to_string());
+    }
+    #[allow(unreachable_code)]
+    Err("Desktop shortcuts are not supported on this platform.".into())
 }
 
 fn parse_nxm_url(raw: &str) -> Result<NxmRequest, String> {
@@ -2316,8 +4347,11 @@ fn parse_nxm_url(raw: &str) -> Result<NxmRequest, String> {
     let user_id = query
         .get("user_id")
         .and_then(|value| value.parse::<u64>().ok());
+    let mut request_hasher = std::collections::hash_map::DefaultHasher::new();
+    raw.hash(&mut request_hasher);
     Ok(NxmRequest {
         raw_url: raw.into(),
+        request_id: format!("nxm-{:016x}", request_hasher.finish()),
         game_domain,
         mod_id,
         file_id,
@@ -2353,10 +4387,10 @@ fn pending_external_installs(state: State<'_, PendingExternalInstalls>) -> Vec<N
 #[tauri::command]
 fn consume_external_install(
     state: State<'_, PendingExternalInstalls>,
-    raw_url: String,
+    request_id: String,
 ) -> Result<(), String> {
     let mut pending = state.0.lock().map_err(to_error)?;
-    pending.retain(|item| item.raw_url != raw_url);
+    pending.retain(|item| item.request_id != request_id);
     Ok(())
 }
 
@@ -2785,6 +4819,38 @@ mod tests {
     }
 
     #[test]
+    fn validates_shortcut_launch_urls_and_internal_ids() {
+        let parsed = parse_shortcut_launch_url("zailon://launch/game/game-123?profile=profile-456")
+            .expect("valid ZAILON shortcut URL");
+        assert_eq!(parsed.game_id, "game-123");
+        assert_eq!(parsed.profile_id, "profile-456");
+        assert!(parse_shortcut_launch_url("zailon://launch/game/../outside?profile=p-1").is_err());
+        assert!(parse_shortcut_launch_url("zailon://evil/game/game-1?profile=p-1").is_err());
+        assert!(parse_shortcut_launch_url("zailon://launch/game/game-1?profile=../p").is_err());
+    }
+
+    #[test]
+    fn masks_provider_secrets_without_returning_the_original() {
+        let secret = "0123456789abcdef0123456789abcdef";
+        let masked = masked_secret(secret);
+        assert!(!masked.contains(secret));
+        assert!(masked.ends_with("cdef"));
+        assert!(validate_provider_secret("nexus", secret).is_ok());
+        assert!(validate_provider_secret("nexus", "short").is_err());
+        assert!(validate_provider_secret("nexus", "invalid secret with spaces").is_err());
+    }
+
+    #[test]
+    fn validates_remote_image_signatures_and_nexus_domains() {
+        assert!(valid_image_bytes(b"\x89PNG\r\n\x1a\nrest", "png"));
+        assert!(!valid_image_bytes(b"MZ executable", "png"));
+        assert!(valid_nexus_domain("skyrimspecialedition"));
+        assert!(!valid_nexus_domain("../outside"));
+        assert!(valid_discord_identifier("123456789012345678"));
+        assert!(!valid_discord_identifier("client-secret"));
+    }
+
+    #[test]
     fn blocks_archive_traversal_reserved_names_and_executables() {
         assert!(validate_archive_relative(Path::new("safe/mod.archive")).is_ok());
         assert!(validate_archive_relative(Path::new("../outside.txt")).is_err());
@@ -2900,15 +4966,21 @@ mod tests {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default();
+    let builder = tauri::Builder::default()
+        .manage(ProviderConnectionCache(Mutex::new(HashMap::new())))
+        .manage(BackgroundTaskRegistry(Arc::new(Mutex::new(HashMap::new()))))
+        .manage(DiscordRuntime(Arc::new(Mutex::new(None))));
     #[cfg(desktop)]
     let builder = builder
         .manage(PendingExternalInstalls(Mutex::new(Vec::new())))
+        .manage(PendingShortcutLaunches(Mutex::new(Vec::new())))
         .plugin(tauri_plugin_single_instance::init(
             |app, args, _working_directory| {
                 for argument in args {
                     if argument.starts_with("nxm://") {
                         enqueue_nxm(app, &argument);
+                    } else if argument.starts_with("zailon://") {
+                        enqueue_shortcut_launch(app, &argument);
                     }
                 }
             },
@@ -2917,6 +4989,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            restore_background_tasks(app.handle(), app.state::<BackgroundTaskRegistry>().inner());
             #[cfg(desktop)]
             {
                 app.handle()
@@ -2927,6 +5000,8 @@ pub fn run() {
                 for argument in std::env::args() {
                     if argument.starts_with("nxm://") {
                         enqueue_nxm(app.handle(), &argument);
+                    } else if argument.starts_with("zailon://") {
+                        enqueue_shortcut_launch(app.handle(), &argument);
                     }
                 }
             }
@@ -2935,25 +5010,35 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan_mods,
             scan_mod_import,
+            scan_mod_import_background,
             toggle_mod,
             delete_mod,
             ensure_dir,
             launch_game,
+            test_discord_connection,
             guess_mods_path,
             install_mod,
             import_mod_candidates,
+            import_mod_candidates_background,
             export_profile,
             preview_profile_import,
             extract_profile_archive,
             set_provider_secret,
             delete_provider_secret,
-            provider_secret_status,
+            provider_connection_statuses,
+            test_provider_connection,
+            nexus_catalog_games,
+            nexus_catalog_mods,
             set_nxm_association,
             nxm_association_status,
             store_game_resource,
+            cache_remote_game_resource,
+            search_game_artwork,
             remove_game_resource,
             open_path,
             open_external_url,
+            background_tasks,
+            cancel_background_task,
             prepare_update_backup,
             record_update_event,
             open_update_log,
@@ -2965,6 +5050,12 @@ pub fn run() {
             pending_external_installs,
             #[cfg(desktop)]
             consume_external_install,
+            #[cfg(desktop)]
+            pending_shortcut_launches,
+            #[cfg(desktop)]
+            consume_shortcut_launch,
+            #[cfg(desktop)]
+            create_desktop_shortcut,
             #[cfg(desktop)]
             check_for_update,
             #[cfg(desktop)]

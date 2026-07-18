@@ -727,6 +727,40 @@ fn is_probable_mod_root(path: &Path) -> bool {
         })
 }
 
+fn has_direct_mod_signature(path: &Path) -> bool {
+    if !path.is_dir() {
+        return is_probable_mod_root(path);
+    }
+    let metadata = [
+        "manifest.json",
+        "mod.json",
+        "info.json",
+        "package.json",
+        "meta.ini",
+        "fomod/info.xml",
+        "nexusmods.txt",
+    ];
+    if metadata.iter().any(|name| path.join(name).is_file()) {
+        return true;
+    }
+    fs::read_dir(path)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|entry| entry.is_file())
+        .any(|entry| {
+            matches!(
+                entry
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .map(|value| value.to_ascii_lowercase())
+                    .as_deref(),
+                Some("pak" | "archive" | "esp" | "esm" | "esl" | "dll" | "asi")
+            )
+        })
+}
+
 fn import_candidate_roots(path: &Path) -> Vec<PathBuf> {
     if path.is_file() {
         return vec![path.to_path_buf()];
@@ -760,7 +794,7 @@ fn import_candidate_roots(path: &Path) -> Vec<PathBuf> {
         .map(|entry| entry.path())
         .filter(|entry| is_probable_mod_root(entry))
         .collect::<Vec<_>>();
-    if direct.len() > 1 && !is_probable_mod_root(path) {
+    if !direct.is_empty() && !has_direct_mod_signature(path) {
         direct
     } else {
         vec![path.to_path_buf()]
@@ -1637,8 +1671,8 @@ fn scan_mod_import(
     paths: Vec<String>,
     game_name: String,
 ) -> Result<Vec<ModImportCandidate>, String> {
-    if paths.is_empty() || paths.len() > 100 {
-        return Err("Select between 1 and 100 import folders.".into());
+    if paths.is_empty() {
+        return Err("Select at least one import folder.".into());
     }
     let mut unique = HashSet::new();
     let mut candidates = Vec::new();
@@ -1894,8 +1928,8 @@ fn unique_destination(directory: &Path, name: &str) -> PathBuf {
 
 #[tauri::command]
 fn import_mod_candidates(paths: Vec<String>, destination: String) -> Result<Vec<String>, String> {
-    if paths.is_empty() || paths.len() > 100 {
-        return Err("Select between 1 and 100 mods.".into());
+    if paths.is_empty() {
+        return Err("Select at least one mod.".into());
     }
     let destination = PathBuf::from(destination);
     fs::create_dir_all(&destination).map_err(to_error)?;
@@ -2779,6 +2813,42 @@ mod tests {
             .source_url
             .as_deref()
             .is_some_and(|url| url.contains("nexusmods.com")));
+        fs::remove_dir_all(root).expect("remove test directory");
+    }
+
+    #[test]
+    fn imports_a_collection_with_more_than_one_hundred_mod_folders() {
+        let root =
+            std::env::temp_dir().join(format!("zailon-unlimited-import-test-{}", unix_timestamp()));
+        let collection = root.join("collection");
+        let destination = root.join("destination");
+        fs::create_dir_all(&collection).expect("create collection");
+        for index in 0..125 {
+            let mod_root = collection.join(format!("mod-{index:03}"));
+            fs::create_dir_all(&mod_root).expect("create mod folder");
+            fs::write(mod_root.join(format!("mod-{index:03}.pak")), b"mod")
+                .expect("write mod file");
+        }
+
+        let candidates = scan_mod_import(
+            vec![collection.to_string_lossy().to_string()],
+            "Test game".into(),
+        )
+        .expect("scan collection");
+        assert_eq!(candidates.len(), 125);
+
+        let installed = import_mod_candidates(
+            candidates.into_iter().map(|item| item.path).collect(),
+            destination.to_string_lossy().to_string(),
+        )
+        .expect("import collection");
+        assert_eq!(installed.len(), 125);
+        assert_eq!(
+            fs::read_dir(&destination)
+                .expect("read destination")
+                .count(),
+            125
+        );
         fs::remove_dir_all(root).expect("remove test directory");
     }
 

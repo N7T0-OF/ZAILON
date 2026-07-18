@@ -1,5 +1,6 @@
 import { Archive, Boxes, Copy, Download, FileArchive, FolderInput, FolderOpen, FolderPlus, Plus, Radar, RefreshCw, Search, ShieldAlert, Trash2, Upload, Wrench, X } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
 import { native, pickExecutable, pickFolder, pickFolders, pickProfileArchive, saveProfileArchive } from '../../lib/native'
 import { ModCard } from '../UI/ModCard'
@@ -78,7 +79,7 @@ export function GamesView() {
       schemaVersion: 1,
       exportedAt: new Date().toISOString(),
       app: 'ZAILON',
-      appVersion: '1.3.0',
+      appVersion: '1.3.1',
       exportMode: complete ? 'complete' : 'light',
       game: { name: selectedGame.name, provider: selectedGame.provider, providerGameId: selectedGame.providerGameId },
       profile,
@@ -161,26 +162,70 @@ function ModImportDialog({ gameName, destination, onClose, onImported }: { gameN
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  const [dragActive, setDragActive] = useState(false)
+  const [visibleCount, setVisibleCount] = useState(250)
+  const visibleCandidates = candidates.slice(0, visibleCount)
 
-  const choose = async () => {
-    const paths = await pickFolders()
+  const analyze = useCallback(async (paths: string[]) => {
     if (!paths.length) return
     setBusy(true); setError(undefined)
     try {
       const found = await native.scanModImport(paths, gameName)
-      setCandidates(found)
-      setSelected(new Set(found.map(item => item.id)))
+      setCandidates(current => {
+        const merged = new Map(current.map(item => [item.path, item]))
+        found.forEach(item => merged.set(item.path, item))
+        return [...merged.values()].sort((left, right) => left.name.localeCompare(right.name))
+      })
+      setSelected(current => {
+        const next = new Set(current)
+        found.forEach(item => next.add(item.path))
+        return next
+      })
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) } finally { setBusy(false) }
+  }, [gameName])
+
+  const choose = async () => {
+    const paths = await pickFolders('Sélectionnez un dossier contenant tous les mods')
+    await analyze(paths)
   }
+
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    let unlisten: (() => void) | undefined
+    let disposed = false
+    void getCurrentWindow().onDragDropEvent(event => {
+      if (event.payload.type === 'enter' || event.payload.type === 'over') setDragActive(true)
+      if (event.payload.type === 'leave') setDragActive(false)
+      if (event.payload.type === 'drop') {
+        setDragActive(false)
+        void analyze(event.payload.paths)
+      }
+    }).then(listener => {
+      if (disposed) listener()
+      else unlisten = listener
+    }).catch(reason => setError(reason instanceof Error ? reason.message : String(reason)))
+    return () => { disposed = true; unlisten?.() }
+  }, [analyze])
+
   const commit = async () => {
     if (!destination) { setError('Configurez le dossier Mods du jeu avant l’import.'); return }
-    const paths = candidates.filter(item => selected.has(item.id)).map(item => item.path)
+    const paths = candidates.filter(item => selected.has(item.path)).map(item => item.path)
     if (!paths.length) return
     setBusy(true); setError(undefined)
     try { await native.importModCandidates(paths, destination); onImported(); onClose() } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); setBusy(false) }
   }
 
-  return <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/70 p-5 backdrop-blur-sm" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}><section className="flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-[#111414] shadow-2xl"><header className="flex items-center gap-3 border-b border-white/[0.07] p-4"><FolderInput size={18} className="text-gold" /><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-white">Import intelligent — {gameName}</h2><p className="mt-0.5 text-[11px] text-white/38">Analyse locale uniquement. Aucun dossier n’est copié avant votre confirmation.</p></div><button onClick={onClose} className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><X size={15} /></button></header><div className="min-h-48 flex-1 overflow-y-auto p-4">{!candidates.length ? <button onClick={() => void choose()} disabled={busy} className="flex min-h-44 w-full flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.1] text-white/45 hover:bg-white/[0.025]"><FolderPlus size={24} /><span className="mt-3 text-xs font-semibold">Sélectionner un ou plusieurs dossiers</span><span className="mt-1 text-[11px]">Scanner générique, Cyberpunk, Bethesda, Unreal Pak et XXMI</span></button> : <div className="space-y-2">{candidates.map(candidate => <label key={candidate.id} className="flex items-start gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"><input type="checkbox" checked={selected.has(candidate.id)} onChange={() => setSelected(current => { const next = new Set(current); next.has(candidate.id) ? next.delete(candidate.id) : next.add(candidate.id); return next })} className="mt-1 accent-gold" /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-white/78">{candidate.name}</span><span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[11px] text-white/45">{candidate.framework}</span><span className="text-[11px] text-white/30">confiance {candidate.confidence}</span></div><p className="mt-1 truncate font-mono text-[11px] text-white/30" title={candidate.path}>{candidate.path}</p>{candidate.sourceUrl && <p className="mt-1 text-[11px] text-emerald-200/55">Source détectée : {candidate.sourceUrl}</p>}{candidate.warnings.map(warning => <p key={warning} className="mt-1 text-[11px] text-amber-200/55">{warning}</p>)}</div><span className="text-[11px] text-white/30">{formatBytes(candidate.sizeBytes)}</span></label>)}</div>}{error && <p className="mt-3 rounded-lg border border-red-400/15 bg-red-400/[0.04] p-3 text-[11px] text-red-200/70">{error}</p>}</div><footer className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] p-4"><button onClick={() => void choose()} disabled={busy} className="rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]">Ajouter des dossiers</button><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-3 py-2 text-[11px] text-white/45">Annuler</button><button onClick={() => void commit()} disabled={busy || !selected.size} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-ink-400 disabled:opacity-35">{busy ? 'Analyse en cours…' : `Importer ${selected.size} mod(s)`}</button></div></footer></section></div>
+  return <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/70 p-5 backdrop-blur-sm" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
+    <section className={`relative flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border bg-[#111414] shadow-2xl transition-colors ${dragActive ? 'border-gold/70 ring-2 ring-gold/20' : 'border-white/[0.1]'}`}>
+      {dragActive && <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[#101313]/90 backdrop-blur-sm"><div className="text-center text-gold"><FolderInput size={36} className="mx-auto" /><p className="mt-3 text-sm font-semibold">Déposez le dossier contenant tous vos mods</p><p className="mt-1 text-[11px] text-white/48">Tous les sous-dossiers détectés seront ajoutés, sans limite de nombre.</p></div></div>}
+      <header className="flex items-center gap-3 border-b border-white/[0.07] p-4"><FolderInput size={18} className="text-gold" /><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-white">Import intelligent — {gameName}</h2><p className="mt-0.5 text-[11px] text-white/38">Glissez le dossier racine de votre collection, ou sélectionnez-le. Aucun dossier n’est copié avant confirmation.</p></div><button onClick={onClose} className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><X size={15} /></button></header>
+      <div className="min-h-48 flex-1 overflow-y-auto p-4">
+        {!candidates.length ? <button onClick={() => void choose()} disabled={busy} className="flex min-h-44 w-full flex-col items-center justify-center rounded-xl border border-dashed border-gold/25 bg-gold/[0.015] text-white/50 hover:bg-gold/[0.035]"><FolderPlus size={26} /><span className="mt-3 text-xs font-semibold">Glissez ici le dossier contenant tous les mods</span><span className="mt-1 text-[11px]">ou cliquez pour sélectionner le dossier racine — aucun maximum de mods</span><span className="mt-1 text-[11px] text-white/28">Générique, Cyberpunk, Bethesda, Unreal Pak, XXMI et BepInEx</span></button> : <div className="space-y-2">{visibleCandidates.map(candidate => <label key={candidate.path} className="flex items-start gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"><input type="checkbox" checked={selected.has(candidate.path)} onChange={() => setSelected(current => { const next = new Set(current); next.has(candidate.path) ? next.delete(candidate.path) : next.add(candidate.path); return next })} className="mt-1 accent-gold" /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-white/78">{candidate.name}</span><span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[11px] text-white/45">{candidate.framework}</span><span className="text-[11px] text-white/30">confiance {candidate.confidence}</span></div><p className="mt-1 truncate font-mono text-[11px] text-white/30" title={candidate.path}>{candidate.path}</p>{candidate.sourceUrl && <p className="mt-1 text-[11px] text-emerald-200/55">Source détectée : {candidate.sourceUrl}</p>}{candidate.warnings.map(warning => <p key={warning} className="mt-1 text-[11px] text-amber-200/55">{warning}</p>)}</div><span className="text-[11px] text-white/30">{formatBytes(candidate.sizeBytes)}</span></label>)}{visibleCount < candidates.length && <button onClick={() => setVisibleCount(count => count + 250)} className="w-full rounded-lg border border-white/[0.08] py-2 text-[11px] text-white/45 hover:bg-white/[0.04]">Afficher 250 résultats supplémentaires ({candidates.length - visibleCount} restants)</button>}</div>}
+        {error && <p className="mt-3 rounded-lg border border-red-400/15 bg-red-400/[0.04] p-3 text-[11px] text-red-200/70">{error}</p>}
+      </div>
+      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] p-4"><div className="flex items-center gap-2"><button onClick={() => void choose()} disabled={busy} className="rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]">Ajouter un dossier racine</button>{candidates.length > 0 && <span className="text-[11px] text-white/32">{candidates.length} mod(s) détecté(s)</span>}</div><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-3 py-2 text-[11px] text-white/45">Annuler</button><button onClick={() => void commit()} disabled={busy || !selected.size} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-ink-400 disabled:opacity-35">{busy ? 'Analyse/import en cours…' : `Importer ${selected.size} mod(s)`}</button></div></footer>
+    </section>
+  </div>
 }
 
 function Field({ label, value, placeholder, onChange, onBrowse }: { label: string; value: string; placeholder: string; onChange: (value: string) => void; onBrowse: () => void }) {

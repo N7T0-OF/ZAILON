@@ -28,7 +28,7 @@ export function AppWindow() {
     <div
       className="relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden"
       style={{
-        background: 'linear-gradient(135deg, #080710 0%, #0d0c17 100%)',
+        background: 'linear-gradient(135deg, #090b0b 0%, #111414 100%)',
       }}
     >
       {/* Subtle grain overlay */}

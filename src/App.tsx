@@ -14,9 +14,9 @@ export default function App() {
   }, [tick])
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-[#030308]"
+    <div className="relative h-screen w-screen overflow-hidden bg-[#050606]"
       style={{
-        backgroundImage: 'radial-gradient(ellipse at 50% 50%, rgba(232,184,75,0.03) 0%, transparent 70%)',
+        backgroundImage: 'radial-gradient(ellipse at 50% 50%, rgba(219,232,229,0.025) 0%, transparent 70%)',
       }}>
       <UpdateProvider>
         <AppWindow />

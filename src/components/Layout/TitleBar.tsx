@@ -57,18 +57,15 @@ export function TitleBar() {
   }
 
   return (
-    <header className="z-[70] flex h-10 flex-shrink-0 select-none items-center border-b border-white/[0.055] bg-[#0a0b0f]/95">
+    <header className="z-[70] flex h-8 flex-shrink-0 select-none items-center border-b border-white/[0.035] bg-[#090b0b]/98">
       <div
         data-tauri-drag-region
         onMouseDown={startDragging}
         onDoubleClick={event => { event.preventDefault(); void toggleMaximize() }}
         className="flex h-full min-w-0 flex-1 cursor-default items-center gap-2 px-3"
       >
-        <div className="flex h-5 w-5 items-center justify-center rounded-md border border-gold/30 bg-gold/10 shadow-[0_0_18px_rgba(232,184,75,0.12)]">
-          <span className="font-display text-[10px] font-black text-gold">Z</span>
-        </div>
-        <span className="font-display text-[11px] font-bold uppercase tracking-[0.19em] text-white/82">ZAILON</span>
-        <span className="font-mono text-[8px] text-white/23">v{appVersion}</span>
+        <span className="font-display text-[9px] font-bold uppercase tracking-[0.24em] text-white/62">ZAILON</span>
+        <span className="font-mono text-[6px] uppercase tracking-[0.12em] text-white/17">Universal Mod Launcher · v{appVersion}</span>
         {windowError && <span title={windowError} className="ml-2 max-w-sm truncate text-[9px] text-red-300/75">Contrôle de fenêtre indisponible</span>}
       </div>
 
@@ -100,6 +97,6 @@ function WindowButton({ label, danger = false, onClick, onMouseDown, children }:
     title={label}
     onMouseDown={onMouseDown}
     onClick={event => { event.stopPropagation(); onClick() }}
-    className={`flex h-full w-12 items-center justify-center text-white/48 transition-colors hover:text-white ${danger ? 'hover:bg-[#c42b3b]' : 'hover:bg-white/[0.09]'}`}
+    className={`flex h-full w-10 items-center justify-center text-white/38 transition-colors hover:text-white ${danger ? 'hover:bg-[#a72f40]' : 'hover:bg-white/[0.07]'}`}
   >{children}</button>
 }

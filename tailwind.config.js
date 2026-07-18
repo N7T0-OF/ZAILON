@@ -5,18 +5,18 @@ export default {
     extend: {
       colors: {
         gold: {
-          DEFAULT: '#e8b84b',
-          dim: '#a07c28',
-          glow: 'rgba(232,184,75,0.15)',
-          bright: '#f5d070',
+          DEFAULT: '#dbe8e5',
+          dim: '#81928f',
+          glow: 'rgba(219,232,229,0.12)',
+          bright: '#f3faf8',
         },
         ink: {
-          50: '#2a2940',
-          100: '#1e1d2e',
-          200: '#14131f',
-          300: '#0d0c17',
-          400: '#080710',
-          500: '#04040b',
+          50: '#29302f',
+          100: '#1d2322',
+          200: '#141817',
+          300: '#0f1212',
+          400: '#090b0b',
+          500: '#050606',
         },
       },
       fontFamily: {
@@ -34,8 +34,8 @@ export default {
       },
       keyframes: {
         'pulse-gold': {
-          '0%, 100%': { boxShadow: '0 0 8px rgba(232,184,75,0.3)' },
-          '50%': { boxShadow: '0 0 20px rgba(232,184,75,0.6)' },
+          '0%, 100%': { boxShadow: '0 0 8px rgba(219,232,229,0.16)' },
+          '50%': { boxShadow: '0 0 20px rgba(219,232,229,0.30)' },
         },
         'slide-up': {
           from: { transform: 'translateY(8px)', opacity: 0 },

@@ -19,7 +19,7 @@ export function StatusBar() {
   }, [])
 
   const activeMods = selectedProfile?.mods.filter(mod => mod.enabled).length ?? 0
-  return <footer className="z-40 flex h-7 flex-shrink-0 items-center gap-1 border-t border-white/[0.055] bg-[#08090c]/96 px-2 text-[8px] text-white/34">
+  return <footer className="z-40 flex h-6 flex-shrink-0 items-center gap-1 border-t border-white/[0.04] bg-[#090b0b]/98 px-2 text-[7px] text-white/28">
     <StatusItem icon={Gamepad2} label={`${games.length} jeu${games.length !== 1 ? 'x' : ''}`} />
     <StatusItem icon={ShieldCheck} label={`${activeMods} mod${activeMods !== 1 ? 's' : ''} actif${activeMods !== 1 ? 's' : ''}`} />
     <StatusItem icon={Radio} label={selectedGame?.provider || 'Bibliothèque locale'} />

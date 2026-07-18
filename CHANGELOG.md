@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1 — Correctif de publication macOS Intel
+
+- Remplace le runner GitHub Actions retiré `macos-13` par le runner Intel standard `macos-15-intel`, afin que les quatre builds desktop se terminent et débloquent la publication automatique des sommes SHA-256.
+
 ## 1.2.0 — Refonte native et détection locale multi-sources
 
 - Refonte complète de l’accueil autour du jeu sélectionné, avec héros visuel, métriques réelles, rail latéral adaptatif et barre d’état persistante.

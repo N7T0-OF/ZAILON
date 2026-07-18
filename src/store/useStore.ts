@@ -4,7 +4,7 @@ import { ExplodMod, Game, GameResources, LoaderType, Mod, Platform, Profile, Upd
 import { DetectedGame, native, NativeMod, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES } from './gamebanana'
 
-const APP_VERSION = '1.2.0'
+const APP_VERSION = '1.2.1'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`

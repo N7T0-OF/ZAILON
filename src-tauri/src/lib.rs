@@ -306,6 +306,46 @@ fn open_path(path: String) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_external_url(url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|_| "The source URL is invalid.".to_string())?;
+    if parsed.scheme() != "https" {
+        return Err("Only secure HTTPS source links can be opened.".into());
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "The source URL has no host.".to_string())?
+        .to_ascii_lowercase();
+    let allowed_hosts = ["gamebanana.com", "nexusmods.com", "curseforge.com"];
+    if !allowed_hosts
+        .iter()
+        .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")))
+    {
+        return Err("This source is not in ZAILON's trusted link list.".into());
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    validate_external_url(&url)?;
+
+    #[cfg(target_os = "windows")]
+    Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", url.as_str()])
+        .spawn()
+        .map_err(to_error)?;
+    #[cfg(target_os = "macos")]
+    Command::new("open").arg(&url).spawn().map_err(to_error)?;
+    #[cfg(target_os = "linux")]
+    Command::new("xdg-open")
+        .arg(&url)
+        .spawn()
+        .map_err(to_error)?;
+
+    Ok(())
+}
+
 fn append_update_log(root: &Path, entry: serde_json::Value) -> Result<(), String> {
     let log_path = root.join("update-log.jsonl");
     let mut log = fs::OpenOptions::new()
@@ -1620,6 +1660,15 @@ mod tests {
         assert!(!allowed_resource_extension("video", "gif"));
     }
 
+    #[test]
+    fn accepts_only_secure_trusted_external_links() {
+        assert!(validate_external_url("https://gamebanana.com/mods/123").is_ok());
+        assert!(validate_external_url("https://api.gamebanana.com/Core/List/New").is_ok());
+        assert!(validate_external_url("http://gamebanana.com/mods/123").is_err());
+        assert!(validate_external_url("https://gamebanana.com.evil.example/mods/123").is_err());
+        assert!(validate_external_url("file:///C:/Windows/System32/cmd.exe").is_err());
+    }
+
     #[cfg(desktop)]
     #[test]
     fn excludes_known_steam_tools_from_game_results() {
@@ -1674,6 +1723,7 @@ pub fn run() {
             store_game_resource,
             remove_game_resource,
             open_path,
+            open_external_url,
             prepare_update_backup,
             record_update_event,
             open_update_log,

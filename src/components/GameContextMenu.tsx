@@ -93,7 +93,7 @@ export function GameContextMenu({ game, position, onClose, onEditResources }: Ga
     style={{ left: placement.x, top: placement.y }}
     className="fixed z-[200] w-64 rounded-xl border border-white/[0.12] bg-[#14151b]/[0.98] p-1.5 shadow-[0_22px_60px_rgba(0,0,0,0.62)] backdrop-blur-xl"
   >
-    <p className="truncate px-2 py-1.5 font-mono text-[8px] uppercase tracking-[0.18em] text-white/30">{game.name}</p>
+    <p className="truncate px-2 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-white/30">{game.name}</p>
     {items.map((item, index) => {
       if ('separator' in item) return <div key={`separator-${index}`} className="my-1 border-t border-white/[0.065]" role="separator" />
       const ItemIcon = item.icon
@@ -107,8 +107,8 @@ export function GameContextMenu({ game, position, onClose, onEditResources }: Ga
         title={item.hint}
         onMouseEnter={() => { if (currentFocus >= 0) setActiveIndex(currentFocus) }}
         onClick={() => item.action?.()}
-        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[10px] transition-colors ${item.danger ? 'text-red-300/80 hover:bg-red-500/10 hover:text-red-200' : 'text-white/66 hover:bg-white/[0.075] hover:text-white'} disabled:cursor-not-allowed disabled:text-white/22 disabled:hover:bg-transparent`}
-      ><ItemIcon size={12} /><span className="flex-1">{item.label}</span>{item.disabled && <span className="text-[7px] uppercase tracking-wide text-white/18">indisponible</span>}</button>
+        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] transition-colors ${item.danger ? 'text-red-300/80 hover:bg-red-500/10 hover:text-red-200' : 'text-white/66 hover:bg-white/[0.075] hover:text-white'} disabled:cursor-not-allowed disabled:text-white/22 disabled:hover:bg-transparent`}
+      ><ItemIcon size={12} /><span className="flex-1">{item.label}</span>{item.disabled && <span className="text-[11px] uppercase tracking-wide text-white/18">indisponible</span>}</button>
     })}
   </div>, document.body)
 }

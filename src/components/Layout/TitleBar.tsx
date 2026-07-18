@@ -64,9 +64,9 @@ export function TitleBar() {
         onDoubleClick={event => { event.preventDefault(); void toggleMaximize() }}
         className="flex h-full min-w-0 flex-1 cursor-default items-center gap-2 px-3"
       >
-        <span className="font-display text-[9px] font-bold uppercase tracking-[0.24em] text-white/62">ZAILON</span>
-        <span className="font-mono text-[6px] uppercase tracking-[0.12em] text-white/17">Universal Mod Launcher · v{appVersion}</span>
-        {windowError && <span title={windowError} className="ml-2 max-w-sm truncate text-[9px] text-red-300/75">Contrôle de fenêtre indisponible</span>}
+        <span className="font-display text-[11px] font-bold uppercase tracking-[0.24em] text-white/62">ZAILON</span>
+        <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-white/17">Universal Mod Launcher · v{appVersion}</span>
+        {windowError && <span title={windowError} className="ml-2 max-w-sm truncate text-[11px] text-red-300/75">Contrôle de fenêtre indisponible</span>}
       </div>
 
       <div className="flex h-full items-stretch" onDoubleClick={event => event.stopPropagation()}>

@@ -3,11 +3,11 @@ import type { LucideIcon } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import { ViewType } from '../../types'
 
-const NAV: Array<{ id: ViewType; icon: LucideIcon; label: string; archived?: boolean }> = [
+const NAV: Array<{ id: ViewType; icon: LucideIcon; label: string }> = [
   { id: 'home', icon: Home, label: 'Accueil' },
   { id: 'games', icon: Gamepad2, label: 'Bibliothèque' },
   { id: 'mods', icon: Boxes, label: 'Mods' },
-  { id: 'explore', icon: Compass, label: 'Explorer — archivé', archived: true },
+  { id: 'explore', icon: Compass, label: 'Explorer' },
   { id: 'downloads', icon: Download, label: 'Téléchargements' },
   { id: 'tools', icon: Wrench, label: 'Outils' },
 ]
@@ -32,7 +32,7 @@ export function Sidebar() {
   </aside>
 }
 
-function NavButton({ item, active, onClick }: { item: { id: ViewType; icon: LucideIcon; label: string; archived?: boolean }; active: boolean; onClick: () => void }) {
+function NavButton({ item, active, onClick }: { item: { id: ViewType; icon: LucideIcon; label: string }; active: boolean; onClick: () => void }) {
   const Icon = item.icon
   return <button
     type="button"
@@ -43,6 +43,5 @@ function NavButton({ item, active, onClick }: { item: { id: ViewType; icon: Luci
     className={`relative flex h-8 w-8 items-center justify-center rounded-full transition-all ${active ? 'bg-[#dbe8e5] text-[#101313] shadow-[0_8px_22px_rgba(0,0,0,0.32)]' : 'text-white/32 hover:bg-white/[0.06] hover:text-white/74'}`}
   >
     <Icon size={13} strokeWidth={active ? 2.35 : 1.7} />
-    {item.archived && <span className={`absolute bottom-0 right-0 h-1.5 w-1.5 rounded-full border border-[#0a0c0c] ${active ? 'bg-[#596564]' : 'bg-white/18'}`} />}
   </button>
 }

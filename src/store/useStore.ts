@@ -4,7 +4,7 @@ import { ExplodMod, Game, GameResources, LoaderType, Mod, Platform, Profile, Upd
 import { DetectedGame, native, NativeMod, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES } from './gamebanana'
 
-const APP_VERSION = '1.2.2'
+const APP_VERSION = '1.2.3'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -424,13 +424,13 @@ export const useStore = create<Store>()(persist((set, get) => ({
     if (isPlaying && playStartTime) set({ sessionTime: Math.floor((Date.now() - playStartTime) / 1_000) })
   },
   setExplorePlatform: explorePlatform => set({ explorePlatform, exploreMods: [], exploreError: undefined }),
-  setExploreGame: exploreGameId => set({ exploreGameId }),
+  setExploreGame: exploreGameId => set({ exploreGameId, exploreMods: [], exploreError: undefined }),
   setExploreSearch: exploreSearch => set({ exploreSearch }),
   setExploreGrid: exploreGrid => set({ exploreGrid }),
   refreshExplore: async () => {
     const { explorePlatform, exploreGameId, exploreSearch } = get()
     if (explorePlatform !== 'gamebanana') {
-      set({ exploreMods: [], exploreError: `${explorePlatform} needs its own API credentials and is not enabled in this build.` })
+      set({ exploreMods: [], exploreError: `${explorePlatform} exige ses propres identifiants API et n’est pas encore connecté.` })
       return
     }
     set({ exploreLoading: true, exploreError: undefined })
@@ -443,7 +443,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   },
   installMod: async mod => {
     const { game } = selected(get())
-    if (!game?.modsPath) { set({ notice: 'Select the game and its mods folder before installing a mod.' }); return }
+    if (!game?.modsPath) { set({ notice: 'Sélectionnez un jeu et configurez son dossier Mods avant l’installation.' }); return }
     try {
       let downloadUrl = mod.downloadUrl
       let fileName = mod.fileName
@@ -452,10 +452,11 @@ export const useStore = create<Store>()(persist((set, get) => ({
         downloadUrl = download.url
         fileName = download.fileName
       }
-      if (!downloadUrl || !fileName) throw new Error('No direct download is available for this mod.')
-      await native.installMod(downloadUrl, fileName, game.modsPath)
+      if (!downloadUrl || !fileName) throw new Error('Aucun téléchargement direct n’est disponible pour ce mod.')
+      const installedPath = await native.installMod(downloadUrl, fileName, game.modsPath)
       await get().scanMods(game.id)
-      set({ notice: `${mod.name} installed.` })
+      const extracted = fileName.toLocaleLowerCase().endsWith('.zip')
+      set({ notice: extracted ? `${mod.name} a été installé dans ${game.name}.` : `${mod.name} a été téléchargé dans ${installedPath}. Cette archive doit être extraite manuellement.` })
     } catch (error) {
       set({ notice: asError(error) })
     }

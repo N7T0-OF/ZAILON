@@ -11,7 +11,7 @@ profiles locally and ships installers for Windows, Linux and macOS.
 - Keep separate local mod profiles, per-profile priority, notes, file-conflict indicators and playtime statistics.
 - Right-click a game card (or use its ellipsis) to play, manage mods, open its folders, mark favorite, hide or remove only its ZAILON entry.
 - Import covers, logos, icons, backgrounds, banners, SVGs and videos; preview, position and resize them before saving. ZAILON copies approved resources into its own local data directory.
-- Keep Explorer visibly archived while its provider adapters, persistent download queue and safe installation flow are rebuilt; no demo catalog is presented as functional data.
+- Browse real GameBanana results in Explorer, search recent mods, hide adult results by default and install a selected file into the explicitly configured target game.
 - Native frameless window with working move, minimize, maximize/restore and close controls.
 - Restore the last valid native window size, position and maximized state.
 - Signed in-app update checks with Stable and Beta channels, progress, local backup and update log.

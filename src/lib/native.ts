@@ -119,6 +119,7 @@ export const native = {
   removeGameResource: (gameId: string, resourcePath: string) =>
     desktopOnly<void>('remove_game_resource', { gameId, resourcePath }),
   openPath: (path: string) => desktopOnly<void>('open_path', { path }),
+  openExternalUrl: (url: string) => desktopOnly<void>('open_external_url', { url }),
   prepareUpdateBackup: (snapshot: string, currentVersion: string, targetVersion: string) =>
     desktopOnly<string>('prepare_update_backup', { snapshot, currentVersion, targetVersion }),
   recordUpdateEvent: (event: string, version: string, message?: string) =>

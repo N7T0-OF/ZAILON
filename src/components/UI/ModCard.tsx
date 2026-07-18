@@ -25,21 +25,21 @@ export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteC
         : 'bg-white/[0.02] border-white/[0.03] opacity-60 hover:opacity-80'
     }`}>
       {/* Loader badge */}
-      <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded flex-shrink-0"
+      <span className="text-[11px] font-mono font-bold px-1.5 py-0.5 rounded flex-shrink-0"
         style={{ color: loaderColor, backgroundColor: `${loaderColor}20`, border: `1px solid ${loaderColor}40` }}>
         {mod.loader}
       </span>
 
       {/* Name + meta */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5"><p className="text-xs font-body font-medium text-white/90 truncate leading-tight">{mod.name}</p>{mod.conflict && mod.conflict !== 'none' && <span title={`${mod.conflictCount || 0} fichier(s) partagé(s) avec un autre mod actif`} className={`flex items-center gap-0.5 rounded px-1 py-0.5 text-[8px] ${mod.conflict === 'overwrites' ? 'bg-amber-400/10 text-amber-200' : mod.conflict === 'overwritten' ? 'bg-red-400/10 text-red-200' : 'bg-purple-400/10 text-purple-200'}`}><AlertTriangle size={9} /> {conflictLabel[mod.conflict]}</span>}</div>
+        <div className="flex items-center gap-1.5"><p className="text-xs font-body font-medium text-white/90 truncate leading-tight">{mod.name}</p>{mod.conflict && mod.conflict !== 'none' && <span title={`${mod.conflictCount || 0} fichier(s) partagé(s) avec un autre mod actif`} className={`flex items-center gap-0.5 rounded px-1 py-0.5 text-[11px] ${mod.conflict === 'overwrites' ? 'bg-amber-400/10 text-amber-200' : mod.conflict === 'overwritten' ? 'bg-red-400/10 text-red-200' : 'bg-purple-400/10 text-purple-200'}`}><AlertTriangle size={9} /> {conflictLabel[mod.conflict]}</span>}</div>
         <div className="flex items-center gap-2 mt-0.5">
-          <span className="text-[9px] font-mono text-white/30">P{(mod.priority ?? 0) + 1}</span>
-          {mod.author && <span className="text-[10px] text-white/35">{mod.author}</span>}
-          {mod.version && <span className="text-[10px] text-white/25">v{mod.version}</span>}
-          {mod.size && <span className="text-[10px] text-white/25">{mod.size}</span>}
+          <span className="text-[11px] font-mono text-white/30">P{(mod.priority ?? 0) + 1}</span>
+          {mod.author && <span className="text-[11px] text-white/35">{mod.author}</span>}
+          {mod.version && <span className="text-[11px] text-white/25">v{mod.version}</span>}
+          {mod.size && <span className="text-[11px] text-white/25">{mod.size}</span>}
           {mod.source && (
-            <span className="text-[9px] font-medium" style={{ color: platformColor }}>
+            <span className="text-[11px] font-medium" style={{ color: platformColor }}>
               {mod.source === 'local' ? 'local' : mod.source}
             </span>
           )}

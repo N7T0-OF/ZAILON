@@ -12,7 +12,7 @@ command = [
     "src-tauri/Cargo.toml",
     "--lib",
 ]
-tail: deque[str] = deque(maxlen=140)
+tail: deque[str] = deque(maxlen=80)
 
 process = subprocess.Popen(
     command,
@@ -37,7 +37,7 @@ if exit_code:
         .replace("\n", "%0A")
     )
     print(
-        f"::error title=Native Rust tests failed::{escaped[:60000]}",
+        f"::error title=Native Rust tests failed::{escaped[-60000:]}",
         flush=True,
     )
 

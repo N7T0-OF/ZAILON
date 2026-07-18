@@ -2092,7 +2092,7 @@ fn preview_profile_import(archive_path: String) -> Result<ProfileImportPreview, 
         let relative = entry
             .enclosed_name()
             .ok_or_else(|| "Profile archive contains an unsafe path.".to_string())?;
-        validate_archive_relative(relative)?;
+        validate_archive_relative(&relative)?;
         if entry.name() == "manifest.json" {
             if entry.size() > 5 * 1024 * 1024 {
                 return Err("Profile manifest is unexpectedly large.".into());
@@ -2470,7 +2470,7 @@ async fn install_mod(url: String, file_name: String, mods_path: String) -> Resul
                 let relative_path = entry
                     .enclosed_name()
                     .ok_or_else(|| "Mod archive contains an unsafe traversal path.".to_string())?;
-                validate_archive_relative(relative_path)?;
+                validate_archive_relative(&relative_path)?;
                 total = total.saturating_add(entry.size());
                 if total > 4 * 1024 * 1024 * 1024 {
                     return Err("Mod archive exceeds the 4 GB extraction limit.".into());

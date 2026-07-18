@@ -2432,6 +2432,7 @@ async fn install_mod(url: String, file_name: String, mods_path: String) -> Resul
     validate_archive_relative(Path::new(&safe_name))?;
     let response = reqwest::Client::new()
         .get(parsed)
+        .send()
         .await
         .map_err(to_error)?
         .error_for_status()

@@ -1,72 +1,105 @@
 import { Maximize2, Minimize2, Minus, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { MouseEvent, useEffect, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { isTauri } from '@tauri-apps/api/core'
 import { saveWindowState } from '@tauri-apps/plugin-window-state'
-import { appVersion } from '../../store/useStore'
-import { useStore } from '../../store/useStore'
+import { appVersion, useStore } from '../../store/useStore'
+
+type WindowAction = 'Réduire' | 'Agrandir' | 'Déplacer' | 'Fermer'
 
 export function TitleBar() {
   const stopPlaying = useStore(state => state.stopPlaying)
   const [maximized, setMaximized] = useState(false)
+  const [windowError, setWindowError] = useState<string>()
+  const desktop = isTauri()
 
   useEffect(() => {
-    if (!isTauri()) return
-    const window = getCurrentWindow()
-    const syncMaximized = () => void window.isMaximized().then(setMaximized).catch(() => undefined)
+    if (!desktop) return
+    const appWindow = getCurrentWindow()
+    const syncMaximized = () => void appWindow.isMaximized().then(setMaximized).catch(error => setWindowError(String(error)))
     let unlisten: (() => void) | undefined
     syncMaximized()
-    void window.onResized(syncMaximized).then(listener => { unlisten = listener })
+    void appWindow.onResized(syncMaximized).then(listener => { unlisten = listener }).catch(error => setWindowError(String(error)))
     return () => unlisten?.()
-  }, [])
+  }, [desktop])
 
-  const withWindow = (action: (window: ReturnType<typeof getCurrentWindow>) => Promise<unknown>) => {
-    if (isTauri()) void action(getCurrentWindow())
+  const run = async (label: WindowAction, action: () => Promise<unknown>) => {
+    if (!desktop) return
+    setWindowError(undefined)
+    try {
+      await action()
+    } catch (error) {
+      setWindowError(`${label} : ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
-  const toggleMaximize = async () => {
-    if (!isTauri()) return
-    const window = getCurrentWindow()
-    await window.toggleMaximize()
-    setMaximized(await window.isMaximized())
+  const toggleMaximize = () => run('Agrandir', async () => {
+    const appWindow = getCurrentWindow()
+    await appWindow.toggleMaximize()
+    setMaximized(await appWindow.isMaximized())
+  })
+
+  const startDragging = (event: MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || event.detail > 1) return
+    void run('Déplacer', () => getCurrentWindow().startDragging())
   }
 
-  const closeWindow = async () => {
+  const closeWindow = () => run('Fermer', async () => {
     stopPlaying()
-    if (!isTauri()) return
-    await saveWindowState()
+    // La sauvegarde de géométrie ne doit jamais pouvoir bloquer la fermeture.
+    try { await saveWindowState() } catch { /* fermeture prioritaire */ }
     await getCurrentWindow().close()
+  })
+
+  const stopChromeEvent = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
   }
 
   return (
-    <div className="flex h-9 flex-shrink-0 select-none items-center border-b border-white/[0.05] bg-ink-400/90">
+    <header className="z-[70] flex h-10 flex-shrink-0 select-none items-center border-b border-white/[0.055] bg-[#0a0b0f]/95">
       <div
         data-tauri-drag-region
-        onDoubleClick={() => void toggleMaximize()}
-        className="flex h-full flex-1 cursor-default items-center gap-2 px-3"
+        onMouseDown={startDragging}
+        onDoubleClick={event => { event.preventDefault(); void toggleMaximize() }}
+        className="flex h-full min-w-0 flex-1 cursor-default items-center gap-2 px-3"
       >
-        <div className="flex items-center gap-2">
-          <div className="flex h-3.5 w-3.5 items-center justify-center rounded-sm bg-gold">
-            <span className="text-[7px] font-display font-black text-ink-400">Z</span>
-          </div>
-          <span className="text-[10px] font-display font-bold tracking-[0.15em] text-gold/80 uppercase">
-            ZAILON
-          </span>
-          <span className="text-[9px] text-white/20 font-mono">v{appVersion}</span>
+        <div className="flex h-5 w-5 items-center justify-center rounded-md border border-gold/30 bg-gold/10 shadow-[0_0_18px_rgba(232,184,75,0.12)]">
+          <span className="font-display text-[10px] font-black text-gold">Z</span>
         </div>
+        <span className="font-display text-[11px] font-bold uppercase tracking-[0.19em] text-white/82">ZAILON</span>
+        <span className="font-mono text-[8px] text-white/23">v{appVersion}</span>
+        {windowError && <span title={windowError} className="ml-2 max-w-sm truncate text-[9px] text-red-300/75">Contrôle de fenêtre indisponible</span>}
       </div>
 
-      <div className="flex h-full items-center">
-        <button aria-label="Minimize" onMouseDown={event => event.stopPropagation()} onClick={() => withWindow(window => window.minimize())} className="flex h-full w-11 items-center justify-center transition-colors hover:bg-white/10">
-          <Minus size={9} className="text-white/40" />
-        </button>
-        <button aria-label={maximized ? 'Restore' : 'Maximize'} onMouseDown={event => event.stopPropagation()} onClick={() => void toggleMaximize()} className="flex h-full w-11 items-center justify-center transition-colors hover:bg-white/10">
-          {maximized ? <Minimize2 size={11} className="text-white/50" /> : <Maximize2 size={11} className="text-white/50" />}
-        </button>
-        <button aria-label="Close" onMouseDown={event => event.stopPropagation()} onClick={() => void closeWindow()} className="group flex h-full w-11 items-center justify-center transition-colors hover:bg-red-500/80">
-          <X size={12} className="text-white/45 group-hover:text-white" />
-        </button>
+      <div className="flex h-full items-stretch" onDoubleClick={event => event.stopPropagation()}>
+        <WindowButton label="Réduire" onClick={() => void run('Réduire', () => getCurrentWindow().minimize())} onMouseDown={stopChromeEvent}>
+          <Minus size={11} />
+        </WindowButton>
+        <WindowButton label={maximized ? 'Restaurer' : 'Agrandir'} onClick={() => void toggleMaximize()} onMouseDown={stopChromeEvent}>
+          {maximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+        </WindowButton>
+        <WindowButton label="Fermer" danger onClick={() => void closeWindow()} onMouseDown={stopChromeEvent}>
+          <X size={13} />
+        </WindowButton>
       </div>
-    </div>
+    </header>
   )
+}
+
+function WindowButton({ label, danger = false, onClick, onMouseDown, children }: {
+  label: string
+  danger?: boolean
+  onClick: () => void
+  onMouseDown: (event: MouseEvent<HTMLButtonElement>) => void
+  children: React.ReactNode
+}) {
+  return <button
+    type="button"
+    aria-label={label}
+    title={label}
+    onMouseDown={onMouseDown}
+    onClick={event => { event.stopPropagation(); onClick() }}
+    className={`flex h-full w-12 items-center justify-center text-white/48 transition-colors hover:text-white ${danger ? 'hover:bg-[#c42b3b]' : 'hover:bg-white/[0.09]'}`}
+  >{children}</button>
 }

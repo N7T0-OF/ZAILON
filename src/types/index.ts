@@ -1,4 +1,4 @@
-export type ViewType = 'home' | 'games' | 'explore' | 'news' | 'settings'
+export type ViewType = 'home' | 'games' | 'explore' | 'downloads' | 'mods' | 'tools' | 'news' | 'settings'
 export type Platform = 'gamebanana' | 'nexus' | 'curseforge' | 'ayakamods'
 export type UpdateChannel = 'stable' | 'beta'
 export type LoaderType = 'GIMI' | 'ZZMI' | 'SRMI' | 'WWMI' | 'EFMI' | 'UE5' | 'BepInEx' | 'ASI' | 'CLEO' | 'REF' | 'MelonLoader' | 'DLL' | 'Archive' | 'Folder' | 'Manual'
@@ -47,9 +47,15 @@ export interface GameResources {
   coverPositionX?: number
   coverPositionY?: number
   coverZoom?: number
+  coverFit?: 'cover' | 'contain'
   backgroundPositionX?: number
   backgroundPositionY?: number
   backgroundZoom?: number
+  backgroundFit?: 'cover' | 'contain'
+  bannerPositionX?: number
+  bannerPositionY?: number
+  bannerZoom?: number
+  bannerFit?: 'cover' | 'contain'
 }
 
 export interface Game {
@@ -73,6 +79,11 @@ export interface Game {
   sizeBytes?: number
   lastProviderUpdate?: number
   needsExecutable?: boolean
+  itemKind?: 'game' | 'software'
+  confidence?: 'high' | 'medium' | 'low'
+  version?: string
+  publisher?: string
+  detectionSource?: string
   resources?: GameResources
   favorite?: boolean
   hidden?: boolean

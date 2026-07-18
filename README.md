@@ -6,15 +6,16 @@ profiles locally and ships installers for Windows, Linux and macOS.
 
 ## What works
 
-- Add games manually or discover Steam through its system location, library list and installed app manifests; review results before adding them.
+- Add games manually or run quick/full local discovery across Steam manifests, Epic Games manifests and Windows installed-application records; review and filter every result before import.
 - Scan, enable, disable and remove local mods without moving them outside the game folder.
 - Keep separate local mod profiles, per-profile priority, notes, file-conflict indicators and playtime statistics.
 - Right-click a game card (or use its ellipsis) to play, manage mods, open its folders, mark favorite, hide or remove only its ZAILON entry.
-- Import covers, logos, icons, backgrounds, banners and videos; ZAILON copies them into its own local data directory.
-- Download GameBanana mods through the desktop application.
+- Import covers, logos, icons, backgrounds, banners, SVGs and videos; preview, position and resize them before saving. ZAILON copies approved resources into its own local data directory.
+- Keep Explorer visibly archived while its provider adapters, persistent download queue and safe installation flow are rebuilt; no demo catalog is presented as functional data.
 - Native frameless window with working move, minimize, maximize/restore and close controls.
 - Restore the last valid native window size, position and maximized state.
 - Signed in-app update checks with Stable and Beta channels, progress, local backup and update log.
+- Review the static reference-manager audit and copyright decisions in [`docs/example-managers-analysis.md`](docs/example-managers-analysis.md).
 
 ## User data and updates
 

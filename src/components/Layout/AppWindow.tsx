@@ -6,6 +6,9 @@ import { GamesView } from '../Views/GamesView'
 import { ExploreView } from '../Views/ExploreView'
 import { NewsView } from '../Views/NewsView'
 import { SettingsView } from '../Views/SettingsView'
+import { DownloadsView } from '../Views/DownloadsView'
+import { ToolsView } from '../Views/ToolsView'
+import { StatusBar } from './StatusBar'
 
 export function AppWindow() {
   const { currentView } = useStore()
@@ -14,6 +17,9 @@ export function AppWindow() {
     home: HomeView,
     games: GamesView,
     explore: ExploreView,
+    downloads: DownloadsView,
+    mods: GamesView,
+    tools: ToolsView,
     news: NewsView,
     settings: SettingsView,
   }[currentView]
@@ -37,6 +43,7 @@ export function AppWindow() {
           <View />
         </main>
       </div>
+      <StatusBar />
     </div>
   )
 }

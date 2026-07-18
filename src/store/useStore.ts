@@ -4,7 +4,7 @@ import { ExplodMod, Game, GameResources, LoaderType, Mod, Platform, Profile, Upd
 import { DetectedGame, native, NativeMod, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES } from './gamebanana'
 
-const APP_VERSION = '1.1.1'
+const APP_VERSION = '1.2.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
@@ -81,7 +81,7 @@ function selected(state: Pick<Store, 'games' | 'selectedGameId' | 'selectedProfi
   return { game, profile }
 }
 
-function makeGame({ name, execPath, modsPath, platform = 'standalone', provider, providerGameId, installDirectory, steamLibrary, buildId, sizeBytes, lastUpdated, needsExecutable }: {
+function makeGame({ name, execPath, modsPath, platform = 'standalone', provider, providerGameId, installDirectory, steamLibrary, buildId, sizeBytes, lastUpdated, needsExecutable, itemKind, confidence, version, publisher, detectionSource }: {
   name: string
   execPath: string
   modsPath: string
@@ -94,6 +94,11 @@ function makeGame({ name, execPath, modsPath, platform = 'standalone', provider,
   sizeBytes?: number
   lastUpdated?: number
   needsExecutable?: boolean
+  itemKind?: Game['itemKind']
+  confidence?: Game['confidence']
+  version?: string
+  publisher?: string
+  detectionSource?: string
 }): Game {
   const gameId = createId()
   const profile: Profile = { id: createId(), gameId, name: 'Default', mods: [], playtime: 0 }
@@ -105,7 +110,7 @@ function makeGame({ name, execPath, modsPath, platform = 'standalone', provider,
     profiles: [profile],
     totalPlaytime: 0,
     platform,
-    detected: platform !== 'standalone',
+    detected: Boolean(detectionSource) || platform !== 'standalone',
     provider,
     providerGameId,
     installDirectory,
@@ -114,6 +119,11 @@ function makeGame({ name, execPath, modsPath, platform = 'standalone', provider,
     sizeBytes,
     lastProviderUpdate: lastUpdated,
     needsExecutable,
+    itemKind,
+    confidence,
+    version,
+    publisher,
+    detectionSource,
   }
 }
 

@@ -26,7 +26,28 @@ export interface DetectedGame {
   lastUpdated?: number
   buildId?: string
   needsExecutable: boolean
+  itemKind: 'game' | 'software'
+  confidence: 'high' | 'medium' | 'low'
+  version?: string
+  publisher?: string
+  detectionSource: string
 }
+
+export interface DiscoveryProviderDiagnostic {
+  provider: string
+  status: 'ok' | 'warning' | 'unavailable'
+  found: number
+  detail: string
+}
+
+export interface DiscoveryScan {
+  games: DetectedGame[]
+  diagnostics: DiscoveryProviderDiagnostic[]
+}
+
+export type DiscoveryScanEvent =
+  | { event: 'Stage'; data: { provider: string; detail: string } }
+  | { event: 'Progress'; data: { current: number; total: number } }
 
 export interface DetectedExecutable {
   path: string
@@ -85,6 +106,12 @@ export const native = {
     channel.onmessage = onEvent
     return invoke<SteamScan>('scan_steam_games', { steamPath, onEvent: channel })
   },
+  scanLibrary: (mode: 'quick' | 'full', onEvent: (event: DiscoveryScanEvent) => void) => {
+    if (!isTauri()) return Promise.reject(new Error('La détection locale est uniquement disponible dans l’application ZAILON.'))
+    const channel = new Channel<DiscoveryScanEvent>()
+    channel.onmessage = onEvent
+    return invoke<DiscoveryScan>('scan_library', { mode, onEvent: channel })
+  },
   installMod: (url: string, fileName: string, modsPath: string) =>
     desktopOnly<string>('install_mod', { url, fileName, modsPath }),
   storeGameResource: (gameId: string, kind: GameResourceKind, sourcePath: string) =>
@@ -129,7 +156,7 @@ export async function pickGameResource(kind: GameResourceKind) {
   const selected = await open({
     title: `Sélectionnez ${kind === 'background' ? 'un arrière-plan' : `une ressource ${kind}`}`,
     multiple: false,
-    filters: [{ name: isVideo ? 'Vidéos' : 'Images', extensions: isVideo ? ['mp4', 'webm'] : ['png', 'jpg', 'jpeg', 'webp', 'avif', 'gif'] }],
+    filters: [{ name: isVideo ? 'Vidéos' : 'Images', extensions: isVideo ? ['mp4', 'webm'] : ['png', 'jpg', 'jpeg', 'webp', 'avif', 'gif', 'svg'] }],
   })
   return typeof selected === 'string' ? selected : null
 }

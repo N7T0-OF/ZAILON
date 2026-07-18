@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     io::{copy, Cursor, Write},
     path::{Path, PathBuf},
@@ -18,6 +18,12 @@ use steamlocate::{Library, SteamDir};
 use tauri::{ipc::Channel, State};
 #[cfg(desktop)]
 use tauri_plugin_updater::{Update, UpdaterExt};
+
+#[cfg(target_os = "windows")]
+use winreg::{
+    enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY},
+    RegKey,
+};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -47,6 +53,11 @@ struct DetectedGame {
     last_updated: Option<u64>,
     build_id: Option<String>,
     needs_executable: bool,
+    item_kind: String,
+    confidence: String,
+    version: Option<String>,
+    publisher: Option<String>,
+    detection_source: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -82,6 +93,34 @@ struct SteamScan {
 enum SteamScanEvent {
     #[serde(rename_all = "camelCase")]
     Stage { stage: String, detail: String },
+    #[serde(rename_all = "camelCase")]
+    Progress { current: usize, total: usize },
+}
+
+#[cfg(desktop)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscoveryProviderDiagnostic {
+    provider: String,
+    status: String,
+    found: usize,
+    detail: String,
+}
+
+#[cfg(desktop)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiscoveryScan {
+    games: Vec<DetectedGame>,
+    diagnostics: Vec<DiscoveryProviderDiagnostic>,
+}
+
+#[cfg(desktop)]
+#[derive(Clone, Serialize)]
+#[serde(tag = "event", content = "data")]
+enum DiscoveryScanEvent {
+    #[serde(rename_all = "camelCase")]
+    Stage { provider: String, detail: String },
     #[serde(rename_all = "camelCase")]
     Progress { current: usize, total: usize },
 }
@@ -174,7 +213,7 @@ fn allowed_resource_extension(kind: &str, extension: &str) -> bool {
         "cover" | "logo" | "icon" | "background" | "banner" => {
             matches!(
                 extension.as_str(),
-                "png" | "jpg" | "jpeg" | "webp" | "avif" | "gif"
+                "png" | "jpg" | "jpeg" | "webp" | "avif" | "gif" | "svg"
             )
         }
         "video" => matches!(extension.as_str(), "mp4" | "webm"),
@@ -663,6 +702,11 @@ fn scan_steam_games_impl(
                 }),
                 build_id: app.build_id.map(|value| value.to_string()),
                 needs_executable,
+                item_kind: "game".into(),
+                confidence: if needs_executable { "medium" } else { "high" }.into(),
+                version: None,
+                publisher: None,
+                detection_source: "Steam appmanifest".into(),
             });
         }
     }
@@ -683,6 +727,523 @@ fn scan_steam_games_impl(
         format!("{} installed Steam game(s) ready to review", games.len()),
     );
     Ok(SteamScan { games, diagnostics })
+}
+
+#[cfg(desktop)]
+fn report_discovery_stage(channel: &Channel<DiscoveryScanEvent>, provider: &str, detail: String) {
+    let _ = channel.send(DiscoveryScanEvent::Stage {
+        provider: provider.into(),
+        detail,
+    });
+}
+
+#[cfg(desktop)]
+fn epic_manifest_root() -> Result<PathBuf, String> {
+    let program_data = std::env::var_os("PROGRAMDATA")
+        .ok_or_else(|| "PROGRAMDATA is unavailable on this platform.".to_string())?;
+    let root = PathBuf::from(program_data)
+        .join("Epic")
+        .join("EpicGamesLauncher")
+        .join("Data")
+        .join("Manifests");
+    if !root.is_dir() {
+        return Err("Epic Games manifest directory was not found.".into());
+    }
+    Ok(root)
+}
+
+#[cfg(desktop)]
+fn scan_epic_games(full: bool) -> Result<Vec<DetectedGame>, String> {
+    let root = epic_manifest_root()?;
+    let mut games = Vec::new();
+    for entry in fs::read_dir(&root)
+        .map_err(to_error)?
+        .filter_map(Result::ok)
+    {
+        let manifest_path = entry.path();
+        if !manifest_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("item"))
+        {
+            continue;
+        }
+        let bytes = match fs::read(&manifest_path) {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+        let manifest: serde_json::Value = match serde_json::from_slice(&bytes) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let text = |key: &str| {
+            manifest
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        };
+        let Some(name) = text("DisplayName") else {
+            continue;
+        };
+        let Some(install_location) = text("InstallLocation") else {
+            continue;
+        };
+        let install_directory = PathBuf::from(&install_location);
+        if !install_directory.is_dir() {
+            continue;
+        }
+        let launch_executable = text("LaunchExecutable")
+            .map(|relative| install_directory.join(relative.replace('/', "\\")))
+            .filter(|path| path.is_file());
+        let mut candidates = launch_executable
+            .as_ref()
+            .map(|path| {
+                vec![DetectedExecutable {
+                    name: path
+                        .file_name()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or("Executable")
+                        .to_string(),
+                    path: path.to_string_lossy().to_string(),
+                    size_bytes: fs::metadata(path)
+                        .map(|metadata| metadata.len())
+                        .unwrap_or(0),
+                }]
+            })
+            .unwrap_or_default();
+        if full && candidates.is_empty() {
+            candidates = executable_candidates(&install_directory, &name)
+                .into_iter()
+                .take(20)
+                .collect();
+        }
+        let exec_path = candidates
+            .first()
+            .map(|candidate| candidate.path.clone())
+            .unwrap_or_default();
+        let needs_executable = exec_path.is_empty();
+        let mods_path = if needs_executable {
+            install_directory.join("Mods").to_string_lossy().to_string()
+        } else {
+            guess_mods_path(exec_path.clone())
+        };
+        games.push(DetectedGame {
+            name,
+            exec_path,
+            mods_path,
+            platform: "epic".into(),
+            provider: "Epic Games".into(),
+            provider_game_id: text("CatalogItemId").or_else(|| text("AppName")),
+            install_directory: install_location,
+            steam_library: None,
+            executable_candidates: candidates,
+            size_bytes: None,
+            last_updated: fs::metadata(&manifest_path)
+                .and_then(|metadata| metadata.modified())
+                .ok()
+                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs()),
+            build_id: None,
+            needs_executable,
+            item_kind: "game".into(),
+            confidence: if needs_executable { "medium" } else { "high" }.into(),
+            version: text("AppVersionString"),
+            publisher: None,
+            detection_source: "Epic .item manifest".into(),
+        });
+    }
+    games.sort_by_key(|game| game.name.to_ascii_lowercase());
+    Ok(games)
+}
+
+#[cfg(target_os = "windows")]
+fn expand_windows_path(value: &str) -> String {
+    let mut expanded = value.trim().trim_matches('"').to_string();
+    for (name, replacement) in std::env::vars() {
+        expanded = expanded.replace(&format!("%{name}%"), &replacement);
+    }
+    expanded
+}
+
+#[cfg(target_os = "windows")]
+fn display_icon_path(value: &str) -> Option<PathBuf> {
+    let value = value.trim();
+    let raw = if let Some(remainder) = value.strip_prefix('"') {
+        remainder.split('"').next().unwrap_or_default()
+    } else {
+        value.split(',').next().unwrap_or_default()
+    };
+    let path = PathBuf::from(expand_windows_path(raw));
+    path.is_file().then_some(path)
+}
+
+#[cfg(target_os = "windows")]
+fn is_technical_program(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    [
+        "security update",
+        "update for ",
+        "hotfix",
+        "language pack",
+        "redistributable",
+        "webview2 runtime",
+        "windows software development kit",
+        "windows driver kit",
+        "debugging tools for windows",
+    ]
+    .iter()
+    .any(|needle| name.contains(needle))
+}
+
+#[cfg(target_os = "windows")]
+fn windows_provider(name: &str, publisher: &str, location: &str) -> String {
+    let fingerprint = format!("{name} {publisher} {location}").to_ascii_lowercase();
+    if fingerprint.contains("ubisoft") {
+        "Ubisoft Connect"
+    } else if fingerprint.contains("electronic arts") || fingerprint.contains("ea games") {
+        "EA app"
+    } else if fingerprint.contains("battle.net") || fingerprint.contains("blizzard") {
+        "Battle.net"
+    } else if fingerprint.contains("riot games") {
+        "Riot Games"
+    } else if fingerprint.contains("rockstar games") {
+        "Rockstar Games"
+    } else if fingerprint.contains("gog.com") || fingerprint.contains("gog galaxy") {
+        "GOG Galaxy"
+    } else if fingerprint.contains("itch.io") {
+        "itch.io"
+    } else if fingerprint.contains("epic games") {
+        "Epic Games"
+    } else {
+        "Applications Windows"
+    }
+    .into()
+}
+
+#[cfg(target_os = "windows")]
+fn registry_estimated_size_bytes(entry: &RegKey) -> Option<u64> {
+    entry
+        .get_value::<u64, _>("EstimatedSize")
+        .ok()
+        .or_else(|| {
+            entry
+                .get_value::<u32, _>("EstimatedSize")
+                .ok()
+                .map(u64::from)
+        })
+        .map(|kilobytes| kilobytes.saturating_mul(1024))
+}
+
+#[cfg(target_os = "windows")]
+fn scan_windows_installed_apps(full: bool) -> Result<Vec<DetectedGame>, String> {
+    let uninstall_path = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
+    let mut games = Vec::new();
+    let mut seen = HashSet::new();
+    let hives = [(HKEY_LOCAL_MACHINE, "HKLM"), (HKEY_CURRENT_USER, "HKCU")];
+    let views = [
+        (KEY_READ | KEY_WOW64_64KEY, "64-bit"),
+        (KEY_READ | KEY_WOW64_32KEY, "32-bit"),
+    ];
+
+    for (hive, hive_name) in hives {
+        for (flags, view_name) in views {
+            let root = RegKey::predef(hive);
+            let Ok(uninstall) = root.open_subkey_with_flags(uninstall_path, flags) else {
+                continue;
+            };
+            for key_name in uninstall.enum_keys().filter_map(Result::ok) {
+                let Ok(entry) = uninstall.open_subkey_with_flags(&key_name, flags) else {
+                    continue;
+                };
+                if entry.get_value::<u32, _>("SystemComponent").unwrap_or(0) == 1 {
+                    continue;
+                }
+                let name = entry
+                    .get_value::<String, _>("DisplayName")
+                    .unwrap_or_default();
+                let name = name.trim().to_string();
+                if name.is_empty() || is_technical_program(&name) {
+                    continue;
+                }
+                let version = entry
+                    .get_value::<String, _>("DisplayVersion")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty());
+                let publisher = entry
+                    .get_value::<String, _>("Publisher")
+                    .unwrap_or_default();
+                let location = entry
+                    .get_value::<String, _>("InstallLocation")
+                    .ok()
+                    .map(|value| expand_windows_path(&value))
+                    .filter(|value| Path::new(value).is_dir())
+                    .unwrap_or_default();
+                let icon = entry
+                    .get_value::<String, _>("DisplayIcon")
+                    .ok()
+                    .and_then(|value| display_icon_path(&value));
+                let identity = format!(
+                    "{}|{}|{}",
+                    name.to_ascii_lowercase(),
+                    publisher.to_ascii_lowercase(),
+                    location.to_ascii_lowercase()
+                );
+                if !seen.insert(identity) {
+                    continue;
+                }
+                let install_directory = if !location.is_empty() {
+                    PathBuf::from(&location)
+                } else {
+                    icon.as_ref()
+                        .and_then(|path| path.parent().map(Path::to_path_buf))
+                        .unwrap_or_default()
+                };
+                let mut candidates = icon
+                    .filter(|path| is_launchable_candidate(path))
+                    .map(|path| {
+                        vec![DetectedExecutable {
+                            name: path
+                                .file_name()
+                                .and_then(|value| value.to_str())
+                                .unwrap_or("Executable")
+                                .to_string(),
+                            size_bytes: fs::metadata(&path)
+                                .map(|metadata| metadata.len())
+                                .unwrap_or(0),
+                            path: path.to_string_lossy().to_string(),
+                        }]
+                    })
+                    .unwrap_or_default();
+                if full && candidates.is_empty() && install_directory.is_dir() {
+                    candidates = executable_candidates(&install_directory, &name)
+                        .into_iter()
+                        .take(12)
+                        .collect();
+                }
+                let exec_path = candidates
+                    .first()
+                    .map(|candidate| candidate.path.clone())
+                    .unwrap_or_default();
+                let needs_executable = exec_path.is_empty();
+                let provider = windows_provider(&name, &publisher, &location);
+                let normalized_name = name.to_ascii_lowercase();
+                let item_kind = if provider != "Applications Windows"
+                    && ![
+                        "launcher",
+                        "connect",
+                        "galaxy",
+                        "battle.net",
+                        "riot client",
+                        "ea app",
+                    ]
+                    .iter()
+                    .any(|needle| normalized_name.contains(needle))
+                {
+                    "game"
+                } else {
+                    "software"
+                };
+                let platform = match provider.as_str() {
+                    "Epic Games" => "epic",
+                    "GOG Galaxy" => "gog",
+                    _ => "standalone",
+                };
+                let mods_path = if exec_path.is_empty() {
+                    install_directory.join("Mods").to_string_lossy().to_string()
+                } else {
+                    guess_mods_path(exec_path.clone())
+                };
+                games.push(DetectedGame {
+                    name,
+                    exec_path,
+                    mods_path,
+                    platform: platform.into(),
+                    provider,
+                    provider_game_id: Some(format!("{hive_name}:{key_name}")),
+                    install_directory: install_directory.to_string_lossy().to_string(),
+                    steam_library: None,
+                    executable_candidates: candidates,
+                    size_bytes: registry_estimated_size_bytes(&entry),
+                    last_updated: None,
+                    build_id: None,
+                    needs_executable,
+                    item_kind: item_kind.into(),
+                    confidence: if needs_executable { "medium" } else { "high" }.into(),
+                    version,
+                    publisher: (!publisher.trim().is_empty()).then_some(publisher),
+                    detection_source: format!("Registre Windows {hive_name} {view_name}"),
+                });
+            }
+        }
+    }
+    Ok(games)
+}
+
+#[cfg(all(desktop, not(target_os = "windows")))]
+fn scan_windows_installed_apps(_full: bool) -> Result<Vec<DetectedGame>, String> {
+    Err("Windows Registry is unavailable on this platform.".into())
+}
+
+#[cfg(desktop)]
+fn deduplicate_discovery(items: Vec<DetectedGame>) -> Vec<DetectedGame> {
+    let mut unique = HashMap::<String, DetectedGame>::new();
+    for item in items {
+        let key = if !item.exec_path.is_empty() {
+            format!(
+                "exec:{}",
+                item.exec_path.replace('/', "\\").to_ascii_lowercase()
+            )
+        } else if let Some(provider_id) = &item.provider_game_id {
+            format!(
+                "provider:{}:{provider_id}",
+                item.provider.to_ascii_lowercase()
+            )
+        } else {
+            format!(
+                "name:{}:{}",
+                item.name.to_ascii_lowercase(),
+                item.install_directory.to_ascii_lowercase()
+            )
+        };
+        match unique.get(&key) {
+            Some(existing) if existing.item_kind == "game" && item.item_kind != "game" => continue,
+            _ => {
+                unique.insert(key, item);
+            }
+        }
+    }
+    let mut values = unique.into_values().collect::<Vec<_>>();
+    values.sort_by(|left, right| {
+        left.item_kind.cmp(&right.item_kind).then_with(|| {
+            left.name
+                .to_ascii_lowercase()
+                .cmp(&right.name.to_ascii_lowercase())
+        })
+    });
+    values
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+fn scan_library(
+    mode: String,
+    on_event: Channel<DiscoveryScanEvent>,
+) -> Result<DiscoveryScan, String> {
+    let full = match mode.as_str() {
+        "quick" => false,
+        "full" => true,
+        _ => return Err("Unknown detection mode.".into()),
+    };
+    let mut diagnostics = Vec::new();
+    let mut discovered = Vec::new();
+    let providers = 3;
+
+    report_discovery_stage(
+        &on_event,
+        "Steam",
+        "Lecture des bibliothèques et manifestes Steam".into(),
+    );
+    match scan_steam_games_impl(None, None) {
+        Ok(scan) => {
+            let found = scan.games.len();
+            discovered.extend(scan.games);
+            diagnostics.push(DiscoveryProviderDiagnostic {
+                provider: "Steam".into(),
+                status: "ok".into(),
+                found,
+                detail: format!(
+                    "{} bibliothèque(s), {} manifeste(s) lu(s)",
+                    scan.diagnostics.libraries.len(),
+                    scan.diagnostics.manifests_found
+                ),
+            });
+        }
+        Err(error) => diagnostics.push(DiscoveryProviderDiagnostic {
+            provider: "Steam".into(),
+            status: "unavailable".into(),
+            found: 0,
+            detail: error,
+        }),
+    }
+    let _ = on_event.send(DiscoveryScanEvent::Progress {
+        current: 1,
+        total: providers,
+    });
+
+    report_discovery_stage(
+        &on_event,
+        "Epic Games",
+        "Lecture des manifestes Epic Games".into(),
+    );
+    match scan_epic_games(full) {
+        Ok(games) => {
+            let found = games.len();
+            discovered.extend(games);
+            diagnostics.push(DiscoveryProviderDiagnostic {
+                provider: "Epic Games".into(),
+                status: "ok".into(),
+                found,
+                detail: "Manifestes .item locaux analysés".into(),
+            });
+        }
+        Err(error) => diagnostics.push(DiscoveryProviderDiagnostic {
+            provider: "Epic Games".into(),
+            status: "unavailable".into(),
+            found: 0,
+            detail: error,
+        }),
+    }
+    let _ = on_event.send(DiscoveryScanEvent::Progress {
+        current: 2,
+        total: providers,
+    });
+
+    report_discovery_stage(
+        &on_event,
+        "Applications Windows",
+        if full {
+            "Lecture du Registre et vérification ciblée des dossiers connus"
+        } else {
+            "Lecture rapide des applications déclarées dans le Registre"
+        }
+        .into(),
+    );
+    match scan_windows_installed_apps(full) {
+        Ok(games) => {
+            let found = games.len();
+            discovered.extend(games);
+            diagnostics.push(DiscoveryProviderDiagnostic {
+                provider: "Applications Windows".into(),
+                status: "ok".into(),
+                found,
+                detail: if full {
+                    "Registre et dossiers d’installation déclarés analysés"
+                } else {
+                    "Registre Windows analysé sans parcours de disque"
+                }
+                .into(),
+            });
+        }
+        Err(error) => diagnostics.push(DiscoveryProviderDiagnostic {
+            provider: "Applications Windows".into(),
+            status: "unavailable".into(),
+            found: 0,
+            detail: error,
+        }),
+    }
+    let _ = on_event.send(DiscoveryScanEvent::Progress {
+        current: providers,
+        total: providers,
+    });
+    let games = deduplicate_discovery(discovered);
+    report_discovery_stage(
+        &on_event,
+        "Terminé",
+        format!("{} élément(s) local(aux) prêt(s) à vérifier", games.len()),
+    );
+    Ok(DiscoveryScan { games, diagnostics })
 }
 
 #[tauri::command]
@@ -1053,6 +1614,7 @@ mod tests {
     #[test]
     fn limits_resource_extensions_by_slot() {
         assert!(allowed_resource_extension("cover", "webp"));
+        assert!(allowed_resource_extension("background", "svg"));
         assert!(allowed_resource_extension("video", "MP4"));
         assert!(!allowed_resource_extension("cover", "exe"));
         assert!(!allowed_resource_extension("video", "gif"));
@@ -1064,6 +1626,24 @@ mod tests {
         assert!(is_steam_runtime_or_tool("Steam Linux Runtime 3.0"));
         assert!(is_steam_runtime_or_tool("Proton Experimental"));
         assert!(!is_steam_runtime_or_tool("Baldur's Gate 3"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn classifies_major_windows_game_providers() {
+        assert_eq!(windows_provider("EA app", "Electronic Arts", ""), "EA app");
+        assert_eq!(
+            windows_provider("Ubisoft Connect", "Ubisoft", ""),
+            "Ubisoft Connect"
+        );
+        assert_eq!(
+            windows_provider("Battle.net", "Blizzard Entertainment", ""),
+            "Battle.net"
+        );
+        assert_eq!(
+            windows_provider("A local utility", "Independent", "C:\\Tools"),
+            "Applications Windows"
+        );
     }
 }
 
@@ -1099,6 +1679,8 @@ pub fn run() {
             open_update_log,
             #[cfg(desktop)]
             scan_steam_games,
+            #[cfg(desktop)]
+            scan_library,
             #[cfg(desktop)]
             check_for_update,
             #[cfg(desktop)]

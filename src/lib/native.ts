@@ -1,7 +1,7 @@
 import { Channel, convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import type { UpdateChannel } from '../types'
-import type { ModImportCandidate, Profile, ProfileArchiveManifest, ProfileIntegrity } from '../types'
+import type { DownloadedModResult, ModImportCandidate, Profile, ProfileArchiveManifest, ProfileIntegrity, SecureImportResult, SensitiveImportAction } from '../types'
 
 export interface ProfilePaths {
   directory: string
@@ -44,6 +44,7 @@ export interface NativeMod {
   profileIds: string[]
   deploymentStatus: 'imported' | 'stored' | 'validated' | 'enabled' | 'deployed' | 'runtime-visible' | 'loaded-by-game' | 'failed' | 'unknown'
   diagnostics: string[]
+  quarantinePath?: string
 }
 
 export interface DetectedGame {
@@ -192,7 +193,7 @@ export interface BackgroundTaskSnapshot {
   id: string
   kind: 'mod-scan' | 'mod-import' | string
   title: string
-  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted'
+  status: 'running' | 'completed' | 'completed_with_warnings' | 'awaiting_user_decision' | 'failed' | 'cancelled' | 'interrupted'
   processed: number
   total: number
   message: string
@@ -285,8 +286,8 @@ export const native = {
     channel.onmessage = onEvent
     return invoke<DiscoveryScan>('scan_library', { mode, onEvent: channel })
   },
-  installMod: (url: string, fileName: string) =>
-    desktopOnly<string>('install_mod', { url, fileName }),
+  installMod: (url: string, fileName: string, gameName: string, sensitiveAction: SensitiveImportAction = 'quarantine') =>
+    desktopOnly<DownloadedModResult>('install_mod', { url, fileName, gameName, sensitiveAction }),
   exportProfile: (destination: string, manifest: ProfileArchiveManifest, complete: boolean, sources: Array<{ id: string; name: string; path: string }>) =>
     desktopOnly<string>('export_profile', { destination, manifest, complete, sources }),
   previewProfileImport: (archivePath: string) =>
@@ -295,11 +296,11 @@ export const native = {
     desktopOnly<string[]>('extract_profile_archive', { archivePath, destination }),
   importModCandidates: (paths: string[], destination: string) =>
     desktopOnly<string[]>('import_mod_candidates', { paths, destination }),
-  importModCandidatesBackground: (taskId: string, gameId: string, profileIds: string[], paths: string[], gameName: string, destination: string, deployNow: boolean, onProgress: (task: BackgroundTaskSnapshot) => void) => {
+  importModCandidatesBackground: (taskId: string, gameId: string, profileIds: string[], paths: string[], gameName: string, destination: string, deployNow: boolean, sensitiveAction: SensitiveImportAction, onProgress: (task: BackgroundTaskSnapshot) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Background mod import is only available in the ZAILON desktop app.'))
     const channel = new Channel<BackgroundTaskEvent>()
     channel.onmessage = event => onProgress(event.data.task)
-    return invoke<string[]>('import_mod_candidates_background', { taskId, gameId, profileIds, paths, gameName, destination, deployNow, onEvent: channel })
+    return invoke<SecureImportResult>('import_mod_candidates_background', { taskId, gameId, profileIds, paths, gameName, destination, deployNow, sensitiveAction, onEvent: channel })
   },
   backgroundTasks: () => desktopOnly<BackgroundTaskSnapshot[]>('background_tasks'),
   cancelBackgroundTask: (taskId: string) => desktopOnly<void>('cancel_background_task', { taskId }),

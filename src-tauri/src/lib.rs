@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -15,6 +16,9 @@ use std::{
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State};
 use walkdir::WalkDir;
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 #[cfg(desktop)]
 use steamlocate::{Library, SteamDir};
@@ -47,6 +51,7 @@ struct NativeMod {
     profile_ids: Vec<String>,
     deployment_status: String,
     diagnostics: Vec<String>,
+    quarantine_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -104,6 +109,52 @@ struct ModImportCandidate {
     version: Option<String>,
     confidence: String,
     warnings: Vec<String>,
+    sensitive_files: Vec<SensitiveFileAssessment>,
+    recognized_destinations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SensitiveFileAssessment {
+    relative_path: String,
+    detected_type: String,
+    extension: String,
+    magic_type: String,
+    size: u64,
+    hash: String,
+    signature_status: String,
+    publisher: Option<String>,
+    source_provider: Option<String>,
+    source_mod_id: Option<String>,
+    expected_by_manifest: bool,
+    expected_by_game_adapter: bool,
+    execution_required: bool,
+    install_destination: String,
+    risk_level: String,
+    reasons: Vec<String>,
+    recommended_action: String,
+    decision: Option<String>,
+    may_deploy: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SecureImportResult {
+    installed_paths: Vec<String>,
+    status: String,
+    warnings: Vec<String>,
+    sensitive_files: Vec<SensitiveFileAssessment>,
+    quarantine_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadedModResult {
+    path: String,
+    status: String,
+    warnings: Vec<String>,
+    sensitive_files: Vec<SensitiveFileAssessment>,
+    quarantine_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1809,6 +1860,7 @@ fn inspect_native_mod(path: &Path) -> NativeMod {
         profile_ids: Vec::new(),
         deployment_status: "unknown".into(),
         diagnostics: Vec::new(),
+        quarantine_path: None,
     }
 }
 
@@ -2904,12 +2956,20 @@ fn scan_mod_import(
             let inspected = inspect_native_mod(&canonical);
             let strong = inspected.framework != "Generic" || !inspected.manifests.is_empty();
             let mut warnings = Vec::new();
+            let sensitive_files = assess_sensitive_files(&canonical, &game_name)?;
+            let destinations = recognized_destinations(&inspected.files);
             if inspected.source_url.is_none() {
                 warnings.push("Aucune source exacte détectée : aucune mise à jour automatique ne sera autorisée.".into());
             }
             if inspected.framework == "Generic" {
                 warnings.push(format!(
                     "Structure générique pour {game_name} : vérifiez la destination avant import."
+                ));
+            }
+            if !sensitive_files.is_empty() {
+                warnings.push(format!(
+                    "{} fichier(s) sensible(s) détecté(s) : une décision sera demandée avant import.",
+                    sensitive_files.len()
                 ));
             }
             candidates.push(ModImportCandidate {
@@ -2927,6 +2987,8 @@ fn scan_mod_import(
                 version: inspected.version,
                 confidence: if strong { "high" } else { "low" }.into(),
                 warnings,
+                sensitive_files,
+                recognized_destinations: destinations,
             });
         }
     }
@@ -2997,6 +3059,8 @@ fn scan_mod_import_background_impl(
         let inspected = inspect_native_mod(&canonical);
         let strong = inspected.framework != "Generic" || !inspected.manifests.is_empty();
         let mut warnings = Vec::new();
+        let sensitive_files = assess_sensitive_files(&canonical, &game_name)?;
+        let destinations = recognized_destinations(&inspected.files);
         if inspected.source_url.is_none() {
             warnings.push(
                 "Aucune source exacte détectée : aucune mise à jour automatique ne sera autorisée."
@@ -3006,6 +3070,12 @@ fn scan_mod_import_background_impl(
         if inspected.framework == "Generic" {
             warnings.push(format!(
                 "Structure générique pour {game_name} : vérifiez la destination avant import."
+            ));
+        }
+        if !sensitive_files.is_empty() {
+            warnings.push(format!(
+                "{} fichier(s) sensible(s) détecté(s) : une décision sera demandée avant import.",
+                sensitive_files.len()
             ));
         }
         let name = inspected.name.clone();
@@ -3024,6 +3094,8 @@ fn scan_mod_import_background_impl(
             version: inspected.version,
             confidence: if strong { "high" } else { "low" }.into(),
             warnings,
+            sensitive_files,
+            recognized_destinations: destinations,
         });
         report_background_task(
             app,
@@ -3732,6 +3804,7 @@ fn prepare_temporary_copy(
         deployed_files: session.entries.len(),
         conflicts_resolved,
         diagnostics,
+        quarantine_path: text("quarantineRoot"),
         session: Some(session),
     })
 }
@@ -3950,12 +4023,273 @@ fn forbidden_archive_file(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
         .map(|value| value.to_ascii_lowercase())
-        .is_some_and(|value| {
-            matches!(
-                value.as_str(),
-                "exe" | "com" | "bat" | "cmd" | "ps1" | "msi" | "scr"
-            )
+        .is_some_and(|value| SENSITIVE_EXTENSIONS.contains(&value.as_str()))
+}
+
+const SENSITIVE_EXTENSIONS: [&str; 21] = [
+    "exe", "com", "scr", "msi", "msp", "bat", "cmd", "ps1", "vbs", "vbe", "js", "jse", "wsf",
+    "wsh", "hta", "dll", "sys", "cpl", "reg", "lnk", "url",
+];
+
+struct MalwareScanResult {
+    status: &'static str,
+    detail: &'static str,
+}
+
+trait MalwareScanBackend {
+    fn scan(&self, _path: &Path) -> MalwareScanResult;
+}
+
+struct NoScanBackend;
+
+impl MalwareScanBackend for NoScanBackend {
+    fn scan(&self, _path: &Path) -> MalwareScanResult {
+        MalwareScanResult {
+            status: "Unavailable",
+            detail:
+                "Analyse antivirus locale non disponible ; le fichier reste traité comme sensible.",
+        }
+    }
+}
+
+fn normalized_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn file_sha256(path: &Path) -> Result<String, String> {
+    let mut file = fs::File::open(path).map_err(to_error)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(to_error)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn file_magic(path: &Path) -> Result<(String, bool), String> {
+    let mut file = fs::File::open(path).map_err(to_error)?;
+    let mut prefix = [0u8; 16];
+    let read = file.read(&mut prefix).map_err(to_error)?;
+    let prefix = &prefix[..read];
+    if prefix.starts_with(b"MZ") {
+        return Ok(("PE/COFF".into(), true));
+    }
+    if prefix.starts_with(b"\x7fELF") {
+        return Ok(("ELF".into(), true));
+    }
+    if prefix.starts_with(&[0xfe, 0xed, 0xfa, 0xce])
+        || prefix.starts_with(&[0xfe, 0xed, 0xfa, 0xcf])
+        || prefix.starts_with(&[0xcf, 0xfa, 0xed, 0xfe])
+        || prefix.starts_with(&[0xca, 0xfe, 0xba, 0xbe])
+    {
+        return Ok(("Mach-O".into(), true));
+    }
+    if prefix.starts_with(b"#!") {
+        return Ok(("ScriptShebang".into(), true));
+    }
+    if prefix.starts_with(b"PK\x03\x04") {
+        return Ok(("ZIP".into(), false));
+    }
+    Ok(("Unknown".into(), false))
+}
+
+fn game_adapter_allows_sensitive(game_name: &str, destination: &str, extension: &str) -> bool {
+    let game = game_name.to_ascii_lowercase();
+    let destination = destination.replace('\\', "/").to_ascii_lowercase();
+    if game.contains("cyberpunk") {
+        return (extension == "dll"
+            && (destination.starts_with("red4ext/plugins/")
+                || destination.starts_with("bin/x64/plugins/")))
+            || (matches!(extension, "js" | "dll")
+                && destination.starts_with("bin/x64/plugins/cyber_engine_tweaks/mods/"));
+    }
+    if game.contains("fivem") {
+        return matches!(extension, "dll" | "asi") && destination.starts_with("fivem.app/plugins/");
+    }
+    false
+}
+
+fn assess_sensitive_file(
+    file: &Path,
+    relative: &Path,
+    install_destination: &Path,
+    game_name: &str,
+    source_provider: Option<&str>,
+    source_mod_id: Option<&str>,
+) -> Result<Option<SensitiveFileAssessment>, String> {
+    let extension = relative
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let (magic_type, magic_executable) = file_magic(file)?;
+    let is_sensitive_extension = SENSITIVE_EXTENSIONS.contains(&extension.as_str());
+    if !is_sensitive_extension && !magic_executable {
+        return Ok(None);
+    }
+    let destination = normalized_path(install_destination);
+    let file_name = relative
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let parts = file_name.split('.').collect::<Vec<_>>();
+    let double_extension = parts.len() > 2
+        && matches!(
+            parts[parts.len() - 2].to_ascii_lowercase().as_str(),
+            "jpg" | "jpeg" | "png" | "gif" | "pdf" | "txt" | "doc" | "docx"
+        );
+    let expected_by_game_adapter =
+        game_adapter_allows_sensitive(game_name, &destination, &extension);
+    let may_deploy = expected_by_game_adapter && matches!(extension.as_str(), "dll" | "asi" | "js");
+    let at_root = relative.components().count() <= 1;
+    let tool_path = normalized_path(relative)
+        .to_ascii_lowercase()
+        .contains("tools/");
+    let blocked = matches!(extension.as_str(), "sys" | "cpl")
+        || (extension == "exe" && destination.ends_with("/cyberpunk2077.exe"));
+    let high_risk = blocked
+        || double_extension
+        || (magic_executable && extension.is_empty())
+        || (at_root
+            && matches!(
+                extension.as_str(),
+                "exe" | "com" | "msi" | "ps1" | "bat" | "cmd"
+            ))
+        || matches!(
+            extension.as_str(),
+            "ps1" | "bat" | "cmd" | "vbs" | "vbe" | "hta" | "lnk" | "url" | "reg"
+        );
+    let risk_level = if blocked {
+        "Blocked"
+    } else if high_risk {
+        "HighRisk"
+    } else {
+        "Caution"
+    };
+    let mut reasons = Vec::new();
+    if is_sensitive_extension {
+        reasons.push(format!("Extension sensible .{extension}."));
+    }
+    if magic_executable {
+        reasons.push(format!(
+            "Signature de format exécutable détectée : {magic_type}."
+        ));
+    }
+    if double_extension {
+        reasons.push("Double extension potentiellement trompeuse.".into());
+    }
+    if tool_path && matches!(extension.as_str(), "exe" | "com") {
+        reasons.push(
+            "Outil facultatif dans un sous-dossier tools ; aucune exécution automatique autorisée."
+                .into(),
+        );
+    }
+    if expected_by_game_adapter {
+        reasons.push("Emplacement binaire reconnu explicitement par l’adaptateur du jeu.".into());
+    } else {
+        reasons.push("Emplacement non déclaré par l’adaptateur du jeu.".into());
+    }
+    if blocked {
+        reasons.push("Type ou destination bloqué par la politique de déploiement.".into());
+    }
+    let malware_scan = NoScanBackend.scan(file);
+    reasons.push(format!("{} ({})", malware_scan.detail, malware_scan.status));
+    let detected_type = if magic_executable {
+        magic_type.clone()
+    } else if extension == "dll" {
+        "DynamicLibrary".into()
+    } else if matches!(extension.as_str(), "ps1" | "bat" | "cmd" | "vbs" | "js") {
+        "Script".into()
+    } else {
+        "SensitiveFile".into()
+    };
+    Ok(Some(SensitiveFileAssessment {
+        relative_path: normalized_path(relative),
+        detected_type,
+        extension,
+        magic_type,
+        size: fs::metadata(file).map_err(to_error)?.len(),
+        hash: file_sha256(file)?,
+        signature_status: "Unknown".into(),
+        publisher: None,
+        source_provider: source_provider.map(ToOwned::to_owned),
+        source_mod_id: source_mod_id.map(ToOwned::to_owned),
+        expected_by_manifest: false,
+        expected_by_game_adapter,
+        execution_required: false,
+        install_destination: destination,
+        risk_level: risk_level.into(),
+        reasons,
+        recommended_action: if blocked {
+            "exclude"
+        } else if may_deploy {
+            "include-adapter"
+        } else {
+            "quarantine"
+        }
+        .into(),
+        decision: None,
+        may_deploy,
+    }))
+}
+
+fn assess_sensitive_files(
+    source: &Path,
+    game_name: &str,
+) -> Result<Vec<SensitiveFileAssessment>, String> {
+    let mut assessments = Vec::new();
+    if source.is_file() {
+        let relative = source
+            .file_name()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("file"));
+        if let Some(assessment) =
+            assess_sensitive_file(source, &relative, &relative, game_name, None, None)?
+        {
+            assessments.push(assessment);
+        }
+        return Ok(assessments);
+    }
+    for entry in WalkDir::new(source)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let relative = entry.path().strip_prefix(source).map_err(to_error)?;
+        if let Some(assessment) =
+            assess_sensitive_file(entry.path(), relative, relative, game_name, None, None)?
+        {
+            assessments.push(assessment);
+        }
+    }
+    Ok(assessments)
+}
+
+fn recognized_destinations(files: &[String]) -> Vec<String> {
+    let mut roots = files
+        .iter()
+        .filter_map(|file| {
+            file.replace('\\', "/")
+                .split('/')
+                .next()
+                .map(ToOwned::to_owned)
         })
+        .filter(|root| {
+            CYBERPUNK_ROOTS
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(root))
+        })
+        .collect::<Vec<_>>();
+    roots.sort();
+    roots.dedup();
+    roots
 }
 
 fn validate_archive_relative(path: &Path) -> Result<(), String> {
@@ -3977,17 +4311,14 @@ fn validate_archive_relative(path: &Path) -> Result<(), String> {
             ));
         }
     }
-    if forbidden_archive_file(path) {
-        return Err(format!(
-            "Archive contains an unexpected executable file: {}",
-            path.display()
-        ));
-    }
     Ok(())
 }
 
 fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
     if source.is_file() {
+        if forbidden_archive_file(source) {
+            return Err("Sensitive files must use ZAILON's secure import flow.".into());
+        }
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent).map_err(to_error)?;
         }
@@ -4008,6 +4339,9 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
             continue;
         }
         validate_archive_relative(relative)?;
+        if entry.file_type().is_file() && forbidden_archive_file(relative) {
+            continue;
+        }
         let output = destination.join(relative);
         if entry.file_type().is_dir() {
             fs::create_dir_all(&output).map_err(to_error)?;
@@ -4124,6 +4458,162 @@ fn copy_tree_cancellable(
     Ok(())
 }
 
+struct SensitiveImportContext {
+    action: String,
+    game_name: String,
+    content_root: PathBuf,
+    inactive_root: PathBuf,
+    quarantine_root: PathBuf,
+    assessments: Vec<SensitiveFileAssessment>,
+    quarantine_paths: Vec<String>,
+}
+
+fn validated_sensitive_action(action: &str) -> Result<String, String> {
+    match action {
+        "exclude" | "quarantine" | "inactive" => Ok(action.to_string()),
+        _ => Err("Invalid sensitive-file decision.".into()),
+    }
+}
+
+fn restrict_quarantine_file(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(to_error)?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+    Ok(())
+}
+
+fn copy_sensitive_aware_file(
+    source: &Path,
+    destination: &Path,
+    context: &mut SensitiveImportContext,
+) -> Result<(), String> {
+    let relative_destination = destination
+        .strip_prefix(&context.content_root)
+        .unwrap_or(destination);
+    let assessment = assess_sensitive_file(
+        source,
+        relative_destination,
+        relative_destination,
+        &context.game_name,
+        None,
+        None,
+    )?;
+    let Some(mut assessment) = assessment else {
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(to_error)?;
+        }
+        fs::copy(source, destination).map_err(to_error)?;
+        return Ok(());
+    };
+    if assessment.may_deploy {
+        assessment.decision = Some("deployed-by-game-adapter".into());
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(to_error)?;
+        }
+        fs::copy(source, destination).map_err(to_error)?;
+    } else if assessment.risk_level == "Blocked" || context.action == "exclude" {
+        assessment.decision = Some("excluded".into());
+    } else if context.action == "inactive" {
+        let target = context.inactive_root.join(relative_destination);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(to_error)?;
+        }
+        fs::copy(source, &target).map_err(to_error)?;
+        assessment.decision = Some("stored-inactive".into());
+    } else {
+        let target = context
+            .quarantine_root
+            .join("files")
+            .join(relative_destination);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(to_error)?;
+        }
+        fs::copy(source, &target).map_err(to_error)?;
+        restrict_quarantine_file(&target)?;
+        assessment.decision = Some("quarantined".into());
+        context
+            .quarantine_paths
+            .push(target.to_string_lossy().to_string());
+    }
+    context.assessments.push(assessment);
+    Ok(())
+}
+
+fn copy_tree_cancellable_secure(
+    source: &Path,
+    destination: &Path,
+    cancel: &AtomicBool,
+    context: &mut SensitiveImportContext,
+) -> Result<(), String> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err("TASK_CANCELLED".into());
+    }
+    if source.is_file() {
+        return copy_sensitive_aware_file(source, destination, context);
+    }
+    for entry in WalkDir::new(source)
+        .follow_links(false)
+        .into_iter()
+        .map(|entry| entry.map_err(to_error))
+    {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("TASK_CANCELLED".into());
+        }
+        let entry = entry?;
+        if entry.file_type().is_symlink() {
+            return Err("Symbolic links are not allowed during mod import.".into());
+        }
+        let relative = entry.path().strip_prefix(source).map_err(to_error)?;
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+        validate_archive_relative(relative)?;
+        let output = destination.join(relative);
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&output).map_err(to_error)?;
+        } else if entry.file_type().is_file() {
+            copy_sensitive_aware_file(entry.path(), &output, context)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_sensitive_import_records(
+    context: &SensitiveImportContext,
+    stage_directory: &Path,
+    source: &Path,
+) -> Result<(), String> {
+    if context.assessments.is_empty() {
+        return Ok(());
+    }
+    write_json_atomic(
+        &stage_directory.join("sensitive-files.json"),
+        &serde_json::to_value(&context.assessments).map_err(to_error)?,
+    )?;
+    if !context.quarantine_paths.is_empty() {
+        write_json_atomic(
+            &context.quarantine_root.join("assessment.json"),
+            &serde_json::to_value(&context.assessments).map_err(to_error)?,
+        )?;
+        write_json_atomic(
+            &context.quarantine_root.join("source.json"),
+            &serde_json::json!({
+                "sourcePath": source.to_string_lossy(),
+                "game": context.game_name,
+                "decision": context.action,
+                "createdAt": unix_timestamp(),
+                "automaticExecution": false
+            }),
+        )?;
+    }
+    Ok(())
+}
+
 const CYBERPUNK_ROOTS: [&str; 9] = [
     "archive", "r6", "red4ext", "bin", "mods", "tools", "engine", "plugins", "config",
 ];
@@ -4157,6 +4647,7 @@ fn stage_content(
     content: &Path,
     game_name: &str,
     cancel: &AtomicBool,
+    security: &mut SensitiveImportContext,
 ) -> Result<(String, Vec<String>), String> {
     let lower_game = game_name.to_ascii_lowercase();
     let cyberpunk = lower_game.contains("cyberpunk");
@@ -4227,7 +4718,7 @@ fn stage_content(
                     .ok_or_else(|| "Invalid source file name.".to_string())?,
             )
         };
-        copy_tree_cancellable(&root, &destination, cancel)?;
+        copy_tree_cancellable_secure(&root, &destination, cancel, security)?;
     } else {
         let root_name = root
             .file_name()
@@ -4247,7 +4738,7 @@ fn stage_content(
                     .join("FiveM.app/plugins")
                     .join(safe_archive_component(root_name))
             };
-            copy_tree_cancellable(&root, &target, cancel)?;
+            copy_tree_cancellable_secure(&root, &target, cancel, security)?;
             diagnostics.push("Paquet classé comme plugin client FiveM. Les ressources serveur ne sont jamais déployées par cet adaptateur.".into());
         } else if contains_game_root_layout(&root) {
             layout = if cyberpunk {
@@ -4264,20 +4755,21 @@ fn stage_content(
                     return Err("TASK_CANCELLED".into());
                 }
                 let name = entry.file_name();
-                copy_tree_cancellable(&entry.path(), &content.join(name), cancel)?;
+                copy_tree_cancellable_secure(&entry.path(), &content.join(name), cancel, security)?;
             }
         } else if CYBERPUNK_ROOTS
             .iter()
             .any(|name| root_name.eq_ignore_ascii_case(name))
         {
             layout = "GameRootFragment".to_string();
-            copy_tree_cancellable(
+            copy_tree_cancellable_secure(
                 &root,
                 &content.join(
                     root.file_name()
                         .ok_or_else(|| "Invalid root name.".to_string())?,
                 ),
                 cancel,
+                security,
             )?;
         } else if cyberpunk
             && WalkDir::new(&root)
@@ -4293,7 +4785,7 @@ fn stage_content(
                 })
         {
             layout = "CyberpunkArchive".to_string();
-            copy_tree_cancellable(&root, &content.join("archive/pc/mod"), cancel)?;
+            copy_tree_cancellable_secure(&root, &content.join("archive/pc/mod"), cancel, security)?;
         } else {
             layout = "GenericModsFolder".to_string();
             diagnostics
@@ -4303,7 +4795,12 @@ fn stage_content(
                     .and_then(|value| value.to_str())
                     .unwrap_or("mod"),
             );
-            copy_tree_cancellable(&root, &content.join("mods").join(name), cancel)?;
+            copy_tree_cancellable_secure(
+                &root,
+                &content.join("mods").join(name),
+                cancel,
+                security,
+            )?;
         }
     }
     Ok((layout, diagnostics))
@@ -4432,14 +4929,19 @@ fn import_mods_with_staging(
     game_name: &str,
     destination: String,
     deploy_now: bool,
+    sensitive_action: &str,
     cancel: &AtomicBool,
-) -> Result<Vec<String>, String> {
+) -> Result<SecureImportResult, String> {
     let game_id = safe_game_id(game_id)?;
+    let sensitive_action = validated_sensitive_action(sensitive_action)?;
     let destination = PathBuf::from(destination);
     let staging_root = staged_mods_root(app, game_id)?;
     fs::create_dir_all(&staging_root).map_err(to_error)?;
     let total = paths.len() as u64;
     let mut installed = Vec::new();
+    let mut all_sensitive_files = Vec::new();
+    let mut all_quarantine_paths = Vec::new();
+    let mut warnings = Vec::new();
     for (index, source) in paths.into_iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
             return Err("TASK_CANCELLED".into());
@@ -4457,6 +4959,17 @@ fn import_mods_with_staging(
             .to_string();
         let staged_content = stage_directory.join("content");
         fs::create_dir_all(&staged_content).map_err(to_error)?;
+        let mut security = SensitiveImportContext {
+            action: sensitive_action.clone(),
+            game_name: game_name.to_string(),
+            content_root: staged_content.clone(),
+            inactive_root: stage_directory.join("inactive-sensitive"),
+            quarantine_root: update_data_root(app)?
+                .join("quarantine")
+                .join(format!("{task_id}-{stage_id}")),
+            assessments: Vec::new(),
+            quarantine_paths: Vec::new(),
+        };
         report_background_task(
             app,
             registry,
@@ -4470,17 +4983,42 @@ fn import_mods_with_staging(
                 inspected.files.len()
             ),
         );
-        let (layout, diagnostics) = match stage_content(&source, &staged_content, game_name, cancel)
-        {
-            Ok(result) => result,
-            Err(error) => {
-                let _ = fs::remove_dir_all(&stage_directory);
-                return Err(error);
-            }
-        };
+        let (layout, mut diagnostics) =
+            match stage_content(&source, &staged_content, game_name, cancel, &mut security) {
+                Ok(result) => result,
+                Err(error) => {
+                    let _ = fs::remove_dir_all(&stage_directory);
+                    let _ = fs::remove_dir_all(&security.quarantine_root);
+                    return Err(error);
+                }
+            };
         if cancel.load(Ordering::Relaxed) {
             let _ = fs::remove_dir_all(&stage_directory);
+            let _ = fs::remove_dir_all(&security.quarantine_root);
             return Err("TASK_CANCELLED".into());
+        }
+        if let Err(error) = write_sensitive_import_records(&security, &stage_directory, &source) {
+            let _ = fs::remove_dir_all(&stage_directory);
+            let _ = fs::remove_dir_all(&security.quarantine_root);
+            return Err(error);
+        }
+        if !security.assessments.is_empty() {
+            let isolated = security
+                .assessments
+                .iter()
+                .filter(|item| item.decision.as_deref() != Some("deployed-by-game-adapter"))
+                .count();
+            diagnostics.push(format!(
+                "{} fichier(s) sensible(s) évalué(s), {} isolé(s) ou exclu(s). Aucun fichier n’a été exécuté.",
+                security.assessments.len(),
+                isolated
+            ));
+            warnings.push(format!(
+                "{} : {} fichier(s) sensible(s) traité(s) avec la décision « {} ».",
+                inspected.name,
+                security.assessments.len(),
+                sensitive_action
+            ));
         }
         let content_inspection = inspect_native_mod(&staged_content);
         let deployment_status = if deploy_now { "enabled" } else { "stored" };
@@ -4498,17 +5036,29 @@ fn import_mods_with_staging(
             "contentFiles": content_inspection.files,
             "layout": layout,
             "diagnostics": diagnostics,
+            "sensitiveFiles": security.assessments.clone(),
+            "quarantinePaths": security.quarantine_paths.clone(),
+            "quarantineRoot": if security.quarantine_paths.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(security.quarantine_root.to_string_lossy().to_string()) },
+            "sensitiveDecision": sensitive_action,
+            "automaticExecution": false,
             "stagedAt": unix_timestamp(),
             "deploymentBackend": "TemporaryCopy",
             "deploymentStatus": deployment_status,
             "legacyDestination": destination.to_string_lossy()
         });
-        fs::write(
+        if let Err(error) = fs::write(
             &manifest_path,
             serde_json::to_vec_pretty(&manifest).map_err(to_error)?,
         )
-        .map_err(to_error)?;
+        .map_err(to_error)
+        {
+            let _ = fs::remove_dir_all(&stage_directory);
+            let _ = fs::remove_dir_all(&security.quarantine_root);
+            return Err(error);
+        }
         installed.push(stage_directory.to_string_lossy().to_string());
+        all_sensitive_files.extend(security.assessments.clone());
+        all_quarantine_paths.extend(security.quarantine_paths.clone());
         report_background_task(
             app,
             registry,
@@ -4519,7 +5069,18 @@ fn import_mods_with_staging(
             format!("{} prêt ({}/{total})", inspected.name, index + 1),
         );
     }
-    Ok(installed)
+    let status = if all_sensitive_files.is_empty() {
+        "Completed"
+    } else {
+        "CompletedWithWarnings"
+    };
+    Ok(SecureImportResult {
+        installed_paths: installed,
+        status: status.into(),
+        warnings,
+        sensitive_files: all_sensitive_files,
+        quarantine_paths: all_quarantine_paths,
+    })
 }
 
 #[tauri::command]
@@ -4533,6 +5094,7 @@ async fn import_mod_candidates_background(
     game_name: String,
     destination: String,
     deploy_now: bool,
+    sensitive_action: String,
     on_event: Channel<BackgroundTaskEvent>,
 ) -> Result<Vec<String>, String> {
     if paths.is_empty() {
@@ -4562,19 +5124,34 @@ async fn import_mod_candidates_background(
             &game_name,
             destination,
             deploy_now,
+            &sensitive_action,
             &cancel,
         )
     })
     .await
     .map_err(|_| "The background import stopped unexpectedly.".to_string())?;
     match &result {
-        Ok(paths) => finish_background_task(
+        Ok(import) => finish_background_task(
             &app,
             &registry,
             None,
             &task_id,
-            "completed",
-            format!("{} mod(s) traité(s) avec Direct Copy.", paths.len()),
+            if import.status == "CompletedWithWarnings" {
+                "completed_with_warnings"
+            } else {
+                "completed"
+            },
+            if import.status == "CompletedWithWarnings" {
+                format!(
+                    "Import terminé avec avertissement : {} mod(s), {} fichier(s) sensible(s) isolé(s) ou contrôlé(s). Aucun fichier n’a été exécuté.",
+                    import.installed_paths.len(), import.sensitive_files.len()
+                )
+            } else {
+                format!(
+                    "{} mod(s) traité(s) avec TemporaryCopy.",
+                    import.installed_paths.len()
+                )
+            },
             None,
         ),
         Err(error) if error == "TASK_CANCELLED" => finish_background_task(
@@ -4832,6 +5409,9 @@ fn extract_profile_archive(
                 continue;
             }
             validate_archive_relative(relative)?;
+            if !entry.is_dir() && forbidden_archive_file(relative) {
+                continue;
+            }
             let output = stage.join(relative);
             if entry.is_dir() {
                 fs::create_dir_all(&output).map_err(to_error)?;
@@ -5712,7 +6292,14 @@ fn scan_steam_games(
 }
 
 #[tauri::command]
-async fn install_mod(app: AppHandle, url: String, file_name: String) -> Result<String, String> {
+async fn install_mod(
+    app: AppHandle,
+    url: String,
+    file_name: String,
+    game_name: String,
+    sensitive_action: String,
+) -> Result<DownloadedModResult, String> {
+    let sensitive_action = validated_sensitive_action(&sensitive_action)?;
     let parsed = url::Url::parse(&url).map_err(to_error)?;
     if parsed.scheme() != "https" || parsed.host_str().is_none() {
         return Err("Only valid HTTPS mod downloads are allowed.".into());
@@ -5745,6 +6332,23 @@ async fn install_mod(app: AppHandle, url: String, file_name: String) -> Result<S
         return Err("Mod download exceeds the 2 GB safety limit.".into());
     }
 
+    let source_provider = parsed
+        .host_str()
+        .map(|host| {
+            if host.to_ascii_lowercase().contains("gamebanana") {
+                "gamebanana"
+            } else if host.to_ascii_lowercase().contains("nexusmods") {
+                "nexus"
+            } else {
+                "https"
+            }
+        })
+        .unwrap_or("https");
+    let quarantine_root = unique_destination(
+        &update_data_root(&app)?.join("quarantine"),
+        &format!("download-{}", unix_timestamp()),
+    );
+
     if safe_name.to_ascii_lowercase().ends_with(".zip") {
         let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(to_error)?;
         if archive.len() > 100_000 {
@@ -5758,6 +6362,10 @@ async fn install_mod(app: AppHandle, url: String, file_name: String) -> Result<S
                 .unwrap_or("mod"),
         ));
         fs::create_dir_all(&extract_root).map_err(to_error)?;
+        let inspection_root = stage.join(".inspection");
+        fs::create_dir_all(&inspection_root).map_err(to_error)?;
+        let mut sensitive_files = Vec::new();
+        let mut quarantine_paths = Vec::new();
         let extraction = (|| {
             let mut total = 0u64;
             for index in 0..archive.len() {
@@ -5773,22 +6381,88 @@ async fn install_mod(app: AppHandle, url: String, file_name: String) -> Result<S
                 if total > 4 * 1024 * 1024 * 1024 {
                     return Err("Mod archive exceeds the 4 GB extraction limit.".into());
                 }
-                let output = extract_root.join(relative_path);
+                let output = extract_root.join(&relative_path);
                 if entry.is_dir() {
                     fs::create_dir_all(&output).map_err(to_error)?;
                 } else {
-                    if let Some(parent) = output.parent() {
-                        fs::create_dir_all(parent).map_err(to_error)?;
-                    }
-                    let mut file = fs::File::create(&output).map_err(to_error)?;
+                    let inspection = inspection_root.join(format!("entry-{index:06}"));
+                    let mut file = fs::File::create(&inspection).map_err(to_error)?;
                     copy(&mut entry, &mut file).map_err(to_error)?;
+                    drop(file);
+                    if let Some(mut assessment) = assess_sensitive_file(
+                        &inspection,
+                        &relative_path,
+                        &relative_path,
+                        &game_name,
+                        Some(source_provider),
+                        None,
+                    )? {
+                        if assessment.may_deploy {
+                            if let Some(parent) = output.parent() {
+                                fs::create_dir_all(parent).map_err(to_error)?;
+                            }
+                            fs::rename(&inspection, &output).map_err(to_error)?;
+                            assessment.decision = Some("deployed-by-game-adapter".into());
+                        } else if assessment.risk_level == "Blocked"
+                            || sensitive_action == "exclude"
+                        {
+                            fs::remove_file(&inspection).map_err(to_error)?;
+                            assessment.decision = Some("excluded".into());
+                        } else {
+                            let area = if sensitive_action == "inactive" {
+                                "inactive-files"
+                            } else {
+                                "files"
+                            };
+                            let target = quarantine_root.join(area).join(&relative_path);
+                            if let Some(parent) = target.parent() {
+                                fs::create_dir_all(parent).map_err(to_error)?;
+                            }
+                            fs::rename(&inspection, &target).map_err(to_error)?;
+                            restrict_quarantine_file(&target)?;
+                            assessment.decision = Some(
+                                if sensitive_action == "inactive" {
+                                    "stored-inactive"
+                                } else {
+                                    "quarantined"
+                                }
+                                .into(),
+                            );
+                            quarantine_paths.push(target.to_string_lossy().to_string());
+                        }
+                        sensitive_files.push(assessment);
+                    } else {
+                        if let Some(parent) = output.parent() {
+                            fs::create_dir_all(parent).map_err(to_error)?;
+                        }
+                        fs::rename(&inspection, &output).map_err(to_error)?;
+                    }
                 }
             }
             Ok(())
         })();
         if let Err(error) = extraction {
             let _ = fs::remove_dir_all(&stage);
+            let _ = fs::remove_dir_all(&quarantine_root);
             return Err(error);
+        }
+        if !sensitive_files.is_empty() {
+            write_json_atomic(
+                &quarantine_root.join("assessment.json"),
+                &serde_json::to_value(&sensitive_files).map_err(to_error)?,
+            )?;
+            write_json_atomic(
+                &quarantine_root.join("source.json"),
+                &serde_json::json!({
+                    "sourceProvider": source_provider,
+                    "sourceHost": parsed.host_str(),
+                    "fileName": safe_name,
+                    "game": game_name,
+                    "decision": sensitive_action,
+                    "createdAt": unix_timestamp(),
+                    "automaticExecution": false
+                }),
+            )?;
         }
         let final_path = unique_destination(
             &destination,
@@ -5799,17 +6473,75 @@ async fn install_mod(app: AppHandle, url: String, file_name: String) -> Result<S
         );
         fs::rename(&extract_root, &final_path).map_err(to_error)?;
         let _ = fs::remove_dir_all(&stage);
-        Ok(final_path.to_string_lossy().to_string())
+        let warning_count = sensitive_files
+            .iter()
+            .filter(|item| item.decision.as_deref() != Some("deployed-by-game-adapter"))
+            .count();
+        Ok(DownloadedModResult {
+            path: final_path.to_string_lossy().to_string(),
+            status: if sensitive_files.is_empty() {
+                "Completed"
+            } else {
+                "CompletedWithWarnings"
+            }
+            .into(),
+            warnings: if sensitive_files.is_empty() {
+                Vec::new()
+            } else {
+                vec![format!("{warning_count} fichier(s) sensible(s) isolé(s) ou exclu(s). Aucun fichier n’a été exécuté.")]
+            },
+            sensitive_files,
+            quarantine_path: if quarantine_paths.is_empty() {
+                None
+            } else {
+                Some(quarantine_root.to_string_lossy().to_string())
+            },
+        })
     } else {
         if forbidden_archive_file(Path::new(&safe_name)) {
-            return Err("Executable downloads are blocked. Open the provider page and review them manually.".into());
+            fs::create_dir_all(quarantine_root.join("files")).map_err(to_error)?;
+            let target = quarantine_root.join("files").join(&safe_name);
+            fs::write(&target, bytes).map_err(to_error)?;
+            restrict_quarantine_file(&target)?;
+            let relative = PathBuf::from(&safe_name);
+            let mut assessment = assess_sensitive_file(
+                &target,
+                &relative,
+                &relative,
+                &game_name,
+                Some(source_provider),
+                None,
+            )?
+            .ok_or_else(|| "Sensitive download assessment failed.".to_string())?;
+            assessment.decision = Some("quarantined".into());
+            write_json_atomic(
+                &quarantine_root.join("assessment.json"),
+                &serde_json::to_value(vec![assessment.clone()]).map_err(to_error)?,
+            )?;
+            write_json_atomic(
+                &quarantine_root.join("source.json"),
+                &serde_json::json!({ "sourceProvider": source_provider, "sourceHost": parsed.host_str(), "fileName": safe_name, "game": game_name, "automaticExecution": false }),
+            )?;
+            return Ok(DownloadedModResult {
+                path: String::new(),
+                status: "CompletedWithWarnings".into(),
+                warnings: vec!["Le téléchargement est uniquement un fichier exécutable : il a été conservé en quarantaine et n’a pas été lancé.".into()],
+                sensitive_files: vec![assessment],
+                quarantine_path: Some(quarantine_root.to_string_lossy().to_string()),
+            });
         }
         let output = destination.join(safe_name);
         if output.exists() {
             return Err("A mod archive with the same file name already exists.".into());
         }
         fs::write(&output, bytes).map_err(to_error)?;
-        Ok(output.to_string_lossy().to_string())
+        Ok(DownloadedModResult {
+            path: output.to_string_lossy().to_string(),
+            status: "Completed".into(),
+            warnings: Vec::new(),
+            sensitive_files: Vec::new(),
+            quarantine_path: None,
+        })
     }
 }
 
@@ -6007,6 +6739,23 @@ async fn install_update(
 mod tests {
     use super::*;
 
+    fn test_security_context(
+        root: &Path,
+        content: &Path,
+        game_name: &str,
+        action: &str,
+    ) -> SensitiveImportContext {
+        SensitiveImportContext {
+            action: action.into(),
+            game_name: game_name.into(),
+            content_root: content.to_path_buf(),
+            inactive_root: root.join("inactive"),
+            quarantine_root: root.join("quarantine"),
+            assessments: Vec::new(),
+            quarantine_paths: Vec::new(),
+        }
+    }
+
     #[test]
     fn accepts_only_safe_game_identifiers() {
         assert!(safe_game_id("4b2d66ca-5c39-4d35_a").is_ok());
@@ -6055,9 +6804,15 @@ mod tests {
         let content = root.join("content");
         fs::create_dir_all(&content).expect("content root");
         let cancel = AtomicBool::new(false);
-        let (layout, diagnostics) =
-            stage_content(&root.join("wrapper"), &content, "Cyberpunk 2077", &cancel)
-                .expect("stage composite mod");
+        let mut security = test_security_context(&root, &content, "Cyberpunk 2077", "quarantine");
+        let (layout, diagnostics) = stage_content(
+            &root.join("wrapper"),
+            &content,
+            "Cyberpunk 2077",
+            &cancel,
+            &mut security,
+        )
+        .expect("stage composite mod");
         assert_eq!(layout, "CyberpunkGameRoot");
         assert!(diagnostics.is_empty());
         assert!(content.join("archive/pc/mod/example.archive").is_file());
@@ -6078,8 +6833,10 @@ mod tests {
         let content = root.join("content");
         fs::create_dir_all(&content).expect("content root");
         let cancel = AtomicBool::new(false);
+        let mut security = test_security_context(&root, &content, "FiveM", "quarantine");
         let (layout, diagnostics) =
-            stage_content(&client, &content, "FiveM", &cancel).expect("stage FiveM client plugin");
+            stage_content(&client, &content, "FiveM", &cancel, &mut security)
+                .expect("stage FiveM client plugin");
         assert_eq!(layout, "FiveMClientPlugin");
         assert!(content
             .join("FiveM.app/plugins/client-pack/example.asi")
@@ -6090,7 +6847,9 @@ mod tests {
         fs::create_dir_all(&server).expect("server pack");
         fs::write(server.join("fxmanifest.lua"), b"fx_version 'cerulean'")
             .expect("server manifest");
-        let error = stage_content(&server, &root.join("rejected"), "FiveM", &cancel)
+        let rejected = root.join("rejected");
+        let mut rejected_security = test_security_context(&root, &rejected, "FiveM", "quarantine");
+        let error = stage_content(&server, &rejected, "FiveM", &cancel, &mut rejected_security)
             .expect_err("server resource must be rejected by client adapter");
         assert!(error.contains("Ressource serveur FiveM"));
         fs::remove_dir_all(root).expect("remove FiveM test");
@@ -6244,12 +7003,223 @@ mod tests {
     }
 
     #[test]
-    fn blocks_archive_traversal_reserved_names_and_executables() {
+    fn blocks_archive_traversal_and_reserved_names_but_assesses_executables() {
         assert!(validate_archive_relative(Path::new("safe/mod.archive")).is_ok());
         assert!(validate_archive_relative(Path::new("../outside.txt")).is_err());
         assert!(validate_archive_relative(Path::new("CON/readme.txt")).is_err());
-        assert!(validate_archive_relative(Path::new("files/setup.exe")).is_err());
+        assert!(validate_archive_relative(Path::new("files/setup.exe")).is_ok());
         assert!(validate_archive_relative(Path::new("folder/name.")).is_err());
+    }
+
+    #[test]
+    fn quarantines_tools_scc_without_rejecting_or_executing_the_mod() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-sensitive-scc-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let package = root.join("package");
+        let content = root.join("content");
+        fs::create_dir_all(package.join("tools")).expect("tools directory");
+        fs::write(package.join("readme.txt"), b"mod content").expect("readme");
+        fs::write(
+            package.join("tools/scc.exe"),
+            b"MZfake-scc-test-do-not-execute",
+        )
+        .expect("scc fixture");
+        fs::create_dir_all(&content).expect("content directory");
+        let cancel = AtomicBool::new(false);
+        let mut security = test_security_context(&root, &content, "Cyberpunk 2077", "quarantine");
+        copy_tree_cancellable_secure(&package, &content, &cancel, &mut security)
+            .expect("secure copy");
+        assert!(content.join("readme.txt").is_file());
+        assert!(!content.join("tools/scc.exe").exists());
+        assert!(root.join("quarantine/files/tools/scc.exe").is_file());
+        assert_eq!(security.assessments.len(), 1);
+        let assessment = &security.assessments[0];
+        assert_eq!(assessment.relative_path, "tools/scc.exe");
+        assert_eq!(assessment.magic_type, "PE/COFF");
+        assert_eq!(assessment.risk_level, "Caution");
+        assert_eq!(assessment.decision.as_deref(), Some("quarantined"));
+        assert_eq!(
+            assessment.hash,
+            "4b6d9f18bf5f9691b01595278001002d167ddd472b7a25e9b87af89642f3b089"
+        );
+        fs::remove_dir_all(root).expect("remove sensitive test");
+    }
+
+    #[test]
+    fn deploys_only_adapter_expected_dll_and_flags_disguised_files() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-sensitive-adapter-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(root.join("red4ext/plugins/Example")).expect("plugin directory");
+        let expected = root.join("red4ext/plugins/Example/Example.dll");
+        fs::write(&expected, b"MZexpected-plugin").expect("expected dll");
+        let allowed = assess_sensitive_file(
+            &expected,
+            Path::new("red4ext/plugins/Example/Example.dll"),
+            Path::new("red4ext/plugins/Example/Example.dll"),
+            "Cyberpunk 2077",
+            None,
+            None,
+        )
+        .expect("assessment")
+        .expect("sensitive assessment");
+        assert!(allowed.expected_by_game_adapter);
+        assert!(allowed.may_deploy);
+
+        let disguised = root.join("manual.jpg.exe");
+        fs::write(&disguised, b"MZdisguised").expect("disguised executable");
+        let blocked = assess_sensitive_file(
+            &disguised,
+            Path::new("manual.jpg.exe"),
+            Path::new("manual.jpg.exe"),
+            "Cyberpunk 2077",
+            None,
+            None,
+        )
+        .expect("assessment")
+        .expect("sensitive assessment");
+        assert_eq!(blocked.risk_level, "HighRisk");
+        assert!(blocked
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("Double extension")));
+        fs::remove_dir_all(root).expect("remove adapter test");
+    }
+
+    #[test]
+    fn sensitive_decisions_are_hash_scoped_and_support_exclude_inactive_and_cancel() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-sensitive-decision-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let package = root.join("package");
+        fs::create_dir_all(package.join("tools")).expect("tools directory");
+        let executable = package.join("tools/helper.exe");
+        fs::write(&executable, b"MZversion-one").expect("first version");
+        let first = assess_sensitive_file(
+            &executable,
+            Path::new("tools/helper.exe"),
+            Path::new("tools/helper.exe"),
+            "Test game",
+            Some("local"),
+            Some("mod-1"),
+        )
+        .expect("first assessment")
+        .expect("sensitive file");
+        fs::write(&executable, b"MZversion-two").expect("second version");
+        let second = assess_sensitive_file(
+            &executable,
+            Path::new("tools/helper.exe"),
+            Path::new("tools/helper.exe"),
+            "Test game",
+            Some("local"),
+            Some("mod-1"),
+        )
+        .expect("second assessment")
+        .expect("sensitive file");
+        assert_ne!(
+            first.hash, second.hash,
+            "a changed binary must require a new decision"
+        );
+
+        let excluded_content = root.join("excluded-content");
+        fs::create_dir_all(&excluded_content).expect("excluded content");
+        let cancel = AtomicBool::new(false);
+        let mut excluded = test_security_context(&root, &excluded_content, "Test game", "exclude");
+        copy_tree_cancellable_secure(&package, &excluded_content, &cancel, &mut excluded)
+            .expect("exclude sensitive file");
+        assert!(!excluded_content.join("tools/helper.exe").exists());
+        assert_eq!(
+            excluded.assessments[0].decision.as_deref(),
+            Some("excluded")
+        );
+
+        let inactive_content = root.join("inactive-content");
+        fs::create_dir_all(&inactive_content).expect("inactive content");
+        let mut inactive = test_security_context(&root, &inactive_content, "Test game", "inactive");
+        copy_tree_cancellable_secure(&package, &inactive_content, &cancel, &mut inactive)
+            .expect("store sensitive file inactive");
+        assert!(!inactive_content.join("tools/helper.exe").exists());
+        assert!(root.join("inactive/tools/helper.exe").is_file());
+        assert_eq!(
+            inactive.assessments[0].decision.as_deref(),
+            Some("stored-inactive")
+        );
+
+        let cancelled_content = root.join("cancelled-content");
+        fs::create_dir_all(&cancelled_content).expect("cancelled content");
+        let cancelled = AtomicBool::new(true);
+        let mut cancelled_security =
+            test_security_context(&root, &cancelled_content, "Test game", "quarantine");
+        assert!(copy_tree_cancellable_secure(
+            &package,
+            &cancelled_content,
+            &cancelled,
+            &mut cancelled_security
+        )
+        .is_err());
+        assert!(fs::read_dir(&cancelled_content)
+            .expect("cancelled directory")
+            .next()
+            .is_none());
+        fs::remove_dir_all(root).expect("remove decision test");
+    }
+
+    #[test]
+    fn assesses_scripts_installers_links_and_extensionless_pe_without_declaring_them_safe() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-sensitive-matrix-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("matrix directory");
+        for name in [
+            "install.ps1",
+            "setup.bat",
+            "package.msi",
+            "shortcut.lnk",
+            "system.sys",
+        ] {
+            let path = root.join(name);
+            fs::write(&path, b"sensitive fixture").expect("matrix file");
+            let assessment = assess_sensitive_file(
+                &path,
+                Path::new(name),
+                Path::new(name),
+                "Test game",
+                None,
+                None,
+            )
+            .expect("matrix assessment")
+            .expect("sensitive assessment");
+            assert_ne!(assessment.risk_level, "Informational");
+            assert_eq!(assessment.signature_status, "Unknown");
+            assert!(assessment
+                .reasons
+                .iter()
+                .any(|reason| reason.contains("antivirus")));
+        }
+        let extensionless = root.join("payload");
+        fs::write(&extensionless, b"MZextensionless").expect("extensionless PE");
+        let assessment = assess_sensitive_file(
+            &extensionless,
+            Path::new("payload"),
+            Path::new("payload"),
+            "Test game",
+            None,
+            None,
+        )
+        .expect("extensionless assessment")
+        .expect("sensitive assessment");
+        assert_eq!(assessment.magic_type, "PE/COFF");
+        assert_eq!(assessment.risk_level, "HighRisk");
+        fs::remove_dir_all(root).expect("remove matrix test");
     }
 
     #[test]

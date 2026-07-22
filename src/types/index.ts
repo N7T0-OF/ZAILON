@@ -4,7 +4,7 @@ export type UpdateChannel = 'stable' | 'beta'
 export type TextSize = 'small' | 'normal' | 'large' | 'very-large'
 export type UiDensity = 'compact' | 'comfortable'
 export type LiquidGlassMode = 'off' | 'light' | 'normal' | 'intense' | 'custom'
-export type ExploreColumns = 'auto' | '2' | '3'
+export type ExploreColumns = '2' | '3'
 export type ModCategorySource = 'detected' | 'metadata' | 'user'
 export type ModCategoryConfidence = 'high' | 'medium' | 'low'
 
@@ -81,6 +81,7 @@ export interface Mod {
   profileIds?: string[]
   deploymentStatus?: ModDeploymentStatus
   diagnostics?: string[]
+  quarantinePath?: string
   categoryTags?: ModCategoryTag[]
   /** Independent logical clone. Content stays immutable until a profile overlay is written. */
   basePackageId?: string
@@ -270,6 +271,49 @@ export interface ModImportCandidate {
   version?: string
   confidence: MatchConfidence
   warnings: string[]
+  sensitiveFiles: SensitiveFileAssessment[]
+  recognizedDestinations: string[]
+}
+
+export type SensitiveRiskLevel = 'Informational' | 'Caution' | 'HighRisk' | 'Blocked'
+export type SensitiveImportAction = 'exclude' | 'quarantine' | 'inactive'
+
+export interface SensitiveFileAssessment {
+  relativePath: string
+  detectedType: string
+  extension: string
+  magicType: string
+  size: number
+  hash: string
+  signatureStatus: 'SignedValid' | 'SignedInvalid' | 'Unsigned' | 'Unknown'
+  publisher?: string
+  sourceProvider?: string
+  sourceModId?: string
+  expectedByManifest: boolean
+  expectedByGameAdapter: boolean
+  executionRequired: boolean
+  installDestination: string
+  riskLevel: SensitiveRiskLevel
+  reasons: string[]
+  recommendedAction: string
+  decision?: string
+  mayDeploy: boolean
+}
+
+export interface SecureImportResult {
+  installedPaths: string[]
+  status: 'Completed' | 'CompletedWithWarnings'
+  warnings: string[]
+  sensitiveFiles: SensitiveFileAssessment[]
+  quarantinePaths: string[]
+}
+
+export interface DownloadedModResult {
+  path: string
+  status: 'Completed' | 'CompletedWithWarnings'
+  warnings: string[]
+  sensitiveFiles: SensitiveFileAssessment[]
+  quarantinePath?: string
 }
 
 export interface ProfileArchiveManifest {

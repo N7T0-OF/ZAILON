@@ -1,4 +1,4 @@
-import { Archive, Boxes, CheckSquare2, Copy, Download, FileArchive, FolderInput, FolderOpen, FolderPlus, Lock, MonitorDown, Plus, Radar, RefreshCw, RotateCcw, Search, ShieldAlert, Tag, Trash2, Unlock, Upload, Wrench, X } from 'lucide-react'
+import { AlertTriangle, Archive, Boxes, CheckSquare2, Copy, Download, FileArchive, FolderInput, FolderOpen, FolderPlus, Lock, MonitorDown, Plus, Radar, RefreshCw, RotateCcw, Search, ShieldAlert, Tag, Trash2, Unlock, Upload, Wrench, X } from 'lucide-react'
 import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
@@ -7,7 +7,7 @@ import { ModCard } from '../UI/ModCard'
 import { formatTime, timeAgo } from '../../utils'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
 import { GameAppearanceEditor } from '../GameResourcesDialog'
-import type { GameTab, ModImportCandidate, Profile, ProfileArchiveManifest } from '../../types'
+import type { GameTab, ModImportCandidate, Profile, ProfileArchiveManifest, SensitiveFileAssessment, SensitiveImportAction } from '../../types'
 
 const TABS: Array<{ id: GameTab; label: string }> = [
   { id: 'overview', label: 'Aperçu' },
@@ -269,6 +269,7 @@ function BulkActionDialog({ mode, count, source, profiles, onClose, onConfirm }:
 
 function ModImportDialog({ gameId, profileId, gameName, destination, onClose, onImported }: { gameId: string; profileId: string; gameName: string; destination?: string; onClose: () => void; onImported: () => void }) {
   const autoReduce = useStore(state => state.taskAutoReduceImports)
+  const upsertBackgroundTask = useStore(state => state.upsertBackgroundTask)
   const [candidates, setCandidates] = useState<ModImportCandidate[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
@@ -278,6 +279,8 @@ function ModImportDialog({ gameId, profileId, gameName, destination, onClose, on
   const [task, setTask] = useState<BackgroundTaskSnapshot>()
   const [taskId, setTaskId] = useState<string>()
   const [deployNow, setDeployNow] = useState(true)
+  const [sensitivePrompt, setSensitivePrompt] = useState(false)
+  const [decisionTask, setDecisionTask] = useState<BackgroundTaskSnapshot>()
   const reduceTimer = useRef<number>()
   const visibleCandidates = candidates.slice(0, visibleCount)
 
@@ -324,7 +327,9 @@ function ModImportDialog({ gameId, profileId, gameName, destination, onClose, on
     return () => { disposed = true; unlisten?.() }
   }, [analyze])
 
-  const commit = async () => {
+  const selectedSensitiveFiles = candidates.filter(item => selected.has(item.path)).flatMap(item => item.sensitiveFiles || [])
+
+  const executeCommit = async (sensitiveAction: SensitiveImportAction) => {
     if (!destination) { setError('Configurez le dossier Mods du jeu avant l’import.'); return }
     const paths = candidates.filter(item => selected.has(item.path)).map(item => item.path)
     if (!paths.length) return
@@ -332,10 +337,11 @@ function ModImportDialog({ gameId, profileId, gameName, destination, onClose, on
     try {
       const nextTaskId = crypto.randomUUID()
       setTaskId(nextTaskId)
-      await native.importModCandidatesBackground(nextTaskId, gameId, [profileId], paths, gameName, destination, deployNow, nextTask => {
+      const result = await native.importModCandidatesBackground(nextTaskId, gameId, [profileId], paths, gameName, destination, deployNow, sensitiveAction, nextTask => {
         setTask(nextTask)
         if (autoReduce && nextTask.status === 'running' && nextTask.processed > 0 && !reduceTimer.current) reduceTimer.current = window.setTimeout(onClose, 1_500)
       })
+      if (result.status === 'CompletedWithWarnings') setError(`Import terminé avec avertissement : ${result.sensitiveFiles.length} fichier(s) sensible(s) traité(s). Aucun n’a été exécuté.`)
       onImported()
       onClose()
     } catch (reason) {
@@ -343,6 +349,29 @@ function ModImportDialog({ gameId, profileId, gameName, destination, onClose, on
       setBusy(false)
       setTaskId(undefined)
     }
+  }
+
+  const commit = () => {
+    if (!selectedSensitiveFiles.length) { void executeCommit('quarantine'); return }
+    const now = Math.floor(Date.now() / 1000)
+    const pending: BackgroundTaskSnapshot = {
+      id: crypto.randomUUID(), kind: 'mod-import', title: 'Import suspendu pour vérification', status: 'awaiting_user_decision',
+      processed: 0, total: selectedSensitiveFiles.length,
+      message: `${selectedSensitiveFiles.length} fichier(s) sensible(s) attendent votre décision. Aucun n’a été exécuté.`,
+      startedAt: now, updatedAt: now,
+    }
+    setDecisionTask(pending)
+    upsertBackgroundTask(pending)
+    setSensitivePrompt(true)
+  }
+  const closeSensitivePrompt = () => {
+    if (decisionTask) upsertBackgroundTask({ ...decisionTask, status: 'cancelled', message: 'Import annulé par l’utilisateur. Aucun fichier sensible n’a été exécuté.', updatedAt: Math.floor(Date.now() / 1000) })
+    setSensitivePrompt(false)
+  }
+  const decideSensitiveImport = (action: SensitiveImportAction) => {
+    if (decisionTask) upsertBackgroundTask({ ...decisionTask, status: 'completed', processed: decisionTask.total, message: `Décision enregistrée : ${action}. Le staging transactionnel peut commencer.`, updatedAt: Math.floor(Date.now() / 1000) })
+    setSensitivePrompt(false)
+    void executeCommit(action)
   }
 
   const cancelTask = () => taskId && void native.cancelBackgroundTask(taskId)
@@ -358,7 +387,25 @@ function ModImportDialog({ gameId, profileId, gameName, destination, onClose, on
         {candidates.length > 0 && <label className="mt-3 flex cursor-pointer items-start justify-between gap-3 rounded-xl border border-white/[0.07] bg-white/[0.018] p-3 text-[11px] text-white/58"><span><strong className="block text-white/72">Activer pour le prochain lancement</strong><span className="mt-1 block leading-relaxed text-white/34">Les fichiers restent stockés hors du jeu. Au lancement, TemporaryCopy résout les conflits, sauvegarde les originaux, copie chaque fichier vers sa vraie racine, vérifie sa visibilité puis restaure le jeu à sa fermeture. Ce backend n’est pas le VFS de MO2.</span></span><input type="checkbox" checked={deployNow} onChange={event => setDeployNow(event.target.checked)} className="mt-1 accent-gold" /></label>}
         {error && <p className="mt-3 rounded-lg border border-red-400/15 bg-red-400/[0.04] p-3 text-[11px] text-red-200/70">{error}</p>}
       </div>
-      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] p-4"><div className="flex items-center gap-2"><button onClick={() => void choose()} disabled={busy} className="rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]">Ajouter un dossier racine</button>{candidates.length > 0 && <span className="text-[11px] text-white/32">{candidates.length} mod(s) détecté(s)</span>}</div><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-3 py-2 text-[11px] text-white/45">{busy ? 'Réduire' : 'Fermer'}</button><button onClick={() => void commit()} disabled={busy || !selected.size} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-ink-400 disabled:opacity-35">{busy ? `${task?.message || 'Tâche en cours…'} ${task?.total ? `${progress}%` : ''}` : `${deployNow ? 'Importer et activer' : 'Stocker'} ${selected.size} mod(s)`}</button></div></footer>
+      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] p-4"><div className="flex items-center gap-2"><button onClick={() => void choose()} disabled={busy} className="rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]">Ajouter un dossier racine</button>{candidates.length > 0 && <span className="text-[11px] text-white/32">{candidates.length} mod(s) détecté(s){selectedSensitiveFiles.length ? ` · ${selectedSensitiveFiles.length} sensible(s)` : ''}</span>}</div><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-3 py-2 text-[11px] text-white/45">{busy ? 'Réduire' : 'Fermer'}</button><button onClick={commit} disabled={busy || !selected.size} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-ink-400 disabled:opacity-35">{busy ? `${task?.message || 'Tâche en cours…'} ${task?.total ? `${progress}%` : ''}` : `${deployNow ? 'Importer et activer' : 'Stocker'} ${selected.size} mod(s)`}</button></div></footer>
+    </section>
+    {sensitivePrompt && <SensitiveFileDecisionDialog files={selectedSensitiveFiles} onClose={closeSensitivePrompt} onDecision={decideSensitiveImport} />}
+  </div>
+}
+
+function SensitiveFileDecisionDialog({ files, onClose, onDecision }: { files: SensitiveFileAssessment[]; onClose: () => void; onDecision: (action: SensitiveImportAction) => void }) {
+  const [showAll, setShowAll] = useState(false)
+  const file = files[0]
+  const quarantineBytes = files.filter(item => !item.mayDeploy).reduce((sum, item) => sum + item.size, 0)
+  return <div className="fixed inset-0 z-[280] flex items-center justify-center bg-black/82 p-4 backdrop-blur-md" onPointerDown={event => { if (event.target === event.currentTarget) onClose() }}>
+    <section role="dialog" aria-modal="true" aria-labelledby="sensitive-file-title" className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-amber-300/20 bg-[#101313] p-5 shadow-2xl">
+      <header className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-300/10 text-amber-200"><AlertTriangle size={20} /></span><div className="min-w-0 flex-1"><h2 id="sensitive-file-title" className="font-display text-xl font-bold text-white">Fichier exécutable détecté</h2><p className="mt-1 text-xs leading-relaxed text-white/48">Le mod contient {files.length} fichier(s) pouvant exécuter du code. ZAILON ne les lancera jamais automatiquement.</p></div><button onClick={onClose} aria-label="Fermer" className="rounded-lg p-2 text-white/38 hover:bg-white/[0.06]"><X size={16} /></button></header>
+      <div className="mt-4 rounded-xl border border-white/[0.08] bg-black/20 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><code className="break-all text-xs font-semibold text-amber-100/80">{file.relativePath}</code><span className={`rounded-full px-2 py-1 text-[11px] ${file.riskLevel === 'HighRisk' || file.riskLevel === 'Blocked' ? 'bg-red-300/10 text-red-200' : 'bg-amber-300/10 text-amber-100'}`}>{file.riskLevel}</span></div><dl className="mt-3 grid gap-2 text-[11px] sm:grid-cols-2"><div><dt className="text-white/28">Type</dt><dd className="mt-0.5 text-white/58">{file.detectedType} · {file.magicType}</dd></div><div><dt className="text-white/28">Taille</dt><dd className="mt-0.5 text-white/58">{formatBytes(file.size)}</dd></div><div><dt className="text-white/28">SHA-256</dt><dd title={file.hash} className="mt-0.5 font-mono text-white/58">{file.hash.slice(0, 16)}…</dd></div><div><dt className="text-white/28">Signature</dt><dd className="mt-0.5 text-white/58">{file.signatureStatus} · éditeur {file.publisher || 'inconnu'}</dd></div></dl><p className="mt-3 text-[11px] leading-relaxed text-white/42">{file.reasons.join(' ')}</p></div>
+      <div className="mt-3 rounded-xl border border-sky-300/14 bg-sky-300/[0.035] p-3 text-[11px] leading-relaxed text-sky-100/60"><strong className="text-sky-100/80">Aperçu :</strong> {files.length} fichier(s) sensible(s), {formatBytes(quarantineBytes)} à isoler, aucun écrasement de fichier existant et aucune exécution automatique.</div>
+      {showAll && <div className="mt-3 max-h-48 space-y-1 overflow-y-auto rounded-xl border border-white/[0.07] p-2">{files.map(item => <div key={`${item.relativePath}-${item.hash}`} className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 text-[11px] hover:bg-white/[0.03]"><code className="min-w-0 truncate text-white/55">{item.relativePath}</code><span className="shrink-0 text-white/30">{item.riskLevel} · {item.hash.slice(0, 8)}</span></div>)}</div>}
+      <button type="button" onClick={() => setShowAll(value => !value)} className="mt-3 text-[11px] font-semibold text-gold">{showAll ? 'Masquer la liste' : 'Afficher tous les fichiers sensibles'}</button>
+      <footer className="mt-5 grid gap-2 sm:grid-cols-2"><button type="button" onClick={() => onDecision('quarantine')} className="rounded-lg bg-gold px-4 py-3 text-xs font-semibold text-[var(--zailon-accent-text)]">Conserver en quarantaine · recommandé</button><button type="button" onClick={() => onDecision('exclude')} className="rounded-lg border border-white/[0.1] px-4 py-3 text-xs font-semibold text-white/62 hover:bg-white/[0.05]">Importer sans ces fichiers</button><button type="button" onClick={() => onDecision('inactive')} className="rounded-lg border border-white/[0.1] px-4 py-3 text-xs text-white/58 hover:bg-white/[0.05]">Inclure comme fichiers inactifs</button><button type="button" onClick={onClose} className="rounded-lg border border-red-300/12 px-4 py-3 text-xs text-red-200/65 hover:bg-red-300/[0.04]">Annuler l’import</button></footer>
+      <p className="mt-3 text-center text-[11px] text-white/28">Aucun bouton « Exécuter quand même » n’est proposé et aucun droit administrateur ne sera demandé.</p>
     </section>
   </div>
 }

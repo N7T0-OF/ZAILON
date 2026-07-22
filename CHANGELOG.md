@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.1 — Explorer unifié et import sécurisé des exécutables
+
+- Simplifie la barre de titre en « ZAILON · version » sans le sous-titre Universal Mod Launcher.
+- Unifie Nexus et GameBanana autour des contrôles Grille/Liste, tri, filtres, pagination et résultats partagés.
+- Remplace le sélecteur de colonnes par un bouton accessible qui cycle directement entre 2 et 3 colonnes avec repli responsive.
+- Sépare la validation des chemins d’archive de l’évaluation des fichiers sensibles : `tools/scc.exe` n’annule plus automatiquement tout l’import.
+- Ajoute une classification par extension, signature magique, destination, adaptateur de jeu et SHA-256, sans jamais exécuter le fichier.
+- Ajoute les décisions exclusion, quarantaine ou stockage inactif, un staging transactionnel et le statut « terminé avec avertissements ».
+- Conserve les évaluations dans la quarantaine, le manifeste du mod et l’historique persistant des tâches.
+
 ## 1.6.0 — Profils isolés, opérations groupées et adaptateur FiveM client
 
 - Corrige la création de profil : un profil neuf est toujours vide ; seule la duplication explicite reprend états, ordre et réglages.

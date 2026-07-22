@@ -5,7 +5,7 @@ import { BackgroundTaskSnapshot, DetectedGame, native, NativeMod, pickExecutable
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
 
-const APP_VERSION = '1.6.0'
+const APP_VERSION = '1.6.1'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 export const DEFAULT_LIQUID_GLASS: LiquidGlassSettings = { opacity: 0.86, blur: 18, darkTint: 0.58, saturation: 1.08, border: 0.12, reflection: 0.08, shadow: 0.5, animations: true, reduceWhenUnfocused: true, preferNative: true }
 
@@ -44,6 +44,7 @@ const nativeModToMod = (mod: NativeMod, previous?: Mod, priority = 0): Mod => wi
   profileIds: mod.profileIds,
   deploymentStatus: mod.deploymentStatus,
   diagnostics: mod.diagnostics,
+  quarantinePath: mod.quarantinePath,
 })
 
 const withProfilePaths = (profile: Profile, paths: Awaited<ReturnType<typeof native.syncProfileState>>): Profile => ({
@@ -412,7 +413,7 @@ export function migratePersistedState(persisted: unknown) {
     exploreRecentGames: state.exploreRecentGames || [],
     explorePage: state.explorePage || 1,
     exploreSort: state.exploreSort || 'recent',
-    exploreColumns: state.exploreColumns || 'auto',
+    exploreColumns: state.exploreColumns === '3' ? '3' : '2',
     textSize: state.textSize || 'normal',
     uiDensity: state.uiDensity || 'comfortable',
     autoArtwork: state.autoArtwork ?? false,
@@ -471,7 +472,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   exploreHasNextPage: false,
   exploreSort: 'recent',
   exploreGrid: true,
-  exploreColumns: 'auto',
+  exploreColumns: '2',
   exploreMods: [],
   exploreLoading: false,
   exploreGamesLoading: false,
@@ -986,11 +987,24 @@ export const useStore = create<Store>()(persist((set, get) => ({
         fileName = download.fileName
       }
       if (!downloadUrl || !fileName) throw new Error('Aucun téléchargement direct n’est disponible pour ce mod.')
-      const downloadedPath = await native.installMod(downloadUrl, fileName)
+      const download = await native.installMod(downloadUrl, fileName, game.name, 'quarantine')
+      if (download.status === 'CompletedWithWarnings') {
+        const now = Math.floor(Date.now() / 1000)
+        get().upsertBackgroundTask({
+          id: createId(), kind: 'mod-import', title: `Mod importé · ${mod.name}`, status: 'completed_with_warnings',
+          processed: download.sensitiveFiles.length, total: download.sensitiveFiles.length,
+          message: `${download.sensitiveFiles.length} fichier(s) sensible(s) isolé(s). ${download.warnings.join(' ')}`,
+          startedAt: now, updatedAt: now,
+        })
+      }
+      if (!download.path) {
+        set({ notice: `Téléchargement isolé : ${download.warnings.join(' ')}` })
+        return
+      }
       const taskId = createId()
-      await native.importModCandidatesBackground(taskId, game.id, [profile.id], [downloadedPath], game.name, game.modsPath || game.installDirectory || '', true, task => get().upsertBackgroundTask(task))
+      const imported = await native.importModCandidatesBackground(taskId, game.id, [profile.id], [download.path], game.name, game.modsPath || game.installDirectory || '', true, 'quarantine', task => get().upsertBackgroundTask(task))
       await get().scanMods(game.id)
-      set({ notice: `${mod.name} a été téléchargé, validé et stocké. Il sera rendu visible dans ${game.name} au prochain lancement après vérification.` })
+      set({ notice: imported.status === 'CompletedWithWarnings' || download.status === 'CompletedWithWarnings' ? `${mod.name} a été importé avec avertissement : ${(download.sensitiveFiles.length + imported.sensitiveFiles.length)} fichier(s) sensible(s) isolé(s). Aucun n’a été exécuté.` : `${mod.name} a été téléchargé, validé et stocké. Il sera rendu visible dans ${game.name} au prochain lancement après vérification.` })
     } catch (error) {
       set({ notice: asError(error) })
     }

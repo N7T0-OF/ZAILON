@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDown, ArrowUp, ExternalLink, RefreshCw, StickyNote, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, ExternalLink, FolderOpen, RefreshCw, StickyNote, Trash2 } from 'lucide-react'
 import type { MouseEvent } from 'react'
 import { Mod } from '../../types'
 import { LOADER_COLORS, PLATFORM_COLORS } from '../../utils'
@@ -21,6 +21,7 @@ const conflictLabel = { overwrites: 'Écrase', overwritten: 'Écrasé', mixed: '
 export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteChange, selected, onSelect }: ModCardProps) {
   const loaderColor = LOADER_COLORS[mod.loader] || '#8888aa'
   const platformColor = mod.source ? PLATFORM_COLORS[mod.source] : '#8888aa'
+  const sensitiveDiagnostic = (mod.diagnostics || []).find(item => item.toLocaleLowerCase().includes('sensible'))
 
   return (
     <div data-mod-id={mod.id} className={`group flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all duration-150 ${selected ? 'border-gold/45 bg-gold/[0.08]' :
@@ -37,7 +38,7 @@ export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteC
 
       {/* Name + meta */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5"><p className="text-xs font-body font-medium text-white/90 truncate leading-tight">{mod.name}</p>{mod.storage === 'staged' && <span title={(mod.diagnostics || []).join('\n') || 'Stocké hors du dossier du jeu'} className={`rounded px-1 py-0.5 text-[11px] ${mod.deploymentStatus === 'runtime-visible' ? 'bg-emerald-300/10 text-emerald-200' : mod.deploymentStatus === 'failed' ? 'bg-red-300/10 text-red-200' : 'bg-sky-300/10 text-sky-200'}`}>{mod.deploymentStatus || 'stored'}</span>}{mod.conflict && mod.conflict !== 'none' && <span title={`${mod.conflictCount || 0} fichier(s) partagé(s) avec un autre mod actif`} className={`flex items-center gap-0.5 rounded px-1 py-0.5 text-[11px] ${mod.conflict === 'overwrites' ? 'bg-amber-400/10 text-amber-200' : mod.conflict === 'overwritten' ? 'bg-red-400/10 text-red-200' : 'bg-purple-400/10 text-purple-200'}`}><AlertTriangle size={9} /> {conflictLabel[mod.conflict]}</span>}</div>
+        <div className="flex items-center gap-1.5"><p className="text-xs font-body font-medium text-white/90 truncate leading-tight">{mod.name}</p>{mod.storage === 'staged' && <span title={(mod.diagnostics || []).join('\n') || 'Stocké hors du dossier du jeu'} className={`rounded px-1 py-0.5 text-[11px] ${mod.deploymentStatus === 'runtime-visible' ? 'bg-emerald-300/10 text-emerald-200' : mod.deploymentStatus === 'failed' ? 'bg-red-300/10 text-red-200' : 'bg-sky-300/10 text-sky-200'}`}>{mod.deploymentStatus || 'stored'}</span>}{sensitiveDiagnostic && <span title={sensitiveDiagnostic} className="flex items-center gap-0.5 rounded bg-amber-300/10 px-1 py-0.5 text-[11px] text-amber-100"><AlertTriangle size={9} /> sensible</span>}{mod.conflict && mod.conflict !== 'none' && <span title={`${mod.conflictCount || 0} fichier(s) partagé(s) avec un autre mod actif`} className={`flex items-center gap-0.5 rounded px-1 py-0.5 text-[11px] ${mod.conflict === 'overwrites' ? 'bg-amber-400/10 text-amber-200' : mod.conflict === 'overwritten' ? 'bg-red-400/10 text-red-200' : 'bg-purple-400/10 text-purple-200'}`}><AlertTriangle size={9} /> {conflictLabel[mod.conflict]}</span>}</div>
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-[11px] font-mono text-white/30">P{(mod.priority ?? 0) + 1}</span>
           {mod.author && <span className="text-[11px] text-white/35">{mod.author}</span>}
@@ -63,6 +64,7 @@ export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteC
             <ExternalLink size={11} className="text-white/30 hover:text-white/60" />
           </button>
         )}
+        {mod.quarantinePath && <button onClick={() => void native.openPath(mod.quarantinePath!)} title="Ouvrir le dossier de quarantaine" className="opacity-0 transition-opacity group-hover:opacity-100"><FolderOpen size={11} className="text-amber-200/45 hover:text-amber-100" /></button>}
         {onDelete && (
           <button onClick={onDelete} className="opacity-0 group-hover:opacity-100 transition-opacity">
             <Trash2 size={11} className="text-white/30 hover:text-red-400" />

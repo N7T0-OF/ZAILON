@@ -9,9 +9,7 @@ import {
   Download,
   ExternalLink,
   Gamepad2,
-  Grid2X2,
   KeyRound,
-  LayoutList,
   Loader2,
   Pin,
   RefreshCw,
@@ -22,6 +20,8 @@ import {
 import { useStore } from '../../store/useStore'
 import type { ExplodMod, Platform } from '../../types'
 import { native, NexusCatalogGame, NexusCatalogMod, ProviderConnectionStatus } from '../../lib/native'
+import { NexusExplorerAdapter } from '../../lib/explorerProviders'
+import { GridColumnCycleButton, ProviderExplorerToolbar, ProviderFilters, ProviderPagination, ProviderSearchResults, ProviderSortControl, ProviderViewModeToggle } from '../Explorer/ProviderExplorer'
 
 const providers: Array<{ id: Platform; name: string; detail: string; ready: boolean }> = [
   { id: 'gamebanana', name: 'GameBanana', detail: 'Catalogue public connecté', ready: true },
@@ -152,7 +152,7 @@ export function ExploreView() {
 
     {!readyProvider ? <ProviderUnavailable provider={providers.find(item => item.id === platform)?.name || platform} onConfigure={() => setView('settings')} /> : platform === 'nexus' ? <NexusCatalog selectedGameName={selectedGame?.name} showNsfw={showNsfw} /> : <>
       <section className="mt-4 rounded-xl border border-white/[0.07] bg-black/10 p-3">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <ProviderExplorerToolbar>
           <div className="relative min-w-0 flex-1">
             <label className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 focus-within:border-gold/26">
               <Gamepad2 size={15} className="shrink-0 text-white/42" />
@@ -173,14 +173,13 @@ export function ExploreView() {
 
           <div className="flex items-center gap-1">
             <button type="button" onClick={() => void refresh()} disabled={loading} title="Actualiser le catalogue" aria-label="Actualiser le catalogue" className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] text-white/46 hover:bg-white/[0.06] hover:text-white disabled:opacity-40"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /></button>
-            <button type="button" onClick={() => setGrid(true)} title="Affichage en grille" aria-label="Affichage en grille" className={`flex h-9 w-9 items-center justify-center rounded-lg ${grid ? 'bg-gold text-[#101313]' : 'border border-white/[0.08] text-white/38 hover:text-white'}`}><Grid2X2 size={14} /></button>
-            <button type="button" onClick={() => setGrid(false)} title="Affichage en liste" aria-label="Affichage en liste" className={`flex h-9 w-9 items-center justify-center rounded-lg ${!grid ? 'bg-gold text-[#101313]' : 'border border-white/[0.08] text-white/38 hover:text-white'}`}><LayoutList size={15} /></button>
-            {grid && <label className="ml-1 flex h-9 items-center gap-2 rounded-lg border border-white/[0.08] px-2 text-[11px] text-white/46">Colonnes<select value={columns} onChange={event => setColumns(event.target.value as typeof columns)} className="bg-[#101313] text-white/72"><option value="auto">Auto</option><option value="2">2</option><option value="3">3</option></select></label>}
+            <ProviderViewModeToggle grid={grid} onChange={setGrid} />
+            {grid && <GridColumnCycleButton currentColumnCount={columns} onChange={setColumns} />}
           </div>
-        </div>
+        </ProviderExplorerToolbar>
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <label className="text-[11px] text-white/45">Trier par <select value={sort} onChange={event => setSort(event.target.value as typeof sort)} className="ml-1 rounded border border-white/[0.08] bg-[#101313] px-2 py-1.5 text-[11px] text-white/75"><option value="recent">Récent</option><option value="updated">Récemment mis à jour</option><option value="popular">Mentions J’aime (page)</option><option value="downloaded">Téléchargements (page)</option></select></label>
-          <button type="button" onClick={() => { setSearch(''); setSort('recent'); setPage(1) }} className="rounded border border-white/[0.08] px-2.5 py-1.5 text-[11px] text-white/50 hover:text-white">Réinitialiser les filtres</button>
+          <ProviderSortControl value={sort} onChange={setSort} />
+          <ProviderFilters onReset={() => { setSearch(''); setSort('recent'); setPage(1) }} />
           <span className="ml-auto text-[11px] text-white/30">Page {page}</span>
         </div>
       </section>
@@ -197,14 +196,10 @@ export function ExploreView() {
           <span className="flex items-center gap-1.5 text-[11px] text-white/30"><ShieldCheck size={13} /> Les fichiers sont récupérés depuis la source officielle.</span>
         </div>
 
-        {loading && !mods.length ? <LoadingGrid /> : !visibleMods.length && !error ? <EmptyResults onReset={() => { setSearch(''); void refresh() }} /> : <div className={grid ? `grid gap-3 ${columns === '2' ? 'md:grid-cols-2' : columns === '3' ? 'md:grid-cols-2 xl:grid-cols-3' : 'md:grid-cols-2 2xl:grid-cols-3'}` : 'space-y-2'}>
+        <ProviderSearchResults grid={grid} columns={columns} loading={loading && !mods.length} empty={!visibleMods.length && !error} loadingFallback={<LoadingGrid />} emptyFallback={<EmptyResults onReset={() => { setSearch(''); void refresh() }} />}>
           {visibleMods.map(mod => <ModResult key={mod.id} mod={mod} grid={grid} installing={installingId === mod.id} canInstall={Boolean(selectedGame?.modsPath)} targetName={selectedGame?.name} onPreview={() => setPreviewMod(mod)} onInstall={() => void install(mod)} />)}
-        </div>}
-        <div className="mt-4 flex items-center justify-center gap-2" aria-label="Pagination GameBanana">
-          <button type="button" disabled={page <= 1 || loading} onClick={() => setPage(page - 1)} className="flex h-9 items-center gap-1 rounded-lg border border-white/[0.08] px-3 text-[11px] text-white/65 hover:bg-white/[0.05] disabled:opacity-25"><ChevronLeft size={14} /> Précédent</button>
-          <span className="flex h-9 min-w-9 items-center justify-center rounded-lg bg-gold text-[11px] font-bold text-[#101313]">{page}</span>
-          <button type="button" disabled={!hasNextPage || loading} onClick={() => setPage(page + 1)} className="flex h-9 items-center gap-1 rounded-lg border border-white/[0.08] px-3 text-[11px] text-white/65 hover:bg-white/[0.05] disabled:opacity-25">Suivant <ChevronRight size={14} /></button>
-        </div>
+        </ProviderSearchResults>
+        <ProviderPagination provider="GameBanana" page={page} hasNextPage={hasNextPage} loading={loading} onPageChange={setPage} />
       </section>
     </>}
     {previewMod && <ModPreviewModal mod={previewMod} canInstall={Boolean(selectedGame?.modsPath)} installing={installingId === previewMod.id} onInstall={() => void install(previewMod)} onClose={() => setPreviewMod(undefined)} />}
@@ -220,16 +215,24 @@ function TargetGame({ gameName, configured, onConfigure }: { gameName?: string; 
 
 function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: string; showNsfw: boolean }) {
   const columns = useStore(state => state.exploreColumns)
+  const grid = useStore(state => state.exploreGrid)
+  const setGrid = useStore(state => state.setExploreGrid)
+  const setColumns = useStore(state => state.setExploreColumns)
   const [games, setGames] = useState<NexusCatalogGame[]>([])
   const [domain, setDomain] = useState('')
   const [gameFilter, setGameFilter] = useState(selectedGameName || '')
   const [feed, setFeed] = useState<'recent' | 'updated' | 'trending'>('trending')
   const [query, setQuery] = useState('')
+  const [sort, setSort] = useState<'recent' | 'updated' | 'popular' | 'downloaded'>('recent')
+  const [page, setPage] = useState(1)
+  const [pageLoading, setPageLoading] = useState(false)
   const [mods, setMods] = useState<NexusCatalogMod[]>([])
   const [loadingGames, setLoadingGames] = useState(true)
   const [loadingMods, setLoadingMods] = useState(false)
   const [error, setError] = useState<string>()
   const [previewMod, setPreviewMod] = useState<ExplodMod>()
+  const requestSerial = useRef(0)
+  const resultsRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     let active = true
@@ -255,31 +258,47 @@ function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: strin
 
   const loadMods = async (nextDomain = domain, nextFeed = feed) => {
     if (!nextDomain) return
+    const request = ++requestSerial.current
     setLoadingMods(true)
     setError(undefined)
     try {
-      setMods(await native.nexusCatalogMods(nextDomain, nextFeed))
+      const result = await native.nexusCatalogMods(nextDomain, nextFeed)
+      if (request === requestSerial.current) setMods(result)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
+      if (request === requestSerial.current) setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
-      setLoadingMods(false)
+      if (request === requestSerial.current) setLoadingMods(false)
     }
   }
 
   useEffect(() => {
-    if (domain) void loadMods(domain, feed)
+    if (domain) { setPage(1); void loadMods(domain, feed) }
   }, [domain, feed])
 
   const gameMatches = gameFilter.trim().length < 2 ? games.slice(0, 25) : games
     .filter(game => `${game.name} ${game.domain}`.toLocaleLowerCase().includes(gameFilter.trim().toLocaleLowerCase()))
     .slice(0, 25)
   const normalizedQuery = query.trim().toLocaleLowerCase()
-  const visibleMods = mods.filter(mod => (showNsfw || !mod.nsfw) && (!normalizedQuery || `${mod.name} ${mod.author} ${mod.description}`.toLocaleLowerCase().includes(normalizedQuery)))
+  const visibleMods = mods.filter(mod => (showNsfw || !mod.nsfw) && (!normalizedQuery || `${mod.name} ${mod.author} ${mod.description}`.toLocaleLowerCase().includes(normalizedQuery))).sort((left, right) => sort === 'downloaded' ? right.downloads - left.downloads : sort === 'popular' ? right.endorsements - left.endorsements : sort === 'updated' ? (right.updatedAt || 0) - (left.updatedAt || 0) : right.modId - left.modId)
   const selectedCatalogGame = games.find(game => game.domain === domain)
+  const pageSize = 9
+  const pageCount = Math.max(1, Math.ceil(visibleMods.length / pageSize))
+  const pageMods = visibleMods.slice((page - 1) * pageSize, page * pageSize)
+  const changePage = (next: number) => {
+    const target = Math.max(1, Math.min(pageCount, next))
+    setPageLoading(true)
+    window.setTimeout(() => {
+      setPage(target)
+      setPageLoading(false)
+      resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 120)
+  }
+
+  useEffect(() => { setPage(1) }, [query, sort, showNsfw])
 
   return <section className="mt-4">
     <div className="rounded-xl border border-white/[0.07] bg-black/10 p-3">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+      <ProviderExplorerToolbar>
         <label className="min-w-0 flex-1 text-[11px] text-white/48">Jeu Nexus
           <div className="relative mt-1.5">
             <input value={gameFilter} onChange={event => setGameFilter(event.target.value)} placeholder={loadingGames ? 'Chargement des jeux Nexus…' : 'Nom ou domaine Nexus…'} className="w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-white/78 outline-none focus:border-gold/26" />
@@ -295,32 +314,23 @@ function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: strin
           <span className="mt-1.5 flex items-center rounded-lg border border-white/[0.08] bg-black/20 px-3"><Search size={14} className="text-white/30" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Nom, auteur, description…" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-xs text-white/78 outline-none" /></span>
         </label>
         <button type="button" onClick={() => void loadMods()} disabled={!domain || loadingMods} className="flex h-9 items-center gap-2 rounded-lg border border-white/[0.1] px-3 text-[11px] font-semibold text-white/62 hover:bg-white/[0.06] disabled:opacity-35"><RefreshCw size={14} className={loadingMods ? 'animate-spin' : ''} />Actualiser</button>
-      </div>
+        <ProviderViewModeToggle grid={grid} onChange={setGrid} />
+        {grid && <GridColumnCycleButton currentColumnCount={columns} onChange={setColumns} />}
+      </ProviderExplorerToolbar>
+      <div className="mt-3 flex flex-wrap items-center gap-2"><ProviderSortControl value={sort} onChange={setSort} /><ProviderFilters onReset={() => { setQuery(''); setSort('recent'); setFeed('trending'); setPage(1) }} /><span className="ml-auto text-[11px] text-white/30">Page {page} / {pageCount}</span></div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/34"><span>{selectedCatalogGame ? `${selectedCatalogGame.name} · ${formatCount(selectedCatalogGame.modCount)} mods` : 'Choisissez un jeu Nexus pour charger son catalogue.'}</span><span>La clé reste dans le coffre système ; seules les données du catalogue arrivent dans l’interface.</span></div>
     </div>
 
     {error && <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-400/18 bg-red-400/[0.04] p-4 text-[11px] text-red-200/70"><AlertTriangle size={15} className="mt-0.5 shrink-0" /><span>{error}</span></div>}
-    {loadingMods ? <LoadingGrid /> : domain && !visibleMods.length && !error ? <EmptyResults onReset={() => { setQuery(''); void loadMods() }} /> : <div className={`mt-4 grid gap-3 ${columns === '2' ? 'md:grid-cols-2' : columns === '3' ? 'md:grid-cols-2 xl:grid-cols-3' : 'md:grid-cols-2 2xl:grid-cols-3'}`}>
-      {visibleMods.map(item => {
-        const mod: ExplodMod = {
-          id: item.id,
-          modId: item.modId,
-          name: item.name,
-          author: item.author || 'Auteur Nexus',
-          game: item.game || selectedCatalogGame?.name || item.gameDomain,
-          thumbnail: item.thumbnail,
-          downloads: item.downloads,
-          rating: item.endorsements,
-          tags: item.version ? [`v${item.version}`] : ['Nexus Mods'],
-          nsfw: item.nsfw,
-          platform: 'nexus',
-          url: item.url,
-          description: item.description,
-          updatedAt: item.updatedAt,
-        }
-        return <ModResult key={mod.id} mod={mod} grid installing={false} canInstall={false} sourceOnly targetName={selectedCatalogGame?.name} onPreview={() => setPreviewMod(mod)} onInstall={() => undefined} />
+    <section ref={resultsRef} className="scroll-mt-4">
+    <ProviderSearchResults grid={grid} columns={columns} loading={loadingMods || pageLoading} empty={Boolean(domain && !visibleMods.length && !error)} loadingFallback={<LoadingGrid />} emptyFallback={<EmptyResults onReset={() => { setQuery(''); void loadMods() }} />}>
+      {pageMods.map(item => {
+        const mod = NexusExplorerAdapter.toResult(item, selectedCatalogGame?.name)
+        return <ModResult key={mod.id} mod={mod} grid={grid} installing={false} canInstall={false} sourceOnly targetName={selectedCatalogGame?.name} onPreview={() => setPreviewMod(mod)} onInstall={() => undefined} />
       })}
-    </div>}
+    </ProviderSearchResults>
+    {domain && visibleMods.length > 0 && <ProviderPagination provider="Nexus Mods" page={page} pageCount={pageCount} hasNextPage={page < pageCount} loading={loadingMods || pageLoading} onPageChange={changePage} />}
+    </section>
     {previewMod && <ModPreviewModal mod={previewMod} canInstall={false} sourceOnly installing={false} onInstall={() => undefined} onClose={() => setPreviewMod(undefined)} />}
   </section>
 }

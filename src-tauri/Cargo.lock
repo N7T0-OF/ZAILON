@@ -5760,13 +5760,14 @@ dependencies = [
 
 [[package]]
 name = "zailon"
-version = "1.6.0"
+version = "1.6.1"
 dependencies = [
  "dirs",
  "keyring",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
  "steamlocate",
  "tauri",
  "tauri-build",

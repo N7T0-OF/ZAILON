@@ -1,11 +1,11 @@
-import { Activity, CheckCircle2, CloudOff, EyeOff, Gamepad2, Loader2, Radio, ShieldCheck, Wifi, X, XCircle } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, CloudOff, EyeOff, Gamepad2, Loader2, Radio, ShieldCheck, Wifi, X, XCircle } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { appVersion, getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
 import { BackgroundTaskSnapshot, DiscordConnectionStatus, native } from '../../lib/native'
 
 const isTerminal = (task: BackgroundTaskSnapshot) => task.status !== 'running'
-const terminalDelay = (status: BackgroundTaskSnapshot['status']) => status === 'completed' ? 4_000 : status === 'cancelled' ? 3_000 : status === 'failed' ? 10_000 : 7_000
+const terminalDelay = (status: BackgroundTaskSnapshot['status']) => status === 'completed' ? 4_000 : status === 'completed_with_warnings' ? 7_000 : status === 'cancelled' ? 3_000 : status === 'failed' ? 10_000 : 7_000
 
 export function StatusBar() {
   const games = useStore(state => state.games)
@@ -90,17 +90,17 @@ export function StatusBar() {
 
 function TaskToast({ task, onHide, onHistory }: { task: BackgroundTaskSnapshot; onHide: () => void; onHistory: () => void }) {
   const progress = task.total ? Math.min(100, Math.round(task.processed / task.total * 100)) : 0
-  const Icon = task.status === 'running' ? Loader2 : task.status === 'completed' ? CheckCircle2 : XCircle
+  const Icon = task.status === 'running' ? Loader2 : task.status === 'completed' ? CheckCircle2 : task.status === 'completed_with_warnings' || task.status === 'awaiting_user_decision' ? AlertTriangle : XCircle
   return <aside className="fixed bottom-11 right-4 z-[235] w-[min(390px,calc(100vw-32px))] rounded-xl border border-white/[0.11] bg-[#101414]/95 p-3 shadow-2xl backdrop-blur-xl" aria-live="polite">
     <div className="flex items-start gap-2"><Icon size={16} className={`mt-0.5 shrink-0 ${task.status === 'running' ? 'animate-spin text-gold' : task.status === 'completed' ? 'text-emerald-300' : 'text-amber-200'}`} /><button type="button" onClick={onHistory} className="min-w-0 flex-1 text-left"><p className="truncate text-xs font-semibold text-white/78">{task.title}</p><p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-white/44">{task.message}</p></button><button type="button" onClick={onHide} title="Masquer cette notification" aria-label="Masquer cette notification" className="rounded p-1.5 text-white/34 hover:bg-white/[0.07] hover:text-white"><EyeOff size={14} /></button></div>
-    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.07]"><div className={`h-full transition-[width] ${task.status === 'failed' ? 'bg-red-300' : task.status === 'completed' ? 'bg-emerald-300' : 'bg-gold'}`} style={{ width: `${progress}%` }} /></div>
+    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.07]"><div className={`h-full transition-[width] ${task.status === 'failed' ? 'bg-red-300' : task.status === 'completed' ? 'bg-emerald-300' : 'bg-amber-300'}`} style={{ width: `${progress}%` }} /></div>
     <p className="mt-1 text-right font-mono text-[11px] text-white/30">{task.processed} / {task.total || '?'} · {task.status}</p>
   </aside>
 }
 
 function TaskRow({ task }: { task: BackgroundTaskSnapshot }) {
   const progress = task.total ? Math.min(100, Math.round(task.processed / task.total * 100)) : 0
-  const Icon = task.status === 'running' ? Loader2 : task.status === 'completed' ? CheckCircle2 : XCircle
+  const Icon = task.status === 'running' ? Loader2 : task.status === 'completed' ? CheckCircle2 : task.status === 'completed_with_warnings' || task.status === 'awaiting_user_decision' ? AlertTriangle : XCircle
   return <div className="rounded-lg border border-white/[0.07] bg-white/[0.02] p-3"><div className="flex items-start gap-2"><Icon size={14} className={`mt-0.5 shrink-0 ${task.status === 'running' ? 'animate-spin text-gold' : task.status === 'completed' ? 'text-emerald-300/70' : 'text-amber-200/70'}`} /><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold text-white/68">{task.title}</p><p className="mt-1 text-[11px] leading-relaxed text-white/38">{task.message}</p></div>{task.status === 'running' && <button type="button" onClick={() => void native.cancelBackgroundTask(task.id)} className="rounded border border-red-300/15 px-2 py-1 text-[11px] text-red-200/60">Annuler</button>}</div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.06]"><div className="h-full bg-gold transition-[width]" style={{ width: `${progress}%` }} /></div></div>
 }
 

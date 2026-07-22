@@ -1,5 +1,5 @@
-import { Archive, Boxes, Copy, Download, FileArchive, FolderInput, FolderOpen, FolderPlus, MonitorDown, Plus, Radar, RefreshCw, Search, ShieldAlert, Trash2, Upload, Wrench, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Archive, Boxes, CheckSquare2, Copy, Download, FileArchive, FolderInput, FolderOpen, FolderPlus, Lock, MonitorDown, Plus, Radar, RefreshCw, RotateCcw, Search, ShieldAlert, Tag, Trash2, Unlock, Upload, Wrench, X } from 'lucide-react'
+import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
 import { BackgroundTaskSnapshot, native, pickExecutable, pickFolder, pickFolders, pickProfileArchive, resourceUrl, saveProfileArchive } from '../../lib/native'
@@ -7,7 +7,7 @@ import { ModCard } from '../UI/ModCard'
 import { formatTime, timeAgo } from '../../utils'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
 import { GameAppearanceEditor } from '../GameResourcesDialog'
-import type { GameTab, ModImportCandidate, ProfileArchiveManifest } from '../../types'
+import type { GameTab, ModImportCandidate, Profile, ProfileArchiveManifest } from '../../types'
 
 const TABS: Array<{ id: GameTab; label: string }> = [
   { id: 'overview', label: 'Aperçu' },
@@ -48,15 +48,32 @@ export function GamesView() {
   const setConflictWinner = useStore(state => state.setConflictWinner)
   const libraryViewMode = useStore(state => state.libraryViewMode)
   const setLibraryViewMode = useStore(state => state.setLibraryViewMode)
+  const bulkSetEnabled = useStore(state => state.bulkSetEnabled)
+  const bulkTransferMods = useStore(state => state.bulkTransferMods)
+  const bulkDeleteMods = useStore(state => state.bulkDeleteMods)
+  const bulkAddTag = useStore(state => state.bulkAddTag)
+  const undoLastBulkOperation = useStore(state => state.undoLastBulkOperation)
+  const bulkHistory = useStore(state => state.bulkHistory)
+  const toggleProfileLock = useStore(state => state.toggleProfileLock)
+  const openProfileDirectory = useStore(state => state.openProfileDirectory)
+  const checkProfileIntegrity = useStore(state => state.checkProfileIntegrity)
+  const repairProfileStorage = useStore(state => state.repairProfileStorage)
   const [search, setSearch] = useState('')
   const [librarySearch, setLibrarySearch] = useState('')
   const [onlyWithoutCover, setOnlyWithoutCover] = useState(false)
   const [profileName, setProfileName] = useState('')
   const [steamDialogOpen, setSteamDialogOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [selectedModIds, setSelectedModIds] = useState<Set<string>>(new Set())
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number>()
+  const [bulkDialog, setBulkDialog] = useState<'move' | 'copy' | 'delete' | 'tag'>()
+  const [tagFilter, setTagFilter] = useState('')
+  const modsListRef = useRef<HTMLDivElement>(null)
+  const selectAllRef = useRef<HTMLInputElement>(null)
 
   const profileMods = useMemo(() => resolveProfileMods(selectedGame, selectedProfile), [selectedGame, selectedProfile])
-  const filteredMods = profileMods.filter(mod => mod.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
+  const filteredMods = profileMods.filter(mod => mod.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()) && (!tagFilter || mod.categoryTags?.some(tag => tag.id === tagFilter)))
+  const availableTags = [...new Map(profileMods.flatMap(mod => mod.categoryTags || []).map(tag => [tag.id, tag])).values()].sort((left, right) => left.label.localeCompare(right.label))
   const conflictMods = profileMods.filter(mod => mod.conflict && mod.conflict !== 'none')
   const resolvedConflicts = useMemo(() => {
     const files = new Map<string, { path: string; owners: typeof profileMods }>()
@@ -75,6 +92,43 @@ export function GamesView() {
     const cover = game.resources?.coverPath || game.resources?.bannerPath || game.resources?.backgroundPath || game.backgroundArt
     return (!onlyWithoutCover || !cover) && game.name.toLocaleLowerCase().includes(librarySearch.trim().toLocaleLowerCase())
   })
+
+  const selectedVisible = filteredMods.filter(mod => selectedModIds.has(mod.id)).length
+  const allVisibleSelected = filteredMods.length > 0 && selectedVisible === filteredMods.length
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = selectedVisible > 0 && !allVisibleSelected
+  }, [allVisibleSelected, selectedVisible])
+  useEffect(() => {
+    setSelectedModIds(current => new Set([...current].filter(id => profileMods.some(mod => mod.id === id))))
+  }, [selectedGame?.id, selectedProfile?.id, profileMods.length])
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (tab !== 'mods' || !modsListRef.current?.contains(document.activeElement)) return
+      const target = event.target as HTMLElement
+      if (target.matches('input[type="text"], input[type="search"], textarea, select')) return
+      if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === 'a') {
+        event.preventDefault(); setSelectedModIds(new Set(filteredMods.map(mod => mod.id)))
+      }
+      if (event.key === 'Escape') setSelectedModIds(new Set())
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [filteredMods, tab])
+
+  const selectMod = (index: number, event: ReactMouseEvent<HTMLInputElement>) => {
+    setSelectedModIds(current => {
+      const next = new Set((event.ctrlKey || event.metaKey || event.shiftKey) ? current : [])
+      if (event.shiftKey && lastSelectedIndex !== undefined) {
+        const [start, end] = [lastSelectedIndex, index].sort((a, b) => a - b)
+        filteredMods.slice(start, end + 1).forEach(mod => next.add(mod.id))
+      } else if (next.has(filteredMods[index].id)) next.delete(filteredMods[index].id)
+      else next.add(filteredMods[index].id)
+      return next
+    })
+    setLastSelectedIndex(index)
+  }
+
+  const clearBulkSelection = () => setSelectedModIds(new Set())
 
   if (!selectedGame || !selectedProfile) {
     return <div className="flex h-full flex-col items-center justify-center gap-3 text-center"><p className="text-sm text-white/50">Ajoutez un jeu pour gérer ses fichiers de mods.</p><button onClick={() => void addGameFromExecutable()} className="rounded-lg bg-gold px-3 py-2 text-xs font-semibold text-ink-400">Ajouter un jeu</button></div>
@@ -101,7 +155,7 @@ export function GamesView() {
       schemaVersion: 1,
       exportedAt: new Date().toISOString(),
       app: 'ZAILON',
-      appVersion: '1.5.0',
+      appVersion: '1.6.0',
       exportMode: complete ? 'complete' : 'light',
       game: { name: selectedGame.name, provider: selectedGame.provider, providerGameId: selectedGame.providerGameId },
       profile,
@@ -166,12 +220,17 @@ export function GamesView() {
         <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.05] p-3">
           <button onClick={() => setImportOpen(true)} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-ink-400"><FolderInput size={13} /> Importer des dossiers</button>
           <button onClick={() => void scanMods(selectedGame.id)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05]"><RefreshCw size={13} /> Analyser</button>
+          {bulkHistory.some(operation => operation.gameId === selectedGame.id && operation.undoable) && <button onClick={() => void undoLastBulkOperation()} title="Annuler la dernière opération groupée" className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]"><RotateCcw size={13} />Annuler</button>}
+          <label className="flex items-center gap-2 rounded-lg border border-white/[0.08] px-2.5 text-[11px] text-white/55"><input ref={selectAllRef} type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedModIds(current => { const next = new Set(current); if (allVisibleSelected) filteredMods.forEach(mod => next.delete(mod.id)); else filteredMods.forEach(mod => next.add(mod.id)); return next })} className="accent-gold" />Tout visible <span className="text-white/30">{selectedVisible}/{filteredMods.length}</span></label>
+          {availableTags.length > 0 && <select value={tagFilter} onChange={event => setTagFilter(event.target.value)} className="rounded-lg border border-white/[0.08] bg-[#101313] px-2 py-2 text-[11px] text-white/58"><option value="">Toutes les étiquettes</option>{availableTags.map(tag => <option key={tag.id} value={tag.id}>{tag.label}</option>)}</select>}
           <div className="relative ml-auto"><Search size={12} className="absolute left-2.5 top-2.5 text-white/30" /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Rechercher" className="w-44 rounded-lg border border-white/[0.07] bg-white/[0.03] py-2 pl-7 pr-2 text-[11px] text-white/70 outline-none focus:border-gold/30" /></div>
         </div>
-        <div className="flex-1 overflow-y-auto p-3"><p className="mb-2 rounded-lg border border-amber-300/15 bg-amber-300/[0.04] px-3 py-2 text-[11px] text-amber-100/65">Le catalogue est partagé entre les profils. Chaque profil conserve seulement l’état, l’ordre et les règles de ses mods.</p><div className="space-y-1.5">{filteredMods.length ? filteredMods.map((mod, index) => <ModCard key={mod.id} mod={mod} onToggle={() => void toggleMod(mod.id)} onDelete={() => { if (window.confirm(`Supprimer réellement « ${mod.name} » du disque et de tous les profils ?`)) void deleteMod(mod.id) }} onMoveUp={index > 0 ? () => moveMod(mod.id, -1) : undefined} onMoveDown={index < filteredMods.length - 1 ? () => moveMod(mod.id, 1) : undefined} onNoteChange={note => setModNote(mod.id, note)} />) : <div className="flex h-40 flex-col items-center justify-center gap-2 text-[11px] text-white/35"><FolderPlus size={20} /><span>Aucun mod. Importez un dossier ou analysez le dossier Mods.</span></div>}</div></div>
+        <div ref={modsListRef} tabIndex={-1} className="relative flex-1 overflow-y-auto p-3 outline-none"><p className="mb-2 rounded-lg border border-amber-300/15 bg-amber-300/[0.04] px-3 py-2 text-[11px] text-amber-100/65">Le store de paquets est partagé et immuable. Chaque profil possède son manifeste, son ordre, ses réglages et son overwrite ; un profil créé vide n’hérite d’aucun mod.</p>{selectedGame.provider === 'FiveM Client' && <p className="mb-2 rounded-lg border border-sky-300/18 bg-sky-300/[0.04] px-3 py-2 text-[11px] leading-relaxed text-sky-100/68">Adaptateur FiveM client : plugins et fichiers client uniquement. Tout paquet contenant <code>fxmanifest.lua</code>, <code>__resource.lua</code> ou <code>server.cfg</code> est refusé afin de ne jamais mélanger ressources serveur et profil client. Les règles des serveurs restent applicables.</p>}<div className="space-y-1.5 pb-20">{filteredMods.length ? filteredMods.map((mod, index) => <ModCard key={mod.id} mod={mod} selected={selectedModIds.has(mod.id)} onSelect={event => selectMod(index, event)} onToggle={() => void toggleMod(mod.id)} onDelete={() => { if (window.confirm(`Retirer « ${mod.name} » de ce profil ? Le paquet partagé n’est supprimé que s’il n’est référencé nulle part.`)) void deleteMod(mod.id) }} onMoveUp={index > 0 ? () => moveMod(mod.id, -1) : undefined} onMoveDown={index < filteredMods.length - 1 ? () => moveMod(mod.id, 1) : undefined} onNoteChange={note => setModNote(mod.id, note)} />) : <div className="flex h-40 flex-col items-center justify-center gap-2 text-[11px] text-white/35"><FolderPlus size={20} /><span>Aucun mod. Importez un dossier ou analysez le dossier Mods.</span></div>}</div>{selectedModIds.size > 0 && <div className="sticky bottom-2 mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-gold/25 bg-[#101313]/95 p-2.5 shadow-2xl backdrop-blur-xl"><span className="flex items-center gap-1.5 pr-1 text-xs font-semibold text-white/72"><CheckSquare2 size={15} className="text-gold" />{selectedModIds.size} sélectionné(s)</span><button onClick={() => void bulkSetEnabled([...selectedModIds], true)} className="rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05]">Activer</button><button onClick={() => void bulkSetEnabled([...selectedModIds], false)} className="rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05]">Désactiver</button><button onClick={() => setBulkDialog('move')} className="rounded-lg bg-gold px-3 py-2 text-xs font-semibold text-[var(--zailon-accent-text)]">Transférer</button><button onClick={() => setBulkDialog('copy')} className="rounded-lg border border-gold/25 px-3 py-2 text-xs text-gold">Copier</button><button onClick={() => setBulkDialog('tag')} className="flex items-center gap-1 rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58"><Tag size={13} />Étiquette</button><button onClick={() => setBulkDialog('delete')} className="rounded-lg border border-red-300/15 px-3 py-2 text-xs text-red-200/70">Retirer</button><button onClick={clearBulkSelection} className="ml-auto rounded p-2 text-white/35 hover:bg-white/[0.05]" aria-label="Effacer la sélection"><X size={14} /></button></div>}</div>
       </div>}
 
-      {tab === 'profiles' && <div className="flex-1 space-y-4 overflow-y-auto p-4"><p className="text-[11px] leading-relaxed text-white/48">Changer de profil applique réellement les états activés/désactivés au dossier Mods. Les profils restent légers et ne recopient pas les fichiers.</p><div className="space-y-2">{selectedGame.profiles.map(profile => <div key={profile.id} className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-3 ${profile.id === selectedProfile.id ? 'border-gold/20 bg-gold/[0.04]' : 'border-white/[0.07] bg-white/[0.02]'}`}><input value={profile.name} onChange={event => renameProfile(profile.id, event.target.value)} className="min-w-40 flex-1 bg-transparent text-xs font-medium text-white/78 outline-none" /><span className="text-[11px] text-white/35">{resolveProfileMods(selectedGame, profile).filter(mod => mod.enabled).length} actif(s)</span><button onClick={() => duplicateProfile(profile.id)} title="Dupliquer" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><Copy size={13} /></button><button onClick={() => removeProfile(profile.id)} disabled={selectedGame.profiles.length < 2 || profile.isDefault} title="Supprimer le profil" className="rounded-lg p-2 text-white/30 hover:bg-red-400/10 hover:text-red-300 disabled:opacity-20"><Trash2 size={13} /></button></div>)}</div><div className="flex gap-2"><input value={profileName} onChange={event => setProfileName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { addProfile(profileName); setProfileName('') } }} placeholder="Nom du nouveau profil" className="flex-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[11px] text-white/70 outline-none focus:border-gold/30" /><button onClick={() => { addProfile(profileName); setProfileName('') }} className="rounded-lg bg-gold px-3 text-[11px] font-semibold text-ink-400">Créer</button></div></div>}
+      {tab === 'profiles' && <button onClick={() => void repairProfileStorage(selectedGame.id)} className="mx-4 mt-4 rounded-lg border border-gold/25 px-3 py-2 text-xs font-semibold text-gold">Réparer et séparer les profils existants</button>}
+
+      {tab === 'profiles' && <div className="flex-1 space-y-4 overflow-y-auto p-4"><div className="rounded-xl border border-gold/15 bg-gold/[0.035] p-3"><p className="text-xs font-semibold text-white/72">Profils réellement isolés</p><p className="mt-1 text-xs leading-relaxed text-white/45">« Créer vide » produit toujours 0 mod actif, sans ordre, réglage ni overwrite hérité. « Dupliquer » est la seule action qui recopie explicitement l’état du profil source. Les paquets restent dans le store immuable commun.</p></div><div className="space-y-2">{selectedGame.profiles.map(profile => <div key={profile.id} className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-3 ${profile.id === selectedProfile.id ? 'border-gold/20 bg-gold/[0.04]' : 'border-white/[0.07] bg-white/[0.02]'}`}><input value={profile.name} disabled={profile.locked} onChange={event => renameProfile(profile.id, event.target.value)} className="min-w-40 flex-1 bg-transparent text-xs font-medium text-white/78 outline-none disabled:opacity-55" /><span className="rounded-full bg-white/[0.035] px-2 py-1 text-[11px] text-white/38">{Object.keys(profile.modStates).length} référencé(s) · {resolveProfileMods(selectedGame, profile).filter(mod => mod.enabled).length} actif(s)</span>{profile.clonedFromProfileId && <span className="text-[11px] text-white/28">copie explicite</span>}<button onClick={() => void openProfileDirectory(profile.id)} title="Ouvrir le dossier racine du profil" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><FolderOpen size={13} /></button><button onClick={() => void checkProfileIntegrity(profile.id)} title="Vérifier l’intégrité" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><ShieldAlert size={13} /></button><button onClick={() => toggleProfileLock(profile.id)} title={profile.locked ? 'Déverrouiller' : 'Verrouiller'} className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white">{profile.locked ? <Lock size={13} /> : <Unlock size={13} />}</button><button onClick={() => duplicateProfile(profile.id)} title="Dupliquer explicitement" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><Copy size={13} /></button><button onClick={() => removeProfile(profile.id)} disabled={selectedGame.profiles.length < 2 || profile.isDefault || profile.locked} title="Placer le profil dans la corbeille ZAILON" className="rounded-lg p-2 text-white/30 hover:bg-red-400/10 hover:text-red-300 disabled:opacity-20"><Trash2 size={13} /></button></div>)}</div><div className="flex gap-2"><input value={profileName} onChange={event => setProfileName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { addProfile(profileName); setProfileName('') } }} placeholder="Nom du nouveau profil vide" className="flex-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[11px] text-white/70 outline-none focus:border-gold/30" /><button onClick={() => { addProfile(profileName); setProfileName('') }} className="rounded-lg bg-gold px-3 text-[11px] font-semibold text-[var(--zailon-accent-text)]">Créer vide</button></div><div className="grid gap-2 sm:grid-cols-3"><button onClick={() => void openProfileDirectory(selectedProfile.id, 'root')} className="rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-white/55">Ouvrir la racine</button><button onClick={() => void openProfileDirectory(selectedProfile.id, 'overwrite')} className="rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-white/55">Ouvrir overwrite</button><button onClick={() => void openProfileDirectory(selectedProfile.id, 'generated')} className="rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-white/55">Ouvrir generated</button></div></div>}
 
       {tab === 'downloads' && <EmptyPanel icon={Download} title="Aucun téléchargement en attente" detail="Les installations GameBanana terminées rejoignent directement le catalogue du jeu. Les téléchargements Nexus nécessitant une action manuelle resteront listés ici dans une prochaine étape." />}
       {tab === 'conflicts' && <div className="flex-1 overflow-y-auto p-4">{resolvedConflicts.length ? <div><div className="mb-3 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] p-3 text-xs text-amber-100/65">TemporaryCopy déploie un seul gagnant par chemin. Sans règle explicite, le dernier mod dans l’ordre du profil gagne.</div><div className="overflow-x-auto rounded-xl border border-white/[0.07]"><table className="w-full text-left text-xs"><thead className="bg-white/[0.03] text-white/42"><tr><th className="px-3 py-2">Chemin résolu</th><th className="px-3 py-2">Fournisseurs</th><th className="px-3 py-2">Gagnant</th></tr></thead><tbody>{resolvedConflicts.map(conflict => <tr key={conflict.path} className="border-t border-white/[0.06]"><td className="max-w-sm break-all px-3 py-2 font-mono text-white/52">{conflict.path}</td><td className="px-3 py-2 text-white/45">{conflict.owners.map(owner => owner.name).join(' → ')}</td><td className="px-3 py-2"><select value={conflict.winner.id} onChange={event => setConflictWinner(conflict.path, event.target.value)} className="rounded-lg border border-white/[0.08] bg-[#101313] px-2 py-1.5 text-xs text-white/68">{conflict.owners.map(owner => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></td></tr>)}</tbody></table></div></div> : <EmptyPanel icon={ShieldAlert} title="Aucun conflit de fichiers" detail="L’analyse compare les chemins relatifs réellement fournis par chaque mod actif." />}</div>}
@@ -183,7 +242,29 @@ export function GamesView() {
 
     {steamDialogOpen && <SteamDetectionDialog onClose={() => setSteamDialogOpen(false)} onImport={importDetectedGames} />}
     {importOpen && <ModImportDialog gameId={selectedGame.id} profileId={selectedProfile.id} gameName={selectedGame.name} destination={selectedGame.modsPath} onClose={() => setImportOpen(false)} onImported={() => void scanMods(selectedGame.id)} />}
+    {bulkDialog && <BulkActionDialog mode={bulkDialog} count={selectedModIds.size} source={selectedProfile} profiles={selectedGame.profiles} onClose={() => setBulkDialog(undefined)} onConfirm={async value => {
+      const ids = [...selectedModIds]
+      if (bulkDialog === 'move' || bulkDialog === 'copy') await bulkTransferMods(ids, value, bulkDialog)
+      else if (bulkDialog === 'delete') await bulkDeleteMods(ids, value === 'all' ? 'all' : 'current')
+      else await bulkAddTag(ids, value)
+      clearBulkSelection(); setBulkDialog(undefined)
+    }} />}
   </div>
+}
+
+function BulkActionDialog({ mode, count, source, profiles, onClose, onConfirm }: {
+  mode: 'move' | 'copy' | 'delete' | 'tag'
+  count: number
+  source: Profile
+  profiles: Profile[]
+  onClose: () => void
+  onConfirm: (value: string) => Promise<void>
+}) {
+  const destinations = profiles.filter(profile => profile.id !== source.id)
+  const [value, setValue] = useState(mode === 'delete' ? 'current' : mode === 'tag' ? '' : destinations[0]?.id || '')
+  const title = mode === 'move' ? 'Transférer la sélection' : mode === 'copy' ? 'Copier la sélection' : mode === 'delete' ? 'Retirer la sélection' : 'Ajouter une étiquette'
+  const valid = mode === 'tag' ? value.trim().length > 0 : Boolean(value)
+  return <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/78 p-4 backdrop-blur-md" onPointerDown={event => { if (event.target === event.currentTarget) onClose() }}><section role="dialog" aria-modal="true" className="w-full max-w-lg rounded-2xl border border-white/[0.1] bg-[#101313] p-4 shadow-2xl"><header className="flex items-start justify-between gap-3"><div><h2 className="font-display text-xl font-bold text-white">{title}</h2><p className="mt-1 text-xs text-white/42">Source : {source.name} · {count} mod(s)</p></div><button onClick={onClose} className="rounded-lg p-2 text-white/40 hover:bg-white/[0.05]"><X size={16} /></button></header>{mode === 'move' || mode === 'copy' ? <><label className="mt-4 block text-xs text-white/50">Profil de destination<select value={value} onChange={event => setValue(event.target.value)} className="mt-1.5 block w-full rounded-lg border border-white/[0.09] bg-[#0b0d0d] px-3 py-2 text-white/75">{destinations.map(profile => <option key={profile.id} value={profile.id} disabled={profile.locked}>{profile.name}{profile.locked ? ' — verrouillé' : ''}</option>)}</select></label><div className="mt-3 rounded-lg border border-sky-300/15 bg-sky-300/[0.04] p-3 text-xs leading-relaxed text-sky-100/58">{mode === 'copy' ? 'La copie ajoute des références au même paquet immuable. Les futurs fichiers générés restent dans l’overwrite du profil destination : aucun fichier source partagé n’est modifié.' : 'Le transfert ajoute d’abord les références à la destination, valide les manifestes, puis les retire de la source. En cas d’échec, la transaction restaure les deux profils.'}</div></> : mode === 'delete' ? <><label className="mt-4 block text-xs text-white/50">Portée<select value={value} onChange={event => setValue(event.target.value)} className="mt-1.5 block w-full rounded-lg border border-white/[0.09] bg-[#0b0d0d] px-3 py-2 text-white/75"><option value="current">Profil courant uniquement</option><option value="all">Tous les profils — paquet conservé dans le store</option></select></label><p className="mt-3 rounded-lg border border-amber-300/15 bg-amber-300/[0.04] p-3 text-xs leading-relaxed text-amber-100/58">Cette action est annulable. ZAILON ne supprime jamais physiquement un paquet encore référencé ; le nettoyage définitif du store est volontairement séparé.</p></> : <label className="mt-4 block text-xs text-white/50">Étiquette personnalisée<input autoFocus value={value} onChange={event => setValue(event.target.value)} placeholder="Ex. Graphismes, Correctifs…" className="mt-1.5 block w-full rounded-lg border border-white/[0.09] bg-[#0b0d0d] px-3 py-2 text-white/75 outline-none focus:border-gold/35" /></label>}<footer className="mt-5 flex justify-end gap-2"><button onClick={onClose} className="rounded-lg px-3 py-2 text-xs text-white/48">Annuler</button><button disabled={!valid} onClick={() => void onConfirm(value)} className="rounded-lg bg-gold px-4 py-2 text-xs font-semibold text-[var(--zailon-accent-text)] disabled:opacity-35">Confirmer</button></footer></section></div>
 }
 
 function ModImportDialog({ gameId, profileId, gameName, destination, onClose, onImported }: { gameId: string; profileId: string; gameName: string; destination?: string; onClose: () => void; onImported: () => void }) {

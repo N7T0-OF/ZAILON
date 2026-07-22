@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "ZAILON",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "identifier": "io.github.n7t0of.zailon",
   "build": {
     "frontendDist": "../dist",
@@ -10,6 +10,7 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "ZAILON",
@@ -21,7 +22,7 @@
         "fullscreen": false,
         "decorations": false,
         "shadow": true,
-        "transparent": false,
+        "transparent": true,
         "center": true
       }
     ],

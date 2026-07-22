@@ -4,6 +4,17 @@ export type UpdateChannel = 'stable' | 'beta'
 export type TextSize = 'small' | 'normal' | 'large' | 'very-large'
 export type UiDensity = 'compact' | 'comfortable'
 export type LiquidGlassMode = 'off' | 'light' | 'normal' | 'intense' | 'custom'
+export type ExploreColumns = 'auto' | '2' | '3'
+export type ModCategorySource = 'detected' | 'metadata' | 'user'
+export type ModCategoryConfidence = 'high' | 'medium' | 'low'
+
+export interface ModCategoryTag {
+  id: string
+  label: string
+  source: ModCategorySource
+  confidence: ModCategoryConfidence
+  userLocked?: boolean
+}
 
 export interface LiquidGlassSettings {
   opacity: number
@@ -70,6 +81,9 @@ export interface Mod {
   profileIds?: string[]
   deploymentStatus?: ModDeploymentStatus
   diagnostics?: string[]
+  categoryTags?: ModCategoryTag[]
+  /** Independent logical clone. Content stays immutable until a profile overlay is written. */
+  basePackageId?: string
 }
 
 export interface ProfileModState {
@@ -99,6 +113,59 @@ export interface Profile {
   runtime?: string
   conflictRules?: Array<{ path: string; winnerModId: string }>
   installOptions?: Record<string, string | boolean | number>
+  clonedFromProfileId?: string
+  templateId?: string
+  temporary?: boolean
+  directory?: string
+  manifestPath?: string
+  loadOrderPath?: string
+  settingsPath?: string
+  overwritePath?: string
+  generatedPath?: string
+  deploymentPath?: string
+}
+
+export type BulkOperationKind = 'copy' | 'move' | 'delete' | 'enable' | 'disable' | 'tag'
+
+export interface BulkOperation {
+  id: string
+  kind: BulkOperationKind
+  gameId: string
+  profileIds: string[]
+  modIds: string[]
+  createdAt: number
+  label: string
+  beforeProfiles: Profile[]
+  afterProfiles: Profile[]
+  beforeMods?: Mod[]
+  afterMods?: Mod[]
+  undoable: boolean
+}
+
+export interface ProfileIntegrity {
+  ok: boolean
+  root: string
+  issues: string[]
+  files: string[]
+}
+
+export interface WindowEffectsDiagnostic {
+  backend: 'WindowsNative' | 'MacOSNative' | 'LinuxCompositor' | 'SimulatedCss' | 'Opaque'
+  nativeAvailable: boolean
+  active: boolean
+  dynamicBackdropVerified: boolean
+  reason: string
+}
+
+export interface UiNotification {
+  id: string
+  key: string
+  message: string
+  kind: 'success' | 'warning' | 'error' | 'info' | 'action'
+  createdAt: number
+  durationMs?: number
+  dismissed?: boolean
+  completed: boolean
 }
 
 export interface GameResources {

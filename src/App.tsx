@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Download, ExternalLink, X } from 'lucide-react'
+import { AlertTriangle, Bell, CheckCircle2, Download, ExternalLink, Info, X } from 'lucide-react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { AppWindow } from './components/Layout/AppWindow'
 import { UpdateProvider } from './components/UpdateProvider'
@@ -11,6 +11,10 @@ export default function App() {
   const tick = useStore(s => s.tick)
   const notice = useStore(s => s.notice)
   const clearNotice = useStore(s => s.clearNotice)
+  const recordNotice = useStore(s => s.recordNotice)
+  const notificationHistory = useStore(s => s.notificationHistory)
+  const dismissNotification = useStore(s => s.dismissNotification)
+  const clearCompletedNotifications = useStore(s => s.clearCompletedNotifications)
   const games = useStore(s => s.games)
   const setSelectedGame = useStore(s => s.setSelectedGame)
   const setSelectedProfile = useStore(s => s.setSelectedProfile)
@@ -19,6 +23,8 @@ export default function App() {
   const liquidGlassMode = useStore(s => s.liquidGlassMode)
   const liquidGlassSettings = useStore(s => s.liquidGlassSettings)
   const energySaver = useStore(s => s.energySaver)
+  const accentColor = useStore(s => s.accentColor)
+  const setWindowEffectDiagnostic = useStore(s => s.setWindowEffectDiagnostic)
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
   const [windowFocused, setWindowFocused] = useState(document.hasFocus())
 
@@ -26,6 +32,12 @@ export default function App() {
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
   }, [tick])
+
+  useEffect(() => {
+    if (!notice) return
+    recordNotice(notice)
+    clearNotice()
+  }, [clearNotice, notice, recordNotice])
 
   useEffect(() => {
     document.documentElement.dataset.textSize = textSize
@@ -41,8 +53,23 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    windowEffectsBackend.apply({ mode: liquidGlassMode, settings: liquidGlassSettings, energySaver, focused: windowFocused })
-  }, [energySaver, liquidGlassMode, liquidGlassSettings, windowFocused])
+    void windowEffectsBackend.apply({ mode: liquidGlassMode, settings: liquidGlassSettings, energySaver, focused: windowFocused }).then(setWindowEffectDiagnostic)
+  }, [energySaver, liquidGlassMode, liquidGlassSettings, setWindowEffectDiagnostic, windowFocused])
+
+  useEffect(() => {
+    const hex = accentColor.replace('#', '')
+    const [red, green, blue] = [0, 2, 4].map(index => Number.parseInt(hex.slice(index, index + 2), 16))
+    const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255
+    const mix = (value: number, target: number, amount: number) => Math.round(value + (target - value) * amount)
+    const rgb = (r: number, g: number, b: number) => `rgb(${r} ${g} ${b})`
+    const root = document.documentElement
+    root.style.setProperty('--zailon-accent', accentColor)
+    root.style.setProperty('--zailon-accent-hover', rgb(mix(red, 255, .18), mix(green, 255, .18), mix(blue, 255, .18)))
+    root.style.setProperty('--zailon-accent-active', rgb(mix(red, 0, .16), mix(green, 0, .16), mix(blue, 0, .16)))
+    root.style.setProperty('--zailon-accent-muted', `rgb(${red} ${green} ${blue} / .14)`)
+    root.style.setProperty('--zailon-accent-text', luminance > .56 ? '#090b0b' : '#ffffff')
+    root.style.setProperty('--zailon-focus-ring', `rgb(${red} ${green} ${blue} / .78)`)
+  }, [accentColor])
 
   useEffect(() => {
     if (!native.isDesktop()) return
@@ -96,21 +123,44 @@ export default function App() {
   }
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-[#050606]"
+    <div className="relative h-screen w-screen overflow-hidden bg-transparent"
       style={{
         backgroundImage: 'radial-gradient(ellipse at 50% 50%, rgba(219,232,229,0.025) 0%, transparent 70%)',
       }}>
       <UpdateProvider>
         <AppWindow />
       </UpdateProvider>
-      {notice && (
-        <button onClick={clearNotice} className="fixed bottom-4 right-4 z-[100] max-w-sm rounded-lg border border-gold/30 bg-ink-200 px-3 py-2 text-left text-xs text-white/75 shadow-2xl">
-          {notice}
-        </button>
-      )}
+      <NotificationCenter history={notificationHistory} onDismiss={dismissNotification} onClear={clearCompletedNotifications} />
       {externalInstalls[0] && <ExternalInstallDialog request={externalInstalls[0]} games={games} onCancel={() => void native.consumeExternalInstall(externalInstalls[0].requestId).finally(() => setExternalInstalls(current => current.slice(1)))} onContinue={(gameId, profileId) => void resolveExternalInstall(externalInstalls[0], gameId, profileId)} />}
     </div>
   )
+}
+
+function NotificationCenter({ history, onDismiss, onClear }: {
+  history: ReturnType<typeof useStore.getState>['notificationHistory']
+  onDismiss: (id: string) => void
+  onClear: () => void
+}) {
+  const [paused, setPaused] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const active = [...history].reverse().find(item => !item.dismissed)
+  useEffect(() => {
+    if (!active?.durationMs || paused || showHistory) return
+    const timeout = window.setTimeout(() => onDismiss(active.id), active.durationMs)
+    return () => window.clearTimeout(timeout)
+  }, [active?.durationMs, active?.id, onDismiss, paused, showHistory])
+  const Icon = active?.kind === 'success' ? CheckCircle2 : active?.kind === 'error' || active?.kind === 'warning' ? AlertTriangle : Info
+  const tone = active?.kind === 'error' ? 'border-red-300/25 text-red-100' : active?.kind === 'warning' || active?.kind === 'action' ? 'border-amber-200/25 text-amber-50' : active?.kind === 'success' ? 'border-emerald-200/20 text-emerald-50' : 'border-gold/25 text-white'
+  return <div className="fixed bottom-4 right-4 z-[220] flex max-w-[min(420px,calc(100vw-2rem))] flex-col items-end gap-2">
+    {showHistory && <section className="max-h-[55vh] w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-white/[0.1] bg-[#101313]/95 shadow-2xl backdrop-blur-xl">
+      <header className="flex items-center justify-between border-b border-white/[0.07] px-3 py-2"><div><p className="text-xs font-semibold text-white/78">Historique des notifications</p><p className="text-[11px] text-white/35">{history.length} événement(s), doublons regroupés</p></div><button type="button" onClick={onClear} className="rounded-lg px-2 py-1 text-[11px] text-white/42 hover:bg-white/[0.05]">Masquer les terminées</button></header>
+      <div className="max-h-[45vh] space-y-1 overflow-y-auto p-2">{[...history].reverse().map(item => <button key={item.id} type="button" onClick={() => onDismiss(item.id)} className="flex w-full items-start gap-2 rounded-lg border border-white/[0.05] bg-white/[0.018] p-2 text-left hover:bg-white/[0.04]"><span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${item.kind === 'error' ? 'bg-red-400' : item.kind === 'warning' ? 'bg-amber-300' : item.kind === 'success' ? 'bg-emerald-300' : 'bg-gold'}`} /><span className="min-w-0"><span className="block text-xs leading-relaxed text-white/64">{item.message}</span><span className="mt-1 block text-[11px] text-white/28">{new Date(item.createdAt).toLocaleTimeString()}</span></span></button>)}</div>
+    </section>}
+    {active && !showHistory && <article onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} className={`flex w-full items-start gap-3 rounded-xl border bg-[#101313]/95 p-3 shadow-2xl backdrop-blur-xl ${tone}`}>
+      <Icon size={17} className="mt-0.5 shrink-0 opacity-75" /><div className="min-w-0 flex-1"><p className="text-xs leading-relaxed">{active.message}</p><p className="mt-1 text-[11px] opacity-45">{paused ? 'Minuteur en pause' : active.durationMs ? `Fermeture automatique · ${Math.round(active.durationMs / 1000)} s` : 'Action requise'}</p></div><button type="button" onClick={() => onDismiss(active.id)} aria-label="Fermer la notification" className="rounded p-1 opacity-55 hover:bg-white/10 hover:opacity-100"><X size={14} /></button>
+    </article>}
+    <button type="button" onClick={() => setShowHistory(value => !value)} className="relative flex h-10 items-center gap-2 rounded-full border border-white/[0.1] bg-[#101313]/95 px-3 text-xs text-white/55 shadow-xl backdrop-blur hover:text-white"><Bell size={15} />Historique{history.some(item => !item.dismissed) && <span className="h-2 w-2 rounded-full bg-gold" />}</button>
+  </div>
 }
 
 function ExternalInstallDialog({ request, games, onCancel, onContinue }: { request: NxmRequest; games: ReturnType<typeof useStore.getState>['games']; onCancel: () => void; onContinue: (gameId: string, profileId: string) => void }) {

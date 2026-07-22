@@ -9,6 +9,9 @@ profiles locally and ships installers for Windows, Linux and macOS.
 - Add games manually or run quick/full local discovery across Steam manifests, Epic Games manifests and Windows installed-application records; review and filter every result before import.
 - Scan, enable, disable and remove local mods without moving them outside the game folder.
 - Keep a shared installed-mod catalogue per game and lightweight profiles with activation, priority, notes, file-conflict rules and playtime statistics. Existing v1 data is migrated automatically.
+- Create genuinely empty profiles or explicitly duplicate one; each profile owns native manifests, load order, settings, overwrite, generated and deployment directories.
+- Select filtered mods with tri-state, Ctrl/Cmd, Shift and keyboard shortcuts, then enable, disable, copy, transfer, tag or remove them through journaled transactions with undo.
+- Detect the official Windows FiveM client, snapshot its neutral base without copying the installation, deploy client plugins through the existing temporary overlay and reject server resources in client profiles.
 - Import one or more existing mod folders through the native Generic/Cyberpunk/Bethesda/Unreal Pak/XXMI scanner, then review every detected root before transactional copy.
 - Import an arbitrarily large root folder as a cancellable background task, keep every completed item in persistent staging and review the task history from the status bar.
 - Deploy staged mods with an explicit Direct Copy backend that never overwrites an existing destination; each staged item includes a local manifest and file inventory.
@@ -22,10 +25,13 @@ profiles locally and ships installers for Windows, Linux and macOS.
 - Create desktop shortcuts with validated internal `zailon://launch/game/...` identifiers and optional profile selection.
 - Track games launched by ZAILON and publish a configurable Discord Rich Presence through the local Discord IPC socket without a client secret.
 - Choose Normal, Large or Very large text and Compact or Comfortable UI density; visible UI text has a 14 px minimum in the smallest mode.
+- Choose a live accent color and Auto/2/3 Explorer columns; open catalogue images in a full-format viewer without losing the parent mod sheet.
+- Use native Tauri Mica/Acrylic on Windows or Vibrancy on macOS when available, with an explicit runtime diagnostic and an honest CSS/compositor fallback.
 - Native frameless window with working move, minimize, maximize/restore and close controls.
 - Restore the last valid native window size, position and maximized state.
 - Signed in-app update checks with Stable and Beta channels, progress, local backup and update log.
 - Review the static reference-manager audit and copyright decisions in [`docs/example-managers-analysis.md`](docs/example-managers-analysis.md).
+- Review the latest UI-reference decisions in [`docs/ui-reference-analysis.md`](docs/ui-reference-analysis.md) and the implementation evidence in [`docs/bulk-profile-fivem-ui-report.md`](docs/bulk-profile-fivem-ui-report.md).
 
 ## User data and updates
 

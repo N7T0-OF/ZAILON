@@ -51,6 +51,44 @@ struct NativeMod {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ProfilePaths {
+    directory: String,
+    manifest_path: String,
+    load_order_path: String,
+    settings_path: String,
+    overwrite_path: String,
+    generated_path: String,
+    deployment_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProfileIntegrity {
+    ok: bool,
+    root: String,
+    issues: Vec<String>,
+    files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProfileTransactionResult {
+    operation_id: String,
+    profiles_written: usize,
+    history_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BaseSnapshotResult {
+    path: String,
+    files: usize,
+    changed_files: usize,
+    created: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ModImportCandidate {
     id: String,
     name: String,
@@ -640,6 +678,301 @@ fn safe_game_id(game_id: &str) -> Result<&str, String> {
         return Err("Invalid game identifier.".into());
     }
     Ok(game_id)
+}
+
+fn profile_directory(app: &AppHandle, game_id: &str, profile_id: &str) -> Result<PathBuf, String> {
+    let game_id = safe_game_id(game_id)?;
+    let profile_id = safe_game_id(profile_id)?;
+    Ok(update_data_root(app)?
+        .join("games")
+        .join(game_id)
+        .join("profiles")
+        .join(profile_id))
+}
+
+fn write_json_atomic(path: &Path, value: &serde_json::Value) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(to_error)?;
+    }
+    let temp = path.with_extension(format!("tmp-{}", unix_timestamp()));
+    fs::write(&temp, serde_json::to_vec_pretty(value).map_err(to_error)?).map_err(to_error)?;
+    if path.exists() {
+        fs::remove_file(path).map_err(to_error)?;
+    }
+    fs::rename(temp, path).map_err(to_error)
+}
+
+fn sync_profile_state_inner(
+    app: &AppHandle,
+    game_id: &str,
+    profile_id: &str,
+    profile: &serde_json::Value,
+) -> Result<ProfilePaths, String> {
+    let payload_id = profile
+        .get("id")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "Profile payload has no identifier.".to_string())?;
+    if payload_id != profile_id {
+        return Err("Profile payload identifier does not match its target directory.".into());
+    }
+    let root = profile_directory(app, game_id, profile_id)?;
+    let settings = root.join("settings");
+    let overwrite = root.join("overwrite");
+    let generated = root.join("generated");
+    let deployment = root.join("deployment");
+    let cache = root.join("cache");
+    for directory in [
+        &root,
+        &settings,
+        &overwrite,
+        &generated,
+        &deployment,
+        &cache,
+    ] {
+        fs::create_dir_all(directory).map_err(to_error)?;
+    }
+    let states = profile
+        .get("modStates")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut order = states
+        .as_object()
+        .into_iter()
+        .flat_map(|map| map.iter())
+        .map(|(mod_id, state)| {
+            (
+                state
+                    .get("priority")
+                    .and_then(|value| value.as_i64())
+                    .unwrap_or(i64::MAX),
+                mod_id.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    order.sort_by_key(|entry| entry.0);
+    let load_order = order.into_iter().map(|entry| entry.1).collect::<Vec<_>>();
+    let profile_path = root.join("profile.json");
+    let manifest_path = root.join("mods.manifest.json");
+    let load_order_path = root.join("load-order.json");
+    write_json_atomic(&profile_path, profile)?;
+    write_json_atomic(
+        &manifest_path,
+        &serde_json::json!({
+            "schemaVersion": 4,
+            "gameId": game_id,
+            "profileId": profile_id,
+            "modStates": states,
+            "updatedAt": unix_timestamp()
+        }),
+    )?;
+    write_json_atomic(&load_order_path, &serde_json::json!(load_order))?;
+    Ok(ProfilePaths {
+        directory: root.to_string_lossy().to_string(),
+        manifest_path: manifest_path.to_string_lossy().to_string(),
+        load_order_path: load_order_path.to_string_lossy().to_string(),
+        settings_path: settings.to_string_lossy().to_string(),
+        overwrite_path: overwrite.to_string_lossy().to_string(),
+        generated_path: generated.to_string_lossy().to_string(),
+        deployment_path: deployment.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+fn sync_profile_state(
+    app: AppHandle,
+    game_id: String,
+    profile_id: String,
+    profile: serde_json::Value,
+) -> Result<ProfilePaths, String> {
+    sync_profile_state_inner(&app, &game_id, &profile_id, &profile)
+}
+
+#[tauri::command]
+fn apply_profile_transaction(
+    app: AppHandle,
+    game_id: String,
+    operation_id: String,
+    before_profiles: Vec<serde_json::Value>,
+    after_profiles: Vec<serde_json::Value>,
+) -> Result<ProfileTransactionResult, String> {
+    let game_id = safe_game_id(&game_id)?.to_string();
+    let operation_id = safe_game_id(&operation_id)?.to_string();
+    let history_root = update_data_root(&app)?
+        .join("games")
+        .join(&game_id)
+        .join("transactions");
+    fs::create_dir_all(&history_root).map_err(to_error)?;
+    let history_path = history_root.join(format!("{operation_id}.json"));
+    write_json_atomic(
+        &history_path,
+        &serde_json::json!({
+            "schemaVersion": 1,
+            "operationId": operation_id,
+            "createdAt": unix_timestamp(),
+            "beforeProfiles": before_profiles,
+            "afterProfiles": after_profiles,
+        }),
+    )?;
+    let mut written = 0usize;
+    for profile in &after_profiles {
+        let profile_id = profile
+            .get("id")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| "A transaction profile has no identifier.".to_string())?;
+        if let Err(error) = sync_profile_state_inner(&app, &game_id, profile_id, profile) {
+            for previous in &before_profiles {
+                if let Some(previous_id) = previous.get("id").and_then(|value| value.as_str()) {
+                    let _ = sync_profile_state_inner(&app, &game_id, previous_id, previous);
+                }
+            }
+            return Err(format!("Profile transaction rolled back: {error}"));
+        }
+        written += 1;
+    }
+    Ok(ProfileTransactionResult {
+        operation_id,
+        profiles_written: written,
+        history_path: history_path.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+fn profile_integrity(
+    app: AppHandle,
+    game_id: String,
+    profile_id: String,
+) -> Result<ProfileIntegrity, String> {
+    let root = profile_directory(&app, &game_id, &profile_id)?;
+    let required_files = ["profile.json", "mods.manifest.json", "load-order.json"];
+    let required_directories = ["settings", "overwrite", "generated", "deployment", "cache"];
+    let mut issues = Vec::new();
+    let mut files = Vec::new();
+    for file in required_files {
+        let path = root.join(file);
+        if !path.is_file() {
+            issues.push(format!("Fichier manquant : {file}"));
+        } else {
+            files.push(path.to_string_lossy().to_string());
+            if serde_json::from_slice::<serde_json::Value>(&fs::read(&path).map_err(to_error)?)
+                .is_err()
+            {
+                issues.push(format!("JSON invalide : {file}"));
+            }
+        }
+    }
+    for directory in required_directories {
+        if !root.join(directory).is_dir() {
+            issues.push(format!("Dossier manquant : {directory}"));
+        }
+    }
+    Ok(ProfileIntegrity {
+        ok: issues.is_empty(),
+        root: root.to_string_lossy().to_string(),
+        issues,
+        files,
+    })
+}
+
+#[tauri::command]
+fn trash_profile_state(
+    app: AppHandle,
+    game_id: String,
+    profile_id: String,
+) -> Result<String, String> {
+    let root = profile_directory(&app, &game_id, &profile_id)?;
+    if !root.exists() {
+        return Ok(String::new());
+    }
+    let trash = update_data_root(&app)?
+        .join("games")
+        .join(safe_game_id(&game_id)?)
+        .join("trash")
+        .join("profiles");
+    fs::create_dir_all(&trash).map_err(to_error)?;
+    let target = trash.join(format!(
+        "{}-{}",
+        unix_timestamp(),
+        safe_game_id(&profile_id)?
+    ));
+    fs::rename(root, &target).map_err(to_error)?;
+    Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn initialize_fivem_base(
+    app: AppHandle,
+    game_id: String,
+    install_directory: String,
+) -> Result<BaseSnapshotResult, String> {
+    let root = fs::canonicalize(install_directory).map_err(to_error)?;
+    if !root.join("FiveM.exe").is_file() || !root.join("FiveM.app").is_dir() {
+        return Err("Le dossier choisi n’est pas une installation client FiveM reconnue.".into());
+    }
+    let snapshot_path = update_data_root(&app)?
+        .join("games")
+        .join(safe_game_id(&game_id)?)
+        .join("base-snapshot.json");
+    let previous = fs::read(&snapshot_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    let previous_files = previous
+        .as_ref()
+        .and_then(|value| value.get("files"))
+        .and_then(|value| value.as_object())
+        .cloned()
+        .unwrap_or_default();
+    let mut files = serde_json::Map::new();
+    for entry in WalkDir::new(&root)
+        .max_depth(3)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let relative = entry.path().strip_prefix(&root).map_err(to_error)?;
+        let normalized = relative.to_string_lossy().replace('\\', "/");
+        let lower = normalized.to_ascii_lowercase();
+        if lower.contains("/cache/") || lower.contains("/logs/") || lower.contains("/crashes/") {
+            continue;
+        }
+        let metadata = entry.metadata().map_err(to_error)?;
+        files.insert(
+            normalized,
+            serde_json::json!({
+                "size": metadata.len(),
+                "signature": file_signature(entry.path())?,
+            }),
+        );
+        if files.len() >= 20_000 {
+            break;
+        }
+    }
+    let changed_files = files
+        .iter()
+        .filter(|(path, metadata)| previous_files.get(*path) != Some(*metadata))
+        .count()
+        + previous_files
+            .keys()
+            .filter(|path| !files.contains_key(*path))
+            .count();
+    let file_count = files.len();
+    write_json_atomic(
+        &snapshot_path,
+        &serde_json::json!({
+            "schemaVersion": 1,
+            "kind": "FiveMClientBase",
+            "installDirectory": root,
+            "capturedAt": unix_timestamp(),
+            "files": files,
+        }),
+    )?;
+    Ok(BaseSnapshotResult {
+        path: snapshot_path.to_string_lossy().to_string(),
+        files: file_count,
+        changed_files,
+        created: previous.is_none(),
+    })
 }
 
 fn game_resource_directory(app: &tauri::AppHandle, game_id: &str) -> Result<PathBuf, String> {
@@ -2321,6 +2654,58 @@ fn deduplicate_discovery(items: Vec<DetectedGame>) -> Vec<DetectedGame> {
     values
 }
 
+#[cfg(target_os = "windows")]
+fn scan_fivem_client() -> Result<Vec<DetectedGame>, String> {
+    let local_app_data = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .ok_or_else(|| "LOCALAPPDATA est indisponible.".to_string())?;
+    let root = local_app_data.join("FiveM");
+    let executable = root.join("FiveM.exe");
+    if !root.is_dir() || !executable.is_file() {
+        return Ok(Vec::new());
+    }
+    let candidate = DetectedExecutable {
+        name: "FiveM.exe".into(),
+        path: executable.to_string_lossy().to_string(),
+        size_bytes: fs::metadata(&executable)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0),
+    };
+    Ok(vec![DetectedGame {
+        name: "FiveM".into(),
+        exec_path: candidate.path.clone(),
+        mods_path: root
+            .join("FiveM.app")
+            .join("plugins")
+            .to_string_lossy()
+            .to_string(),
+        platform: "standalone".into(),
+        provider: "FiveM Client".into(),
+        provider_game_id: Some("fivem-client".into()),
+        install_directory: root.to_string_lossy().to_string(),
+        steam_library: None,
+        executable_candidates: vec![candidate],
+        size_bytes: None,
+        last_updated: fs::metadata(&executable)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs()),
+        build_id: None,
+        needs_executable: false,
+        item_kind: "game".into(),
+        confidence: "high".into(),
+        version: None,
+        publisher: Some("Cfx.re".into()),
+        detection_source: "Dossier client officiel %LOCALAPPDATA%\\FiveM".into(),
+    }])
+}
+
+#[cfg(not(target_os = "windows"))]
+fn scan_fivem_client() -> Result<Vec<DetectedGame>, String> {
+    Err("Le client FiveM officiel est détecté automatiquement sous Windows uniquement.".into())
+}
+
 #[cfg(desktop)]
 #[tauri::command]
 fn scan_library(
@@ -2334,7 +2719,7 @@ fn scan_library(
     };
     let mut diagnostics = Vec::new();
     let mut discovered = Vec::new();
-    let providers = 3;
+    let providers = 4;
 
     report_discovery_stage(
         &on_event,
@@ -2424,6 +2809,39 @@ fn scan_library(
         }
         Err(error) => diagnostics.push(DiscoveryProviderDiagnostic {
             provider: "Applications Windows".into(),
+            status: "unavailable".into(),
+            found: 0,
+            detail: error,
+        }),
+    }
+    let _ = on_event.send(DiscoveryScanEvent::Progress {
+        current: 3,
+        total: providers,
+    });
+
+    report_discovery_stage(
+        &on_event,
+        "FiveM Client",
+        "Vérification ciblée du client et du dossier de plugins".into(),
+    );
+    match scan_fivem_client() {
+        Ok(games) => {
+            let found = games.len();
+            discovered.extend(games);
+            diagnostics.push(DiscoveryProviderDiagnostic {
+                provider: "FiveM Client".into(),
+                status: "ok".into(),
+                found,
+                detail: if found > 0 {
+                    "Client détecté ; les ressources serveur restent volontairement séparées"
+                } else {
+                    "Client FiveM non trouvé dans son emplacement officiel"
+                }
+                .into(),
+            });
+        }
+        Err(error) => diagnostics.push(DiscoveryProviderDiagnostic {
+            provider: "FiveM Client".into(),
             status: "unavailable".into(),
             found: 0,
             detail: error,
@@ -2962,6 +3380,22 @@ fn framework_diagnostics(game_root: &Path, relatives: &[PathBuf]) -> Result<Vec<
         .iter()
         .map(|path| deployment_key(path))
         .collect::<Vec<_>>();
+    let cyberpunk_layout = keys.iter().any(|path| {
+        [
+            "archive/pc/",
+            "r6/",
+            "red4ext/",
+            "bin/x64/plugins/cyber_engine_tweaks/",
+            "tools/redmod/",
+        ]
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+    });
+    if !cyberpunk_layout {
+        return Ok(vec![
+            "Layout générique validé : aucun diagnostic Cyberpunk/REDmod appliqué à ce jeu.".into(),
+        ]);
+    }
     let supplied = |needle: &str| keys.iter().any(|path| path.starts_with(needle));
     let existing_or_supplied = |relative: &str| {
         known_game_path_exists(game_root, relative) || supplied(&relative.to_ascii_lowercase())
@@ -3053,11 +3487,21 @@ fn set_staged_deployment_status(app: &AppHandle, game_id: &str, ids: &[String], 
     let Ok(root) = staged_mods_root(app, game_id) else {
         return;
     };
+    let legacy = root.parent().map(|parent| parent.join("mods"));
     for id in ids {
         if safe_game_id(id).is_err() {
             continue;
         }
-        let manifest_path = root.join(id).join("manifest.json");
+        let manifest_path = [
+            Some(root.join(id).join("manifest.json")),
+            legacy
+                .as_ref()
+                .map(|path| path.join(id).join("manifest.json")),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| root.join(id).join("manifest.json"));
         let Ok(payload) = fs::read(&manifest_path) else {
             continue;
         };
@@ -3143,12 +3587,22 @@ fn prepare_temporary_copy(
     let game_root = fs::canonicalize(game_root)
         .map_err(|_| "Le dossier d’installation du jeu est introuvable.".to_string())?;
     let staged_root = staged_mods_root(app, game_id)?;
+    let legacy_root = staged_root.parent().map(|parent| parent.join("mods"));
     let mut owners: HashMap<String, Vec<(String, PathBuf, PathBuf)>> = HashMap::new();
     for id in enabled_mod_ids {
         if safe_game_id(id).is_err() {
             continue;
         }
-        let content = staged_root.join(id).join("content");
+        let content = [
+            Some(staged_root.join(id).join("content")),
+            legacy_root
+                .as_ref()
+                .map(|path| path.join(id).join("content")),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|path| path.is_dir())
+        .unwrap_or_else(|| staged_root.join(id).join("content"));
         if !content.is_dir() {
             continue;
         }
@@ -3706,11 +4160,37 @@ fn stage_content(
 ) -> Result<(String, Vec<String>), String> {
     let lower_game = game_name.to_ascii_lowercase();
     let cyberpunk = lower_game.contains("cyberpunk");
+    let fivem_client = lower_game.contains("fivem");
     let root = if source.is_dir() {
         unwrap_package_root(source)
     } else {
         source.to_path_buf()
     };
+    if fivem_client {
+        let server_markers = WalkDir::new(&root)
+            .max_depth(4)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .map(|name| name.to_ascii_lowercase())
+            })
+            .filter(|name| {
+                matches!(
+                    name.as_str(),
+                    "fxmanifest.lua" | "__resource.lua" | "server.cfg"
+                )
+            })
+            .collect::<Vec<_>>();
+        if !server_markers.is_empty() {
+            return Err(format!(
+                "Ressource serveur FiveM détectée ({}) : l’adaptateur client refuse de la mélanger aux plugins client. Importez-la plus tard dans un gestionnaire serveur dédié.",
+                server_markers.join(", ")
+            ));
+        }
+    }
     let mut diagnostics = Vec::new();
     let layout;
     if root.is_file() {
@@ -3719,7 +4199,15 @@ fn stage_content(
             .and_then(|value| value.to_str())
             .unwrap_or_default()
             .to_ascii_lowercase();
-        let destination = if cyberpunk && extension == "archive" {
+        let destination = if fivem_client
+            && matches!(extension.as_str(), "asi" | "dll" | "ini" | "fx")
+        {
+            layout = "FiveMClientPlugin".to_string();
+            content.join("FiveM.app/plugins").join(
+                root.file_name()
+                    .ok_or_else(|| "Invalid source file name.".to_string())?,
+            )
+        } else if cyberpunk && extension == "archive" {
             layout = "CyberpunkArchive".to_string();
             content.join("archive/pc/mod").join(
                 root.file_name()
@@ -3746,7 +4234,22 @@ fn stage_content(
             .and_then(|value| value.to_str())
             .unwrap_or_default()
             .to_ascii_lowercase();
-        if contains_game_root_layout(&root) {
+        if fivem_client {
+            layout = "FiveMClientPlugin".to_string();
+            let root_name = root
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default();
+            let target = if root_name.eq_ignore_ascii_case("plugins") {
+                content.join("FiveM.app/plugins")
+            } else {
+                content
+                    .join("FiveM.app/plugins")
+                    .join(safe_archive_component(root_name))
+            };
+            copy_tree_cancellable(&root, &target, cancel)?;
+            diagnostics.push("Paquet classé comme plugin client FiveM. Les ressources serveur ne sont jamais déployées par cet adaptateur.".into());
+        } else if contains_game_root_layout(&root) {
             layout = if cyberpunk {
                 "CyberpunkGameRoot"
             } else {
@@ -3810,7 +4313,7 @@ fn staged_mods_root(app: &AppHandle, game_id: &str) -> Result<PathBuf, String> {
     Ok(update_data_root(app)?
         .join("games")
         .join(safe_game_id(game_id)?)
-        .join("mods"))
+        .join("store"))
 }
 
 fn staged_native_mod(stage_directory: &Path) -> Result<NativeMod, String> {
@@ -3876,12 +4379,18 @@ fn staged_native_mod(stage_directory: &Path) -> Result<NativeMod, String> {
 #[tauri::command]
 fn list_staged_mods(app: AppHandle, game_id: String) -> Result<Vec<NativeMod>, String> {
     let root = staged_mods_root(&app, &game_id)?;
-    if !root.exists() {
-        return Ok(Vec::new());
-    }
-    let mut mods = fs::read_dir(root)
-        .map_err(to_error)?
-        .filter_map(Result::ok)
+    let legacy = root.parent().map(|parent| parent.join("mods"));
+    let mut mods = [Some(root), legacy]
+        .into_iter()
+        .flatten()
+        .filter(|path| path.is_dir())
+        .flat_map(|path| {
+            fs::read_dir(path)
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .collect::<Vec<_>>()
+        })
         .filter(|entry| entry.path().is_dir())
         .filter_map(|entry| staged_native_mod(&entry.path()).ok())
         .collect::<Vec<_>>();
@@ -3897,12 +4406,17 @@ fn list_staged_mods(app: AppHandle, game_id: String) -> Result<Vec<NativeMod>, S
 fn delete_staged_mod(app: AppHandle, game_id: String, stage_id: String) -> Result<(), String> {
     safe_game_id(&stage_id)?;
     let root = staged_mods_root(&app, &game_id)?;
-    let target = root.join(stage_id);
-    if target.parent() != Some(root.as_path()) {
-        return Err("Invalid stored mod path.".into());
-    }
-    if target.exists() {
-        fs::remove_dir_all(target).map_err(to_error)?;
+    let legacy = root.parent().map(|parent| parent.join("mods"));
+    for target in [
+        Some(root.join(&stage_id)),
+        legacy.map(|path| path.join(&stage_id)),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if target.exists() {
+            fs::remove_dir_all(target).map_err(to_error)?;
+        }
     }
     Ok(())
 }
@@ -5552,6 +6066,55 @@ mod tests {
     }
 
     #[test]
+    fn fivem_client_staging_maps_plugins_and_rejects_server_resources() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-fivem-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let client = root.join("client-pack");
+        fs::create_dir_all(&client).expect("client pack");
+        fs::write(client.join("example.asi"), b"client-plugin").expect("client plugin");
+        let content = root.join("content");
+        fs::create_dir_all(&content).expect("content root");
+        let cancel = AtomicBool::new(false);
+        let (layout, diagnostics) =
+            stage_content(&client, &content, "FiveM", &cancel).expect("stage FiveM client plugin");
+        assert_eq!(layout, "FiveMClientPlugin");
+        assert!(content
+            .join("FiveM.app/plugins/client-pack/example.asi")
+            .is_file());
+        assert!(diagnostics.iter().any(|item| item.contains("client FiveM")));
+
+        let server = root.join("server-resource");
+        fs::create_dir_all(&server).expect("server pack");
+        fs::write(server.join("fxmanifest.lua"), b"fx_version 'cerulean'")
+            .expect("server manifest");
+        let error = stage_content(&server, &root.join("rejected"), "FiveM", &cancel)
+            .expect_err("server resource must be rejected by client adapter");
+        assert!(error.contains("Ressource serveur FiveM"));
+        fs::remove_dir_all(root).expect("remove FiveM test");
+    }
+
+    #[test]
+    fn generic_layout_does_not_report_cyberpunk_dependencies() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-generic-diagnostics-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("generic game root");
+        let diagnostics = framework_diagnostics(
+            &root,
+            &[PathBuf::from("FiveM.app/plugins/example/example.asi")],
+        )
+        .expect("generic diagnostics");
+        assert_eq!(diagnostics.len(), 1);
+        assert!(!diagnostics[0].contains("ArchiveXL"));
+        fs::remove_dir_all(root).expect("remove generic diagnostics test");
+    }
+
+    #[test]
     fn dependency_diagnostics_block_and_accept_known_cyberpunk_frameworks() {
         let root = std::env::temp_dir().join(format!(
             "zailon-framework-test-{}-{}",
@@ -5845,6 +6408,11 @@ pub fn run() {
             toggle_mod,
             delete_mod,
             delete_staged_mod,
+            sync_profile_state,
+            apply_profile_transaction,
+            profile_integrity,
+            trash_profile_state,
+            initialize_fivem_base,
             ensure_dir,
             launch_game,
             test_discord_connection,

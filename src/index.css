@@ -3,6 +3,12 @@
 @tailwind utilities;
 
 :root {
+  --zailon-accent: #f3faf8;
+  --zailon-accent-hover: #ffffff;
+  --zailon-accent-active: #cfd8d6;
+  --zailon-accent-muted: rgb(243 250 248 / 0.14);
+  --zailon-accent-text: #090b0b;
+  --zailon-focus-ring: rgb(243 250 248 / 0.78);
   --zailon-caption: 15px;
   --zailon-small: 16px;
   --zailon-body: 16px;
@@ -64,7 +70,7 @@
     font-family: 'DM Sans', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background: #050606;
+    background: transparent;
     color: #f0eff8;
     overflow: hidden;
     font-size: var(--zailon-body);
@@ -85,7 +91,7 @@
   }
 
   :focus-visible {
-    outline: 2px solid rgba(219, 232, 229, 0.72);
+    outline: 2px solid var(--zailon-focus-ring);
     outline-offset: 2px;
   }
 }

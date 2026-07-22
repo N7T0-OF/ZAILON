@@ -1,4 +1,5 @@
 import { AlertTriangle, ArrowDown, ArrowUp, ExternalLink, RefreshCw, StickyNote, Trash2 } from 'lucide-react'
+import type { MouseEvent } from 'react'
 import { Mod } from '../../types'
 import { LOADER_COLORS, PLATFORM_COLORS } from '../../utils'
 import { Toggle } from './Toggle'
@@ -11,20 +12,23 @@ interface ModCardProps {
   onMoveUp?: () => void
   onMoveDown?: () => void
   onNoteChange?: (note: string) => void
+  selected?: boolean
+  onSelect?: (event: MouseEvent<HTMLInputElement>) => void
 }
 
 const conflictLabel = { overwrites: 'Écrase', overwritten: 'Écrasé', mixed: 'Conflit mixte' } as const
 
-export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteChange }: ModCardProps) {
+export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteChange, selected, onSelect }: ModCardProps) {
   const loaderColor = LOADER_COLORS[mod.loader] || '#8888aa'
   const platformColor = mod.source ? PLATFORM_COLORS[mod.source] : '#8888aa'
 
   return (
-    <div className={`group flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all duration-150 ${
+    <div data-mod-id={mod.id} className={`group flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all duration-150 ${selected ? 'border-gold/45 bg-gold/[0.08]' :
       mod.enabled
         ? 'bg-white/[0.04] border-white/[0.06] hover:bg-white/[0.06] hover:border-gold/20'
         : 'bg-white/[0.02] border-white/[0.03] opacity-60 hover:opacity-80'
     }`}>
+      {onSelect && <input type="checkbox" checked={Boolean(selected)} onClick={onSelect} onChange={() => undefined} aria-label={`Sélectionner ${mod.name}`} className="h-4 w-4 shrink-0 accent-gold" />}
       {/* Loader badge */}
       <span className="text-[11px] font-mono font-bold px-1.5 py-0.5 rounded flex-shrink-0"
         style={{ color: loaderColor, backgroundColor: `${loaderColor}20`, border: `1px solid ${loaderColor}40` }}>
@@ -44,6 +48,8 @@ export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteC
               {mod.source === 'local' ? 'local' : mod.source}
             </span>
           )}
+          {(mod.categoryTags || []).slice(0, 2).map(tag => <span key={tag.id} title={`${tag.source} · confiance ${tag.confidence}`} className="rounded-full border border-white/[0.07] bg-white/[0.025] px-1.5 py-0.5 text-[11px] text-white/38">{tag.label}</span>)}
+          {(mod.categoryTags?.length || 0) > 2 && <span className="text-[11px] text-white/28">+{(mod.categoryTags?.length || 0) - 2}</span>}
         </div>
       </div>
 

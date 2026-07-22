@@ -47,6 +47,7 @@ export function ExploreView() {
   const hasNextPage = useStore(state => state.exploreHasNextPage)
   const sort = useStore(state => state.exploreSort)
   const grid = useStore(state => state.exploreGrid)
+  const columns = useStore(state => state.exploreColumns)
   const mods = useStore(state => state.exploreMods)
   const loading = useStore(state => state.exploreLoading)
   const error = useStore(state => state.exploreError)
@@ -64,6 +65,7 @@ export function ExploreView() {
   const setPage = useStore(state => state.setExplorePage)
   const setSort = useStore(state => state.setExploreSort)
   const setGrid = useStore(state => state.setExploreGrid)
+  const setColumns = useStore(state => state.setExploreColumns)
   const refresh = useStore(state => state.refreshExplore)
   const installMod = useStore(state => state.installMod)
   const setView = useStore(state => state.setView)
@@ -173,6 +175,7 @@ export function ExploreView() {
             <button type="button" onClick={() => void refresh()} disabled={loading} title="Actualiser le catalogue" aria-label="Actualiser le catalogue" className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.08] text-white/46 hover:bg-white/[0.06] hover:text-white disabled:opacity-40"><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /></button>
             <button type="button" onClick={() => setGrid(true)} title="Affichage en grille" aria-label="Affichage en grille" className={`flex h-9 w-9 items-center justify-center rounded-lg ${grid ? 'bg-gold text-[#101313]' : 'border border-white/[0.08] text-white/38 hover:text-white'}`}><Grid2X2 size={14} /></button>
             <button type="button" onClick={() => setGrid(false)} title="Affichage en liste" aria-label="Affichage en liste" className={`flex h-9 w-9 items-center justify-center rounded-lg ${!grid ? 'bg-gold text-[#101313]' : 'border border-white/[0.08] text-white/38 hover:text-white'}`}><LayoutList size={15} /></button>
+            {grid && <label className="ml-1 flex h-9 items-center gap-2 rounded-lg border border-white/[0.08] px-2 text-[11px] text-white/46">Colonnes<select value={columns} onChange={event => setColumns(event.target.value as typeof columns)} className="bg-[#101313] text-white/72"><option value="auto">Auto</option><option value="2">2</option><option value="3">3</option></select></label>}
           </div>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -194,7 +197,7 @@ export function ExploreView() {
           <span className="flex items-center gap-1.5 text-[11px] text-white/30"><ShieldCheck size={13} /> Les fichiers sont récupérés depuis la source officielle.</span>
         </div>
 
-        {loading && !mods.length ? <LoadingGrid /> : !visibleMods.length && !error ? <EmptyResults onReset={() => { setSearch(''); void refresh() }} /> : <div className={grid ? 'grid gap-3 md:grid-cols-2 2xl:grid-cols-3' : 'space-y-2'}>
+        {loading && !mods.length ? <LoadingGrid /> : !visibleMods.length && !error ? <EmptyResults onReset={() => { setSearch(''); void refresh() }} /> : <div className={grid ? `grid gap-3 ${columns === '2' ? 'md:grid-cols-2' : columns === '3' ? 'md:grid-cols-2 xl:grid-cols-3' : 'md:grid-cols-2 2xl:grid-cols-3'}` : 'space-y-2'}>
           {visibleMods.map(mod => <ModResult key={mod.id} mod={mod} grid={grid} installing={installingId === mod.id} canInstall={Boolean(selectedGame?.modsPath)} targetName={selectedGame?.name} onPreview={() => setPreviewMod(mod)} onInstall={() => void install(mod)} />)}
         </div>}
         <div className="mt-4 flex items-center justify-center gap-2" aria-label="Pagination GameBanana">
@@ -216,6 +219,7 @@ function TargetGame({ gameName, configured, onConfigure }: { gameName?: string; 
 }
 
 function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: string; showNsfw: boolean }) {
+  const columns = useStore(state => state.exploreColumns)
   const [games, setGames] = useState<NexusCatalogGame[]>([])
   const [domain, setDomain] = useState('')
   const [gameFilter, setGameFilter] = useState(selectedGameName || '')
@@ -296,7 +300,7 @@ function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: strin
     </div>
 
     {error && <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-400/18 bg-red-400/[0.04] p-4 text-[11px] text-red-200/70"><AlertTriangle size={15} className="mt-0.5 shrink-0" /><span>{error}</span></div>}
-    {loadingMods ? <LoadingGrid /> : domain && !visibleMods.length && !error ? <EmptyResults onReset={() => { setQuery(''); void loadMods() }} /> : <div className="mt-4 grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+    {loadingMods ? <LoadingGrid /> : domain && !visibleMods.length && !error ? <EmptyResults onReset={() => { setQuery(''); void loadMods() }} /> : <div className={`mt-4 grid gap-3 ${columns === '2' ? 'md:grid-cols-2' : columns === '3' ? 'md:grid-cols-2 xl:grid-cols-3' : 'md:grid-cols-2 2xl:grid-cols-3'}`}>
       {visibleMods.map(item => {
         const mod: ExplodMod = {
           id: item.id,
@@ -342,6 +346,7 @@ function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, onIn
   const [brokenImages, setBrokenImages] = useState<string[]>([])
   const images = allImages.filter(image => !brokenImages.includes(image))
   const [imageIndex, setImageIndex] = useState(0)
+  const [lightbox, setLightbox] = useState(false)
   const dialogRef = useRef<HTMLElement>(null)
   const tiltRef = useRef<HTMLDivElement>(null)
   const frameRef = useRef<number>()
@@ -357,13 +362,13 @@ function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, onIn
   useEffect(() => {
     dialogRef.current?.focus()
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') lightbox ? setLightbox(false) : onClose()
       if (event.key === 'ArrowLeft' && images.length > 1) previous()
       if (event.key === 'ArrowRight' && images.length > 1) next()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [images.length, onClose])
+  }, [images.length, lightbox, onClose])
 
   useEffect(() => {
     if (images.length < 2) return
@@ -399,7 +404,7 @@ function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, onIn
       <div className="min-h-0 border-b border-white/[0.07] lg:border-b-0 lg:border-r">
         <div onPointerMove={tilt} onPointerLeave={resetTilt} className="relative flex min-h-[320px] h-[58vh] max-h-[680px] items-center justify-center overflow-hidden bg-black/45" style={{ perspective: 1000 }}>
           <div ref={tiltRef} className="flex h-full w-full items-center justify-center transition-transform duration-300 ease-out will-change-transform">
-            {currentImage ? <img src={currentImage} onError={() => imageFailed(currentImage)} alt={`Aperçu ${imageIndex + 1} de ${mod.name}`} className="h-full w-full object-contain" /> : <div className="text-center text-white/24"><Compass size={38} className="mx-auto" /><p className="mt-3 text-[11px]">Aucune capture disponible</p></div>}
+            {currentImage ? <img src={currentImage} onClick={() => setLightbox(true)} onError={() => imageFailed(currentImage)} alt={`Aperçu ${imageIndex + 1} de ${mod.name}`} title="Ouvrir au format complet" className="h-full w-full cursor-zoom-in object-contain" /> : <div className="text-center text-white/24"><Compass size={38} className="mx-auto" /><p className="mt-3 text-[11px]">Aucune capture disponible</p></div>}
           </div>
           <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/65 to-transparent p-3"><span className="rounded bg-black/45 px-2 py-1 text-[11px] text-white/56">Galerie 3D en parallaxe</span>{images.length > 0 && <span className="rounded bg-black/45 px-2 py-1 font-mono text-[11px] text-white/56">{imageIndex + 1} / {images.length}</span>}</div>
           {images.length > 1 && <><button type="button" onClick={previous} aria-label="Image précédente" className="absolute left-3 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 backdrop-blur hover:bg-black/80"><ChevronLeft size={20} /></button><button type="button" onClick={next} aria-label="Image suivante" className="absolute right-3 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 backdrop-blur hover:bg-black/80"><ChevronRight size={20} /></button></>}
@@ -417,6 +422,11 @@ function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, onIn
         <footer className="flex flex-wrap justify-end gap-2 border-t border-white/[0.07] p-4"><button type="button" onClick={() => void openSource()} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/62 hover:bg-white/[0.05]"><ExternalLink size={13} />Voir la page source</button><button type="button" onClick={sourceOnly ? () => void openSource() : onInstall} disabled={installing} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[#101313] disabled:opacity-40">{installing ? <Loader2 size={13} className="animate-spin" /> : sourceOnly ? <ExternalLink size={13} /> : <Download size={13} />}{installing ? 'Installation…' : sourceOnly ? 'Ouvrir Nexus' : canInstall ? 'Installer' : 'Configurer le jeu'}</button></footer>
       </aside>
     </section>
+    {lightbox && currentImage && <div role="dialog" aria-modal="true" aria-label={`Image ${imageIndex + 1} de ${mod.name} au format complet`} className="fixed inset-0 z-[280] flex flex-col bg-black/94 p-3 backdrop-blur-xl" onPointerDown={event => { if (event.target === event.currentTarget) setLightbox(false) }}>
+      <header className="flex items-center justify-between gap-3 pb-2"><div className="min-w-0"><p className="truncate text-sm font-semibold text-white/78">{mod.name}</p><p className="text-[11px] text-white/40">{imageIndex + 1} / {images.length} · image complète conservée dans la fiche</p></div><button type="button" onClick={() => setLightbox(false)} aria-label="Fermer l’image complète" className="flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white/70 hover:bg-white/10"><X size={18} /></button></header>
+      <div className="relative min-h-0 flex-1" onPointerDown={event => event.stopPropagation()}><img src={currentImage} onError={() => imageFailed(currentImage)} alt={`Image complète ${imageIndex + 1} de ${mod.name}`} className="h-full w-full select-none object-contain" />{images.length > 1 && <><button type="button" onClick={previous} aria-label="Image précédente" className="absolute left-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/80"><ChevronLeft size={22} /></button><button type="button" onClick={next} aria-label="Image suivante" className="absolute right-2 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/80"><ChevronRight size={22} /></button></>}</div>
+      {images.length > 1 && <div className="mx-auto mt-2 flex max-w-full gap-2 overflow-x-auto rounded-xl border border-white/[0.08] bg-black/35 p-2">{images.map((image, index) => <button key={image} type="button" onClick={() => setImageIndex(index)} className={`h-14 w-20 shrink-0 overflow-hidden rounded-lg border ${index === imageIndex ? 'border-gold' : 'border-white/10'}`}><img src={thumbnailSource(image)} alt="" className="h-full w-full object-cover" /></button>)}</div>}
+    </div>}
   </div>
 }
 

@@ -1,10 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { ExplodMod, ExploreSort, Game, GameResources, GameTab, GamebananaGame, LiquidGlassMode, LiquidGlassSettings, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileModState, TextSize, UiDensity, UpdateChannel, ViewType } from '../types'
+import { BulkOperation, ExplodMod, ExploreColumns, ExploreSort, Game, GameResources, GameTab, GamebananaGame, LiquidGlassMode, LiquidGlassSettings, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType, WindowEffectsDiagnostic } from '../types'
 import { BackgroundTaskSnapshot, DetectedGame, native, NativeMod, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
+import { createUserTag, withInferredTags } from '../lib/modCategories'
 
-const APP_VERSION = '1.5.0'
+const APP_VERSION = '1.6.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 export const DEFAULT_LIQUID_GLASS: LiquidGlassSettings = { opacity: 0.86, blur: 18, darkTint: 0.58, saturation: 1.08, border: 0.12, reflection: 0.08, shadow: 0.5, animations: true, reduceWhenUnfocused: true, preferNative: true }
 
@@ -20,7 +21,7 @@ let exploreGameController: AbortController | undefined
 let exploreCatalogRequest = 0
 let exploreGameRequest = 0
 
-const nativeModToMod = (mod: NativeMod, previous?: Mod, priority = 0): Mod => ({
+const nativeModToMod = (mod: NativeMod, previous?: Mod, priority = 0): Mod => withInferredTags({
   id: previous?.id ?? mod.id,
   name: mod.name,
   path: mod.path,
@@ -44,6 +45,31 @@ const nativeModToMod = (mod: NativeMod, previous?: Mod, priority = 0): Mod => ({
   deploymentStatus: mod.deploymentStatus,
   diagnostics: mod.diagnostics,
 })
+
+const withProfilePaths = (profile: Profile, paths: Awaited<ReturnType<typeof native.syncProfileState>>): Profile => ({
+  ...profile,
+  directory: paths.directory,
+  manifestPath: paths.manifestPath,
+  loadOrderPath: paths.loadOrderPath,
+  settingsPath: paths.settingsPath,
+  overwritePath: paths.overwritePath,
+  generatedPath: paths.generatedPath,
+  deploymentPath: paths.deploymentPath,
+})
+
+async function persistProfileTransaction(gameId: string, operationId: string, beforeProfiles: Profile[], afterProfiles: Profile[]) {
+  if (!native.isDesktop()) return afterProfiles
+  await native.applyProfileTransaction(gameId, operationId, beforeProfiles, afterProfiles)
+  return Promise.all(afterProfiles.map(async profile => withProfilePaths(profile, await native.syncProfileState(gameId, profile))))
+}
+
+const cloneProfile = (profile: Profile): Profile => JSON.parse(JSON.stringify(profile)) as Profile
+const cloneMods = (mods: Mod[]): Mod[] => JSON.parse(JSON.stringify(mods)) as Mod[]
+
+function replaceProfiles(game: Game, replacements: Profile[]) {
+  const byId = new Map(replacements.map(profile => [profile.id, profile]))
+  return { ...game, profiles: game.profiles.map(profile => byId.get(profile.id) || profile) }
+}
 
 function decorateMods(mods: Mod[]): Mod[] {
   const ordered = [...mods]
@@ -238,6 +264,7 @@ export interface Store {
   exploreHasNextPage: boolean
   exploreSort: ExploreSort
   exploreGrid: boolean
+  exploreColumns: ExploreColumns
   exploreMods: ExplodMod[]
   exploreLoading: boolean
   exploreError?: string
@@ -251,6 +278,10 @@ export interface Store {
   liquidGlassSettings: LiquidGlassSettings
   energySaver: boolean
   showSupportButton: boolean
+  accentColor: string
+  bulkHistory: BulkOperation[]
+  windowEffectDiagnostic?: WindowEffectsDiagnostic
+  notificationHistory: UiNotification[]
   notice?: string
   setView: (view: ViewType) => void
   setActiveGameTab: (tab: GameTab) => void
@@ -310,6 +341,7 @@ export interface Store {
   setExplorePage: (page: number) => void
   setExploreSort: (sort: ExploreSort) => void
   setExploreGrid: (grid: boolean) => void
+  setExploreColumns: (columns: ExploreColumns) => void
   refreshExplore: () => Promise<void>
   installMod: (mod: ExplodMod) => Promise<void>
   replaceBackgroundTasks: (tasks: BackgroundTaskSnapshot[]) => void
@@ -321,6 +353,20 @@ export interface Store {
   setLiquidGlassSettings: (settings: Partial<LiquidGlassSettings>) => void
   setEnergySaver: (enabled: boolean) => void
   setShowSupportButton: (enabled: boolean) => void
+  setAccentColor: (color: string) => void
+  setWindowEffectDiagnostic: (diagnostic: WindowEffectsDiagnostic) => void
+  bulkSetEnabled: (modIds: string[], enabled: boolean) => Promise<void>
+  bulkTransferMods: (modIds: string[], destinationProfileId: string, mode: 'copy' | 'move') => Promise<void>
+  bulkDeleteMods: (modIds: string[], scope: 'current' | 'all') => Promise<void>
+  bulkAddTag: (modIds: string[], label: string) => Promise<void>
+  undoLastBulkOperation: () => Promise<void>
+  toggleProfileLock: (profileId: string) => void
+  openProfileDirectory: (profileId: string, kind?: 'root' | 'overwrite' | 'generated') => Promise<void>
+  checkProfileIntegrity: (profileId: string) => Promise<ProfileIntegrity | undefined>
+  repairProfileStorage: (gameId: string) => Promise<void>
+  recordNotice: (message: string) => void
+  dismissNotification: (id: string) => void
+  clearCompletedNotifications: () => void
   clearNotice: () => void
 }
 
@@ -336,7 +382,7 @@ export function migratePersistedState(persisted: unknown) {
         if (!existing) catalog.set(mod.id, mod)
       }
     }
-    const installedMods = decorateMods([...catalog.values()])
+    const installedMods = decorateMods([...catalog.values()].map(mod => withInferredTags(mod)))
     const profiles = (game.profiles || []).map((rawProfile, index): Profile => {
       const legacyMods = rawProfile.mods || []
       const legacyByName = new Map(legacyMods.map(mod => [mod.name.toLocaleLowerCase(), mod]))
@@ -366,6 +412,7 @@ export function migratePersistedState(persisted: unknown) {
     exploreRecentGames: state.exploreRecentGames || [],
     explorePage: state.explorePage || 1,
     exploreSort: state.exploreSort || 'recent',
+    exploreColumns: state.exploreColumns || 'auto',
     textSize: state.textSize || 'normal',
     uiDensity: state.uiDensity || 'comfortable',
     autoArtwork: state.autoArtwork ?? false,
@@ -381,6 +428,9 @@ export function migratePersistedState(persisted: unknown) {
     liquidGlassSettings: { ...DEFAULT_LIQUID_GLASS, ...(state.liquidGlassSettings || {}) },
     energySaver: state.energySaver ?? false,
     showSupportButton: state.showSupportButton ?? true,
+    accentColor: /^#[0-9a-f]{6}$/i.test(state.accentColor || '') ? state.accentColor : '#f3faf8',
+    bulkHistory: state.bulkHistory || [],
+    notificationHistory: state.notificationHistory || [],
   }
 }
 
@@ -421,6 +471,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   exploreHasNextPage: false,
   exploreSort: 'recent',
   exploreGrid: true,
+  exploreColumns: 'auto',
   exploreMods: [],
   exploreLoading: false,
   exploreGamesLoading: false,
@@ -432,6 +483,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
   liquidGlassSettings: { ...DEFAULT_LIQUID_GLASS },
   energySaver: false,
   showSupportButton: true,
+  accentColor: '#f3faf8',
+  bulkHistory: [],
+  notificationHistory: [],
   setView: currentView => set({ currentView }),
   setActiveGameTab: activeGameTab => set({ activeGameTab, currentView: 'games' }),
   setSelectedGame: selectedGameId => {
@@ -476,6 +530,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
       const modsPath = native.isDesktop() ? await native.guessModsPath(execPath) : ''
       const game = makeGame({ name: gameNameFromPath(execPath), execPath, modsPath })
       set(state => ({ games: [...state.games, game], selectedGameId: game.id, selectedProfileId: game.profiles[0].id, currentView: 'games', notice: 'Game added. Choose or create its mods folder, then scan it.' }))
+      if (native.isDesktop()) {
+        const profile = game.profiles[0]
+        void native.syncProfileState(game.id, profile).then(paths => set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => withProfilePaths(current, paths)) })))
+      }
     } catch (error) {
       set({ notice: asError(error) })
     }
@@ -510,6 +568,19 @@ export const useStore = create<Store>()(persist((set, get) => ({
         selectedProfileId: state.selectedProfileId ?? fresh[0].profiles[0].id,
         notice: `${fresh.length} jeu${fresh.length > 1 ? 'x' : ''} Steam ajouté${fresh.length > 1 ? 's' : ''}.`,
       }))
+      if (native.isDesktop()) {
+        fresh.forEach(game => {
+          const initial = game.profiles[0]
+          void native.syncProfileState(game.id, initial).then(paths => {
+            set(state => ({ games: updateProfile(state.games, game.id, initial.id, profile => withProfilePaths(profile, paths)) }))
+          }).catch(error => set({ notice: asError(error) }))
+          if (game.provider === 'FiveM Client' && game.installDirectory) {
+            void native.initializeFiveMBase(game.id, game.installDirectory).then(snapshot => {
+              set({ notice: `FiveM client détecté. Base neutre indexée (${snapshot.files} fichiers, aucune copie complète).` })
+            }).catch(error => set({ notice: asError(error) }))
+          }
+        })
+      }
       if (get().autoArtwork) {
         fresh.forEach(game => {
           void automaticArtworkForGame(game).then(resources => {
@@ -554,21 +625,25 @@ export const useStore = create<Store>()(persist((set, get) => ({
     games: state.games.map(game => game.id === gameId ? { ...game, categories } : game),
   })),
   addProfile: name => {
-    const { game, profile } = selected(get())
-    if (!game || !profile || !name.trim()) return
+    const { game } = selected(get())
+    if (!game || !name.trim()) return
     const next: Profile = {
-      ...profile,
       id: createId(),
+      gameId: game.id,
       name: name.trim(),
-      mods: undefined,
-      modStates: { ...profile.modStates },
+      modStates: {},
       playtime: 0,
-      lastPlayed: undefined,
       createdAt: Date.now(),
-      lastUsed: undefined,
       isDefault: false,
     }
-    set(state => ({ games: state.games.map(item => item.id === game.id ? { ...item, profiles: [...item.profiles, next] } : item), selectedProfileId: next.id }))
+    set(state => ({
+      games: state.games.map(item => item.id === game.id ? { ...item, profiles: [...item.profiles, next] } : item),
+      selectedProfileId: next.id,
+      notice: `Profil vide « ${next.name} » créé : 0 mod actif, aucun réglage hérité.`,
+    }))
+    if (native.isDesktop()) void native.syncProfileState(game.id, next).then(paths => {
+      set(state => ({ games: updateProfile(state.games, game.id, next.id, profile => withProfilePaths(profile, paths)) }))
+    }).catch(error => set({ notice: `Profil créé localement, mais sa persistance native a échoué : ${asError(error)}` }))
   },
   duplicateProfile: profileId => {
     const { game } = selected(get())
@@ -578,17 +653,31 @@ export const useStore = create<Store>()(persist((set, get) => ({
       ...source,
       id: createId(),
       name: `${source.name} — copie`,
-      modStates: { ...source.modStates },
+      modStates: Object.fromEntries(Object.entries(source.modStates).map(([id, state]) => [id, { ...state }])),
+      conflictRules: source.conflictRules?.map(rule => ({ ...rule })),
+      installOptions: source.installOptions ? { ...source.installOptions } : undefined,
       createdAt: Date.now(),
       lastUsed: undefined,
       isDefault: false,
       locked: false,
+      temporary: false,
+      clonedFromProfileId: source.id,
+      directory: undefined,
+      manifestPath: undefined,
+      loadOrderPath: undefined,
+      settingsPath: undefined,
+      overwritePath: undefined,
+      generatedPath: undefined,
+      deploymentPath: undefined,
     }
     set(state => ({
       games: state.games.map(item => item.id === game.id ? { ...item, profiles: [...item.profiles, copy] } : item),
       selectedProfileId: copy.id,
       notice: `Le profil « ${source.name} » a été dupliqué.`,
     }))
+    if (native.isDesktop()) void native.syncProfileState(game.id, copy).then(paths => {
+      set(state => ({ games: updateProfile(state.games, game.id, copy.id, profile => withProfilePaths(profile, paths)) }))
+    }).catch(error => set({ notice: asError(error) }))
   },
   importProfileManifest: manifest => {
     const { game } = selected(get())
@@ -624,7 +713,11 @@ export const useStore = create<Store>()(persist((set, get) => ({
   renameProfile: (profileId, name) => {
     const { game } = selected(get())
     if (!game || !name.trim()) return
-    set(state => ({ games: updateProfile(state.games, game.id, profileId, profile => ({ ...profile, name: name.trim() })) }))
+    const profile = game.profiles.find(item => item.id === profileId)
+    if (!profile || profile.locked) return
+    const renamed = { ...profile, name: name.trim() }
+    set(state => ({ games: updateProfile(state.games, game.id, profileId, () => renamed) }))
+    if (native.isDesktop()) void native.syncProfileState(game.id, renamed).catch(error => set({ notice: asError(error) }))
   },
   removeProfile: profileId => {
     const { game } = selected(get())
@@ -637,6 +730,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
       selectedProfileId: state.selectedProfileId === profileId ? next.id : state.selectedProfileId,
       notice: 'Profil retiré. Les fichiers de mods ne sont pas supprimés.',
     }))
+    if (native.isDesktop()) void native.trashProfileState(game.id, profileId).then(path => {
+      if (path) set({ notice: `Profil placé dans la corbeille ZAILON : ${path}` })
+    }).catch(error => set({ notice: asError(error) }))
   },
   scanMods: async gameId => {
     const state = get()
@@ -666,6 +762,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
         }),
         notice: `${mods.length} mod${mods.length !== 1 ? 's' : ''} analysé${mods.length !== 1 ? 's' : ''}, dont ${stagedMods.length} stocké${stagedMods.length !== 1 ? 's' : ''} par ZAILON.`,
       }))
+      const updated = get().games.find(item => item.id === game.id)?.profiles.find(item => item.id === profile.id)
+      if (updated && native.isDesktop()) await native.syncProfileState(game.id, updated)
     } catch (error) {
       set({ notice: asError(error) })
     }
@@ -674,6 +772,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const { game, profile } = selected(get())
     const mod = resolveProfileMods(game, profile).find(item => item.id === modId)
     if (!game || !profile || !mod) return
+    if (profile.locked) { set({ notice: `Le profil « ${profile.name} » est verrouillé.` }); return }
     try {
       const path = mod.storage !== 'staged' && mod.path ? await native.toggleMod(mod.path, game.modsPath || '', !mod.enabled) : undefined
       set(state => ({ games: state.games.map(item => item.id !== game.id ? item : {
@@ -684,6 +783,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
           modStates: { ...current.modStates, [modId]: { ...(current.modStates[modId] || { priority: mod.priority ?? 0 }), enabled: !mod.enabled } },
         }),
       }) }))
+      const updated = get().games.find(item => item.id === game.id)?.profiles.find(item => item.id === profile.id)
+      if (updated && native.isDesktop()) await native.syncProfileState(game.id, updated)
     } catch (error) {
       set({ notice: asError(error) })
     }
@@ -692,7 +793,22 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const { game, profile } = selected(get())
     const mod = resolveProfileMods(game, profile).find(item => item.id === modId)
     if (!game || !profile || !mod) return
+    if (profile.locked) { set({ notice: `Le profil « ${profile.name} » est verrouillé.` }); return }
     try {
+      const otherReferences = game.profiles.filter(item => item.id !== profile.id && Object.prototype.hasOwnProperty.call(item.modStates, modId))
+      if (otherReferences.length) {
+        set(state => ({
+          games: updateProfile(state.games, game.id, profile.id, current => {
+            const modStates = { ...current.modStates }
+            delete modStates[modId]
+            return { ...current, modStates }
+          }),
+          notice: `${mod.name} retiré de « ${profile.name} ». Le paquet partagé reste utilisé par ${otherReferences.length} autre(s) profil(s).`,
+        }))
+        const updated = get().games.find(item => item.id === game.id)?.profiles.find(item => item.id === profile.id)
+        if (updated && native.isDesktop()) await native.syncProfileState(game.id, updated)
+        return
+      }
       if (mod.storage === 'staged' && mod.stageId) await native.deleteStagedMod(game.id, mod.stageId)
       else if (mod.path) await native.deleteMod(mod.path, game.modsPath || '')
       set(state => ({
@@ -714,6 +830,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   moveMod: (modId, direction) => {
     const { game, profile } = selected(get())
     if (!game || !profile) return
+    if (profile.locked) { set({ notice: `Le profil « ${profile.name} » est verrouillé.` }); return }
     const mods = resolveProfileMods(game, profile)
     const index = mods.findIndex(mod => mod.id === modId)
     const destination = index + direction
@@ -722,12 +839,17 @@ export const useStore = create<Store>()(persist((set, get) => ({
     mods.splice(destination, 0, moved)
     const modStates = statesFromMods(decorateMods(mods))
     set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, modStates })) }))
+    const updated = get().games.find(item => item.id === game.id)?.profiles.find(item => item.id === profile.id)
+    if (updated && native.isDesktop()) void native.syncProfileState(game.id, updated).catch(error => set({ notice: asError(error) }))
   },
   setModNote: (modId, note) => {
     const { game, profile } = selected(get())
     if (!game || !profile) return
+    if (profile.locked) return
     const currentState = profile.modStates[modId] || { enabled: true, priority: 0 }
     set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, modStates: { ...current.modStates, [modId]: { ...currentState, note } } })) }))
+    const updated = get().games.find(item => item.id === game.id)?.profiles.find(item => item.id === profile.id)
+    if (updated && native.isDesktop()) void native.syncProfileState(game.id, updated).catch(error => set({ notice: asError(error) }))
   },
   toggleNSFW: () => set(state => ({ nsfw: !state.nsfw })),
   setHideUnclassifiedNsfw: hideUnclassifiedNsfw => set({ hideUnclassifiedNsfw }),
@@ -834,6 +956,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setExplorePage: explorePage => set({ explorePage: Math.max(1, explorePage) }),
   setExploreSort: exploreSort => set({ exploreSort, explorePage: 1 }),
   setExploreGrid: exploreGrid => set({ exploreGrid }),
+  setExploreColumns: exploreColumns => set({ exploreColumns }),
   refreshExplore: async () => {
     const { explorePlatform, exploreGameId, exploreSearch, explorePage, exploreSort } = get()
     if (explorePlatform !== 'gamebanana') {
@@ -874,8 +997,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
   },
   setConflictWinner: (path, winnerModId) => {
     const { game, profile } = selected(get())
-    if (!game || !profile) return
+    if (!game || !profile || profile.locked) return
     set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, conflictRules: [...(current.conflictRules || []).filter(rule => rule.path.toLocaleLowerCase() !== path.toLocaleLowerCase()), { path, winnerModId }] })) }))
+    const updated = get().games.find(item => item.id === game.id)?.profiles.find(item => item.id === profile.id)
+    if (updated && native.isDesktop()) void native.syncProfileState(game.id, updated).catch(error => set({ notice: asError(error) }))
   },
   replaceBackgroundTasks: backgroundTasks => set({ backgroundTasks: [...backgroundTasks].sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 500) }),
   upsertBackgroundTask: task => set(state => ({ backgroundTasks: [task, ...state.backgroundTasks.filter(item => item.id !== task.id)].sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 500) })),
@@ -886,6 +1011,207 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setLiquidGlassSettings: settings => set(state => ({ liquidGlassSettings: { ...state.liquidGlassSettings, ...settings }, liquidGlassMode: 'custom' })),
   setEnergySaver: energySaver => set({ energySaver }),
   setShowSupportButton: showSupportButton => set({ showSupportButton }),
+  setAccentColor: accentColor => {
+    if (/^#[0-9a-f]{6}$/i.test(accentColor)) set({ accentColor })
+  },
+  setWindowEffectDiagnostic: windowEffectDiagnostic => set({ windowEffectDiagnostic }),
+  bulkSetEnabled: async (modIds, enabled) => {
+    const { game, profile } = selected(get())
+    if (!game || !profile || !modIds.length) return
+    if (profile.locked) { set({ notice: `Le profil « ${profile.name} » est verrouillé.` }); return }
+    const allowed = new Set(modIds)
+    const resolved = resolveProfileMods(game, profile)
+    const next = cloneProfile(profile)
+    resolved.forEach((mod, index) => {
+      if (!allowed.has(mod.id)) return
+      next.modStates[mod.id] = { ...(next.modStates[mod.id] || { priority: index }), enabled }
+    })
+    const id = createId()
+    try {
+      const [persisted] = await persistProfileTransaction(game.id, id, [cloneProfile(profile)], [next])
+      const operation: BulkOperation = {
+        id, kind: enabled ? 'enable' : 'disable', gameId: game.id, profileIds: [profile.id], modIds,
+        createdAt: Date.now(), label: `${enabled ? 'Activation' : 'Désactivation'} de ${modIds.length} mod(s)`,
+        beforeProfiles: [cloneProfile(profile)], afterProfiles: [cloneProfile(persisted)], undoable: true,
+      }
+      set(state => ({
+        games: state.games.map(item => item.id === game.id ? replaceProfiles(item, [persisted]) : item),
+        bulkHistory: [...state.bulkHistory, operation].slice(-30),
+        notice: `${operation.label} terminée.`,
+      }))
+    } catch (error) { set({ notice: asError(error) }) }
+  },
+  bulkTransferMods: async (modIds, destinationProfileId, mode) => {
+    const { game, profile: source } = selected(get())
+    const destination = game?.profiles.find(item => item.id === destinationProfileId)
+    if (!game || !source || !destination || source.id === destination.id || !modIds.length) return
+    if (source.locked || destination.locked) { set({ notice: 'Le profil source ou destination est verrouillé.' }); return }
+    const before = [cloneProfile(source), cloneProfile(destination)]
+    const nextSource = cloneProfile(source)
+    const nextDestination = cloneProfile(destination)
+    const resolved = new Map(resolveProfileMods(game, source).map((mod, index) => [mod.id, { mod, index }]))
+    modIds.forEach(modId => {
+      const entry = resolved.get(modId)
+      if (!entry) return
+      const state = source.modStates[modId] || { enabled: entry.mod.enabled, priority: entry.index, note: entry.mod.note }
+      nextDestination.modStates[modId] = { ...state }
+      if (mode === 'move') delete nextSource.modStates[modId]
+    })
+    const after = mode === 'move' ? [nextSource, nextDestination] : [nextDestination]
+    const transactionBefore = mode === 'move' ? before : [before[1]]
+    const id = createId()
+    try {
+      const persisted = await persistProfileTransaction(game.id, id, transactionBefore, after)
+      const operation: BulkOperation = {
+        id, kind: mode, gameId: game.id, profileIds: [source.id, destination.id], modIds, createdAt: Date.now(),
+        label: `${mode === 'move' ? 'Transfert' : 'Copie'} de ${modIds.length} mod(s) vers ${destination.name}`,
+        beforeProfiles: transactionBefore, afterProfiles: persisted.map(cloneProfile), undoable: true,
+      }
+      set(state => ({
+        games: state.games.map(item => item.id === game.id ? replaceProfiles(item, persisted) : item),
+        bulkHistory: [...state.bulkHistory, operation].slice(-30),
+        notice: `${operation.label} terminée sans dupliquer les fichiers immuables.`,
+      }))
+    } catch (error) { set({ notice: asError(error) }) }
+  },
+  bulkDeleteMods: async (modIds, scope) => {
+    const { game, profile } = selected(get())
+    if (!game || !profile || !modIds.length) return
+    const targets = scope === 'all' ? game.profiles : [profile]
+    if (targets.some(item => item.locked)) { set({ notice: 'Au moins un profil ciblé est verrouillé.' }); return }
+    const before = targets.map(cloneProfile)
+    const after = targets.map(current => {
+      const next = cloneProfile(current)
+      modIds.forEach(modId => delete next.modStates[modId])
+      return next
+    })
+    const id = createId()
+    try {
+      const persisted = await persistProfileTransaction(game.id, id, before, after)
+      const operation: BulkOperation = {
+        id, kind: 'delete', gameId: game.id, profileIds: targets.map(item => item.id), modIds, createdAt: Date.now(),
+        label: `Retrait de ${modIds.length} mod(s) ${scope === 'all' ? 'de tous les profils' : `du profil ${profile.name}`}`,
+        beforeProfiles: before, afterProfiles: persisted.map(cloneProfile), undoable: true,
+      }
+      set(state => ({
+        games: state.games.map(item => item.id === game.id ? replaceProfiles(item, persisted) : item),
+        bulkHistory: [...state.bulkHistory, operation].slice(-30),
+        notice: `${operation.label}. Les paquets partagés restent dans le store et peuvent être restaurés.`,
+      }))
+    } catch (error) { set({ notice: asError(error) }) }
+  },
+  bulkAddTag: async (modIds, label) => {
+    const { game } = selected(get())
+    const tag = createUserTag(label)
+    if (!game || !modIds.length || !tag.label) return
+    const selectedIds = new Set(modIds)
+    const beforeMods = cloneMods(game.installedMods)
+    const afterMods = game.installedMods.map(mod => selectedIds.has(mod.id)
+      ? { ...mod, categoryTags: [...(mod.categoryTags || []).filter(item => item.id !== tag.id), tag] }
+      : mod)
+    const operation: BulkOperation = {
+      id: createId(), kind: 'tag', gameId: game.id, profileIds: [], modIds, createdAt: Date.now(),
+      label: `Étiquette « ${tag.label} » ajoutée à ${modIds.length} mod(s)`, beforeProfiles: [], afterProfiles: [],
+      beforeMods, afterMods: cloneMods(afterMods), undoable: true,
+    }
+    set(state => ({
+      games: state.games.map(item => item.id === game.id ? { ...item, installedMods: afterMods } : item),
+      bulkHistory: [...state.bulkHistory, operation].slice(-30), notice: operation.label,
+    }))
+  },
+  undoLastBulkOperation: async () => {
+    const operation = [...get().bulkHistory].reverse().find(item => item.undoable)
+    if (!operation) { set({ notice: 'Aucune opération groupée annulable.' }); return }
+    const game = get().games.find(item => item.id === operation.gameId)
+    if (!game) return
+    try {
+      let restoredProfiles = operation.beforeProfiles
+      if (operation.beforeProfiles.length) {
+        const current = operation.afterProfiles.map(profile => game.profiles.find(item => item.id === profile.id)).filter(Boolean) as Profile[]
+        restoredProfiles = await persistProfileTransaction(game.id, createId(), current.map(cloneProfile), operation.beforeProfiles.map(cloneProfile))
+      }
+      set(state => ({
+        games: state.games.map(item => item.id !== game.id ? item : {
+          ...replaceProfiles(item, restoredProfiles),
+          installedMods: operation.beforeMods ? cloneMods(operation.beforeMods) : item.installedMods,
+        }),
+        bulkHistory: state.bulkHistory.filter(item => item.id !== operation.id),
+        notice: `Opération annulée : ${operation.label}.`,
+      }))
+    } catch (error) { set({ notice: asError(error) }) }
+  },
+  toggleProfileLock: profileId => {
+    const { game } = selected(get())
+    const profile = game?.profiles.find(item => item.id === profileId)
+    if (!game || !profile) return
+    const next = { ...profile, locked: !profile.locked }
+    set(state => ({ games: updateProfile(state.games, game.id, profileId, () => next), notice: `Profil ${next.locked ? 'verrouillé' : 'déverrouillé'} : ${next.name}.` }))
+    if (native.isDesktop()) void native.syncProfileState(game.id, next).catch(error => set({ notice: asError(error) }))
+  },
+  openProfileDirectory: async (profileId, kind = 'root') => {
+    const { game } = selected(get())
+    const profile = game?.profiles.find(item => item.id === profileId)
+    if (!game || !profile) return
+    try {
+      const paths = native.isDesktop() ? await native.syncProfileState(game.id, profile) : undefined
+      if (!paths) { set({ notice: 'Les dossiers de profil sont disponibles dans l’application native.' }); return }
+      const path = kind === 'overwrite' ? paths.overwritePath : kind === 'generated' ? paths.generatedPath : paths.directory
+      await native.openPath(path)
+      set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => withProfilePaths(current, paths)) }))
+    } catch (error) { set({ notice: asError(error) }) }
+  },
+  checkProfileIntegrity: async profileId => {
+    const { game } = selected(get())
+    const profile = game?.profiles.find(item => item.id === profileId)
+    if (!game || !profile || !native.isDesktop()) return undefined
+    try {
+      await native.syncProfileState(game.id, profile)
+      const integrity = await native.profileIntegrity(game.id, profile.id)
+      set({ notice: integrity.ok ? `Profil « ${profile.name} » intègre.` : integrity.issues.join(' · ') })
+      return integrity
+    } catch (error) { set({ notice: asError(error) }); return undefined }
+  },
+  repairProfileStorage: async gameId => {
+    const game = get().games.find(item => item.id === gameId)
+    if (!game) return
+    const seen = new Set<string>()
+    const repaired = game.profiles.map(profile => {
+      let id = profile.id
+      if (seen.has(id)) id = createId()
+      seen.add(id)
+      return {
+        ...cloneProfile(profile), id, gameId,
+        directory: id === profile.id ? profile.directory : undefined,
+        manifestPath: id === profile.id ? profile.manifestPath : undefined,
+        loadOrderPath: id === profile.id ? profile.loadOrderPath : undefined,
+        settingsPath: id === profile.id ? profile.settingsPath : undefined,
+        overwritePath: id === profile.id ? profile.overwritePath : undefined,
+        generatedPath: id === profile.id ? profile.generatedPath : undefined,
+        deploymentPath: id === profile.id ? profile.deploymentPath : undefined,
+      }
+    })
+    try {
+      const persisted = await persistProfileTransaction(game.id, createId(), game.profiles.map(cloneProfile), repaired)
+      set(state => ({
+        games: state.games.map(item => item.id === game.id ? { ...item, profiles: persisted } : item),
+        selectedProfileId: persisted.some(profile => profile.id === state.selectedProfileId) ? state.selectedProfileId : persisted[0]?.id,
+        notice: `${persisted.length} profil(s) vérifiés et séparés dans leurs répertoires natifs. Aucun état de mod n’a été hérité ou fusionné.`,
+      }))
+    } catch (error) { set({ notice: asError(error) }) }
+  },
+  recordNotice: message => set(state => {
+    const normalized = message.trim().toLocaleLowerCase().replace(/\d+/g, '#').slice(0, 160)
+    const error = /erreur|échec|impossible|failed|invalid|refus|introuvable/i.test(message)
+    const warning = /attention|avert|verrouill|requis|manquant|aucun|non trouvé/i.test(message)
+    const action = /confirmer|choisissez|sélectionnez|action requise/i.test(message)
+    const success = /terminé|créé|ajouté|installé|intègre|annulée|détecté/i.test(message)
+    const kind: UiNotification['kind'] = action ? 'action' : error ? 'error' : warning ? 'warning' : success ? 'success' : 'info'
+    const durationMs = kind === 'action' ? undefined : kind === 'error' ? 10_000 : kind === 'warning' ? 7_000 : 4_000
+    const notification: UiNotification = { id: createId(), key: normalized, message, kind, createdAt: Date.now(), durationMs, completed: true }
+    return { notificationHistory: [...state.notificationHistory.filter(item => item.key !== normalized), notification].slice(-100) }
+  }),
+  dismissNotification: id => set(state => ({ notificationHistory: state.notificationHistory.map(item => item.id === id ? { ...item, dismissed: true } : item) })),
+  clearCompletedNotifications: () => set(state => ({ notificationHistory: state.notificationHistory.filter(item => !item.completed) })),
   clearNotice: () => set({ notice: undefined }),
 }), {
   name: 'zailon-v1',

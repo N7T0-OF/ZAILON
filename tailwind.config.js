@@ -5,10 +5,11 @@ export default {
     extend: {
       colors: {
         gold: {
-          DEFAULT: '#dbe8e5',
-          dim: '#81928f',
-          glow: 'rgba(219,232,229,0.12)',
-          bright: '#f3faf8',
+          DEFAULT: 'var(--zailon-accent)',
+          dim: 'color-mix(in srgb, var(--zailon-accent) 56%, #64706e)',
+          glow: 'var(--zailon-accent-muted)',
+          bright: 'var(--zailon-accent-hover)',
+          light: 'var(--zailon-accent-hover)',
         },
         ink: {
           50: '#29302f',

@@ -1,7 +1,30 @@
 import { Channel, convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import type { UpdateChannel } from '../types'
-import type { ModImportCandidate, ProfileArchiveManifest } from '../types'
+import type { ModImportCandidate, Profile, ProfileArchiveManifest, ProfileIntegrity } from '../types'
+
+export interface ProfilePaths {
+  directory: string
+  manifestPath: string
+  loadOrderPath: string
+  settingsPath: string
+  overwritePath: string
+  generatedPath: string
+  deploymentPath: string
+}
+
+export interface ProfileTransactionResult {
+  operationId: string
+  profilesWritten: number
+  historyPath: string
+}
+
+export interface BaseSnapshotResult {
+  path: string
+  files: number
+  changedFiles: number
+  created: boolean
+}
 
 export interface NativeMod {
   id: string
@@ -240,6 +263,12 @@ export const native = {
   toggleMod: (modPath: string, modsRoot: string, enable: boolean) => desktopOnly<string>('toggle_mod', { modPath, modsRoot, enable }),
   deleteMod: (modPath: string, modsRoot: string) => desktopOnly<void>('delete_mod', { modPath, modsRoot }),
   deleteStagedMod: (gameId: string, stageId: string) => desktopOnly<void>('delete_staged_mod', { gameId, stageId }),
+  syncProfileState: (gameId: string, profile: Profile) => desktopOnly<ProfilePaths>('sync_profile_state', { gameId, profileId: profile.id, profile }),
+  applyProfileTransaction: (gameId: string, operationId: string, beforeProfiles: Profile[], afterProfiles: Profile[]) =>
+    desktopOnly<ProfileTransactionResult>('apply_profile_transaction', { gameId, operationId, beforeProfiles, afterProfiles }),
+  profileIntegrity: (gameId: string, profileId: string) => desktopOnly<ProfileIntegrity>('profile_integrity', { gameId, profileId }),
+  trashProfileState: (gameId: string, profileId: string) => desktopOnly<string>('trash_profile_state', { gameId, profileId }),
+  initializeFiveMBase: (gameId: string, installDirectory: string) => desktopOnly<BaseSnapshotResult>('initialize_fivem_base', { gameId, installDirectory }),
   launchGame: (execPath: string, gameId: string, gameName: string, gameRoot: string, profileId: string, profileName: string, activeMods: number, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, discord?: DiscordPresenceConfig) =>
     desktopOnly<LaunchGameResult>('launch_game', { execPath, gameId, gameName, gameRoot, profileId, profileName, activeMods, enabledModIds, conflictRules, discord }),
   testDiscordConnection: (clientId: string) => desktopOnly<DiscordConnectionStatus>('test_discord_connection', { clientId }),

@@ -1,14 +1,12 @@
 import { ExplodMod, ExploreSort, GamebananaGame } from '../types'
 
 export const GAMEBANANA_GAMES = [
-  { id: 23012, name: 'Neverness To Everness', shortName: 'NTE' },
+  { id: 8722, name: 'Cyberpunk 2077', shortName: 'CP2077' },
   { id: 8552, name: 'Genshin Impact', shortName: 'GI' },
   { id: 18366, name: 'Honkai Star Rail', shortName: 'HSR' },
   { id: 19567, name: 'Zenless Zone Zero', shortName: 'ZZZ' },
   { id: 20357, name: 'Wuthering Waves', shortName: 'WUWA' },
-  { id: 8722, name: 'Cyberpunk 2077', shortName: 'CP2077' },
   { id: 5609, name: 'The Witcher 3 : Wild Hunt', shortName: 'TW3' },
-  { id: 16951, name: 'Persona 5 Royal (PC)', shortName: 'P5R' },
 ] as const
 
 const API = 'https://api.gamebanana.com/Core'
@@ -18,26 +16,31 @@ const DETAILS_FIELDS = [
   'downloads',
   'likes',
   'Preview().sSubFeedImageUrl()',
+  'Preview().sStructuredDataFullsizeUrl()',
   'description',
   'Nsfw().bIsNsfw()',
   'Game().name',
   'Url().sProfileUrl()',
-  'Preview().aPreviewMedia()',
+  'screenshots',
 ].join(',')
 const CACHE_TIME = 5 * 60_000
 const pageCache = new Map<string, { expiresAt: number; mods: ExplodMod[] }>()
+const gameCache = new Map<string, { expiresAt: number; games: GamebananaGame[] }>()
 
 const stringValue = (value: unknown) => typeof value === 'string' ? value : ''
 const numberValue = (value: unknown) => typeof value === 'number' ? value : Number(value) || 0
 const booleanValue = (value: unknown) => value === true || value === 1 || value === '1'
 
-function thumbnail(value: unknown) {
+function imageUrl(value: unknown) {
   const path = stringValue(value)
   if (!path) return ''
-  return path.startsWith('http') ? path : `https:${path}`
+  return path.startsWith('http') ? path : path.startsWith('//') ? `https:${path}` : ''
 }
 
 function previewImages(value: unknown, images: string[] = []): string[] {
+  if (typeof value === 'string' && value.trim().startsWith('[')) {
+    try { return previewImages(JSON.parse(value), images) } catch { return images }
+  }
   if (Array.isArray(value)) {
     value.forEach(item => previewImages(item, images))
     return [...new Set(images)]
@@ -47,11 +50,11 @@ function previewImages(value: unknown, images: string[] = []): string[] {
   const base = stringValue(record._sBaseUrl ?? record.baseUrl)
   const file = stringValue(record._sFile ?? record.file)
   const direct = stringValue(record._sUrl ?? record.url ?? record._sImageUrl)
-  const candidate = direct || (base && file ? `${base}${base.endsWith('/') ? '' : '/'}${file}` : '')
-  if (candidate) {
-    const normalized = candidate.startsWith('http') ? candidate : candidate.startsWith('//') ? `https:${candidate}` : ''
-    if (normalized && /\.(?:png|jpe?g|webp|gif|avif)(?:\?|$)/i.test(normalized)) images.push(normalized)
-  }
+  const candidate = direct || (base && file
+    ? `${base}${base.endsWith('/') ? '' : '/'}${file}`
+    : file ? `https://images.gamebanana.com/img/ss/mods/${file}` : '')
+  const normalized = imageUrl(candidate)
+  if (normalized && /\.(?:png|jpe?g|webp|gif|avif)(?:\?|$)/i.test(normalized)) images.push(normalized)
   Object.values(record).forEach(item => previewImages(item, images))
   return [...new Set(images)]
 }
@@ -70,12 +73,38 @@ function plainText(value: unknown) {
 function apiError(payload: unknown) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined
   const record = payload as Record<string, unknown>
-  return stringValue(record.error) || undefined
+  return stringValue(record.error ?? record._sErrorMessage) || undefined
 }
 
 function requestSignal(signal?: AbortSignal) {
   if (!signal) return AbortSignal.timeout(15_000)
   return AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+}
+
+export type GamebananaFailure = 'network' | 'timeout' | 'http' | 'schema' | 'api'
+
+export class GamebananaApiError extends Error {
+  constructor(public readonly category: GamebananaFailure, message: string, public readonly status?: number) {
+    super(message)
+    this.name = 'GamebananaApiError'
+  }
+}
+
+async function apiJson(url: string, signal?: AbortSignal): Promise<unknown> {
+  let response: Response
+  try {
+    response = await fetch(url, { signal: requestSignal(signal) })
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') throw error
+    if ((error as Error)?.name === 'TimeoutError') throw new GamebananaApiError('timeout', 'GameBanana ne répond pas dans le délai imparti.')
+    throw new GamebananaApiError('network', 'GameBanana est inaccessible. Vérifiez la connexion puis réessayez.')
+  }
+  if (!response.ok) throw new GamebananaApiError('http', `GameBanana a renvoyé HTTP ${response.status}.`, response.status)
+  let payload: unknown
+  try { payload = await response.json() } catch { throw new GamebananaApiError('schema', 'GameBanana a renvoyé une réponse illisible.') }
+  const error = apiError(payload)
+  if (error) throw new GamebananaApiError('api', error)
+  return payload
 }
 
 async function fetchNewIds(gameId: number, page: number, includeUpdated: boolean, signal?: AbortSignal) {
@@ -86,15 +115,15 @@ async function fetchNewIds(gameId: number, page: number, includeUpdated: boolean
     format: 'json_min',
     include_updated: includeUpdated ? '1' : '0',
   })
-  const response = await fetch(`${API}/List/New?${params.toString()}`, { signal: requestSignal(signal) })
-  if (!response.ok) throw new Error(`GameBanana a renvoyé HTTP ${response.status}.`)
-  const payload: unknown = await response.json()
-  const error = apiError(payload)
-  if (error) throw new Error(error)
-  if (!Array.isArray(payload)) return []
+  const payload = await apiJson(`${API}/List/New?${params.toString()}`, signal)
+  if (!Array.isArray(payload)) throw new GamebananaApiError('schema', 'La liste de mods GameBanana a un format inattendu.')
   return payload
     .map(item => Array.isArray(item) && item[0] === 'Mod' ? numberValue(item[1]) : 0)
     .filter(id => Number.isInteger(id) && id > 0)
+}
+
+function detailValue(row: unknown[] | Record<string, unknown>, name: string, legacyIndex: number) {
+  return Array.isArray(row) ? row[legacyIndex] : row[name]
 }
 
 async function fetchDetails(ids: number[], fallbackGame: string, fallbackGameId: number, signal?: AbortSignal): Promise<ExplodMod[]> {
@@ -107,34 +136,31 @@ async function fetchDetails(ids: number[], fallbackGame: string, fallbackGameId:
     params.append('return_keys[]', 'true')
   }
   params.set('format', 'json_min')
-  const response = await fetch(`${API}/Item/Data?${params.toString()}`, { signal: requestSignal(signal) })
-  if (!response.ok) throw new Error(`GameBanana a renvoyé HTTP ${response.status}.`)
-  const payload: unknown = await response.json()
-  const error = apiError(payload)
-  if (error) throw new Error(error)
-  if (!Array.isArray(payload)) return []
+  const payload = await apiJson(`${API}/Item/Data?${params.toString()}`, signal)
+  if (!Array.isArray(payload)) throw new GamebananaApiError('schema', 'Les détails GameBanana ont un format inattendu.')
 
-  return payload.map((row, index): ExplodMod | null => {
-    if (!Array.isArray(row) || !ids[index]) return null
+  return payload.map((raw, index): ExplodMod | null => {
+    if ((!Array.isArray(raw) && (!raw || typeof raw !== 'object')) || !ids[index]) return null
+    const row = raw as unknown[] | Record<string, unknown>
     const id = ids[index]
-    const profileUrl = stringValue(row[8])
-    const thumbnailUrl = thumbnail(row[4])
-    const screenshots = [thumbnailUrl, ...previewImages(row[9])].filter(Boolean)
+    const thumbnail = imageUrl(detailValue(row, 'Preview().sSubFeedImageUrl()', 4))
+    const structured = imageUrl(detailValue(row, 'Preview().sStructuredDataFullsizeUrl()', 5))
+    const screenshots = [thumbnail, structured, ...previewImages(detailValue(row, 'screenshots', 10))].filter(Boolean)
     return {
       id: `gb-${id}`,
       modId: id,
-      name: stringValue(row[0]) || `Mod ${id}`,
-      author: stringValue(row[1]) || 'Auteur inconnu',
-      game: stringValue(row[7]) || fallbackGame,
-      thumbnail: thumbnailUrl,
+      name: stringValue(detailValue(row, 'name', 0)) || `Mod ${id}`,
+      author: stringValue(detailValue(row, 'Owner().name', 1)) || 'Auteur inconnu',
+      game: stringValue(detailValue(row, 'Game().name', 8)) || fallbackGame,
+      thumbnail,
       screenshots: [...new Set(screenshots)],
-      downloads: numberValue(row[2]),
-      rating: numberValue(row[3]),
+      downloads: numberValue(detailValue(row, 'downloads', 2)),
+      rating: numberValue(detailValue(row, 'likes', 3)),
       tags: ['GameBanana'],
-      nsfw: booleanValue(row[6]),
+      nsfw: booleanValue(detailValue(row, 'Nsfw().bIsNsfw()', 7)),
       platform: 'gamebanana',
-      url: profileUrl || `https://gamebanana.com/mods/${id}`,
-      description: plainText(row[5]),
+      url: stringValue(detailValue(row, 'Url().sProfileUrl()', 9)) || `https://gamebanana.com/mods/${id}`,
+      description: plainText(detailValue(row, 'description', 6)),
       gameId: fallbackGameId,
     }
   }).filter((item): item is ExplodMod => item !== null)
@@ -146,7 +172,7 @@ async function loadPage(gameId: number, page: number, includeUpdated: boolean, s
   if (cached && cached.expiresAt > Date.now()) return cached.mods
   const game = GAMEBANANA_GAMES.find(item => item.id === gameId)
   const ids = await fetchNewIds(gameId, page, includeUpdated, signal)
-  const mods = await fetchDetails(ids, game?.name || 'GameBanana', gameId, signal)
+  const mods = await fetchDetails(ids, game?.name || `GameBanana #${gameId}`, gameId, signal)
   pageCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TIME, mods })
   return mods
 }
@@ -154,17 +180,18 @@ async function loadPage(gameId: number, page: number, includeUpdated: boolean, s
 export async function searchGamebananaGames(query: string, signal?: AbortSignal): Promise<GamebananaGame[]> {
   const match = query.trim()
   if (match.length < 2) return []
+  const cacheKey = match.toLocaleLowerCase()
+  const cached = gameCache.get(cacheKey)
+  if (cached && cached.expiresAt > Date.now()) return cached.games
   const params = new URLSearchParams({ itemtype: 'Game', field: 'name', match, format: 'json_min' })
-  const response = await fetch(`${API}/List/Like?${params.toString()}`, { signal: requestSignal(signal) })
-  if (!response.ok) throw new Error(`GameBanana a renvoyé HTTP ${response.status}.`)
-  const payload: unknown = await response.json()
-  const error = apiError(payload)
-  if (error) throw new Error(error)
-  if (!Array.isArray(payload)) return []
-  return payload.map(item => {
+  const payload = await apiJson(`${API}/List/Like?${params.toString()}`, signal)
+  if (!Array.isArray(payload)) throw new GamebananaApiError('schema', 'La recherche de jeux GameBanana a un format inattendu.')
+  const games = payload.map(item => {
     const record = item && typeof item === 'object' ? item as Record<string, unknown> : {}
     return { id: numberValue(record.id), name: stringValue(record.name) }
   }).filter(game => game.id > 0 && game.name)
+  gameCache.set(cacheKey, { expiresAt: Date.now() + CACHE_TIME, games })
+  return games
 }
 
 export async function fetchGamebananaMods(gameId: number, search = '', page = 1, sort: ExploreSort = 'recent', signal?: AbortSignal): Promise<{ mods: ExplodMod[]; hasNextPage: boolean }> {
@@ -175,10 +202,9 @@ export async function fetchGamebananaMods(gameId: number, search = '', page = 1,
     fetchNewIds(gameId, page + 1, includeUpdated, signal),
   ])
   let mods = query ? current.filter(mod => `${mod.name} ${mod.author} ${mod.description}`.toLocaleLowerCase().includes(query)) : current
-  const hasNextPage = nextIds.length > 0
   if (sort === 'popular') mods = [...mods].sort((a, b) => b.rating - a.rating)
   if (sort === 'downloaded') mods = [...mods].sort((a, b) => b.downloads - a.downloads)
-  return { mods: [...new Map(mods.map(mod => [mod.id, mod])).values()], hasNextPage }
+  return { mods: [...new Map(mods.map(mod => [mod.id, mod])).values()], hasNextPage: nextIds.length > 0 }
 }
 
 type DownloadCandidate = { url: string; fileName: string; date: number; trusted: boolean }
@@ -213,15 +239,11 @@ export async function fetchGamebananaDownload(modId: number) {
     return_keys: 'true',
     format: 'json_min',
   })
-  const response = await fetch(`${API}/Item/Data?${params.toString()}`, { signal: AbortSignal.timeout(15_000) })
-  if (!response.ok) throw new Error(`GameBanana a renvoyé HTTP ${response.status}.`)
-  const payload: unknown = await response.json()
-  const error = apiError(payload)
-  if (error) throw new Error(error)
+  const payload = await apiJson(`${API}/Item/Data?${params.toString()}`)
   const candidates = collectDownloads(payload)
     .filter(candidate => candidate.trusted)
-    .sort((left, right) => Number(right.trusted) - Number(left.trusted) || right.date - left.date)
+    .sort((left, right) => right.date - left.date)
   const download = candidates[0]
-  if (!download) throw new Error('Aucun fichier téléchargeable sûr n’a été trouvé pour ce mod.')
+  if (!download) throw new GamebananaApiError('schema', 'Aucun fichier téléchargeable sûr n’a été trouvé pour ce mod.')
   return { ...download, url: download.url.startsWith('http') ? download.url : `https:${download.url}` }
 }

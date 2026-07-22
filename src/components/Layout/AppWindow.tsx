@@ -13,7 +13,7 @@ import { StatusBar } from './StatusBar'
 export function AppWindow() {
   const { currentView } = useStore()
 
-  const View = {
+  const View = ({
     home: HomeView,
     games: GamesView,
     explore: ExploreView,
@@ -21,13 +21,13 @@ export function AppWindow() {
     tools: ToolsView,
     news: NewsView,
     settings: SettingsView,
-  }[currentView]
+  } as const)[currentView] ?? HomeView
 
   return (
     <div
-      className="relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden"
+      className="zailon-window-surface relative flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden"
       style={{
-        background: 'linear-gradient(135deg, #090b0b 0%, #111414 100%)',
+        background: 'var(--zailon-window-background, linear-gradient(135deg, #090b0b 0%, #111414 100%))',
       }}
     >
       {/* Subtle grain overlay */}

@@ -42,6 +42,11 @@ struct NativeMod {
     manifests: Vec<String>,
     source_url: Option<String>,
     version: Option<String>,
+    storage: String,
+    stage_id: Option<String>,
+    profile_ids: Vec<String>,
+    deployment_status: String,
+    diagnostics: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -182,14 +187,51 @@ struct LaunchGameResult {
     pid: u32,
     discord_connected: bool,
     discord_message: String,
+    deployment_backend: String,
+    deployed_files: usize,
+    conflicts_resolved: usize,
+    deployment_status: String,
+    diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LaunchConflictRule {
+    path: String,
+    winner_mod_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct DeploymentEntry {
+    relative: PathBuf,
+    had_original: bool,
+    deployed_signature: u64,
+}
+
+#[derive(Debug, Clone)]
+struct DeploymentSession {
+    game_root: PathBuf,
+    session_root: PathBuf,
+    overwrite_root: PathBuf,
+    entries: Vec<DeploymentEntry>,
+}
+
+struct PreparedDeployment {
+    session: Option<DeploymentSession>,
+    deployed_files: usize,
+    conflicts_resolved: usize,
+    diagnostics: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GameProcessEvent {
     pid: u32,
+    game_id: String,
     game_name: String,
+    profile_id: String,
     exit_code: Option<i32>,
+    cleanup_error: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -1090,12 +1132,33 @@ fn validate_external_url(url: &str) -> Result<(), String> {
         .host_str()
         .ok_or_else(|| "The source URL has no host.".to_string())?
         .to_ascii_lowercase();
-    let allowed_hosts = ["gamebanana.com", "nexusmods.com", "curseforge.com"];
+    let allowed_hosts = [
+        "gamebanana.com",
+        "nexusmods.com",
+        "curseforge.com",
+        "ko-fi.com",
+        "paypal.com",
+        "haunt.gg",
+    ];
     if !allowed_hosts
         .iter()
         .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")))
     {
         return Err("This source is not in ZAILON's trusted link list.".into());
+    }
+    let is_creator_host = ["ko-fi.com", "paypal.com", "haunt.gg"]
+        .iter()
+        .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")));
+    if is_creator_host {
+        let creator_link_is_exact = match host.as_str() {
+            "ko-fi.com" => parsed.path() == "/souanptm",
+            "www.paypal.com" => parsed.path() == "/paypalme/souanpt",
+            "haunt.gg" => parsed.path() == "/souanpt",
+            _ => false,
+        };
+        if !creator_link_is_exact || parsed.query().is_some() || parsed.fragment().is_some() {
+            return Err("This creator link is not in ZAILON's exact HTTPS allowlist.".into());
+        }
     }
 
     Ok(())
@@ -1408,6 +1471,11 @@ fn inspect_native_mod(path: &Path) -> NativeMod {
         manifests,
         source_url,
         version,
+        storage: "game-folder".into(),
+        stage_id: None,
+        profile_ids: Vec::new(),
+        deployment_status: "unknown".into(),
+        diagnostics: Vec::new(),
     }
 }
 
@@ -1485,10 +1553,22 @@ fn import_candidate_roots(path: &Path) -> Vec<PathBuf> {
     let cyberpunk_locations = [
         "archive/pc/mod",
         "r6/scripts",
+        "r6/tweaks",
         "red4ext/plugins",
         "bin/x64/plugins",
+        "bin/x64/plugins/cyber_engine_tweaks/mods",
         "mods",
+        "tools",
+        "engine",
     ];
+    if cyberpunk_locations
+        .iter()
+        .any(|location| path.join(location).exists())
+    {
+        // A game-root-shaped selection may contain several framework roots that belong
+        // to the same composite mod. Keep it intact instead of splitting its payload.
+        return vec![path.to_path_buf()];
+    }
     let mut specialized = Vec::new();
     for location in cyberpunk_locations {
         let directory = path.join(location);
@@ -2830,6 +2910,350 @@ fn clear_discord_activity(runtime: &DiscordRuntime) {
     }
 }
 
+fn file_signature(path: &Path) -> Result<u64, String> {
+    let mut file = fs::File::open(path).map_err(to_error)?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(to_error)?;
+        if read == 0 {
+            break;
+        }
+        buffer[..read].hash(&mut hasher);
+    }
+    Ok(hasher.finish())
+}
+
+fn deployment_key(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase()
+}
+
+fn framework_diagnostics(game_root: &Path, relatives: &[PathBuf]) -> Result<Vec<String>, String> {
+    let keys = relatives
+        .iter()
+        .map(|path| deployment_key(path))
+        .collect::<Vec<_>>();
+    let supplied = |needle: &str| keys.iter().any(|path| path.starts_with(needle));
+    let existing_or_supplied = |relative: &str| {
+        game_root.join(relative).exists() || supplied(&relative.to_ascii_lowercase())
+    };
+    let mut diagnostics = Vec::new();
+    let mut blockers = Vec::new();
+    if keys
+        .iter()
+        .any(|path| path.starts_with("bin/x64/plugins/cyber_engine_tweaks/mods/"))
+    {
+        if existing_or_supplied("bin/x64/plugins/cyber_engine_tweaks.asi")
+            || existing_or_supplied("bin/x64/plugins/cyber_engine_tweaks/")
+        {
+            diagnostics
+                .push("Cyber Engine Tweaks : disponible pour les mods CET sélectionnés.".into());
+        } else {
+            blockers.push("Cyber Engine Tweaks est requis par un mod sous bin/x64/plugins/cyber_engine_tweaks/mods/.".to_string());
+        }
+    }
+    if keys.iter().any(|path| path.starts_with("r6/scripts/")) {
+        if existing_or_supplied("engine/tools/scc.exe") {
+            diagnostics.push("redscript : compilateur détecté pour r6/scripts.".into());
+        } else {
+            blockers.push("redscript est requis par un mod sous r6/scripts/.".to_string());
+        }
+    }
+    if keys.iter().any(|path| path.starts_with("red4ext/plugins/")) {
+        if existing_or_supplied("red4ext/red4ext.dll") {
+            diagnostics.push("RED4ext : runtime détecté pour red4ext/plugins.".into());
+        } else {
+            blockers.push("RED4ext est requis par un plugin sous red4ext/plugins/.".to_string());
+        }
+    }
+    if keys.iter().any(|path| path.starts_with("r6/tweaks/")) {
+        let tweakxl = game_root.join("red4ext/plugins/TweakXL").exists()
+            || supplied("red4ext/plugins/tweakxl/");
+        if tweakxl {
+            diagnostics.push("TweakXL : détecté pour r6/tweaks.".into());
+        } else {
+            blockers.push("TweakXL est requis par un mod sous r6/tweaks/.".to_string());
+        }
+    }
+    if keys.iter().any(|path| path.ends_with(".xl")) {
+        if existing_or_supplied("red4ext/plugins/archivexl/") {
+            diagnostics.push("ArchiveXL : détecté pour les ressources .xl sélectionnées.".into());
+        } else {
+            blockers.push("ArchiveXL est requis par une ressource .xl sélectionnée.".to_string());
+        }
+    } else if game_root.join("red4ext/plugins/ArchiveXL").exists() {
+        diagnostics.push("ArchiveXL : installation existante détectée.".into());
+    } else {
+        diagnostics.push("ArchiveXL : aucune dépendance déductible dans ce profil.".into());
+    }
+    if game_root.join("red4ext/plugins/Codeware").exists() || supplied("red4ext/plugins/codeware/")
+    {
+        diagnostics.push("Codeware : runtime détecté.".into());
+    } else {
+        diagnostics
+            .push("Codeware : aucune dépendance déductible dans les chemins sélectionnés.".into());
+    }
+    let redmod_layout = keys
+        .iter()
+        .any(|path| path.starts_with("mods/") && path.ends_with("/info.json"));
+    if redmod_layout {
+        if existing_or_supplied("tools/redmod/bin/redmod.exe") {
+            diagnostics.push("REDmod : outil détecté pour le layout mods/<nom>/info.json.".into());
+        } else {
+            blockers.push("REDmod est requis par un paquet mods/<nom>/info.json.".to_string());
+        }
+    } else if game_root.join("tools/redmod/bin/redMod.exe").is_file() {
+        diagnostics.push("REDmod : installation existante détectée.".into());
+    } else {
+        diagnostics.push("REDmod : aucun paquet REDmod déductible dans ce profil.".into());
+    }
+    if !blockers.is_empty() {
+        return Err(format!(
+            "Préparation bloquée : dépendance(s) manquante(s) : {}",
+            blockers.join(" ")
+        ));
+    }
+    if keys.iter().any(|path| path.starts_with("archive/pc/mod/")) {
+        diagnostics.push("Archive Cyberpunk : chemin archive/pc/mod validé.".into());
+    }
+    Ok(diagnostics)
+}
+
+fn set_staged_deployment_status(app: &AppHandle, game_id: &str, ids: &[String], status: &str) {
+    let Ok(root) = staged_mods_root(app, game_id) else {
+        return;
+    };
+    for id in ids {
+        if safe_game_id(id).is_err() {
+            continue;
+        }
+        let manifest_path = root.join(id).join("manifest.json");
+        let Ok(payload) = fs::read(&manifest_path) else {
+            continue;
+        };
+        let Ok(mut manifest) = serde_json::from_slice::<serde_json::Value>(&payload) else {
+            continue;
+        };
+        manifest["deploymentStatus"] = serde_json::Value::String(status.into());
+        manifest["lastDeploymentAt"] = serde_json::json!(unix_timestamp());
+        if let Ok(payload) = serde_json::to_vec_pretty(&manifest) {
+            let _ = fs::write(&manifest_path, payload);
+        }
+    }
+}
+
+fn finish_temporary_copy(
+    session: DeploymentSession,
+    capture_overwrite: bool,
+) -> Result<(), String> {
+    let backup_root = session.session_root.join("backup");
+    let mut errors = Vec::new();
+    for entry in session.entries.iter().rev() {
+        let destination = session.game_root.join(&entry.relative);
+        if capture_overwrite && destination.is_file() {
+            let capture_result = (|| -> Result<(), String> {
+                let current_signature = file_signature(&destination)?;
+                if current_signature != entry.deployed_signature {
+                    let overwrite = session.overwrite_root.join(&entry.relative);
+                    if let Some(parent) = overwrite.parent() {
+                        fs::create_dir_all(parent).map_err(to_error)?;
+                    }
+                    fs::copy(&destination, overwrite).map_err(to_error)?;
+                }
+                Ok(())
+            })();
+            if let Err(error) = capture_result {
+                errors.push(format!(
+                    "Capture overwrite impossible pour {} : {error}",
+                    entry.relative.display()
+                ));
+            }
+        }
+        let restore_result = (|| -> Result<(), String> {
+            if entry.had_original {
+                let backup = backup_root.join(&entry.relative);
+                if let Some(parent) = destination.parent() {
+                    fs::create_dir_all(parent).map_err(to_error)?;
+                }
+                fs::copy(backup, &destination).map_err(to_error)?;
+            } else if destination.exists() {
+                fs::remove_file(&destination).map_err(to_error)?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = restore_result {
+            errors.push(format!(
+                "Restauration impossible pour {} : {error}",
+                entry.relative.display()
+            ));
+        }
+    }
+    if let Err(error) = fs::remove_dir_all(&session.session_root) {
+        if session.session_root.exists() {
+            errors.push(format!("Nettoyage de la session impossible : {error}"));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join(" "))
+    }
+}
+
+fn prepare_temporary_copy(
+    app: &AppHandle,
+    game_id: &str,
+    profile_id: &str,
+    game_root: &Path,
+    enabled_mod_ids: &[String],
+    conflict_rules: &[LaunchConflictRule],
+) -> Result<PreparedDeployment, String> {
+    safe_game_id(game_id)?;
+    safe_game_id(profile_id)?;
+    let game_root = fs::canonicalize(game_root)
+        .map_err(|_| "Le dossier d’installation du jeu est introuvable.".to_string())?;
+    let staged_root = staged_mods_root(app, game_id)?;
+    let mut owners: HashMap<String, Vec<(String, PathBuf, PathBuf)>> = HashMap::new();
+    for id in enabled_mod_ids {
+        if safe_game_id(id).is_err() {
+            continue;
+        }
+        let content = staged_root.join(id).join("content");
+        if !content.is_dir() {
+            continue;
+        }
+        for entry in WalkDir::new(&content)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let relative = entry
+                .path()
+                .strip_prefix(&content)
+                .map_err(to_error)?
+                .to_path_buf();
+            validate_archive_relative(&relative)?;
+            owners.entry(deployment_key(&relative)).or_default().push((
+                id.clone(),
+                entry.path().to_path_buf(),
+                relative,
+            ));
+        }
+    }
+    if owners.is_empty() {
+        return Ok(PreparedDeployment { session: None, deployed_files: 0, conflicts_resolved: 0, diagnostics: vec!["Aucun mod stocké actif à projeter ; les mods déjà présents dans le jeu restent inchangés.".into()] });
+    }
+    let rules = conflict_rules
+        .iter()
+        .map(|rule| {
+            (
+                rule.path.replace('\\', "/").to_ascii_lowercase(),
+                rule.winner_mod_id.as_str(),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let mut chosen = Vec::new();
+    let mut conflicts_resolved = 0;
+    for (key, candidates) in owners {
+        if candidates.len() > 1 {
+            conflicts_resolved += 1;
+        }
+        let winner = rules
+            .get(&key)
+            .and_then(|winner_id| {
+                candidates
+                    .iter()
+                    .find(|candidate| candidate.0 == *winner_id)
+            })
+            .unwrap_or_else(|| candidates.last().expect("non-empty deployment candidates"));
+        chosen.push((winner.0.clone(), winner.1.clone(), winner.2.clone()));
+    }
+    chosen.sort_by(|left, right| deployment_key(&left.2).cmp(&deployment_key(&right.2)));
+    let mut diagnostics = framework_diagnostics(
+        &game_root,
+        &chosen.iter().map(|item| item.2.clone()).collect::<Vec<_>>(),
+    )?;
+    diagnostics.push(format!(
+        "{} conflit(s) résolu(s) selon l’ordre du profil et ses règles explicites.",
+        conflicts_resolved
+    ));
+
+    let data_root = update_data_root(app)?.join("games").join(game_id);
+    let session_root = unique_destination(
+        &data_root.join("deployments"),
+        &format!("session-{}", unix_timestamp()),
+    );
+    let backup_root = session_root.join("backup");
+    let overwrite_root = data_root
+        .join("profiles")
+        .join(profile_id)
+        .join("overwrite");
+    fs::create_dir_all(&backup_root).map_err(to_error)?;
+    fs::create_dir_all(&overwrite_root).map_err(to_error)?;
+    let mut session = DeploymentSession {
+        game_root: game_root.clone(),
+        session_root: session_root.clone(),
+        overwrite_root,
+        entries: Vec::new(),
+    };
+    let result = (|| {
+        let mut resolved_manifest = Vec::new();
+        for (winner_id, source, relative) in chosen {
+            let destination = game_root.join(&relative);
+            if !destination.starts_with(&game_root) {
+                return Err("Un chemin de déploiement sort du dossier du jeu.".to_string());
+            }
+            let had_original = destination.is_file();
+            let source_signature = file_signature(&source)?;
+            if had_original {
+                let backup = backup_root.join(&relative);
+                if let Some(parent) = backup.parent() {
+                    fs::create_dir_all(parent).map_err(to_error)?;
+                }
+                fs::copy(&destination, backup).map_err(to_error)?;
+            }
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent).map_err(to_error)?;
+            }
+            session.entries.push(DeploymentEntry {
+                relative: relative.clone(),
+                had_original,
+                deployed_signature: source_signature,
+            });
+            fs::copy(&source, &destination).map_err(to_error)?;
+            let destination_signature = file_signature(&destination)?;
+            if source_signature != destination_signature {
+                return Err(format!(
+                    "Vérification RuntimeVisible échouée pour {}.",
+                    relative.display()
+                ));
+            }
+            resolved_manifest.push(serde_json::json!({ "path": relative, "winnerModId": winner_id, "runtimeVisible": true }));
+        }
+        fs::write(
+            session_root.join("resolved-files.json"),
+            serde_json::to_vec_pretty(&resolved_manifest).map_err(to_error)?,
+        )
+        .map_err(to_error)?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let _ = finish_temporary_copy(session, false);
+        return Err(error);
+    }
+    Ok(PreparedDeployment {
+        deployed_files: session.entries.len(),
+        conflicts_resolved,
+        diagnostics,
+        session: Some(session),
+    })
+}
+
 #[tauri::command]
 fn test_discord_connection(
     app: AppHandle,
@@ -2849,19 +3273,54 @@ fn launch_game(
     app: AppHandle,
     state: State<'_, DiscordRuntime>,
     exec_path: String,
+    game_id: String,
     game_name: String,
+    game_root: String,
+    profile_id: String,
     profile_name: String,
     active_mods: usize,
+    enabled_mod_ids: Vec<String>,
+    conflict_rules: Vec<LaunchConflictRule>,
     discord: Option<DiscordPresenceConfig>,
 ) -> Result<LaunchGameResult, String> {
-    let executable = PathBuf::from(exec_path);
+    let executable = fs::canonicalize(PathBuf::from(exec_path))
+        .map_err(|_| "The game executable was not found.".to_string())?;
     if !executable.is_file() {
         return Err("The game executable was not found.".into());
     }
-    let mut child = Command::new(&executable)
+    let game_root_path = fs::canonicalize(PathBuf::from(game_root))
+        .map_err(|_| "Le dossier d’installation du jeu est introuvable.".to_string())?;
+    if !executable.starts_with(&game_root_path) {
+        return Err("L’exécutable ne se trouve pas dans le dossier d’installation configuré. Corrigez le chemin du jeu avant le lancement.".into());
+    }
+    let prepared = match prepare_temporary_copy(
+        &app,
+        &game_id,
+        &profile_id,
+        &game_root_path,
+        &enabled_mod_ids,
+        &conflict_rules,
+    ) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            set_staged_deployment_status(&app, &game_id, &enabled_mod_ids, "failed");
+            return Err(error);
+        }
+    };
+    let mut child = match Command::new(&executable)
         .current_dir(executable.parent().unwrap_or_else(|| Path::new(".")))
         .spawn()
-        .map_err(to_error)?;
+    {
+        Ok(child) => child,
+        Err(error) => {
+            if let Some(session) = prepared.session {
+                let _ = finish_temporary_copy(session, false);
+            }
+            set_staged_deployment_status(&app, &game_id, &enabled_mod_ids, "failed");
+            return Err(to_error(error));
+        }
+    };
+    set_staged_deployment_status(&app, &game_id, &enabled_mod_ids, "runtime-visible");
     let pid = child.id();
     let runtime = state.inner().clone();
     let (discord_connected, discord_message) =
@@ -2884,15 +3343,35 @@ fn launch_game(
         "game-process-started",
         GameProcessEvent {
             pid,
+            game_id: game_id.clone(),
             game_name: game_name.clone(),
+            profile_id: profile_id.clone(),
             exit_code: None,
+            cleanup_error: None,
         },
     );
     let worker_app = app.clone();
     let worker_runtime = runtime.clone();
     let worker_game_name = game_name.clone();
+    let worker_app_for_cleanup = app.clone();
+    let worker_game_id = game_id.clone();
+    let worker_profile_id = profile_id.clone();
+    let worker_enabled_mod_ids = enabled_mod_ids.clone();
+    let deployment_session = prepared.session;
     std::thread::spawn(move || {
         let exit_code = child.wait().ok().and_then(|status| status.code());
+        let cleanup_error =
+            deployment_session.and_then(|session| finish_temporary_copy(session, true).err());
+        set_staged_deployment_status(
+            &worker_app_for_cleanup,
+            &worker_game_id,
+            &worker_enabled_mod_ids,
+            if cleanup_error.is_some() {
+                "failed"
+            } else {
+                "enabled"
+            },
+        );
         clear_discord_activity(&worker_runtime);
         let _ = worker_app.emit(
             "discord-status-changed",
@@ -2906,8 +3385,11 @@ fn launch_game(
             "game-process-stopped",
             GameProcessEvent {
                 pid,
+                game_id: worker_game_id,
                 game_name: worker_game_name,
+                profile_id: worker_profile_id,
                 exit_code,
+                cleanup_error,
             },
         );
     });
@@ -2915,6 +3397,19 @@ fn launch_game(
         pid,
         discord_connected,
         discord_message,
+        deployment_backend: if prepared.deployed_files > 0 {
+            "TemporaryCopy".into()
+        } else {
+            "None".into()
+        },
+        deployed_files: prepared.deployed_files,
+        conflicts_resolved: prepared.conflicts_resolved,
+        deployment_status: if prepared.deployed_files > 0 {
+            "runtime-visible".into()
+        } else {
+            "unknown".into()
+        },
+        diagnostics: prepared.diagnostics,
     })
 }
 
@@ -3147,6 +3642,243 @@ fn copy_tree_cancellable(
     Ok(())
 }
 
+const CYBERPUNK_ROOTS: [&str; 9] = [
+    "archive", "r6", "red4ext", "bin", "mods", "tools", "engine", "plugins", "config",
+];
+
+fn contains_game_root_layout(path: &Path) -> bool {
+    CYBERPUNK_ROOTS.iter().any(|name| path.join(name).exists())
+}
+
+fn unwrap_package_root(source: &Path) -> PathBuf {
+    let mut current = source.to_path_buf();
+    for _ in 0..4 {
+        if contains_game_root_layout(&current) {
+            break;
+        }
+        let children = fs::read_dir(&current)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
+            .collect::<Vec<_>>();
+        if children.len() != 1 || !children[0].path().is_dir() {
+            break;
+        }
+        current = children[0].path();
+    }
+    current
+}
+
+fn stage_content(
+    source: &Path,
+    content: &Path,
+    game_name: &str,
+    cancel: &AtomicBool,
+) -> Result<(String, Vec<String>), String> {
+    let lower_game = game_name.to_ascii_lowercase();
+    let cyberpunk = lower_game.contains("cyberpunk");
+    let root = if source.is_dir() {
+        unwrap_package_root(source)
+    } else {
+        source.to_path_buf()
+    };
+    let mut diagnostics = Vec::new();
+    let layout;
+    if root.is_file() {
+        let extension = root
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let destination = if cyberpunk && extension == "archive" {
+            layout = "CyberpunkArchive".to_string();
+            content.join("archive/pc/mod").join(
+                root.file_name()
+                    .ok_or_else(|| "Invalid source file name.".to_string())?,
+            )
+        } else if cyberpunk && extension == "reds" {
+            layout = "CyberpunkRedscript".to_string();
+            content.join("r6/scripts").join(
+                root.file_name()
+                    .ok_or_else(|| "Invalid source file name.".to_string())?,
+            )
+        } else {
+            layout = "GenericModsFolder".to_string();
+            diagnostics.push("Fichier isolé sans racine connue : mappé sous mods/. Vérification manuelle conseillée.".into());
+            content.join("mods").join(
+                root.file_name()
+                    .ok_or_else(|| "Invalid source file name.".to_string())?,
+            )
+        };
+        copy_tree_cancellable(&root, &destination, cancel)?;
+    } else {
+        let root_name = root
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if contains_game_root_layout(&root) {
+            layout = if cyberpunk {
+                "CyberpunkGameRoot"
+            } else {
+                "GameRoot"
+            }
+            .to_string();
+            for entry in fs::read_dir(&root)
+                .map_err(to_error)?
+                .filter_map(Result::ok)
+            {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err("TASK_CANCELLED".into());
+                }
+                let name = entry.file_name();
+                copy_tree_cancellable(&entry.path(), &content.join(name), cancel)?;
+            }
+        } else if CYBERPUNK_ROOTS
+            .iter()
+            .any(|name| root_name.eq_ignore_ascii_case(name))
+        {
+            layout = "GameRootFragment".to_string();
+            copy_tree_cancellable(
+                &root,
+                &content.join(
+                    root.file_name()
+                        .ok_or_else(|| "Invalid root name.".to_string())?,
+                ),
+                cancel,
+            )?;
+        } else if cyberpunk
+            && WalkDir::new(&root)
+                .max_depth(2)
+                .into_iter()
+                .filter_map(Result::ok)
+                .any(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .and_then(|value| value.to_str())
+                        .is_some_and(|value| value.eq_ignore_ascii_case("archive"))
+                })
+        {
+            layout = "CyberpunkArchive".to_string();
+            copy_tree_cancellable(&root, &content.join("archive/pc/mod"), cancel)?;
+        } else {
+            layout = "GenericModsFolder".to_string();
+            diagnostics
+                .push("Structure sans racine de jeu reconnue : mappée sous mods/<nom>.".into());
+            let name = safe_archive_component(
+                root.file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("mod"),
+            );
+            copy_tree_cancellable(&root, &content.join("mods").join(name), cancel)?;
+        }
+    }
+    Ok((layout, diagnostics))
+}
+
+fn staged_mods_root(app: &AppHandle, game_id: &str) -> Result<PathBuf, String> {
+    Ok(update_data_root(app)?
+        .join("games")
+        .join(safe_game_id(game_id)?)
+        .join("mods"))
+}
+
+fn staged_native_mod(stage_directory: &Path) -> Result<NativeMod, String> {
+    let manifest_path = stage_directory.join("manifest.json");
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).map_err(to_error)?).map_err(to_error)?;
+    let content = stage_directory.join("content");
+    if !content.is_dir() {
+        return Err("Stored mod content is missing.".into());
+    }
+    let inspected = inspect_native_mod(&content);
+    let text = |key: &str| {
+        manifest
+            .get(key)
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned)
+    };
+    let diagnostics = manifest
+        .get("diagnostics")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    let stage_id = stage_directory
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "Invalid stored mod identifier.".to_string())?
+        .to_string();
+    Ok(NativeMod {
+        id: stage_id.clone(),
+        name: text("name").unwrap_or(inspected.name),
+        path: content.to_string_lossy().to_string(),
+        enabled: true,
+        mod_type: inspected.mod_type,
+        size_bytes: inspected.size_bytes,
+        files: inspected.files,
+        fingerprint: text("fingerprint").unwrap_or(inspected.fingerprint),
+        framework: text("framework").unwrap_or(inspected.framework),
+        manifests: inspected.manifests,
+        source_url: text("sourceUrl").or(inspected.source_url),
+        version: text("version").or(inspected.version),
+        storage: "staged".into(),
+        stage_id: Some(stage_id),
+        profile_ids: manifest
+            .get("profiles")
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        deployment_status: text("deploymentStatus").unwrap_or_else(|| "stored".into()),
+        diagnostics,
+    })
+}
+
+#[tauri::command]
+fn list_staged_mods(app: AppHandle, game_id: String) -> Result<Vec<NativeMod>, String> {
+    let root = staged_mods_root(&app, &game_id)?;
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut mods = fs::read_dir(root)
+        .map_err(to_error)?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| staged_native_mod(&entry.path()).ok())
+        .collect::<Vec<_>>();
+    mods.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+    });
+    Ok(mods)
+}
+
+#[tauri::command]
+fn delete_staged_mod(app: AppHandle, game_id: String, stage_id: String) -> Result<(), String> {
+    safe_game_id(&stage_id)?;
+    let root = staged_mods_root(&app, &game_id)?;
+    let target = root.join(stage_id);
+    if target.parent() != Some(root.as_path()) {
+        return Err("Invalid stored mod path.".into());
+    }
+    if target.exists() {
+        fs::remove_dir_all(target).map_err(to_error)?;
+    }
+    Ok(())
+}
+
 fn import_mods_with_staging(
     app: &AppHandle,
     registry: &BackgroundTaskRegistry,
@@ -3155,17 +3887,14 @@ fn import_mods_with_staging(
     game_id: &str,
     profile_ids: &[String],
     paths: Vec<String>,
+    game_name: &str,
     destination: String,
     deploy_now: bool,
     cancel: &AtomicBool,
 ) -> Result<Vec<String>, String> {
     let game_id = safe_game_id(game_id)?;
     let destination = PathBuf::from(destination);
-    fs::create_dir_all(&destination).map_err(to_error)?;
-    let staging_root = update_data_root(app)?
-        .join("games")
-        .join(game_id)
-        .join("mods");
+    let staging_root = staged_mods_root(app, game_id)?;
     fs::create_dir_all(&staging_root).map_err(to_error)?;
     let total = paths.len() as u64;
     let mut installed = Vec::new();
@@ -3179,8 +3908,13 @@ fn import_mods_with_staging(
         }
         let inspected = inspect_native_mod(&source);
         let stage_directory = unique_destination(&staging_root, &inspected.id);
-        let staged_files = stage_directory.join("files");
-        fs::create_dir_all(&staged_files).map_err(to_error)?;
+        let stage_id = stage_directory
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| "Invalid stored mod identifier.".to_string())?
+            .to_string();
+        let staged_content = stage_directory.join("content");
+        fs::create_dir_all(&staged_content).map_err(to_error)?;
         report_background_task(
             app,
             registry,
@@ -3194,94 +3928,45 @@ fn import_mods_with_staging(
                 inspected.files.len()
             ),
         );
-        let stage_target = if source.is_file() {
-            staged_files.join(
-                source
-                    .file_name()
-                    .ok_or_else(|| "Invalid mod file name.".to_string())?,
-            )
-        } else {
-            staged_files.clone()
+        let (layout, diagnostics) = match stage_content(&source, &staged_content, game_name, cancel)
+        {
+            Ok(result) => result,
+            Err(error) => {
+                let _ = fs::remove_dir_all(&stage_directory);
+                return Err(error);
+            }
         };
-        if let Err(error) = copy_tree_cancellable(&source, &stage_target, cancel) {
+        if cancel.load(Ordering::Relaxed) {
             let _ = fs::remove_dir_all(&stage_directory);
-            return Err(error);
+            return Err("TASK_CANCELLED".into());
         }
-        let mut deployment = serde_json::json!({
-            "backend": "Direct Copy",
-            "status": "staged",
-            "destination": destination.to_string_lossy(),
-            "deployedPath": null,
-            "deployedAt": null
-        });
+        let content_inspection = inspect_native_mod(&staged_content);
+        let deployment_status = if deploy_now { "enabled" } else { "stored" };
         let manifest_path = stage_directory.join("manifest.json");
         let manifest = serde_json::json!({
-            "schemaVersion": 1,
-            "id": inspected.id.clone(),
+            "schemaVersion": 2,
+            "id": stage_id,
             "name": inspected.name.clone(),
             "fingerprint": inspected.fingerprint.clone(),
             "framework": inspected.framework.clone(),
             "version": inspected.version.clone(),
             "sourceUrl": inspected.source_url.clone(),
             "profiles": profile_ids,
-            "files": inspected.files.clone(),
+            "sourceFiles": inspected.files.clone(),
+            "contentFiles": content_inspection.files,
+            "layout": layout,
+            "diagnostics": diagnostics,
             "stagedAt": unix_timestamp(),
-            "deployment": deployment
+            "deploymentBackend": "TemporaryCopy",
+            "deploymentStatus": deployment_status,
+            "legacyDestination": destination.to_string_lossy()
         });
         fs::write(
             &manifest_path,
             serde_json::to_vec_pretty(&manifest).map_err(to_error)?,
         )
         .map_err(to_error)?;
-        if deploy_now {
-            if cancel.load(Ordering::Relaxed) {
-                return Err("TASK_CANCELLED".into());
-            }
-            let final_path = unique_destination(&destination, &inspected.name);
-            report_background_task(
-                app,
-                registry,
-                Some(channel),
-                task_id,
-                index as u64,
-                total,
-                format!("Déploiement Direct Copy de {}", inspected.name),
-            );
-            if let Err(error) = copy_tree_cancellable(&staged_files, &final_path, cancel) {
-                if final_path.starts_with(&destination) && final_path != destination {
-                    let _ = fs::remove_dir_all(&final_path);
-                }
-                return Err(error);
-            }
-            deployment = serde_json::json!({
-                "backend": "Direct Copy",
-                "status": "deployed",
-                "destination": destination.to_string_lossy(),
-                "deployedPath": final_path.to_string_lossy(),
-                "deployedAt": unix_timestamp()
-            });
-            let manifest = serde_json::json!({
-                "schemaVersion": 1,
-                "id": inspected.id.clone(),
-                "name": inspected.name.clone(),
-                "fingerprint": inspected.fingerprint.clone(),
-                "framework": inspected.framework.clone(),
-                "version": inspected.version.clone(),
-                "sourceUrl": inspected.source_url.clone(),
-                "profiles": profile_ids,
-                "files": inspected.files.clone(),
-                "stagedAt": unix_timestamp(),
-                "deployment": deployment
-            });
-            fs::write(
-                &manifest_path,
-                serde_json::to_vec_pretty(&manifest).map_err(to_error)?,
-            )
-            .map_err(to_error)?;
-            installed.push(final_path.to_string_lossy().to_string());
-        } else {
-            installed.push(stage_directory.to_string_lossy().to_string());
-        }
+        installed.push(stage_directory.to_string_lossy().to_string());
         report_background_task(
             app,
             registry,
@@ -3303,6 +3988,7 @@ async fn import_mod_candidates_background(
     game_id: String,
     profile_ids: Vec<String>,
     paths: Vec<String>,
+    game_name: String,
     destination: String,
     deploy_now: bool,
     on_event: Channel<BackgroundTaskEvent>,
@@ -3331,6 +4017,7 @@ async fn import_mod_candidates_background(
             &game_id,
             &profile_ids,
             paths,
+            &game_name,
             destination,
             deploy_now,
             &cancel,
@@ -4483,12 +5170,12 @@ fn scan_steam_games(
 }
 
 #[tauri::command]
-async fn install_mod(url: String, file_name: String, mods_path: String) -> Result<String, String> {
+async fn install_mod(app: AppHandle, url: String, file_name: String) -> Result<String, String> {
     let parsed = url::Url::parse(&url).map_err(to_error)?;
     if parsed.scheme() != "https" || parsed.host_str().is_none() {
         return Err("Only valid HTTPS mod downloads are allowed.".into());
     }
-    let destination = PathBuf::from(mods_path);
+    let destination = update_data_root(&app)?.join("downloads");
     fs::create_dir_all(&destination).map_err(to_error)?;
 
     let safe_name = Path::new(&file_name)
@@ -4801,6 +5488,121 @@ mod tests {
         assert!(validate_external_url("http://gamebanana.com/mods/123").is_err());
         assert!(validate_external_url("https://gamebanana.com.evil.example/mods/123").is_err());
         assert!(validate_external_url("file:///C:/Windows/System32/cmd.exe").is_err());
+        assert!(validate_external_url("https://ko-fi.com/souanptm").is_ok());
+        assert!(validate_external_url("https://www.paypal.com/paypalme/souanpt").is_ok());
+        assert!(validate_external_url("https://haunt.gg/souanpt").is_ok());
+        assert!(validate_external_url("https://ko-fi.com/another-account").is_err());
+        assert!(validate_external_url("https://www.paypal.com/paypalme/another-account").is_err());
+        assert!(validate_external_url("https://haunt.gg/another-account").is_err());
+        assert!(validate_external_url("https://paypal.com.evil.example/souanpt").is_err());
+    }
+
+    #[test]
+    fn preserves_a_composite_cyberpunk_tree_during_staging() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-layout-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let package = root.join("wrapper/real-mod");
+        fs::create_dir_all(package.join("archive/pc/mod")).expect("archive root");
+        fs::create_dir_all(package.join("r6/scripts/example")).expect("script root");
+        fs::write(package.join("archive/pc/mod/example.archive"), b"archive")
+            .expect("archive file");
+        fs::write(package.join("r6/scripts/example/main.reds"), b"script").expect("script file");
+        let content = root.join("content");
+        fs::create_dir_all(&content).expect("content root");
+        let cancel = AtomicBool::new(false);
+        let (layout, diagnostics) =
+            stage_content(&root.join("wrapper"), &content, "Cyberpunk 2077", &cancel)
+                .expect("stage composite mod");
+        assert_eq!(layout, "CyberpunkGameRoot");
+        assert!(diagnostics.is_empty());
+        assert!(content.join("archive/pc/mod/example.archive").is_file());
+        assert!(content.join("r6/scripts/example/main.reds").is_file());
+        fs::remove_dir_all(root).expect("remove layout test");
+    }
+
+    #[test]
+    fn dependency_diagnostics_block_and_accept_known_cyberpunk_frameworks() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-framework-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("game root");
+        let paths = vec![PathBuf::from("r6/scripts/example/main.reds")];
+        assert!(framework_diagnostics(&root, &paths).is_err());
+        fs::create_dir_all(root.join("engine/tools")).expect("framework root");
+        fs::write(root.join("engine/tools/scc.exe"), b"fake-test-runtime").expect("fake runtime");
+        assert!(framework_diagnostics(&root, &paths).is_ok());
+        fs::remove_dir_all(root).expect("remove framework test");
+    }
+
+    #[test]
+    fn dependency_diagnostics_cover_archivexl_codeware_and_redmod() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-framework-matrix-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("game root");
+        let paths = vec![
+            PathBuf::from("archive/pc/mod/example.archive.xl"),
+            PathBuf::from("mods/example/info.json"),
+        ];
+        assert!(framework_diagnostics(&root, &paths).is_err());
+        fs::create_dir_all(root.join("red4ext/plugins/ArchiveXL")).expect("ArchiveXL root");
+        fs::create_dir_all(root.join("red4ext/plugins/Codeware")).expect("Codeware root");
+        fs::create_dir_all(root.join("tools/redmod/bin")).expect("REDmod root");
+        fs::write(root.join("tools/redmod/bin/redMod.exe"), b"fake-redmod")
+            .expect("fake REDmod runtime");
+        let diagnostics = framework_diagnostics(&root, &paths).expect("framework diagnostics");
+        assert!(diagnostics.iter().any(|item| item.contains("ArchiveXL")));
+        assert!(diagnostics.iter().any(|item| item.contains("Codeware")));
+        assert!(diagnostics.iter().any(|item| item.contains("REDmod")));
+        fs::remove_dir_all(root).expect("remove framework test");
+    }
+
+    #[test]
+    fn temporary_copy_restores_originals_and_captures_overwrite() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-rollback-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let game_root = root.join("game");
+        let session_root = root.join("session");
+        let overwrite_root = root.join("overwrite");
+        let relative = PathBuf::from("archive/pc/mod/example.archive");
+        let destination = game_root.join(&relative);
+        let backup = session_root.join("backup").join(&relative);
+        fs::create_dir_all(destination.parent().expect("destination parent")).expect("game tree");
+        fs::create_dir_all(backup.parent().expect("backup parent")).expect("backup tree");
+        fs::write(&destination, b"deployed").expect("deployed file");
+        fs::write(&backup, b"original").expect("backup file");
+        let deployed_signature = file_signature(&destination).expect("signature");
+        fs::write(&destination, b"changed-by-game").expect("game overwrite");
+        finish_temporary_copy(
+            DeploymentSession {
+                game_root: game_root.clone(),
+                session_root,
+                overwrite_root: overwrite_root.clone(),
+                entries: vec![DeploymentEntry {
+                    relative: relative.clone(),
+                    had_original: true,
+                    deployed_signature,
+                }],
+            },
+            true,
+        )
+        .expect("finish deployment");
+        assert_eq!(fs::read(&destination).expect("restored file"), b"original");
+        assert_eq!(
+            fs::read(overwrite_root.join(relative)).expect("captured overwrite"),
+            b"changed-by-game"
+        );
+        fs::remove_dir_all(root).expect("remove rollback test");
     }
 
     #[test]
@@ -5009,10 +5811,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             scan_mods,
+            list_staged_mods,
             scan_mod_import,
             scan_mod_import_background,
             toggle_mod,
             delete_mod,
+            delete_staged_mod,
             ensure_dir,
             launch_game,
             test_discord_connection,

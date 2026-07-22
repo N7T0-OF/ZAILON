@@ -4,7 +4,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { AppWindow } from './components/Layout/AppWindow'
 import { UpdateProvider } from './components/UpdateProvider'
 import { useStore } from './store/useStore'
-import { native, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
+import { native, type BackgroundTaskSnapshot, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
+import { windowEffectsBackend } from './lib/windowEffects'
 
 export default function App() {
   const tick = useStore(s => s.tick)
@@ -15,7 +16,11 @@ export default function App() {
   const setSelectedProfile = useStore(s => s.setSelectedProfile)
   const textSize = useStore(s => s.textSize)
   const uiDensity = useStore(s => s.uiDensity)
+  const liquidGlassMode = useStore(s => s.liquidGlassMode)
+  const liquidGlassSettings = useStore(s => s.liquidGlassSettings)
+  const energySaver = useStore(s => s.energySaver)
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
+  const [windowFocused, setWindowFocused] = useState(document.hasFocus())
 
   useEffect(() => {
     const id = setInterval(tick, 1000)
@@ -28,6 +33,18 @@ export default function App() {
   }, [textSize, uiDensity])
 
   useEffect(() => {
+    const focused = () => setWindowFocused(true)
+    const blurred = () => setWindowFocused(false)
+    window.addEventListener('focus', focused)
+    window.addEventListener('blur', blurred)
+    return () => { window.removeEventListener('focus', focused); window.removeEventListener('blur', blurred) }
+  }, [])
+
+  useEffect(() => {
+    windowEffectsBackend.apply({ mode: liquidGlassMode, settings: liquidGlassSettings, energySaver, focused: windowFocused })
+  }, [energySaver, liquidGlassMode, liquidGlassSettings, windowFocused])
+
+  useEffect(() => {
     if (!native.isDesktop()) return
     let unlisten: UnlistenFn | undefined
     void native.pendingExternalInstalls().then(setExternalInstalls).catch(() => undefined)
@@ -38,7 +55,15 @@ export default function App() {
   useEffect(() => {
     if (!native.isDesktop()) return
     let unlisten: UnlistenFn | undefined
-    void listen<GameProcessEvent>('game-process-stopped', () => useStore.getState().stopPlaying()).then(dispose => { unlisten = dispose })
+    void native.backgroundTasks().then(tasks => useStore.getState().replaceBackgroundTasks(tasks)).catch(() => undefined)
+    void listen<BackgroundTaskSnapshot>('background-task-changed', event => useStore.getState().upsertBackgroundTask(event.payload)).then(dispose => { unlisten = dispose })
+    return () => unlisten?.()
+  }, [])
+
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    let unlisten: UnlistenFn | undefined
+    void listen<GameProcessEvent>('game-process-stopped', event => useStore.getState().stopPlaying(event.payload.gameId, event.payload.profileId, event.payload.cleanupError)).then(dispose => { unlisten = dispose })
     return () => unlisten?.()
   }, [])
 

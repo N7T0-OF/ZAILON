@@ -50,6 +50,8 @@ export function ExploreView() {
   const mods = useStore(state => state.exploreMods)
   const loading = useStore(state => state.exploreLoading)
   const error = useStore(state => state.exploreError)
+  const gamesLoading = useStore(state => state.exploreGamesLoading)
+  const gameError = useStore(state => state.exploreGameError)
   const games = useStore(state => state.games)
   const selectedGameId = useStore(state => state.selectedGameId)
   const showNsfw = useStore(state => state.nsfw)
@@ -149,19 +151,17 @@ export function ExploreView() {
     {!readyProvider ? <ProviderUnavailable provider={providers.find(item => item.id === platform)?.name || platform} onConfigure={() => setView('settings')} /> : platform === 'nexus' ? <NexusCatalog selectedGameName={selectedGame?.name} showNsfw={showNsfw} /> : <>
       <section className="mt-4 rounded-xl border border-white/[0.07] bg-black/10 p-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-white/48">
-            <Gamepad2 size={15} className="shrink-0" />
-            <span className="sr-only">Jeu du catalogue</span>
-            <select value={gameId} onChange={event => setGame(Number(event.target.value))} className="min-w-0 flex-1 bg-transparent text-xs text-white/76 outline-none">
-              {gameChoices.map(game => <option key={game.id} value={game.id} className="bg-[#101313]">{game.name}</option>)}
-            </select>
-            <button type="button" onClick={() => pinGame(selectedCatalogGame)} title="Épingler ou désépingler ce jeu" className={pinnedGames.some(game => game.id === gameId) ? 'text-gold' : 'text-white/30 hover:text-white'}><Pin size={14} /></button>
-          </label>
-
-          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 focus-within:border-gold/26">
-            <Search size={14} className="shrink-0 text-white/32" />
-            <input value={gameQuery} onChange={event => setGameQuery(event.target.value)} placeholder="Chercher n’importe quel jeu…" className="min-w-0 flex-1 bg-transparent text-xs text-white/76 outline-none placeholder:text-white/25" />
-          </label>
+          <div className="relative min-w-0 flex-1">
+            <label className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 focus-within:border-gold/26">
+              <Gamepad2 size={15} className="shrink-0 text-white/42" />
+              <span className="sr-only">Rechercher un jeu GameBanana</span>
+              <input value={gameQuery} onChange={event => setGameQuery(event.target.value)} placeholder={selectedCatalogGame.name || 'Chercher un jeu GameBanana…'} autoComplete="off" className="min-w-0 flex-1 bg-transparent text-xs text-white/76 outline-none placeholder:text-white/42" />
+              <button type="button" onClick={() => pinGame(selectedCatalogGame)} title="Épingler ou désépingler ce jeu" className={pinnedGames.some(game => game.id === gameId) ? 'text-gold' : 'text-white/30 hover:text-white'}><Pin size={14} /></button>
+            </label>
+            {gameQuery.trim().length >= 2 && <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-white/[0.1] bg-[#101313] p-1 shadow-2xl">
+              {gamesLoading ? <p className="flex items-center gap-2 px-3 py-3 text-[11px] text-white/42"><Loader2 size={13} className="animate-spin" />Recherche GameBanana…</p> : gameError ? <p className="px-3 py-3 text-[11px] text-red-200/65">{gameError}</p> : gameChoices.length ? gameChoices.map(game => <button key={game.id} type="button" onClick={() => { setGame(game.id); setGameQuery('') }} className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-xs text-white/68 hover:bg-white/[0.06] hover:text-white"><span className="truncate">{game.name}</span><span className="font-mono text-[11px] text-white/28">#{game.id}</span></button>) : <p className="px-3 py-3 text-[11px] text-white/38">Aucun jeu correspondant.</p>}
+            </div>}
+          </div>
 
           <form onSubmit={submitSearch} className="flex min-w-0 flex-[1.3] items-center rounded-lg border border-white/[0.08] bg-black/20 focus-within:border-gold/26">
             <Search size={15} className="ml-3 shrink-0 text-white/32" />
@@ -338,11 +338,18 @@ function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, onIn
   onInstall: () => void
   onClose: () => void
 }) {
-  const images = [...new Set([mod.thumbnail, ...(mod.screenshots || [])].filter(Boolean))]
+  const allImages = [...new Set([mod.thumbnail, ...(mod.screenshots || [])].filter(Boolean))]
+  const [brokenImages, setBrokenImages] = useState<string[]>([])
+  const images = allImages.filter(image => !brokenImages.includes(image))
   const [imageIndex, setImageIndex] = useState(0)
-  const [origin, setOrigin] = useState('50% 50%')
   const dialogRef = useRef<HTMLElement>(null)
+  const tiltRef = useRef<HTMLDivElement>(null)
+  const frameRef = useRef<number>()
   const currentImage = images[imageIndex]
+  const thumbnailSource = (source: string) => source.replace(
+    /(images\.gamebanana\.com\/img\/ss\/mods\/)(?!\d+-\d+_)([^/?]+)(\?.*)?$/i,
+    (_match, base: string, file: string, query: string | undefined) => `${base}100-90_${file}${query || ''}`,
+  )
   const openSource = () => native.isDesktop() ? native.openExternalUrl(mod.url) : window.open(mod.url, '_blank', 'noopener,noreferrer')
   const previous = () => setImageIndex(index => (index - 1 + images.length) % images.length)
   const next = () => setImageIndex(index => (index + 1) % images.length)
@@ -364,22 +371,40 @@ function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, onIn
     neighbors.forEach(source => { const image = new Image(); image.src = source })
   }, [imageIndex, images.join('|')])
 
-  const pan = (event: PointerEvent<HTMLDivElement>) => {
+  useEffect(() => () => window.cancelAnimationFrame(frameRef.current || 0), [])
+
+  const tilt = (event: PointerEvent<HTMLDivElement>) => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
     const bounds = event.currentTarget.getBoundingClientRect()
-    const x = Math.max(0, Math.min(100, ((event.clientX - bounds.left) / bounds.width) * 100))
-    const y = Math.max(0, Math.min(100, ((event.clientY - bounds.top) / bounds.height) * 100))
-    setOrigin(`${x}% ${y}%`)
+    const x = Math.max(-1, Math.min(1, ((event.clientX - bounds.left) / bounds.width - 0.5) * 2))
+    const y = Math.max(-1, Math.min(1, ((event.clientY - bounds.top) / bounds.height - 0.5) * 2))
+    window.cancelAnimationFrame(frameRef.current || 0)
+    frameRef.current = window.requestAnimationFrame(() => {
+      if (tiltRef.current) tiltRef.current.style.transform = `rotateX(${-y * 5}deg) rotateY(${x * 7}deg) scale(1.005)`
+    })
+  }
+  const resetTilt = () => {
+    window.cancelAnimationFrame(frameRef.current || 0)
+    frameRef.current = window.requestAnimationFrame(() => {
+      if (tiltRef.current) tiltRef.current.style.transform = 'rotateX(0deg) rotateY(0deg) scale(1)'
+    })
+  }
+  const imageFailed = (source: string) => {
+    setBrokenImages(current => current.includes(source) ? current : [...current, source])
+    setImageIndex(0)
   }
 
   return <div className="fixed inset-0 z-[240] flex items-center justify-center bg-black/82 p-3 backdrop-blur-md" onPointerDown={event => { if (event.target === event.currentTarget) onClose() }}>
     <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="mod-preview-title" className="grid max-h-[94vh] w-full max-w-6xl overflow-hidden rounded-2xl border border-white/[0.11] bg-[#101313] shadow-[0_36px_120px_rgba(0,0,0,.82)] lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,.75fr)]">
       <div className="min-h-0 border-b border-white/[0.07] lg:border-b-0 lg:border-r">
-        <div onPointerMove={pan} onPointerLeave={() => setOrigin('50% 50%')} className="relative flex min-h-[320px] h-[58vh] max-h-[680px] items-center justify-center overflow-hidden bg-black/45">
-          {currentImage ? <img src={currentImage} alt={`Aperçu ${imageIndex + 1} de ${mod.name}`} className="h-full w-full object-contain transition-transform duration-150 hover:scale-[1.18]" style={{ transformOrigin: origin }} /> : <div className="text-center text-white/24"><Compass size={38} className="mx-auto" /><p className="mt-3 text-[11px]">Aucune capture disponible</p></div>}
-          <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/65 to-transparent p-3"><span className="rounded bg-black/45 px-2 py-1 text-[11px] text-white/56">Zoom panoramique au pointeur</span>{images.length > 0 && <span className="rounded bg-black/45 px-2 py-1 font-mono text-[11px] text-white/56">{imageIndex + 1} / {images.length}</span>}</div>
+        <div onPointerMove={tilt} onPointerLeave={resetTilt} className="relative flex min-h-[320px] h-[58vh] max-h-[680px] items-center justify-center overflow-hidden bg-black/45" style={{ perspective: 1000 }}>
+          <div ref={tiltRef} className="flex h-full w-full items-center justify-center transition-transform duration-300 ease-out will-change-transform">
+            {currentImage ? <img src={currentImage} onError={() => imageFailed(currentImage)} alt={`Aperçu ${imageIndex + 1} de ${mod.name}`} className="h-full w-full object-contain" /> : <div className="text-center text-white/24"><Compass size={38} className="mx-auto" /><p className="mt-3 text-[11px]">Aucune capture disponible</p></div>}
+          </div>
+          <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/65 to-transparent p-3"><span className="rounded bg-black/45 px-2 py-1 text-[11px] text-white/56">Galerie 3D en parallaxe</span>{images.length > 0 && <span className="rounded bg-black/45 px-2 py-1 font-mono text-[11px] text-white/56">{imageIndex + 1} / {images.length}</span>}</div>
           {images.length > 1 && <><button type="button" onClick={previous} aria-label="Image précédente" className="absolute left-3 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 backdrop-blur hover:bg-black/80"><ChevronLeft size={20} /></button><button type="button" onClick={next} aria-label="Image suivante" className="absolute right-3 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 backdrop-blur hover:bg-black/80"><ChevronRight size={20} /></button></>}
         </div>
-        {images.length > 1 && <div className="flex gap-2 overflow-x-auto border-t border-white/[0.06] p-2">{images.map((image, index) => <button key={image} type="button" onClick={() => setImageIndex(index)} aria-label={`Afficher l’image ${index + 1}`} className={`h-16 w-24 shrink-0 overflow-hidden rounded-lg border ${index === imageIndex ? 'border-gold/70' : 'border-white/[0.08]'}`}><img src={image} alt="" loading={Math.abs(index - imageIndex) <= 1 ? 'eager' : 'lazy'} className="h-full w-full object-cover" /></button>)}</div>}
+        {images.length > 1 && <div className="flex gap-2 overflow-x-auto border-t border-white/[0.06] p-2">{images.map((image, index) => <button key={image} type="button" onClick={() => { setImageIndex(index); resetTilt() }} aria-label={`Afficher l’image ${index + 1}`} className={`h-16 w-24 shrink-0 overflow-hidden rounded-lg border ${index === imageIndex ? 'border-gold/70' : 'border-white/[0.08]'}`}><img src={thumbnailSource(image)} onError={event => { if (!event.currentTarget.dataset.fullFallback) { event.currentTarget.dataset.fullFallback = 'true'; event.currentTarget.src = image } else imageFailed(image) }} alt="" loading={Math.abs(index - imageIndex) <= 1 ? 'eager' : 'lazy'} className="h-full w-full object-cover" /></button>)}</div>}
       </div>
       <aside className="flex min-h-0 flex-col">
         <header className="flex items-start justify-between gap-3 border-b border-white/[0.07] p-4"><div className="min-w-0"><p className="font-mono text-[11px] uppercase tracking-[0.18em] text-gold/60">{mod.platform === 'nexus' ? 'Nexus Mods' : 'GameBanana'} · {mod.game}</p><h2 id="mod-preview-title" className="mt-1 font-display text-2xl font-bold text-white">{mod.name}</h2><p className="mt-1 text-[11px] text-white/42">par {mod.author}</p></div><button type="button" onClick={onClose} aria-label="Fermer l’aperçu" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white/42 hover:bg-white/[0.07] hover:text-white"><X size={17} /></button></header>
@@ -398,7 +423,7 @@ function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, onIn
 function ModResult({ mod, grid, installing, canInstall, sourceOnly = false, targetName, onPreview, onInstall }: { mod: ExplodMod; grid: boolean; installing: boolean; canInstall: boolean; sourceOnly?: boolean; targetName?: string; onPreview: () => void; onInstall: () => void }) {
   const openSource = () => native.isDesktop() ? native.openExternalUrl(mod.url) : window.open(mod.url, '_blank', 'noopener,noreferrer')
   return <article className={`group overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.018] transition-colors hover:border-white/15 hover:bg-white/[0.03] ${grid ? '' : 'flex min-h-28'}`}>
-    <button type="button" onClick={onPreview} aria-label={`Aperçu rapide de ${mod.name}`} className={`relative shrink-0 cursor-zoom-in overflow-hidden bg-white/[0.025] text-left ${grid ? 'aspect-[16/7] w-full' : 'w-44'}`}>
+    <button type="button" onClick={onPreview} aria-label={`Aperçu rapide de ${mod.name}`} className={`relative shrink-0 cursor-pointer overflow-hidden bg-white/[0.025] text-left ${grid ? 'aspect-[16/7] w-full' : 'w-44'}`}>
       {mod.thumbnail ? <img src={mod.thumbnail} alt="" loading="lazy" className="h-full w-full object-cover opacity-75 transition duration-300 group-hover:scale-[1.02] group-hover:opacity-90" /> : <div className="flex h-full items-center justify-center text-white/16"><Compass size={26} /></div>}
       <div className="absolute inset-0 bg-gradient-to-t from-[#0d1010] via-transparent to-transparent" />
       <span className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-1 text-[11px] font-semibold text-white/62 backdrop-blur-sm">{mod.game}</span>

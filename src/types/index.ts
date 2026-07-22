@@ -3,11 +3,26 @@ export type Platform = 'gamebanana' | 'nexus' | 'curseforge' | 'ayakamods'
 export type UpdateChannel = 'stable' | 'beta'
 export type TextSize = 'small' | 'normal' | 'large' | 'very-large'
 export type UiDensity = 'compact' | 'comfortable'
+export type LiquidGlassMode = 'off' | 'light' | 'normal' | 'intense' | 'custom'
+
+export interface LiquidGlassSettings {
+  opacity: number
+  blur: number
+  darkTint: number
+  saturation: number
+  border: number
+  reflection: number
+  shadow: number
+  animations: boolean
+  reduceWhenUnfocused: boolean
+  preferNative: boolean
+}
 export type GameTab = 'overview' | 'mods' | 'profiles' | 'downloads' | 'conflicts' | 'tools' | 'backups' | 'appearance' | 'settings'
 export type LoaderType = 'GIMI' | 'ZZMI' | 'SRMI' | 'WWMI' | 'EFMI' | 'UE5' | 'BepInEx' | 'ASI' | 'CLEO' | 'REF' | 'MelonLoader' | 'DLL' | 'Archive' | 'Folder' | 'Manual'
 
 export type MatchConfidence = 'exact' | 'high' | 'medium' | 'low' | 'unknown'
 export type ModUpdateStatus = 'unknown' | 'checking' | 'up-to-date' | 'available' | 'downloaded' | 'manual' | 'error'
+export type ModDeploymentStatus = 'imported' | 'stored' | 'validated' | 'enabled' | 'deployed' | 'runtime-visible' | 'loaded-by-game' | 'failed' | 'unknown'
 
 export interface ExternalModReference {
   provider: Exclude<Platform, 'ayakamods'>
@@ -50,6 +65,11 @@ export interface Mod {
   updateStatus?: ModUpdateStatus
   availableVersion?: string
   updateError?: string
+  storage?: 'staged' | 'game-folder'
+  stageId?: string
+  profileIds?: string[]
+  deploymentStatus?: ModDeploymentStatus
+  diagnostics?: string[]
 }
 
 export interface ProfileModState {

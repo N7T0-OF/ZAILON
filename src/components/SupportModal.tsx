@@ -1,0 +1,11 @@
+import { ExternalLink, Heart, X } from 'lucide-react'
+import { CREATOR_LINKS } from '../config/creatorLinks'
+import { native } from '../lib/native'
+import { useStore } from '../store/useStore'
+
+export function SupportModal({ onClose }: { onClose: () => void }) {
+  const language = useStore(state => state.language)
+  const french = language === 'fr'
+  const open = (url: string) => native.isDesktop() ? native.openExternalUrl(url) : window.open(url, '_blank', 'noopener,noreferrer')
+  return <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/75 p-5 backdrop-blur-sm" onPointerDown={event => { if (event.target === event.currentTarget) onClose() }}><section role="dialog" aria-modal="true" aria-labelledby="support-title" className="w-full max-w-md rounded-2xl border border-white/[0.11] bg-[#111414] p-5 shadow-2xl"><header className="flex items-start gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-300/10 text-rose-200"><Heart size={18} /></span><div className="min-w-0 flex-1"><h2 id="support-title" className="font-display text-xl font-bold text-white">{french ? 'Me soutenir' : 'Support me'}</h2><p className="mt-1 text-xs leading-relaxed text-white/42">{french ? 'Si ZAILON vous aide, vous pouvez soutenir son développement sur le service de votre choix.' : 'If ZAILON helps you, you can support its development using the service you prefer.'}</p></div><button type="button" onClick={onClose} aria-label={french ? 'Fermer' : 'Close'} className="rounded-lg p-2 text-white/36 hover:bg-white/[0.06]"><X size={15} /></button></header><div className="mt-4 grid gap-2">{CREATOR_LINKS.map(link => <button key={link.id} type="button" onClick={() => void open(link.url)} className="flex items-center justify-between rounded-xl border border-white/[0.08] bg-white/[0.025] px-4 py-3 text-left text-sm font-semibold text-white/72 hover:border-gold/25 hover:bg-white/[0.05]"><span>{link.label}</span><ExternalLink size={14} className="text-white/35" /></button>)}</div><p className="mt-4 text-[11px] leading-relaxed text-white/30">{french ? 'Le paiement est effectué sur le site externe. ZAILON ne collecte aucune donnée de paiement et n’ajoute aucune télémétrie.' : 'Payment happens on the external website. ZAILON collects no payment data and adds no telemetry.'}</p></section></div>
+}

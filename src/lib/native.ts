@@ -16,6 +16,11 @@ export interface NativeMod {
   manifests: string[]
   sourceUrl?: string
   version?: string
+  storage: 'staged' | 'game-folder'
+  stageId?: string
+  profileIds: string[]
+  deploymentStatus: 'imported' | 'stored' | 'validated' | 'enabled' | 'deployed' | 'runtime-visible' | 'loaded-by-game' | 'failed' | 'unknown'
+  diagnostics: string[]
 }
 
 export interface DetectedGame {
@@ -193,12 +198,20 @@ export interface LaunchGameResult {
   pid: number
   discordConnected: boolean
   discordMessage: string
+  deploymentBackend: string
+  deployedFiles: number
+  conflictsResolved: number
+  deploymentStatus: string
+  diagnostics: string[]
 }
 
 export interface GameProcessEvent {
   pid: number
+  gameId: string
   gameName: string
+  profileId: string
   exitCode?: number
+  cleanupError?: string
 }
 
 export type UpdateDownloadEvent =
@@ -216,6 +229,7 @@ const desktopOnly = <T>(command: string, args?: Record<string, unknown>) => {
 export const native = {
   isDesktop: () => isTauri(),
   scanMods: (modsPath: string) => desktopOnly<NativeMod[]>('scan_mods', { modsPath }),
+  listStagedMods: (gameId: string) => desktopOnly<NativeMod[]>('list_staged_mods', { gameId }),
   scanModImport: (paths: string[], gameName: string) => desktopOnly<ModImportCandidate[]>('scan_mod_import', { paths, gameName }),
   scanModImportBackground: (taskId: string, paths: string[], gameName: string, onProgress: (task: BackgroundTaskSnapshot) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Background mod analysis is only available in the ZAILON desktop app.'))
@@ -225,8 +239,9 @@ export const native = {
   },
   toggleMod: (modPath: string, modsRoot: string, enable: boolean) => desktopOnly<string>('toggle_mod', { modPath, modsRoot, enable }),
   deleteMod: (modPath: string, modsRoot: string) => desktopOnly<void>('delete_mod', { modPath, modsRoot }),
-  launchGame: (execPath: string, gameName: string, profileName: string, activeMods: number, discord?: DiscordPresenceConfig) =>
-    desktopOnly<LaunchGameResult>('launch_game', { execPath, gameName, profileName, activeMods, discord }),
+  deleteStagedMod: (gameId: string, stageId: string) => desktopOnly<void>('delete_staged_mod', { gameId, stageId }),
+  launchGame: (execPath: string, gameId: string, gameName: string, gameRoot: string, profileId: string, profileName: string, activeMods: number, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, discord?: DiscordPresenceConfig) =>
+    desktopOnly<LaunchGameResult>('launch_game', { execPath, gameId, gameName, gameRoot, profileId, profileName, activeMods, enabledModIds, conflictRules, discord }),
   testDiscordConnection: (clientId: string) => desktopOnly<DiscordConnectionStatus>('test_discord_connection', { clientId }),
   guessModsPath: (execPath: string) => desktopOnly<string>('guess_mods_path', { execPath }),
   scanSteamGames: (steamPath: string | undefined, onEvent: (event: SteamScanEvent) => void) => {
@@ -241,8 +256,8 @@ export const native = {
     channel.onmessage = onEvent
     return invoke<DiscoveryScan>('scan_library', { mode, onEvent: channel })
   },
-  installMod: (url: string, fileName: string, modsPath: string) =>
-    desktopOnly<string>('install_mod', { url, fileName, modsPath }),
+  installMod: (url: string, fileName: string) =>
+    desktopOnly<string>('install_mod', { url, fileName }),
   exportProfile: (destination: string, manifest: ProfileArchiveManifest, complete: boolean, sources: Array<{ id: string; name: string; path: string }>) =>
     desktopOnly<string>('export_profile', { destination, manifest, complete, sources }),
   previewProfileImport: (archivePath: string) =>
@@ -251,11 +266,11 @@ export const native = {
     desktopOnly<string[]>('extract_profile_archive', { archivePath, destination }),
   importModCandidates: (paths: string[], destination: string) =>
     desktopOnly<string[]>('import_mod_candidates', { paths, destination }),
-  importModCandidatesBackground: (taskId: string, gameId: string, profileIds: string[], paths: string[], destination: string, deployNow: boolean, onProgress: (task: BackgroundTaskSnapshot) => void) => {
+  importModCandidatesBackground: (taskId: string, gameId: string, profileIds: string[], paths: string[], gameName: string, destination: string, deployNow: boolean, onProgress: (task: BackgroundTaskSnapshot) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Background mod import is only available in the ZAILON desktop app.'))
     const channel = new Channel<BackgroundTaskEvent>()
     channel.onmessage = event => onProgress(event.data.task)
-    return invoke<string[]>('import_mod_candidates_background', { taskId, gameId, profileIds, paths, destination, deployNow, onEvent: channel })
+    return invoke<string[]>('import_mod_candidates_background', { taskId, gameId, profileIds, paths, gameName, destination, deployNow, onEvent: channel })
   },
   backgroundTasks: () => desktopOnly<BackgroundTaskSnapshot[]>('background_tasks'),
   cancelBackgroundTask: (taskId: string) => desktopOnly<void>('cancel_background_task', { taskId }),

@@ -1,4 +1,4 @@
-import { Boxes, Clock3, FolderPlus, Gamepad2, MoreHorizontal, Palette, Play, Radar, Settings2, Square } from 'lucide-react'
+import { Boxes, Clock3, FolderPlus, Gamepad2, MoreHorizontal, Palette, Play, Radar, Settings2 } from 'lucide-react'
 import { useState } from 'react'
 import { Game } from '../../types'
 import { resourceUrl } from '../../lib/native'
@@ -17,7 +17,6 @@ export function HomeView() {
   const importDetectedGames = useStore(state => state.importDetectedGames)
   const setGameResources = useStore(state => state.setGameResources)
   const launchSelectedGame = useStore(state => state.launchSelectedGame)
-  const stopPlaying = useStore(state => state.stopPlaying)
   const isPlaying = useStore(state => state.isPlaying)
   const sessionTime = useStore(state => state.sessionTime)
   const setView = useStore(state => state.setView)
@@ -109,8 +108,8 @@ export function HomeView() {
             : <h1 className="mt-3 max-w-3xl font-display text-[clamp(3.2rem,6.7vw,7rem)] font-black uppercase leading-[0.78] tracking-[-0.025em] text-white">{selectedGame.shortName || selectedGame.name}</h1>}
           <p className="mt-5 text-[11px] text-white/38">Profil <span className="font-semibold text-white/70">{selectedProfile.name}</span><span className="mx-2 text-white/18">•</span>{activeMods} mod{activeMods !== 1 ? 's' : ''} actif{activeMods !== 1 ? 's' : ''}</p>
           <div className="mt-5 flex items-center gap-2">
-            <button type="button" onClick={() => void (isPlaying ? Promise.resolve(stopPlaying()) : launchSelectedGame())} className={`flex min-w-28 items-center justify-center gap-2 rounded-full px-5 py-2.5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all ${isPlaying ? 'bg-[#a73b4d] text-white hover:bg-[#bb4559]' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
-              {isPlaying ? <Square size={10} fill="currentColor" /> : <Play size={10} fill="currentColor" />}{isPlaying ? 'Arrêter' : 'Jouer'}
+            <button type="button" disabled={isPlaying} title={isPlaying ? 'Le déploiement sera restauré automatiquement à la fermeture du jeu.' : 'Préparer les mods et lancer le jeu'} onClick={() => void launchSelectedGame()} className={`flex min-w-28 items-center justify-center gap-2 rounded-full px-5 py-2.5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all ${isPlaying ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
+              <Play size={10} fill="currentColor" />{isPlaying ? 'En cours' : 'Jouer'}
             </button>
             <button type="button" onClick={() => setActiveGameTab('mods')} aria-label="Gérer les mods" title="Gérer les mods" className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.12] bg-black/25 text-white/50 backdrop-blur hover:bg-white/[0.08] hover:text-white"><Settings2 size={12} /></button>
           </div>

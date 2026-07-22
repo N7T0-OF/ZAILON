@@ -1,11 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { ExplodMod, ExploreSort, Game, GameResources, GameTab, GamebananaGame, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileModState, TextSize, UiDensity, UpdateChannel, ViewType } from '../types'
-import { DetectedGame, native, NativeMod, pickExecutable } from '../lib/native'
+import { ExplodMod, ExploreSort, Game, GameResources, GameTab, GamebananaGame, LiquidGlassMode, LiquidGlassSettings, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileModState, TextSize, UiDensity, UpdateChannel, ViewType } from '../types'
+import { BackgroundTaskSnapshot, DetectedGame, native, NativeMod, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 
-const APP_VERSION = '1.4.0'
+const APP_VERSION = '1.5.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
+export const DEFAULT_LIQUID_GLASS: LiquidGlassSettings = { opacity: 0.86, blur: 18, darkTint: 0.58, saturation: 1.08, border: 0.12, reflection: 0.08, shadow: 0.5, animations: true, reduceWhenUnfocused: true, preferNative: true }
 
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 const asError = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -14,7 +15,10 @@ const normalizedPath = (path?: string) => (path || '').trim().replace(/\//g, '\\
 const formatBytes = (size: number) => size >= 1024 * 1024
   ? `${(size / (1024 * 1024)).toFixed(size >= 100 * 1024 * 1024 ? 0 : 1)} MB`
   : `${Math.max(1, Math.round(size / 1024))} KB`
-let exploreController: AbortController | undefined
+let exploreCatalogController: AbortController | undefined
+let exploreGameController: AbortController | undefined
+let exploreCatalogRequest = 0
+let exploreGameRequest = 0
 
 const nativeModToMod = (mod: NativeMod, previous?: Mod, priority = 0): Mod => ({
   id: previous?.id ?? mod.id,
@@ -34,6 +38,11 @@ const nativeModToMod = (mod: NativeMod, previous?: Mod, priority = 0): Mod => ({
   manifests: mod.manifests,
   version: mod.version ?? previous?.version,
   sourceUrl: mod.sourceUrl ?? previous?.sourceUrl,
+  storage: mod.storage,
+  stageId: mod.stageId,
+  profileIds: mod.profileIds,
+  deploymentStatus: mod.deploymentStatus,
+  diagnostics: mod.diagnostics,
 })
 
 function decorateMods(mods: Mod[]): Mod[] {
@@ -89,7 +98,7 @@ export function resolveProfileMods(game?: Game, profile?: Profile): Mod[] {
     const state = profile.modStates?.[mod.id]
     return {
       ...mod,
-      enabled: state?.enabled ?? mod.enabled,
+      enabled: state?.enabled ?? (mod.storage === 'staged' ? false : mod.enabled),
       priority: state?.priority ?? mod.priority ?? index,
       note: state?.note ?? mod.note,
     }
@@ -232,6 +241,16 @@ export interface Store {
   exploreMods: ExplodMod[]
   exploreLoading: boolean
   exploreError?: string
+  exploreGamesLoading: boolean
+  exploreGameError?: string
+  backgroundTasks: BackgroundTaskSnapshot[]
+  taskToastsEnabled: boolean
+  taskAutoReduceImports: boolean
+  libraryViewMode: 'grid' | 'illustrated' | 'compact'
+  liquidGlassMode: LiquidGlassMode
+  liquidGlassSettings: LiquidGlassSettings
+  energySaver: boolean
+  showSupportButton: boolean
   notice?: string
   setView: (view: ViewType) => void
   setActiveGameTab: (tab: GameTab) => void
@@ -257,6 +276,7 @@ export interface Store {
   deleteMod: (modId: string) => Promise<void>
   moveMod: (modId: string, direction: -1 | 1) => void
   setModNote: (modId: string, note: string) => void
+  setConflictWinner: (path: string, modId: string) => void
   toggleNSFW: () => void
   setHideUnclassifiedNsfw: (enabled: boolean) => void
   setLanguage: (language: string) => void
@@ -279,7 +299,7 @@ export interface Store {
   prepareInstalledUpdate: (update: { version: string; notes?: string; date?: string }) => void
   dismissInstalledUpdate: () => void
   launchSelectedGame: () => Promise<void>
-  stopPlaying: () => void
+  stopPlaying: (gameId?: string, profileId?: string, cleanupError?: string) => void
   tick: () => void
   setExplorePlatform: (platform: Platform) => void
   setExploreGame: (gameId: number) => void
@@ -292,6 +312,15 @@ export interface Store {
   setExploreGrid: (grid: boolean) => void
   refreshExplore: () => Promise<void>
   installMod: (mod: ExplodMod) => Promise<void>
+  replaceBackgroundTasks: (tasks: BackgroundTaskSnapshot[]) => void
+  upsertBackgroundTask: (task: BackgroundTaskSnapshot) => void
+  setTaskToastsEnabled: (enabled: boolean) => void
+  setTaskAutoReduceImports: (enabled: boolean) => void
+  setLibraryViewMode: (mode: Store['libraryViewMode']) => void
+  setLiquidGlassMode: (mode: LiquidGlassMode) => void
+  setLiquidGlassSettings: (settings: Partial<LiquidGlassSettings>) => void
+  setEnergySaver: (enabled: boolean) => void
+  setShowSupportButton: (enabled: boolean) => void
   clearNotice: () => void
 }
 
@@ -345,6 +374,13 @@ export function migratePersistedState(persisted: unknown) {
     discordShowProfile: state.discordShowProfile ?? true,
     discordShowModCount: state.discordShowModCount ?? true,
     discordShowElapsed: state.discordShowElapsed ?? true,
+    taskToastsEnabled: state.taskToastsEnabled ?? true,
+    taskAutoReduceImports: state.taskAutoReduceImports ?? true,
+    libraryViewMode: state.libraryViewMode || 'grid',
+    liquidGlassMode: state.liquidGlassMode || 'off',
+    liquidGlassSettings: { ...DEFAULT_LIQUID_GLASS, ...(state.liquidGlassSettings || {}) },
+    energySaver: state.energySaver ?? false,
+    showSupportButton: state.showSupportButton ?? true,
   }
 }
 
@@ -387,6 +423,15 @@ export const useStore = create<Store>()(persist((set, get) => ({
   exploreGrid: true,
   exploreMods: [],
   exploreLoading: false,
+  exploreGamesLoading: false,
+  backgroundTasks: [],
+  taskToastsEnabled: true,
+  taskAutoReduceImports: true,
+  libraryViewMode: 'grid',
+  liquidGlassMode: 'off',
+  liquidGlassSettings: { ...DEFAULT_LIQUID_GLASS },
+  energySaver: false,
+  showSupportButton: true,
   setView: currentView => set({ currentView }),
   setActiveGameTab: activeGameTab => set({ activeGameTab, currentView: 'games' }),
   setSelectedGame: selectedGameId => {
@@ -598,20 +643,28 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const game = state.games.find(item => item.id === (gameId ?? state.selectedGameId))
     const profile = game?.profiles.find(item => item.id === state.selectedProfileId) ?? game?.profiles[0]
     if (!game || !profile) return
-    if (!game.modsPath) { set({ notice: 'Select a mods folder first.' }); return }
     try {
-      const mods = await native.scanMods(game.modsPath)
+      const [folderMods, stagedMods] = await Promise.all([
+        game.modsPath ? native.scanMods(game.modsPath) : Promise.resolve([]),
+        native.listStagedMods(game.id),
+      ])
+      const mods = [...stagedMods, ...folderMods.filter(folderMod => !stagedMods.some(staged => staged.fingerprint === folderMod.fingerprint))]
       const previous = resolveProfileMods(game, profile)
       const catalog = scannedMods(mods, game.installedMods || previous)
       const previousStates = profile.modStates || statesFromMods(previous)
-      const nextStates = Object.fromEntries(catalog.map((mod, index) => [mod.id, previousStates[mod.id] || { enabled: mod.enabled, priority: index }]))
+      const nextStates = Object.fromEntries(catalog.map((mod, index) => [mod.id, previousStates[mod.id] || {
+        enabled: mod.storage === 'staged'
+          ? Boolean(mod.profileIds?.includes(profile.id) && mod.deploymentStatus !== 'stored')
+          : mod.enabled,
+        priority: index,
+      }]))
       set(state => ({
         games: state.games.map(item => item.id !== game.id ? item : {
           ...item,
           installedMods: catalog,
           profiles: item.profiles.map(current => current.id === profile.id ? { ...current, mods: undefined, modStates: nextStates } : current),
         }),
-        notice: `${mods.length} mod${mods.length !== 1 ? 's' : ''} scanned.`,
+        notice: `${mods.length} mod${mods.length !== 1 ? 's' : ''} analysé${mods.length !== 1 ? 's' : ''}, dont ${stagedMods.length} stocké${stagedMods.length !== 1 ? 's' : ''} par ZAILON.`,
       }))
     } catch (error) {
       set({ notice: asError(error) })
@@ -622,7 +675,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const mod = resolveProfileMods(game, profile).find(item => item.id === modId)
     if (!game || !profile || !mod) return
     try {
-      const path = mod.path ? await native.toggleMod(mod.path, game.modsPath || '', !mod.enabled) : undefined
+      const path = mod.storage !== 'staged' && mod.path ? await native.toggleMod(mod.path, game.modsPath || '', !mod.enabled) : undefined
       set(state => ({ games: state.games.map(item => item.id !== game.id ? item : {
         ...item,
         installedMods: item.installedMods.map(current => current.id === modId ? { ...current, path: path ?? current.path } : current),
@@ -640,7 +693,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const mod = resolveProfileMods(game, profile).find(item => item.id === modId)
     if (!game || !profile || !mod) return
     try {
-      if (mod.path) await native.deleteMod(mod.path, game.modsPath || '')
+      if (mod.storage === 'staged' && mod.stageId) await native.deleteStagedMod(game.id, mod.stageId)
+      else if (mod.path) await native.deleteMod(mod.path, game.modsPath || '')
       set(state => ({
         games: state.games.map(item => item.id !== game.id ? item : {
           ...item,
@@ -698,11 +752,17 @@ export const useStore = create<Store>()(persist((set, get) => ({
   dismissInstalledUpdate: () => set({ lastInstalledUpdate: undefined }),
   launchSelectedGame: async () => {
     const state = get()
+    if (state.isPlaying) { set({ notice: 'Un jeu est déjà en cours. Fermez son processus avant un nouveau lancement afin que ZAILON restaure proprement les fichiers temporaires.' }); return }
     const { game, profile } = selected(state)
     if (!game?.execPath) { set({ notice: 'Select a game executable before launching.' }); return }
     if (!profile) { set({ notice: 'Select a profile before launching.' }); return }
     try {
-      const result = await native.launchGame(game.execPath, game.name, profile.name, resolveProfileMods(game, profile).filter(mod => mod.enabled).length, state.discordPresence ? {
+      const enabledMods = resolveProfileMods(game, profile).filter(mod => mod.enabled)
+      const executableParent = game.execPath.replace(/[\\/][^\\/]+$/, '')
+      const knownRoot = game.name.toLocaleLowerCase().includes('cyberpunk') && /[\\/]bin[\\/]x64(?:[\\/]|$)/i.test(game.execPath)
+        ? game.execPath.split(/[\\/]bin[\\/]x64/i)[0]
+        : executableParent
+      const result = await native.launchGame(game.execPath, game.id, game.name, game.installDirectory || knownRoot, profile.id, profile.name, enabledMods.length, enabledMods.map(mod => mod.stageId || mod.id), profile.conflictRules || [], state.discordPresence ? {
         enabled: true,
         clientId: state.discordClientId,
         largeImageKey: state.discordLargeImageKey || undefined,
@@ -710,20 +770,35 @@ export const useStore = create<Store>()(persist((set, get) => ({
         showModCount: state.discordShowModCount,
         showElapsed: state.discordShowElapsed,
       } : undefined)
-      set({ isPlaying: true, playStartTime: Date.now(), sessionTime: 0, notice: `${game.name} lancé (PID ${result.pid}). ${result.discordMessage}` })
+      set(current => ({
+        isPlaying: true,
+        playStartTime: Date.now(),
+        sessionTime: 0,
+        games: current.games.map(item => item.id !== game.id ? item : { ...item, installedMods: item.installedMods.map(mod => enabledMods.some(enabled => enabled.id === mod.id) && mod.storage === 'staged' ? { ...mod, deploymentStatus: 'runtime-visible' } : mod) }),
+        notice: `${game.name} lancé (PID ${result.pid}) après vérification de ${result.deployedFiles} fichier(s) via ${result.deploymentBackend}. ${result.discordMessage}`,
+      }))
     } catch (error) {
       set({ notice: asError(error) })
     }
   },
-  stopPlaying: () => {
+  stopPlaying: (gameId, profileId, cleanupError) => {
     const state = get()
-    const { game, profile } = selected(state)
-    if (!game || !profile || !state.playStartTime) { set({ isPlaying: false, playStartTime: undefined, sessionTime: 0 }); return }
-    const minutes = Math.floor((Date.now() - state.playStartTime) / 60_000)
+    const game = state.games.find(item => item.id === gameId) ?? state.games.find(item => item.id === state.selectedGameId)
+    const profile = game?.profiles.find(item => item.id === profileId) ?? game?.profiles.find(item => item.id === state.selectedProfileId) ?? game?.profiles[0]
+    if (!game || !profile) { set({ isPlaying: false, playStartTime: undefined, sessionTime: 0 }); return }
+    const minutes = state.playStartTime ? Math.floor((Date.now() - state.playStartTime) / 60_000) : 0
     const now = Date.now()
+    const restoredStatus: NonNullable<Mod['deploymentStatus']> = cleanupError ? 'failed' : 'enabled'
     const games = updateProfile(state.games, game.id, profile.id, current => ({ ...current, playtime: current.playtime + minutes, lastPlayed: now }))
-      .map(item => item.id === game.id ? { ...item, totalPlaytime: item.totalPlaytime + minutes, lastPlayed: now } : item)
-    set({ games, isPlaying: false, playStartTime: undefined, sessionTime: 0 })
+      .map(item => item.id === game.id ? {
+        ...item,
+        totalPlaytime: item.totalPlaytime + minutes,
+        lastPlayed: now,
+        installedMods: item.installedMods.map(mod => mod.storage === 'staged' && mod.deploymentStatus === 'runtime-visible'
+          ? { ...mod, deploymentStatus: restoredStatus, diagnostics: cleanupError ? [...(mod.diagnostics || []), cleanupError] : mod.diagnostics }
+          : mod),
+      } : item)
+    set({ games, isPlaying: false, playStartTime: undefined, sessionTime: 0, notice: cleanupError ? `Restauration du jeu incomplète : ${cleanupError}` : state.notice })
   },
   tick: () => {
     const { isPlaying, playStartTime } = get()
@@ -738,15 +813,16 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setExploreGameQuery: exploreGameQuery => set({ exploreGameQuery }),
   searchExploreGames: async () => {
     const query = get().exploreGameQuery.trim()
-    if (query.length < 2) { set({ exploreGames: [...GAMEBANANA_GAMES] }); return }
-    exploreController?.abort()
-    exploreController = new AbortController()
-    set({ exploreLoading: true, exploreError: undefined })
+    if (query.length < 2) { exploreGameController?.abort(); set({ exploreGames: [...GAMEBANANA_GAMES], exploreGamesLoading: false, exploreGameError: undefined }); return }
+    exploreGameController?.abort()
+    exploreGameController = new AbortController()
+    const request = ++exploreGameRequest
+    set({ exploreGamesLoading: true, exploreGameError: undefined })
     try {
-      const exploreGames = await searchGamebananaGames(query, exploreController.signal)
-      set({ exploreGames, exploreLoading: false })
+      const exploreGames = await searchGamebananaGames(query, exploreGameController.signal)
+      if (request === exploreGameRequest) set({ exploreGames, exploreGamesLoading: false })
     } catch (error) {
-      if ((error as Error)?.name !== 'AbortError') set({ exploreLoading: false, exploreError: asError(error) })
+      if ((error as Error)?.name !== 'AbortError' && request === exploreGameRequest) set({ exploreGamesLoading: false, exploreGameError: asError(error) })
     }
   },
   pinExploreGame: game => set(state => ({
@@ -764,19 +840,20 @@ export const useStore = create<Store>()(persist((set, get) => ({
       set({ exploreMods: [], exploreError: `${explorePlatform} exige ses propres identifiants API et n’est pas encore connecté.` })
       return
     }
-    exploreController?.abort()
-    exploreController = new AbortController()
+    exploreCatalogController?.abort()
+    exploreCatalogController = new AbortController()
+    const request = ++exploreCatalogRequest
     set({ exploreLoading: true, exploreError: undefined })
     try {
-      const result = await fetchGamebananaMods(exploreGameId, exploreSearch, explorePage, exploreSort, exploreController.signal)
-      set({ exploreMods: result.mods, exploreHasNextPage: result.hasNextPage, exploreLoading: false })
+      const result = await fetchGamebananaMods(exploreGameId, exploreSearch, explorePage, exploreSort, exploreCatalogController.signal)
+      if (request === exploreCatalogRequest) set({ exploreMods: result.mods, exploreHasNextPage: result.hasNextPage, exploreLoading: false })
     } catch (error) {
-      if ((error as Error)?.name !== 'AbortError') set({ exploreLoading: false, exploreError: asError(error) })
+      if ((error as Error)?.name !== 'AbortError' && request === exploreCatalogRequest) set({ exploreLoading: false, exploreError: asError(error) })
     }
   },
   installMod: async mod => {
-    const { game } = selected(get())
-    if (!game?.modsPath) { set({ notice: 'Sélectionnez un jeu et configurez son dossier Mods avant l’installation.' }); return }
+    const { game, profile } = selected(get())
+    if (!game || !profile) { set({ notice: 'Sélectionnez un jeu et un profil avant l’import.' }); return }
     try {
       let downloadUrl = mod.downloadUrl
       let fileName = mod.fileName
@@ -786,14 +863,29 @@ export const useStore = create<Store>()(persist((set, get) => ({
         fileName = download.fileName
       }
       if (!downloadUrl || !fileName) throw new Error('Aucun téléchargement direct n’est disponible pour ce mod.')
-      const installedPath = await native.installMod(downloadUrl, fileName, game.modsPath)
+      const downloadedPath = await native.installMod(downloadUrl, fileName)
+      const taskId = createId()
+      await native.importModCandidatesBackground(taskId, game.id, [profile.id], [downloadedPath], game.name, game.modsPath || game.installDirectory || '', true, task => get().upsertBackgroundTask(task))
       await get().scanMods(game.id)
-      const extracted = fileName.toLocaleLowerCase().endsWith('.zip')
-      set({ notice: extracted ? `${mod.name} a été installé dans ${game.name}.` : `${mod.name} a été téléchargé dans ${installedPath}. Cette archive doit être extraite manuellement.` })
+      set({ notice: `${mod.name} a été téléchargé, validé et stocké. Il sera rendu visible dans ${game.name} au prochain lancement après vérification.` })
     } catch (error) {
       set({ notice: asError(error) })
     }
   },
+  setConflictWinner: (path, winnerModId) => {
+    const { game, profile } = selected(get())
+    if (!game || !profile) return
+    set(state => ({ games: updateProfile(state.games, game.id, profile.id, current => ({ ...current, conflictRules: [...(current.conflictRules || []).filter(rule => rule.path.toLocaleLowerCase() !== path.toLocaleLowerCase()), { path, winnerModId }] })) }))
+  },
+  replaceBackgroundTasks: backgroundTasks => set({ backgroundTasks: [...backgroundTasks].sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 500) }),
+  upsertBackgroundTask: task => set(state => ({ backgroundTasks: [task, ...state.backgroundTasks.filter(item => item.id !== task.id)].sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 500) })),
+  setTaskToastsEnabled: taskToastsEnabled => set({ taskToastsEnabled }),
+  setTaskAutoReduceImports: taskAutoReduceImports => set({ taskAutoReduceImports }),
+  setLibraryViewMode: libraryViewMode => set({ libraryViewMode }),
+  setLiquidGlassMode: liquidGlassMode => set({ liquidGlassMode }),
+  setLiquidGlassSettings: settings => set(state => ({ liquidGlassSettings: { ...state.liquidGlassSettings, ...settings }, liquidGlassMode: 'custom' })),
+  setEnergySaver: energySaver => set({ energySaver }),
+  setShowSupportButton: showSupportButton => set({ showSupportButton }),
   clearNotice: () => set({ notice: undefined }),
 }), {
   name: 'zailon-v1',
@@ -831,6 +923,13 @@ export const useStore = create<Store>()(persist((set, get) => ({
     explorePage: state.explorePage,
     exploreSort: state.exploreSort,
     exploreGrid: state.exploreGrid,
+    taskToastsEnabled: state.taskToastsEnabled,
+    taskAutoReduceImports: state.taskAutoReduceImports,
+    libraryViewMode: state.libraryViewMode,
+    liquidGlassMode: state.liquidGlassMode,
+    liquidGlassSettings: state.liquidGlassSettings,
+    energySaver: state.energySaver,
+    showSupportButton: state.showSupportButton,
   }),
   version: 3,
   migrate: persisted => migratePersistedState(persisted) as never,

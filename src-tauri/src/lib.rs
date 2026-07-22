@@ -3804,7 +3804,6 @@ fn prepare_temporary_copy(
         deployed_files: session.entries.len(),
         conflicts_resolved,
         diagnostics,
-        quarantine_path: text("quarantineRoot"),
         session: Some(session),
     })
 }
@@ -4870,6 +4869,7 @@ fn staged_native_mod(stage_directory: &Path) -> Result<NativeMod, String> {
             .unwrap_or_default(),
         deployment_status: text("deploymentStatus").unwrap_or_else(|| "stored".into()),
         diagnostics,
+        quarantine_path: text("quarantineRoot"),
     })
 }
 
@@ -5096,7 +5096,7 @@ async fn import_mod_candidates_background(
     deploy_now: bool,
     sensitive_action: String,
     on_event: Channel<BackgroundTaskEvent>,
-) -> Result<Vec<String>, String> {
+) -> Result<SecureImportResult, String> {
     if paths.is_empty() {
         return Err("Select at least one mod.".into());
     }
@@ -6315,7 +6315,7 @@ async fn install_mod(
         .to_string();
     validate_archive_relative(Path::new(&safe_name))?;
     let response = reqwest::Client::new()
-        .get(parsed)
+        .get(parsed.clone())
         .send()
         .await
         .map_err(to_error)?

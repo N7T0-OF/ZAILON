@@ -2930,6 +2930,33 @@ fn deployment_key(path: &Path) -> String {
         .to_ascii_lowercase()
 }
 
+fn known_game_path_exists(game_root: &Path, relative: &str) -> bool {
+    let direct = game_root.join(relative);
+    if direct.exists() {
+        return true;
+    }
+    let mut current = game_root.to_path_buf();
+    for component in relative
+        .replace('\\', "/")
+        .split('/')
+        .filter(|item| !item.is_empty())
+    {
+        let Ok(entries) = fs::read_dir(&current) else {
+            return false;
+        };
+        let Some(next) = entries.filter_map(Result::ok).find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(component)
+        }) else {
+            return false;
+        };
+        current = next.path();
+    }
+    current.exists()
+}
+
 fn framework_diagnostics(game_root: &Path, relatives: &[PathBuf]) -> Result<Vec<String>, String> {
     let keys = relatives
         .iter()
@@ -2937,7 +2964,7 @@ fn framework_diagnostics(game_root: &Path, relatives: &[PathBuf]) -> Result<Vec<
         .collect::<Vec<_>>();
     let supplied = |needle: &str| keys.iter().any(|path| path.starts_with(needle));
     let existing_or_supplied = |relative: &str| {
-        game_root.join(relative).exists() || supplied(&relative.to_ascii_lowercase())
+        known_game_path_exists(game_root, relative) || supplied(&relative.to_ascii_lowercase())
     };
     let mut diagnostics = Vec::new();
     let mut blockers = Vec::new();
@@ -2969,7 +2996,7 @@ fn framework_diagnostics(game_root: &Path, relatives: &[PathBuf]) -> Result<Vec<
         }
     }
     if keys.iter().any(|path| path.starts_with("r6/tweaks/")) {
-        let tweakxl = game_root.join("red4ext/plugins/TweakXL").exists()
+        let tweakxl = known_game_path_exists(game_root, "red4ext/plugins/TweakXL")
             || supplied("red4ext/plugins/tweakxl/");
         if tweakxl {
             diagnostics.push("TweakXL : détecté pour r6/tweaks.".into());
@@ -2983,12 +3010,13 @@ fn framework_diagnostics(game_root: &Path, relatives: &[PathBuf]) -> Result<Vec<
         } else {
             blockers.push("ArchiveXL est requis par une ressource .xl sélectionnée.".to_string());
         }
-    } else if game_root.join("red4ext/plugins/ArchiveXL").exists() {
+    } else if known_game_path_exists(game_root, "red4ext/plugins/ArchiveXL") {
         diagnostics.push("ArchiveXL : installation existante détectée.".into());
     } else {
         diagnostics.push("ArchiveXL : aucune dépendance déductible dans ce profil.".into());
     }
-    if game_root.join("red4ext/plugins/Codeware").exists() || supplied("red4ext/plugins/codeware/")
+    if known_game_path_exists(game_root, "red4ext/plugins/Codeware")
+        || supplied("red4ext/plugins/codeware/")
     {
         diagnostics.push("Codeware : runtime détecté.".into());
     } else {
@@ -3004,7 +3032,7 @@ fn framework_diagnostics(game_root: &Path, relatives: &[PathBuf]) -> Result<Vec<
         } else {
             blockers.push("REDmod est requis par un paquet mods/<nom>/info.json.".to_string());
         }
-    } else if game_root.join("tools/redmod/bin/redMod.exe").is_file() {
+    } else if known_game_path_exists(game_root, "tools/redmod/bin/redMod.exe") {
         diagnostics.push("REDmod : installation existante détectée.".into());
     } else {
         diagnostics.push("REDmod : aucun paquet REDmod déductible dans ce profil.".into());

@@ -2096,7 +2096,19 @@ fn is_probable_mod_root(path: &Path) -> bool {
                 .and_then(|value| value.to_str())
                 .map(|value| value.to_ascii_lowercase())
                 .as_deref(),
-            Some("zip" | "7z" | "rar" | "pak" | "archive" | "esp" | "esm" | "esl" | "dll" | "asi")
+            Some(
+                "zip"
+                    | "7z"
+                    | "rar"
+                    | "pak"
+                    | "archive"
+                    | "esp"
+                    | "esm"
+                    | "esl"
+                    | "dll"
+                    | "asi"
+                    | "reds"
+            )
         );
     }
     if !metadata_files(path).is_empty() {
@@ -2117,7 +2129,7 @@ fn is_probable_mod_root(path: &Path) -> bool {
                     .and_then(|value| value.to_str())
                     .map(|value| value.to_ascii_lowercase())
                     .as_deref(),
-                Some("pak" | "archive" | "esp" | "esm" | "esl" | "dll" | "asi" | "ini")
+                Some("pak" | "archive" | "esp" | "esm" | "esl" | "dll" | "asi" | "ini" | "reds")
             )
         })
 }
@@ -2151,7 +2163,7 @@ fn has_direct_mod_signature(path: &Path) -> bool {
                     .and_then(|value| value.to_str())
                     .map(|value| value.to_ascii_lowercase())
                     .as_deref(),
-                Some("pak" | "archive" | "esp" | "esm" | "esl" | "dll" | "asi")
+                Some("pak" | "archive" | "esp" | "esm" | "esl" | "dll" | "asi" | "reds")
             )
         })
 }

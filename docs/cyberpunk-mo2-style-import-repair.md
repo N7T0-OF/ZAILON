@@ -181,7 +181,8 @@ Des tests plus anciens couvrent aussi le staging d’une racine composite, les d
 - `npm.cmd run build` : réussi.
 - `cargo fmt` : réussi.
 - `git diff --check` : réussi.
-- Les tests Rust ont été écrits mais ne peuvent pas être exécutés localement : le poste ne possède pas `link.exe` ni les bibliothèques du Windows SDK.
+- GitHub Actions a compilé le backend et exécuté 29/29 tests Rust avec succès sur Windows et Linux, y compris les nouvelles fixtures Cyberpunk.
+- Les mêmes tests ne peuvent pas être exécutés localement : le poste ne possède pas `link.exe` ni les bibliothèques du Windows SDK.
 - Aucun import réel de plusieurs centaines de mods n’a été exécuté.
 - Aucun package Cyberpunk réel de l’utilisateur n’a été modifié par ces tests.
 - Aucun lancement Cyberpunk, test redscript en jeu ou test RED4ext en jeu n’a été exécuté.

@@ -4,7 +4,7 @@ Date du rapport : 23 juillet 2026
 
 ## Statut
 
-La limite locale à environ vingt mods a été supprimée. Le catalogue utilise maintenant la pagination serveur Nexus et l’interface peut demander chaque page réelle. Le frontend de production compile. Le backend Rust n’a pas encore pu être compilé sur ce poste, car le linker MSVC et le Windows SDK ne sont pas installés ; la validation native reste donc obligatoire dans GitHub Actions avant publication.
+La limite locale à environ vingt mods a été supprimée. Le catalogue utilise maintenant la pagination serveur Nexus et l’interface peut demander chaque page réelle. Le frontend de production compile. GitHub Actions a compilé et testé le backend Rust sur Windows et Linux.
 
 ## Cause exacte
 
@@ -90,8 +90,9 @@ Une requête de page supérieure à 2 n’est plus calculée à partir du lot d�
 - `npm.cmd run build` : réussi, TypeScript et bundle Vite de production.
 - `cargo fmt --check` : réussi avant le dernier ajout, puis `cargo fmt` réussi après celui-ci.
 - `git diff --check` : réussi.
-- Tests unitaires ajoutés pour les offsets Mods et Collections.
-- `cargo check` / `cargo test` : non exécutables sur ce poste ; `link.exe`, `kernel32.lib` et le Windows SDK sont absents.
+- Tests unitaires ajoutés et réussis pour les offsets Mods et Collections.
+- GitHub Actions : frontend, contrat GameBanana et 29 tests Rust réussis sur Windows et Linux.
+- `cargo check` local reste impossible sur ce poste ; `link.exe`, `kernel32.lib` et le Windows SDK sont absents.
 
 ## Limites restantes
 
@@ -99,6 +100,6 @@ Une requête de page supérieure à 2 n’est plus calculée à partir du lot d�
 - La taille 40/60 et le défilement continu ne sont pas exposés dans les paramètres.
 - L’état est conservé dans la session de l’application, pas encore dans une vraie route interne.
 - Si Nexus retire `totalCount` de cette API encore en évolution, il faudra passer à une navigation progressive fondée sur `hasNext` au lieu d’inventer une dernière page.
-- La validation native GitHub Actions doit réussir avant toute nouvelle release.
+- Les installateurs complets ne sont volontairement pas publiés depuis cette branche de validation ; ils restent produits par le workflow de release sur un tag versionné.
 
 Documentation de référence : [Nexus Mods GraphQL API](https://graphql.nexusmods.com/) et [politique d’utilisation de l’API Nexus](https://help.nexusmods.com/article/114-api-acceptable-use-policy).

@@ -133,8 +133,9 @@ Les priorités présentes dans la liste sont conservées comme ordre stable, mai
 - Cas adulte refusé puis autorisé.
 - Compilation frontend `npm.cmd run build` réussie.
 - Formatage Rust et contrôle du diff réussis.
-- Tests purs ajoutés pour la pagination serveur.
-- Compilation et tests Rust bloqués localement par l’absence du linker MSVC et du Windows SDK.
+- Tests purs de pagination serveur réussis.
+- GitHub Actions : compilation et 29 tests Rust réussis sur Windows et Linux.
+- La compilation native locale reste bloquée par l’absence du linker MSVC et du Windows SDK.
 - Aucun compte Premium réel ni téléchargement complet de fichier Nexus n’a été utilisé pour un test de bout en bout.
 - Aucun lancement de jeu avec un profil de Collection n’a été effectué.
 

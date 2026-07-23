@@ -8230,17 +8230,19 @@ async fn download_collection_nxm_file(
         update_collection_entry_download(&app, &request, "Failed", None);
         return Err("Le lien NXM a expiré ; ouvrez de nouveau la page Nexus officielle.".into());
     }
-    let mut query = url::form_urlencoded::Serializer::new(String::new());
-    if let Some(key) = request.key.as_deref() {
-        query.append_pair("key", key);
-    }
-    if let Some(expires) = request.expires {
-        query.append_pair("expires", &expires.to_string());
-    }
-    if let Some(user_id) = request.user_id {
-        query.append_pair("user_id", &user_id.to_string());
-    }
-    let query = query.finish();
+    let query = {
+        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+        if let Some(key) = request.key.as_deref() {
+            serializer.append_pair("key", key);
+        }
+        if let Some(expires) = request.expires {
+            serializer.append_pair("expires", &expires.to_string());
+        }
+        if let Some(user_id) = request.user_id {
+            serializer.append_pair("user_id", &user_id.to_string());
+        }
+        serializer.finish()
+    };
     let endpoint = format!(
         "games/{}/mods/{}/files/{}/download_link.json{}{}",
         request.game_domain,

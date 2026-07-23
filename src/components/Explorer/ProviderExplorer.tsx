@@ -40,12 +40,32 @@ export function ProviderFilters({ onReset }: { onReset: () => void }) {
   return <button type="button" onClick={onReset} className="flex items-center gap-1.5 rounded border border-white/[0.08] px-2.5 py-1.5 text-[11px] text-white/50 hover:text-white"><RotateCcw size={12} />Réinitialiser les filtres</button>
 }
 
+export function compactPaginationPages(page: number, pageCount?: number): number[] {
+  if (!pageCount || pageCount <= 1) return []
+  if (pageCount <= 7) return Array.from({ length: pageCount }, (_, index) => index + 1)
+  if (page <= 4) return [1, 2, 3, 4, 5, pageCount]
+  if (page >= pageCount - 3) return [1, pageCount - 4, pageCount - 3, pageCount - 2, pageCount - 1, pageCount]
+  return [1, page - 1, page, page + 1, pageCount]
+}
+
 export function ProviderPagination({ provider, page, hasNextPage, loading, onPageChange, pageCount }: { provider: string; page: number; hasNextPage: boolean; loading: boolean; onPageChange: (page: number) => void; pageCount?: number }) {
-  const pages = pageCount && pageCount > 1 ? Array.from({ length: pageCount }, (_, index) => index + 1).filter(value => value === 1 || value === pageCount || Math.abs(value - page) <= 1) : []
-  return <nav className="mt-4 flex items-center justify-center gap-2" aria-label={`Pagination ${provider}`}>
+  const pages = compactPaginationPages(page, pageCount)
+  const [jumpPage, setJumpPage] = useState(String(page))
+  useEffect(() => setJumpPage(String(page)), [page])
+  const jump = () => {
+    const parsed = Number.parseInt(jumpPage, 10)
+    if (!Number.isFinite(parsed)) return
+    onPageChange(Math.max(1, pageCount ? Math.min(pageCount, parsed) : parsed))
+  }
+  return <nav className="mt-4 flex flex-wrap items-center justify-center gap-2" aria-label={`Pagination ${provider}`}>
     <button type="button" disabled={page <= 1 || loading} onClick={() => onPageChange(page - 1)} className="flex h-9 items-center gap-1 rounded-lg border border-white/[0.08] px-3 text-[11px] text-white/65 hover:bg-white/[0.05] disabled:opacity-25"><ChevronLeft size={14} /> Précédent</button>
-    {pages.length ? pages.map((value, index) => <span key={`${value}-${index}`} className="contents">{index > 0 && value - pages[index - 1] > 1 && <span className="text-white/28">…</span>}<button type="button" onClick={() => onPageChange(value)} aria-current={value === page ? 'page' : undefined} className={`flex h-9 min-w-9 items-center justify-center rounded-lg text-[11px] font-bold ${value === page ? 'bg-gold text-[var(--zailon-accent-text)]' : 'border border-white/[0.08] text-white/55 hover:bg-white/[0.05]'}`}>{value}</button></span>) : <span className="flex h-9 items-center justify-center rounded-lg bg-gold px-3 text-[11px] font-bold text-[var(--zailon-accent-text)]">Page {page}</span>}
+    {pages.length ? pages.map((value, index) => <span key={`${value}-${index}`} className="contents">{index > 0 && value - pages[index - 1] > 1 && <span className="px-0.5 text-white/28">…</span>}<button type="button" disabled={loading} onClick={() => onPageChange(value)} aria-current={value === page ? 'page' : undefined} className={`flex h-9 min-w-9 items-center justify-center rounded-lg px-2 text-[11px] font-bold disabled:opacity-50 ${value === page ? 'bg-gold text-[var(--zailon-accent-text)]' : 'border border-white/[0.08] text-white/55 hover:bg-white/[0.05]'}`}>{value}</button></span>) : <span className="flex h-9 items-center justify-center rounded-lg bg-gold px-3 text-[11px] font-bold text-[var(--zailon-accent-text)]">Page {page}</span>}
     <button type="button" disabled={!hasNextPage || loading} onClick={() => onPageChange(page + 1)} className="flex h-9 items-center gap-1 rounded-lg border border-white/[0.08] px-3 text-[11px] text-white/65 hover:bg-white/[0.05] disabled:opacity-25">Suivant <ChevronRight size={14} /></button>
+    {pageCount && pageCount > 7 && <form onSubmit={event => { event.preventDefault(); jump() }} className="ml-1 flex h-9 items-center gap-1.5 rounded-lg border border-white/[0.08] bg-black/10 px-2">
+      <label htmlFor={`${provider}-page-jump`} className="text-[11px] text-white/42">Aller à</label>
+      <input id={`${provider}-page-jump`} inputMode="numeric" min={1} max={pageCount} value={jumpPage} onChange={event => setJumpPage(event.target.value.replace(/\D/g, '').slice(0, 7))} className="w-14 rounded border border-white/[0.08] bg-black/20 px-1.5 py-1 text-center font-mono text-[11px] text-white/70 outline-none focus:border-gold/35" aria-label={`Aller à une page ${provider}`} />
+      <button type="submit" disabled={loading || !jumpPage} className="rounded bg-white/[0.05] px-2 py-1 text-[11px] font-semibold text-white/58 hover:bg-white/[0.09] disabled:opacity-30">OK</button>
+    </form>}
   </nav>
 }
 

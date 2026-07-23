@@ -124,6 +124,17 @@ export interface Profile {
   overwritePath?: string
   generatedPath?: string
   deploymentPath?: string
+  collectionState?: 'Preparing' | 'Downloading' | 'Installing' | 'NeedsAttention' | 'Ready' | 'Incomplete' | 'Failed' | 'Cancelled' | 'Paused'
+  collectionMetadata?: {
+    installId: string
+    collectionId: number
+    slug: string
+    installedRevisionId?: number
+    latestKnownRevisionId: number
+    sourceGameDomain: string
+    selections: string[]
+    localOverrides: string[]
+  }
 }
 
 export type BulkOperationKind = 'copy' | 'move' | 'delete' | 'enable' | 'disable' | 'tag'
@@ -260,6 +271,13 @@ export interface ModImportCandidate {
   id: string
   name: string
   path: string
+  sourcePath: string
+  detectedRoot: string
+  detectedFramework: string
+  relativeGamePaths: string[]
+  strippedSegments: string[]
+  rootConfidence: MatchConfidence
+  rootReason: string
   enabled: boolean
   modType: string
   sizeBytes: number

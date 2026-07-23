@@ -47,6 +47,36 @@ export interface NativeMod {
   quarantinePath?: string
 }
 
+export interface CyberpunkRepairMove {
+  from: string
+  to: string
+}
+
+export interface CyberpunkRepairItem {
+  stageId: string
+  name: string
+  detectedFramework: string
+  moves: CyberpunkRepairMove[]
+  conflicts: string[]
+  confidence: 'high' | 'medium' | 'low' | string
+}
+
+export interface CyberpunkRepairPreview {
+  gameId: string
+  packagesScanned: number
+  filesAffected: number
+  items: CyberpunkRepairItem[]
+  warnings: string[]
+}
+
+export interface CyberpunkRepairResult {
+  repairId: string
+  snapshotPath: string
+  packagesRepaired: number
+  filesMoved: number
+  diagnostics: string[]
+}
+
 export interface DetectedGame {
   name: string
   execPath: string
@@ -177,6 +207,156 @@ export interface NexusCatalogMod {
   url: string
 }
 
+export interface NexusPaginationMetadata {
+  page: number
+  pageSize: number
+  totalResults: number
+  totalPages: number
+  loadedResultCount: number
+  providerGameTotalMods?: number
+  providerGameTotalCollections?: number
+  hasPrevious: boolean
+  hasNext: boolean
+  totalIsExact: boolean
+}
+
+export interface NexusCatalogPage {
+  results: NexusCatalogMod[]
+  pagination: NexusPaginationMetadata
+  source: 'nexus-graphql-v2' | string
+  fetchedAt: number
+}
+
+export interface NexusAccountCapabilities {
+  authenticated: boolean
+  membershipTier: 'premium' | 'free' | 'unknown' | string
+  supportsDirectDownloads?: boolean
+  supportsAutomaticCollectionDownloads?: boolean
+  downloadRateLimit?: string
+  apiHourlyRemaining?: number
+  apiHourlyLimit?: number
+  apiDailyRemaining?: number
+  apiDailyLimit?: number
+  requiresManualDownloadConfirmation?: boolean
+}
+
+export interface NexusCollectionSummary {
+  id: number
+  slug: string
+  name: string
+  summary: string
+  description: string
+  author: string
+  game: string
+  gameDomain: string
+  tileImage: string
+  headerImage: string
+  endorsements: number
+  totalDownloads: number
+  uniqueDownloads: number
+  updatedAt?: number
+  adult: boolean
+  collectionSchemaId?: number
+  recommendedManager: string
+  compatibility: 'partial' | 'unsupported' | 'unknown' | string
+  latestRevisionId?: number
+  latestRevisionNumber?: number
+  modCount: number
+  totalSize: number
+  gameVersions: string[]
+  providerGameCollectionCount?: number
+  url: string
+}
+
+export interface NexusCollectionPage {
+  results: NexusCollectionSummary[]
+  pagination: NexusPaginationMetadata
+  source: 'nexus-graphql-v2-collections' | string
+  fetchedAt: number
+}
+
+export interface NexusCollectionEntry {
+  collectionEntryId: string
+  nexusGameDomain: string
+  modId: number
+  fileId: number
+  expectedVersion: string
+  displayName: string
+  fileName: string
+  author: string
+  required: boolean
+  installOrder: number
+  priority: number
+  updatePolicy: string
+  expectedSize?: number
+  virusScanStatus: string
+  sourceUrl: string
+  status: 'Ready' | 'Queued' | 'WaitingForUser' | 'NxmReceived' | 'Downloaded' | 'Installed' | 'Unavailable' | string
+  localPath?: string
+}
+
+export interface NexusExternalRequirement {
+  id: number
+  name: string
+  author: string
+  required: boolean
+  resourceType: string
+  resourceUrl?: string
+  fileExpression: string
+}
+
+export interface NexusCollectionDetail {
+  collection: NexusCollectionSummary
+  revisionId: number
+  revisionNumber: number
+  revisionStatus: string
+  collectionSchemaVersion: string
+  modCount: number
+  totalSize: number
+  assetsSizeBytes: number
+  temporaryBytes: number
+  installationInfo: string
+  adult: boolean
+  gameVersions: string[]
+  entries: NexusCollectionEntry[]
+  externalRequirements: NexusExternalRequirement[]
+  unsupportedInstructions: string[]
+  warnings: string[]
+}
+
+export interface CollectionInstallPlan {
+  schemaVersion: number
+  installId: string
+  collectionId: number
+  collectionSlug: string
+  collectionName: string
+  revisionId: number
+  revisionNumber: number
+  gameId: string
+  gameDomain: string
+  profileId: string
+  profileName: string
+  profileState: string
+  entries: NexusCollectionEntry[]
+  externalRequirements: NexusExternalRequirement[]
+  downloadBytes: number
+  temporaryBytes: number
+  finalAdditionalBytes: number
+  accountCapabilities: NexusAccountCapabilities
+  warnings: string[]
+  createdAt: number
+  updatedAt: number
+  openNextRequiredPage: boolean
+  automaticExecution: boolean
+}
+
+export interface PreparedCollectionInstall {
+  plan: CollectionInstallPlan
+  profile: Profile
+  profilePaths: ProfilePaths
+  planPath: string
+}
+
 export interface ArtworkCandidate {
   id: string
   provider: 'steam'
@@ -264,6 +444,12 @@ export const native = {
   toggleMod: (modPath: string, modsRoot: string, enable: boolean) => desktopOnly<string>('toggle_mod', { modPath, modsRoot, enable }),
   deleteMod: (modPath: string, modsRoot: string) => desktopOnly<void>('delete_mod', { modPath, modsRoot }),
   deleteStagedMod: (gameId: string, stageId: string) => desktopOnly<void>('delete_staged_mod', { gameId, stageId }),
+  previewCyberpunkStructureRepair: (gameId: string) =>
+    desktopOnly<CyberpunkRepairPreview>('preview_cyberpunk_structure_repair', { gameId }),
+  applyCyberpunkStructureRepair: (gameId: string, stageIds: string[]) =>
+    desktopOnly<CyberpunkRepairResult>('apply_cyberpunk_structure_repair', { gameId, stageIds }),
+  rollbackCyberpunkStructureRepair: (gameId: string, repairId: string) =>
+    desktopOnly<CyberpunkRepairResult>('rollback_cyberpunk_structure_repair', { gameId, repairId }),
   syncProfileState: (gameId: string, profile: Profile) => desktopOnly<ProfilePaths>('sync_profile_state', { gameId, profileId: profile.id, profile }),
   applyProfileTransaction: (gameId: string, operationId: string, beforeProfiles: Profile[], afterProfiles: Profile[]) =>
     desktopOnly<ProfileTransactionResult>('apply_profile_transaction', { gameId, operationId, beforeProfiles, afterProfiles }),
@@ -312,8 +498,21 @@ export const native = {
   testProviderConnection: (provider: 'nexus' | 'curseforge') =>
     desktopOnly<ProviderConnectionStatus>('test_provider_connection', { provider }),
   nexusCatalogGames: () => desktopOnly<NexusCatalogGame[]>('nexus_catalog_games'),
-  nexusCatalogMods: (gameDomain: string, feed: 'recent' | 'updated' | 'trending' | 'popular' | 'downloaded') =>
-    desktopOnly<NexusCatalogMod[]>('nexus_catalog_mods', { gameDomain, feed }),
+  nexusAccountCapabilities: () => desktopOnly<NexusAccountCapabilities>('nexus_account_capabilities'),
+  nexusCatalogMods: (gameDomain: string, query: string, sort: 'recent' | 'updated' | 'popular' | 'downloaded', page: number, pageSize: number, includeAdult: boolean) =>
+    desktopOnly<NexusCatalogPage>('nexus_catalog_mods', { gameDomain, query, sort, page, pageSize, includeAdult }),
+  nexusCatalogCollections: (gameDomain: string, query: string, sort: 'recent' | 'updated' | 'popular' | 'downloaded', page: number, pageSize: number, includeAdult: boolean) =>
+    desktopOnly<NexusCollectionPage>('nexus_catalog_collections', { gameDomain, query, sort, page, pageSize, includeAdult }),
+  nexusCollectionDetail: (gameDomain: string, slug: string, revision: number | undefined, includeAdult: boolean) =>
+    desktopOnly<NexusCollectionDetail>('nexus_collection_detail', { gameDomain, slug, revision, includeAdult }),
+  prepareNexusCollectionInstall: (gameId: string, installId: string, profile: Profile, gameDomain: string, slug: string, revision: number | undefined, includeAdult: boolean) =>
+    desktopOnly<PreparedCollectionInstall>('prepare_nexus_collection_install', { gameId, installId, profile, gameDomain, slug, revision, includeAdult }),
+  listCollectionInstallPlans: (gameId: string) =>
+    desktopOnly<CollectionInstallPlan[]>('list_collection_install_plans', { gameId }),
+  updateCollectionInstall: (gameId: string, installId: string, action: 'pause' | 'resume' | 'cancel') =>
+    desktopOnly<CollectionInstallPlan>('update_collection_install', { gameId, installId, action }),
+  startCollectionInstall: (gameId: string, installId: string) =>
+    desktopOnly<CollectionInstallPlan>('start_collection_install', { gameId, installId }),
   setNxmAssociation: (enabled: boolean) => desktopOnly<boolean>('set_nxm_association', { enabled }),
   nxmAssociationStatus: () => desktopOnly<boolean>('nxm_association_status'),
   pendingExternalInstalls: () => desktopOnly<NxmRequest[]>('pending_external_installs'),

@@ -98,6 +98,13 @@ struct ModImportCandidate {
     id: String,
     name: String,
     path: String,
+    source_path: String,
+    detected_root: String,
+    detected_framework: String,
+    relative_game_paths: Vec<String>,
+    stripped_segments: Vec<String>,
+    root_confidence: String,
+    root_reason: String,
     enabled: bool,
     mod_type: String,
     size_bytes: u64,
@@ -356,6 +363,224 @@ struct NexusCatalogMod {
     updated_at: Option<u64>,
     nsfw: bool,
     url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NexusPaginationMetadata {
+    page: u64,
+    page_size: u64,
+    total_results: u64,
+    total_pages: u64,
+    loaded_result_count: u64,
+    provider_game_total_mods: Option<u64>,
+    provider_game_total_collections: Option<u64>,
+    has_previous: bool,
+    has_next: bool,
+    total_is_exact: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NexusCatalogPage {
+    results: Vec<NexusCatalogMod>,
+    pagination: NexusPaginationMetadata,
+    source: String,
+    fetched_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NexusAccountCapabilities {
+    authenticated: bool,
+    membership_tier: String,
+    supports_direct_downloads: Option<bool>,
+    supports_automatic_collection_downloads: Option<bool>,
+    download_rate_limit: Option<String>,
+    api_hourly_remaining: Option<u64>,
+    api_hourly_limit: Option<u64>,
+    api_daily_remaining: Option<u64>,
+    api_daily_limit: Option<u64>,
+    requires_manual_download_confirmation: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NexusCollectionSummary {
+    id: u64,
+    slug: String,
+    name: String,
+    summary: String,
+    description: String,
+    author: String,
+    game: String,
+    game_domain: String,
+    tile_image: String,
+    header_image: String,
+    endorsements: u64,
+    total_downloads: u64,
+    unique_downloads: u64,
+    updated_at: Option<u64>,
+    adult: bool,
+    collection_schema_id: Option<u64>,
+    recommended_manager: String,
+    compatibility: String,
+    latest_revision_id: Option<u64>,
+    latest_revision_number: Option<u64>,
+    mod_count: u64,
+    total_size: u64,
+    game_versions: Vec<String>,
+    provider_game_collection_count: Option<u64>,
+    url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NexusCollectionPage {
+    results: Vec<NexusCollectionSummary>,
+    pagination: NexusPaginationMetadata,
+    source: String,
+    fetched_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NexusCollectionEntry {
+    collection_entry_id: String,
+    nexus_game_domain: String,
+    mod_id: u64,
+    file_id: u64,
+    expected_version: String,
+    display_name: String,
+    file_name: String,
+    author: String,
+    required: bool,
+    install_order: u64,
+    priority: i64,
+    update_policy: String,
+    expected_size: Option<u64>,
+    virus_scan_status: String,
+    source_url: String,
+    status: String,
+    local_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NexusExternalRequirement {
+    id: u64,
+    name: String,
+    author: String,
+    required: bool,
+    resource_type: String,
+    resource_url: Option<String>,
+    file_expression: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NexusCollectionDetail {
+    collection: NexusCollectionSummary,
+    revision_id: u64,
+    revision_number: u64,
+    revision_status: String,
+    collection_schema_version: String,
+    mod_count: u64,
+    total_size: u64,
+    assets_size_bytes: u64,
+    temporary_bytes: u64,
+    installation_info: String,
+    adult: bool,
+    game_versions: Vec<String>,
+    entries: Vec<NexusCollectionEntry>,
+    external_requirements: Vec<NexusExternalRequirement>,
+    unsupported_instructions: Vec<String>,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CollectionInstallPlan {
+    schema_version: u64,
+    install_id: String,
+    collection_id: u64,
+    collection_slug: String,
+    collection_name: String,
+    revision_id: u64,
+    revision_number: u64,
+    game_id: String,
+    game_domain: String,
+    profile_id: String,
+    profile_name: String,
+    profile_state: String,
+    entries: Vec<NexusCollectionEntry>,
+    external_requirements: Vec<NexusExternalRequirement>,
+    download_bytes: u64,
+    temporary_bytes: u64,
+    final_additional_bytes: u64,
+    account_capabilities: NexusAccountCapabilities,
+    warnings: Vec<String>,
+    created_at: u64,
+    updated_at: u64,
+    open_next_required_page: bool,
+    automatic_execution: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreparedCollectionInstall {
+    plan: CollectionInstallPlan,
+    profile: serde_json::Value,
+    profile_paths: ProfilePaths,
+    plan_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingCollectionDownloadMatch {
+    collection_install_id: String,
+    entry_id: String,
+    game_domain: String,
+    mod_id: u64,
+    file_id: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CyberpunkRepairMove {
+    from: String,
+    to: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CyberpunkRepairItem {
+    stage_id: String,
+    name: String,
+    detected_framework: String,
+    moves: Vec<CyberpunkRepairMove>,
+    conflicts: Vec<String>,
+    confidence: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CyberpunkRepairPreview {
+    game_id: String,
+    packages_scanned: u64,
+    files_affected: u64,
+    items: Vec<CyberpunkRepairItem>,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CyberpunkRepairResult {
+    repair_id: String,
+    snapshot_path: String,
+    packages_repaired: u64,
+    files_moved: u64,
+    diagnostics: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1931,6 +2156,194 @@ fn has_direct_mod_signature(path: &Path) -> bool {
         })
 }
 
+fn case_insensitive_relative(root: &Path, relative: &str) -> Option<PathBuf> {
+    let mut current = root.to_path_buf();
+    for component in relative.split('/').filter(|part| !part.is_empty()) {
+        let entry = fs::read_dir(&current)
+            .ok()?
+            .filter_map(Result::ok)
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(component)
+            })?;
+        current = entry.path();
+    }
+    Some(current)
+}
+
+fn cyberpunk_relative_destination(source: &Path) -> Option<PathBuf> {
+    let parts = source
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let lower = parts
+        .iter()
+        .map(|part| part.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let signatures: &[(&[&str], &[&str])] = &[
+        (
+            &["bin", "x64", "plugins", "cyber_engine_tweaks", "mods"],
+            &["bin", "x64", "plugins", "cyber_engine_tweaks", "mods"],
+        ),
+        (&["archive", "pc", "mod"], &["archive", "pc", "mod"]),
+        (&["red4ext", "plugins"], &["red4ext", "plugins"]),
+        (&["bin", "x64", "plugins"], &["bin", "x64", "plugins"]),
+        (&["r6", "scripts"], &["r6", "scripts"]),
+        (&["r6", "tweaks"], &["r6", "tweaks"]),
+        (&["tools", "redmod"], &["tools", "redmod"]),
+        (&["archive"], &["archive"]),
+        (&["red4ext"], &["red4ext"]),
+        (&["engine"], &["engine"]),
+        (&["mods"], &["mods"]),
+        (&["r6"], &["r6"]),
+        (&["tools"], &["tools"]),
+        (&["bin"], &["bin"]),
+    ];
+    for (index, _) in lower.iter().enumerate() {
+        for (signature, normalized) in signatures {
+            if index + signature.len() > lower.len()
+                || !lower[index..index + signature.len()]
+                    .iter()
+                    .zip(signature.iter())
+                    .all(|(part, expected)| part == expected)
+            {
+                continue;
+            }
+            let mut relative = PathBuf::new();
+            for part in normalized.iter() {
+                relative.push(part);
+            }
+            for part in &parts[index + signature.len()..] {
+                relative.push(part);
+            }
+            return Some(relative);
+        }
+    }
+    None
+}
+
+#[derive(Debug)]
+struct RootDetectionResult {
+    detected_root: PathBuf,
+    relative_game_paths: Vec<String>,
+    stripped_segments: Vec<String>,
+    confidence: String,
+    reason: String,
+}
+
+fn detect_candidate_root(path: &Path) -> RootDetectionResult {
+    let detected_root = if path.is_dir() {
+        unwrap_package_root(path)
+    } else {
+        path.to_path_buf()
+    };
+    let stripped_segments = detected_root
+        .strip_prefix(path)
+        .ok()
+        .map(|relative| {
+            relative
+                .components()
+                .filter_map(|component| match component {
+                    std::path::Component::Normal(value) => {
+                        Some(value.to_string_lossy().to_string())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut relative_game_paths = Vec::new();
+    let mut reason = String::new();
+    if contains_game_root_layout(&detected_root) {
+        for root in CYBERPUNK_ROOTS {
+            if case_insensitive_relative(&detected_root, root).is_some() {
+                relative_game_paths.push(root.to_string());
+            }
+        }
+        reason = "Signatures de racine de jeu détectées après suppression des conteneurs.".into();
+    } else if let Some(relative) = cyberpunk_relative_destination(&detected_root) {
+        relative_game_paths.push(relative.to_string_lossy().replace('\\', "/"));
+        reason = "Destination Cyberpunk reconstruite depuis un chemin de framework connu.".into();
+    } else if detected_root
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("archive"))
+    {
+        relative_game_paths.push("archive/pc/mod".into());
+        reason = "Archive Cyberpunk isolée reconnue par son extension.".into();
+    } else if detected_root
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("reds"))
+    {
+        relative_game_paths.push("r6/scripts".into());
+        reason = "Script REDscript isolé reconnu par son extension.".into();
+    }
+    relative_game_paths.sort();
+    relative_game_paths.dedup();
+    let confidence = if relative_game_paths.is_empty() {
+        "low"
+    } else if stripped_segments.is_empty() {
+        "high"
+    } else {
+        "medium"
+    };
+    if reason.is_empty() {
+        reason = "Aucune signature de racine Cyberpunk déterministe.".into();
+    }
+    RootDetectionResult {
+        detected_root,
+        relative_game_paths,
+        stripped_segments,
+        confidence: confidence.into(),
+        reason,
+    }
+}
+
+fn detect_cyberpunk_framework(path: &Path, files: &[String]) -> String {
+    let joined = format!("{} {}", path.to_string_lossy(), files.join(" "))
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    if joined.contains("cyber_engine_tweaks")
+        && (joined.contains("cyber_engine_tweaks.asi") || joined.contains("/mods/"))
+    {
+        "Cyber Engine Tweaks".into()
+    } else if joined.contains("red4ext/plugins/archivexl")
+        || joined.contains("archive_xl.dll")
+        || joined.contains("archivexl.dll")
+    {
+        "ArchiveXL".into()
+    } else if joined.contains("red4ext/plugins/tweakxl") || joined.contains("tweak_xl.dll") {
+        "TweakXL".into()
+    } else if joined.contains("red4ext/plugins/codeware") || joined.contains("codeware.dll") {
+        "Codeware".into()
+    } else if joined.contains("redscript.toml")
+        || joined.contains("engine/tools/scc.exe")
+        || joined.contains("redscript.dll")
+    {
+        "redscript".into()
+    } else if joined.contains("red4ext/red4ext.dll") || joined.contains("red4ext.dll") {
+        "RED4ext".into()
+    } else if joined.contains("red4ext/plugins/") {
+        "RED4ext plugin".into()
+    } else if joined.contains("/mods/") && joined.contains("info.json") {
+        "REDmod".into()
+    } else if joined.contains("r6/scripts/") {
+        "REDscript mod".into()
+    } else if joined.contains("r6/tweaks/") {
+        "TweakXL content".into()
+    } else if joined.contains("archive/pc/mod/") {
+        "Cyberpunk archive".into()
+    } else {
+        "Unknown".into()
+    }
+}
+
 fn import_candidate_roots(path: &Path) -> Vec<PathBuf> {
     if path.is_file() {
         return vec![path.to_path_buf()];
@@ -1946,26 +2359,37 @@ fn import_candidate_roots(path: &Path) -> Vec<PathBuf> {
         "tools",
         "engine",
     ];
-    if cyberpunk_locations
-        .iter()
-        .any(|location| path.join(location).exists())
-    {
-        // A game-root-shaped selection may contain several framework roots that belong
-        // to the same composite mod. Keep it intact instead of splitting its payload.
-        return vec![path.to_path_buf()];
-    }
     let mut specialized = Vec::new();
     for location in cyberpunk_locations {
-        let directory = path.join(location);
+        let Some(directory) = case_insensitive_relative(path, location) else {
+            continue;
+        };
         if let Ok(entries) = fs::read_dir(directory) {
             specialized.extend(
                 entries
                     .filter_map(Result::ok)
                     .map(|entry| entry.path())
-                    .filter(|entry| is_probable_mod_root(entry)),
+                    .filter(|entry| {
+                        let name = entry
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or_default();
+                        !name.starts_with('.')
+                            && !(location.eq_ignore_ascii_case("bin/x64/plugins")
+                                && name.eq_ignore_ascii_case("cyber_engine_tweaks"))
+                            && is_probable_mod_root(entry)
+                    }),
             );
         }
     }
+    let mut seen = HashSet::new();
+    specialized.retain(|candidate| {
+        let key = candidate
+            .to_string_lossy()
+            .replace('\\', "/")
+            .to_ascii_lowercase();
+        seen.insert(key)
+    });
     if !specialized.is_empty() {
         return specialized;
     }
@@ -2954,10 +3378,18 @@ fn scan_mod_import(
                 continue;
             }
             let inspected = inspect_native_mod(&canonical);
-            let strong = inspected.framework != "Generic" || !inspected.manifests.is_empty();
+            let root_detection = detect_candidate_root(&canonical);
+            let detected_framework =
+                detect_cyberpunk_framework(&root_detection.detected_root, &inspected.files);
+            let strong = inspected.framework != "Generic"
+                || detected_framework != "Unknown"
+                || !inspected.manifests.is_empty();
             let mut warnings = Vec::new();
             let sensitive_files = assess_sensitive_files(&canonical, &game_name)?;
-            let destinations = recognized_destinations(&inspected.files);
+            let mut destinations = root_detection.relative_game_paths.clone();
+            if destinations.is_empty() {
+                destinations = recognized_destinations(&inspected.files);
+            }
             if inspected.source_url.is_none() {
                 warnings.push("Aucune source exacte détectée : aucune mise à jour automatique ne sera autorisée.".into());
             }
@@ -2975,7 +3407,14 @@ fn scan_mod_import(
             candidates.push(ModImportCandidate {
                 id: inspected.id.clone(),
                 name: inspected.name,
-                path: inspected.path,
+                path: inspected.path.clone(),
+                source_path: inspected.path,
+                detected_root: root_detection.detected_root.to_string_lossy().to_string(),
+                detected_framework,
+                relative_game_paths: root_detection.relative_game_paths,
+                stripped_segments: root_detection.stripped_segments,
+                root_confidence: root_detection.confidence.clone(),
+                root_reason: root_detection.reason,
                 enabled: inspected.enabled,
                 mod_type: inspected.mod_type,
                 size_bytes: inspected.size_bytes,
@@ -2985,7 +3424,11 @@ fn scan_mod_import(
                 manifests: inspected.manifests,
                 source_url: inspected.source_url,
                 version: inspected.version,
-                confidence: if strong { "high" } else { "low" }.into(),
+                confidence: if strong {
+                    root_detection.confidence
+                } else {
+                    "low".into()
+                },
                 warnings,
                 sensitive_files,
                 recognized_destinations: destinations,
@@ -3057,10 +3500,18 @@ fn scan_mod_import_background_impl(
             return Err("TASK_CANCELLED".into());
         }
         let inspected = inspect_native_mod(&canonical);
-        let strong = inspected.framework != "Generic" || !inspected.manifests.is_empty();
+        let root_detection = detect_candidate_root(&canonical);
+        let detected_framework =
+            detect_cyberpunk_framework(&root_detection.detected_root, &inspected.files);
+        let strong = inspected.framework != "Generic"
+            || detected_framework != "Unknown"
+            || !inspected.manifests.is_empty();
         let mut warnings = Vec::new();
         let sensitive_files = assess_sensitive_files(&canonical, &game_name)?;
-        let destinations = recognized_destinations(&inspected.files);
+        let mut destinations = root_detection.relative_game_paths.clone();
+        if destinations.is_empty() {
+            destinations = recognized_destinations(&inspected.files);
+        }
         if inspected.source_url.is_none() {
             warnings.push(
                 "Aucune source exacte détectée : aucune mise à jour automatique ne sera autorisée."
@@ -3082,7 +3533,14 @@ fn scan_mod_import_background_impl(
         candidates.push(ModImportCandidate {
             id: inspected.id.clone(),
             name: inspected.name,
-            path: inspected.path,
+            path: inspected.path.clone(),
+            source_path: inspected.path,
+            detected_root: root_detection.detected_root.to_string_lossy().to_string(),
+            detected_framework,
+            relative_game_paths: root_detection.relative_game_paths,
+            stripped_segments: root_detection.stripped_segments,
+            root_confidence: root_detection.confidence.clone(),
+            root_reason: root_detection.reason,
             enabled: inspected.enabled,
             mod_type: inspected.mod_type,
             size_bytes: inspected.size_bytes,
@@ -3092,7 +3550,11 @@ fn scan_mod_import_background_impl(
             manifests: inspected.manifests,
             source_url: inspected.source_url,
             version: inspected.version,
-            confidence: if strong { "high" } else { "low" }.into(),
+            confidence: if strong {
+                root_detection.confidence
+            } else {
+                "low".into()
+            },
             warnings,
             sensitive_files,
             recognized_destinations: destinations,
@@ -4689,9 +5151,17 @@ fn stage_content(
             .and_then(|value| value.to_str())
             .unwrap_or_default()
             .to_ascii_lowercase();
-        let destination = if fivem_client
-            && matches!(extension.as_str(), "asi" | "dll" | "ini" | "fx")
-        {
+        let anchored_destination = cyberpunk
+            .then(|| cyberpunk_relative_destination(&root))
+            .flatten();
+        let destination = if let Some(relative) = anchored_destination {
+            layout = "CyberpunkNormalizedFragment".to_string();
+            diagnostics.push(format!(
+                "Chemin Cyberpunk normalisé vers {}.",
+                relative.to_string_lossy().replace('\\', "/")
+            ));
+            content.join(relative)
+        } else if fivem_client && matches!(extension.as_str(), "asi" | "dll" | "ini" | "fx") {
             layout = "FiveMClientPlugin".to_string();
             content.join("FiveM.app/plugins").join(
                 root.file_name()
@@ -4739,6 +5209,71 @@ fn stage_content(
             };
             copy_tree_cancellable_secure(&root, &target, cancel, security)?;
             diagnostics.push("Paquet classé comme plugin client FiveM. Les ressources serveur ne sont jamais déployées par cet adaptateur.".into());
+        } else if cyberpunk && !contains_game_root_layout(&root) {
+            if let Some(relative) = cyberpunk_relative_destination(&root) {
+                layout = "CyberpunkNormalizedFragment".to_string();
+                diagnostics.push(format!(
+                    "Racine Cyberpunk reconstruite vers {}.",
+                    relative.to_string_lossy().replace('\\', "/")
+                ));
+                copy_tree_cancellable_secure(&root, &content.join(relative), cancel, security)?;
+            } else if WalkDir::new(&root)
+                .max_depth(2)
+                .into_iter()
+                .filter_map(Result::ok)
+                .any(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .and_then(|value| value.to_str())
+                        .is_some_and(|value| value.eq_ignore_ascii_case("archive"))
+                })
+            {
+                layout = "CyberpunkArchive".to_string();
+                diagnostics.push(
+                    "Archive(s) Cyberpunk sans racine explicite : destination archive/pc/mod."
+                        .into(),
+                );
+                copy_tree_cancellable_secure(
+                    &root,
+                    &content.join("archive/pc/mod"),
+                    cancel,
+                    security,
+                )?;
+            } else if WalkDir::new(&root)
+                .max_depth(3)
+                .into_iter()
+                .filter_map(Result::ok)
+                .any(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .and_then(|value| value.to_str())
+                        .is_some_and(|value| value.eq_ignore_ascii_case("reds"))
+                })
+            {
+                layout = "CyberpunkRedscript".to_string();
+                diagnostics.push(
+                    "Script(s) REDscript sans racine explicite : destination r6/scripts.".into(),
+                );
+                copy_tree_cancellable_secure(&root, &content.join("r6/scripts"), cancel, security)?;
+            } else {
+                layout = "GenericModsFolder".to_string();
+                diagnostics.push(
+                    "Structure Cyberpunk ambiguë : aucun chemin de jeu déterministe, stockage sous mods/<nom> avec vérification manuelle.".into(),
+                );
+                let name = safe_archive_component(
+                    root.file_name()
+                        .and_then(|value| value.to_str())
+                        .unwrap_or("mod"),
+                );
+                copy_tree_cancellable_secure(
+                    &root,
+                    &content.join("mods").join(name),
+                    cancel,
+                    security,
+                )?;
+            }
         } else if contains_game_root_layout(&root) {
             layout = if cyberpunk {
                 "CyberpunkGameRoot"
@@ -4918,6 +5453,373 @@ fn delete_staged_mod(app: AppHandle, game_id: String, stage_id: String) -> Resul
     Ok(())
 }
 
+fn cyberpunk_repair_target(relative: &Path) -> Option<PathBuf> {
+    let parts = relative
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if parts.len() < 2 {
+        return None;
+    }
+    let lower = parts
+        .iter()
+        .map(|part| part.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let recognized = [
+        "archive", "r6", "red4ext", "bin", "engine", "tools", "plugins", "config",
+    ];
+    if recognized.contains(&lower[0].as_str()) {
+        return None;
+    }
+    let start = lower
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find_map(|(index, part)| recognized.contains(&part.as_str()).then_some(index))?;
+    let mut output = PathBuf::new();
+    output.push(&lower[start]);
+    for part in &parts[start + 1..] {
+        output.push(part);
+    }
+    Some(output)
+}
+
+fn copy_tree_for_snapshot(source: &Path, destination: &Path) -> Result<(), String> {
+    for entry in WalkDir::new(source)
+        .follow_links(false)
+        .into_iter()
+        .map(|entry| entry.map_err(to_error))
+    {
+        let entry = entry?;
+        if entry.file_type().is_symlink() {
+            return Err("Un lien symbolique empêche la création du snapshot.".into());
+        }
+        let relative = entry.path().strip_prefix(source).map_err(to_error)?;
+        if relative.as_os_str().is_empty() {
+            fs::create_dir_all(destination).map_err(to_error)?;
+            continue;
+        }
+        validate_archive_relative(relative)?;
+        let target = destination.join(relative);
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&target).map_err(to_error)?;
+        } else if entry.file_type().is_file() {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(to_error)?;
+            }
+            fs::copy(entry.path(), target).map_err(to_error)?;
+        }
+    }
+    Ok(())
+}
+
+fn cyberpunk_structure_repair_preview_inner(
+    app: &AppHandle,
+    game_id: &str,
+) -> Result<CyberpunkRepairPreview, String> {
+    let game_id = safe_game_id(game_id)?.to_string();
+    let store = staged_mods_root(app, &game_id)?;
+    let mut packages_scanned = 0u64;
+    let mut files_affected = 0u64;
+    let mut items = Vec::new();
+    for entry in fs::read_dir(store)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+    {
+        packages_scanned += 1;
+        let stage = entry.path();
+        let content = stage.join("content");
+        if !content.is_dir() {
+            continue;
+        }
+        let stage_id = entry.file_name().to_string_lossy().to_string();
+        if safe_game_id(&stage_id).is_err() {
+            continue;
+        }
+        let manifest = fs::read(stage.join("manifest.json"))
+            .ok()
+            .and_then(|payload| serde_json::from_slice::<serde_json::Value>(&payload).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        let name = nexus_json_string(&manifest, &["name"]);
+        let files = mod_files(&content);
+        let detected_framework = detect_cyberpunk_framework(&content, &files);
+        let mut moves = Vec::new();
+        let mut targets: HashMap<String, Vec<String>> = HashMap::new();
+        for file in &files {
+            let relative = PathBuf::from(file);
+            let Some(target) = cyberpunk_repair_target(&relative) else {
+                continue;
+            };
+            let from = relative.to_string_lossy().replace('\\', "/");
+            let to = target.to_string_lossy().replace('\\', "/");
+            if from.eq_ignore_ascii_case(&to) {
+                continue;
+            }
+            targets.entry(to.clone()).or_default().push(from.clone());
+            moves.push(CyberpunkRepairMove { from, to });
+        }
+        if moves.is_empty() {
+            continue;
+        }
+        files_affected += moves.len() as u64;
+        let conflicts = targets
+            .into_iter()
+            .filter(|(_, sources)| sources.len() > 1)
+            .map(|(target, sources)| format!("{target} ← {}", sources.join(" · ")))
+            .collect::<Vec<_>>();
+        items.push(CyberpunkRepairItem {
+            stage_id,
+            name: if name.is_empty() {
+                entry.file_name().to_string_lossy().to_string()
+            } else {
+                name
+            },
+            detected_framework,
+            confidence: if conflicts.is_empty() { "high" } else { "low" }.into(),
+            moves,
+            conflicts,
+        });
+    }
+    items.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+    });
+    let mut warnings = Vec::new();
+    if items.iter().any(|item| !item.conflicts.is_empty()) {
+        warnings.push(
+            "Des collisions de chemins demandent une correction manuelle et bloquent l'application automatique."
+                .into(),
+        );
+    }
+    Ok(CyberpunkRepairPreview {
+        game_id,
+        packages_scanned,
+        files_affected,
+        items,
+        warnings,
+    })
+}
+
+#[tauri::command]
+fn preview_cyberpunk_structure_repair(
+    app: AppHandle,
+    game_id: String,
+) -> Result<CyberpunkRepairPreview, String> {
+    cyberpunk_structure_repair_preview_inner(&app, &game_id)
+}
+
+#[tauri::command]
+fn apply_cyberpunk_structure_repair(
+    app: AppHandle,
+    game_id: String,
+    stage_ids: Vec<String>,
+) -> Result<CyberpunkRepairResult, String> {
+    let game_id = safe_game_id(&game_id)?.to_string();
+    let requested = stage_ids
+        .into_iter()
+        .map(|stage_id| safe_game_id(&stage_id).map(str::to_string))
+        .collect::<Result<HashSet<_>, _>>()?;
+    if requested.is_empty() {
+        return Err("Aucun paquet Cyberpunk sélectionné pour réparation.".into());
+    }
+    let preview = cyberpunk_structure_repair_preview_inner(&app, &game_id)?;
+    let selected = preview
+        .items
+        .into_iter()
+        .filter(|item| requested.contains(&item.stage_id))
+        .collect::<Vec<_>>();
+    if selected.len() != requested.len() {
+        return Err("Le plan de réparation a changé ; relancez l'aperçu.".into());
+    }
+    if selected.iter().any(|item| !item.conflicts.is_empty()) {
+        return Err("Une collision de chemins bloque la réparation automatique.".into());
+    }
+    let repair_id = format!(
+        "cyberpunk-repair-{}-{}",
+        unix_timestamp(),
+        std::process::id()
+    );
+    let repair_root = update_data_root(&app)?
+        .join("games")
+        .join(&game_id)
+        .join("repairs")
+        .join(&repair_id);
+    let snapshot_root = repair_root.join("snapshot");
+    let work_root = repair_root.join("work");
+    fs::create_dir_all(&snapshot_root).map_err(to_error)?;
+    fs::create_dir_all(&work_root).map_err(to_error)?;
+    let store = staged_mods_root(&app, &game_id)?;
+    let mut packages_repaired = 0u64;
+    let mut files_moved = 0u64;
+    let mut diagnostics = Vec::new();
+    for item in selected {
+        let stage = store.join(&item.stage_id);
+        let content = stage.join("content");
+        if !content.is_dir() {
+            return Err(format!("Contenu manquant pour {}.", item.name));
+        }
+        copy_tree_for_snapshot(&stage, &snapshot_root.join(&item.stage_id))?;
+        let repaired_content = work_root.join(&item.stage_id).join("content");
+        fs::create_dir_all(&repaired_content).map_err(to_error)?;
+        let move_map = item
+            .moves
+            .iter()
+            .map(|entry| (entry.from.to_ascii_lowercase(), PathBuf::from(&entry.to)))
+            .collect::<HashMap<_, _>>();
+        for entry in WalkDir::new(&content)
+            .follow_links(false)
+            .into_iter()
+            .map(|entry| entry.map_err(to_error))
+        {
+            let entry = entry?;
+            if entry.file_type().is_symlink() {
+                return Err("Un lien symbolique bloque la réparation.".into());
+            }
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let relative = entry.path().strip_prefix(&content).map_err(to_error)?;
+            validate_archive_relative(relative)?;
+            let key = relative
+                .to_string_lossy()
+                .replace('\\', "/")
+                .to_ascii_lowercase();
+            let target_relative = move_map
+                .get(&key)
+                .cloned()
+                .unwrap_or_else(|| relative.to_path_buf());
+            let target = repaired_content.join(target_relative);
+            if target.exists() {
+                return Err(format!(
+                    "Collision imprévue pendant la réparation de {}.",
+                    item.name
+                ));
+            }
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(to_error)?;
+            }
+            fs::copy(entry.path(), target).map_err(to_error)?;
+        }
+        let previous_content = stage.join(format!("content.before-{repair_id}"));
+        fs::rename(&content, &previous_content).map_err(to_error)?;
+        if let Err(error) = fs::rename(&repaired_content, &content).map_err(to_error) {
+            let _ = fs::rename(&previous_content, &content);
+            return Err(error);
+        }
+        let manifest_path = stage.join("manifest.json");
+        let mut manifest = fs::read(&manifest_path)
+            .ok()
+            .and_then(|payload| serde_json::from_slice::<serde_json::Value>(&payload).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        manifest["layout"] = serde_json::json!("CyberpunkRepairedGameRelative");
+        manifest["framework"] = serde_json::json!(item.detected_framework);
+        manifest["lastCyberpunkRepairId"] = serde_json::json!(repair_id);
+        manifest["lastCyberpunkRepairAt"] = serde_json::json!(unix_timestamp());
+        manifest["repairSnapshot"] =
+            serde_json::json!(snapshot_root.join(&item.stage_id).to_string_lossy());
+        if let Err(error) = write_json_atomic(&manifest_path, &manifest) {
+            let _ = fs::remove_dir_all(&content);
+            let _ = fs::rename(&previous_content, &content);
+            return Err(error);
+        }
+        fs::remove_dir_all(previous_content).map_err(to_error)?;
+        packages_repaired += 1;
+        files_moved += item.moves.len() as u64;
+        diagnostics.push(format!(
+            "{} : {} chemin(s) replacé(s) relativement à la racine du jeu.",
+            item.name,
+            item.moves.len()
+        ));
+    }
+    write_json_atomic(
+        &repair_root.join("repair.json"),
+        &serde_json::json!({
+            "schemaVersion": 1,
+            "repairId": repair_id,
+            "gameId": game_id,
+            "createdAt": unix_timestamp(),
+            "packagesRepaired": packages_repaired,
+            "filesMoved": files_moved,
+            "snapshotPath": snapshot_root,
+            "diagnostics": diagnostics,
+        }),
+    )?;
+    Ok(CyberpunkRepairResult {
+        repair_id,
+        snapshot_path: snapshot_root.to_string_lossy().to_string(),
+        packages_repaired,
+        files_moved,
+        diagnostics,
+    })
+}
+
+#[tauri::command]
+fn rollback_cyberpunk_structure_repair(
+    app: AppHandle,
+    game_id: String,
+    repair_id: String,
+) -> Result<CyberpunkRepairResult, String> {
+    let game_id = safe_game_id(&game_id)?.to_string();
+    let repair_id = safe_game_id(&repair_id)?.to_string();
+    let repair_root = update_data_root(&app)?
+        .join("games")
+        .join(&game_id)
+        .join("repairs")
+        .join(&repair_id);
+    let snapshot_root = repair_root.join("snapshot");
+    if !snapshot_root.is_dir() {
+        return Err("Snapshot de réparation introuvable.".into());
+    }
+    let store = staged_mods_root(&app, &game_id)?;
+    let rollback_root = repair_root.join(format!("rollback-{}", unix_timestamp()));
+    let mut packages_repaired = 0u64;
+    for snapshot in fs::read_dir(&snapshot_root)
+        .map_err(to_error)?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+    {
+        let stage_id = snapshot.file_name().to_string_lossy().to_string();
+        safe_game_id(&stage_id)?;
+        let target = store.join(&stage_id);
+        let restored = rollback_root.join("restored").join(&stage_id);
+        copy_tree_for_snapshot(&snapshot.path(), &restored)?;
+        if target.exists() {
+            let displaced = rollback_root.join("replaced").join(&stage_id);
+            if let Some(parent) = displaced.parent() {
+                fs::create_dir_all(parent).map_err(to_error)?;
+            }
+            fs::rename(&target, &displaced).map_err(to_error)?;
+        }
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(to_error)?;
+        }
+        if let Err(error) = fs::rename(&restored, &target).map_err(to_error) {
+            let displaced = rollback_root.join("replaced").join(&stage_id);
+            if displaced.exists() {
+                let _ = fs::rename(displaced, &target);
+            }
+            return Err(error);
+        }
+        packages_repaired += 1;
+    }
+    Ok(CyberpunkRepairResult {
+        repair_id,
+        snapshot_path: snapshot_root.to_string_lossy().to_string(),
+        packages_repaired,
+        files_moved: 0,
+        diagnostics: vec![
+            "Snapshot restauré. La version remplacée reste dans le dossier rollback du journal de réparation."
+                .into(),
+        ],
+    })
+}
+
 fn import_mods_with_staging(
     app: &AppHandle,
     registry: &BackgroundTaskRegistry,
@@ -5021,6 +5923,8 @@ fn import_mods_with_staging(
             ));
         }
         let content_inspection = inspect_native_mod(&staged_content);
+        let explicit_framework =
+            detect_cyberpunk_framework(&staged_content, &content_inspection.files);
         let deployment_status = if deploy_now { "enabled" } else { "stored" };
         let manifest_path = stage_directory.join("manifest.json");
         let manifest = serde_json::json!({
@@ -5028,7 +5932,7 @@ fn import_mods_with_staging(
             "id": stage_id,
             "name": inspected.name.clone(),
             "fingerprint": inspected.fingerprint.clone(),
-            "framework": inspected.framework.clone(),
+            "framework": if explicit_framework == "Unknown" { inspected.framework.clone() } else { explicit_framework },
             "version": inspected.version.clone(),
             "sourceUrl": inspected.source_url.clone(),
             "profiles": profile_ids,
@@ -5803,6 +6707,347 @@ async fn nexus_api_json(
     Ok((payload, headers))
 }
 
+async fn nexus_graphql_json(
+    query: &str,
+    variables: serde_json::Value,
+) -> Result<(serde_json::Value, reqwest::header::HeaderMap), String> {
+    let secret = provider_credential("nexus")?.get_password().map_err(|_| {
+        "Connectez Nexus Mods dans les paramètres avant d'ouvrir le catalogue.".to_string()
+    })?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(25))
+        .user_agent(format!("ZAILON/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|_| "Impossible d'initialiser la connexion sécurisée Nexus.".to_string())?;
+    let response = client
+        .post("https://api.nexusmods.com/v2/graphql")
+        .header("apikey", secret)
+        .header("Application-Name", "ZAILON")
+        .header("Application-Version", env!("CARGO_PKG_VERSION"))
+        .json(&serde_json::json!({ "query": query, "variables": variables }))
+        .send()
+        .await
+        .map_err(|error| {
+            if error.is_timeout() {
+                "La requête paginée Nexus a expiré.".to_string()
+            } else {
+                "Nexus est actuellement inaccessible.".to_string()
+            }
+        })?;
+    let status = response.status();
+    let headers = response.headers().clone();
+    if !status.is_success() {
+        return Err(match status.as_u16() {
+            401 | 403 => "La clé Nexus a été refusée ou ne permet pas cette opération.".into(),
+            429 => "La limite de requêtes Nexus est atteinte.".into(),
+            _ => format!(
+                "Nexus n'a pas accepté la demande paginée (HTTP {}).",
+                status.as_u16()
+            ),
+        });
+    }
+    let payload = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|_| "Nexus a renvoyé une réponse paginée illisible.".to_string())?;
+    if let Some(errors) = payload.get("errors").and_then(|value| value.as_array()) {
+        let detail = errors
+            .iter()
+            .filter_map(|error| error.get("message").and_then(|message| message.as_str()))
+            .take(2)
+            .collect::<Vec<_>>()
+            .join(" · ");
+        return Err(if detail.is_empty() {
+            "Nexus a refusé la recherche paginée.".into()
+        } else {
+            format!("Nexus a refusé la recherche paginée : {detail}")
+        });
+    }
+    Ok((payload, headers))
+}
+
+fn nexus_capabilities_from_validation(
+    payload: &serde_json::Value,
+    headers: &reqwest::header::HeaderMap,
+) -> NexusAccountCapabilities {
+    let premium = payload
+        .get("is_premium")
+        .or_else(|| payload.get("isPremium"))
+        .and_then(|value| value.as_bool());
+    NexusAccountCapabilities {
+        // This helper is only called after users/validate.json returned a
+        // successful response. Some accounts omit identifying fields.
+        authenticated: true,
+        membership_tier: match premium {
+            Some(true) => "premium",
+            Some(false) => "free",
+            None => "unknown",
+        }
+        .into(),
+        supports_direct_downloads: premium,
+        supports_automatic_collection_downloads: premium,
+        download_rate_limit: None,
+        api_hourly_remaining: header_number(
+            headers,
+            &["x-rl-hourly-remaining", "x-ratelimit-hourly-remaining"],
+        ),
+        api_hourly_limit: header_number(
+            headers,
+            &["x-rl-hourly-limit", "x-ratelimit-hourly-limit"],
+        ),
+        api_daily_remaining: header_number(
+            headers,
+            &["x-rl-daily-remaining", "x-ratelimit-daily-remaining"],
+        ),
+        api_daily_limit: header_number(headers, &["x-rl-daily-limit", "x-ratelimit-daily-limit"]),
+        requires_manual_download_confirmation: premium.map(|value| !value),
+    }
+}
+
+#[tauri::command]
+async fn nexus_account_capabilities(
+    app: AppHandle,
+    state: State<'_, ProviderConnectionCache>,
+) -> Result<NexusAccountCapabilities, String> {
+    let (payload, headers) = nexus_api_json("users/validate.json").await?;
+    refresh_nexus_status_from_headers(&app, &state, &headers);
+    Ok(nexus_capabilities_from_validation(&payload, &headers))
+}
+
+fn parse_iso8601_utc(value: &str) -> Option<u64> {
+    let bytes = value.as_bytes();
+    if bytes.len() < 20
+        || bytes.get(4) != Some(&b'-')
+        || bytes.get(7) != Some(&b'-')
+        || bytes.get(10) != Some(&b'T')
+        || bytes.get(13) != Some(&b':')
+        || bytes.get(16) != Some(&b':')
+        || !value.ends_with('Z')
+    {
+        return None;
+    }
+    let parse = |start: usize, end: usize| value.get(start..end)?.parse::<i64>().ok();
+    let mut year = parse(0, 4)?;
+    let month = parse(5, 7)?;
+    let day = parse(8, 10)?;
+    let hour = parse(11, 13)?;
+    let minute = parse(14, 16)?;
+    let second = parse(17, 19)?;
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || !(0..=23).contains(&hour)
+        || !(0..=59).contains(&minute)
+        || !(0..=60).contains(&second)
+    {
+        return None;
+    }
+    year -= i64::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let shifted_month = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * shifted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days_since_epoch = era * 146_097 + day_of_era - 719_468;
+    u64::try_from(days_since_epoch * 86_400 + hour * 3_600 + minute * 60 + second).ok()
+}
+
+fn nexus_mod_from_graphql(
+    node: &serde_json::Value,
+    fallback_domain: &str,
+) -> Option<NexusCatalogMod> {
+    let mod_id = nexus_json_u64(node, &["modId", "mod_id"]);
+    let name = nexus_json_string(node, &["name"]);
+    if mod_id == 0 || name.is_empty() {
+        return None;
+    }
+    let game = node.get("game").unwrap_or(&serde_json::Value::Null);
+    let domain = nexus_json_string(game, &["domainName", "domain_name"]);
+    let game_domain = if valid_nexus_domain(&domain) {
+        domain
+    } else {
+        fallback_domain.to_string()
+    };
+    Some(NexusCatalogMod {
+        id: format!("nexus-{game_domain}-{mod_id}"),
+        mod_id,
+        name,
+        author: nexus_json_string(node, &["author"]),
+        game: nexus_json_string(game, &["name"]),
+        game_domain: game_domain.clone(),
+        thumbnail: safe_remote_image(nexus_json_string(
+            node,
+            &["thumbnailLargeUrl", "thumbnailUrl", "pictureUrl"],
+        )),
+        downloads: nexus_json_u64(node, &["downloads"]),
+        endorsements: nexus_json_u64(node, &["endorsements"]),
+        description: nexus_json_string(node, &["summary", "description"]),
+        version: Some(nexus_json_string(node, &["version"])).filter(|value| !value.is_empty()),
+        updated_at: node
+            .get("updatedAt")
+            .and_then(|value| value.as_str())
+            .and_then(parse_iso8601_utc),
+        nsfw: nexus_json_bool(node, &["adultContent", "adult"]),
+        url: format!("https://www.nexusmods.com/{game_domain}/mods/{mod_id}"),
+    })
+}
+
+fn nexus_collection_from_graphql(
+    node: &serde_json::Value,
+    fallback_domain: &str,
+) -> Option<NexusCollectionSummary> {
+    let id = nexus_json_u64(node, &["id"]);
+    let slug = nexus_json_string(node, &["slug"]);
+    let name = nexus_json_string(node, &["name"]);
+    if id == 0
+        || slug.is_empty()
+        || name.is_empty()
+        || !slug
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+    {
+        return None;
+    }
+    let game = node.get("game").unwrap_or(&serde_json::Value::Null);
+    let candidate_domain = nexus_json_string(game, &["domainName"]);
+    let game_domain = if valid_nexus_domain(&candidate_domain) {
+        candidate_domain
+    } else {
+        fallback_domain.to_string()
+    };
+    let revision = node
+        .get("latestPublishedRevision")
+        .unwrap_or(&serde_json::Value::Null);
+    let schema_id = nexus_json_u64(node, &["collectionSchemaId"])
+        .max(nexus_json_u64(revision, &["collectionSchemaId"]));
+    let manager = match schema_id {
+        1 => "Vortex",
+        2 => "Wabbajack",
+        _ => "Inconnu",
+    };
+    let compatibility = match schema_id {
+        1 => "partial",
+        2 => "unsupported",
+        _ => "unknown",
+    };
+    let tile = node.get("tileImage").unwrap_or(&serde_json::Value::Null);
+    let header = node.get("headerImage").unwrap_or(&serde_json::Value::Null);
+    let user = node.get("user").unwrap_or(&serde_json::Value::Null);
+    let game_versions = revision
+        .get("gameVersions")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| nexus_json_string(item, &["reference"]))
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let updated_at = parse_iso8601_utc(&nexus_json_string(node, &["updatedAt"]))
+        .or_else(|| parse_iso8601_utc(&nexus_json_string(revision, &["updatedAt"])));
+    Some(NexusCollectionSummary {
+        id,
+        slug: slug.clone(),
+        name,
+        summary: nexus_json_string(node, &["summary"]),
+        description: nexus_json_string(node, &["description"]),
+        author: nexus_json_string(user, &["name"]),
+        game: nexus_json_string(game, &["name"]),
+        game_domain: game_domain.clone(),
+        tile_image: safe_remote_image(nexus_json_string(tile, &["thumbnailUrl", "url"])),
+        header_image: safe_remote_image(nexus_json_string(header, &["thumbnailUrl", "url"])),
+        endorsements: nexus_json_u64(node, &["endorsements"]),
+        total_downloads: nexus_json_u64(node, &["totalDownloads"]),
+        unique_downloads: nexus_json_u64(node, &["uniqueDownloads"]),
+        updated_at,
+        adult: nexus_json_bool(revision, &["adultContent"])
+            || nexus_json_bool(node, &["adultContent"]),
+        collection_schema_id: (schema_id > 0).then_some(schema_id),
+        recommended_manager: manager.into(),
+        compatibility: compatibility.into(),
+        latest_revision_id: Some(nexus_json_u64(revision, &["id"])).filter(|value| *value > 0),
+        latest_revision_number: Some(nexus_json_u64(revision, &["revisionNumber"]))
+            .filter(|value| *value > 0),
+        mod_count: nexus_json_u64(revision, &["modCount"]),
+        total_size: nexus_json_u64(revision, &["totalSize"]),
+        game_versions,
+        provider_game_collection_count: Some(nexus_json_u64(game, &["collectionCount"]))
+            .filter(|value| *value > 0),
+        url: format!("https://next.nexusmods.com/{game_domain}/collections/{slug}"),
+    })
+}
+
+fn nexus_collection_variables(
+    game_domain: &str,
+    query: &str,
+    sort: &str,
+    page: u64,
+    page_size: u64,
+    include_adult: bool,
+) -> serde_json::Value {
+    let mut filter = serde_json::json!({
+        "op": "AND",
+        "gameDomain": [{ "value": game_domain, "op": "EQUALS" }],
+        "hasPublishedRevision": [{ "value": true, "op": "EQUALS" }]
+    });
+    if !query.is_empty() {
+        filter["generalSearch"] = serde_json::json!([{ "value": query, "op": "MATCHES" }]);
+    }
+    if !include_adult {
+        filter["adultContent"] = serde_json::json!([{ "value": false, "op": "EQUALS" }]);
+    }
+    let sort_field = match sort {
+        "updated" => "updatedAt",
+        "popular" => "endorsements",
+        "downloaded" => "downloads",
+        _ => "createdAt",
+    };
+    serde_json::json!({
+        "filter": filter,
+        "sort": [{ (sort_field): { "direction": "DESC" } }],
+        "offset": page.saturating_sub(1).saturating_mul(page_size),
+        "count": page_size
+    })
+}
+
+fn nexus_catalog_variables(
+    game_domain: &str,
+    query: &str,
+    sort: &str,
+    page: u64,
+    page_size: u64,
+    include_adult: bool,
+) -> serde_json::Value {
+    let mut filter = serde_json::json!({
+        "op": "AND",
+        "gameDomainName": [{ "value": game_domain, "op": "EQUALS" }]
+    });
+    if !query.is_empty() {
+        filter["filter"] = serde_json::json!([{
+            "op": "OR",
+            "name": [{ "value": query, "op": "WILDCARD" }],
+            "author": [{ "value": query, "op": "WILDCARD" }],
+            "description": [{ "value": query, "op": "MATCHES" }]
+        }]);
+    }
+    if !include_adult {
+        filter["adultContent"] = serde_json::json!([{ "value": false, "op": "EQUALS" }]);
+    }
+    let sort_field = match sort {
+        "updated" => "updatedAt",
+        "popular" => "endorsements",
+        "downloaded" | "trending" => "downloads",
+        _ => "createdAt",
+    };
+    let offset = page.saturating_sub(1).saturating_mul(page_size);
+    serde_json::json!({
+        "filter": filter,
+        "sort": [{ (sort_field): { "direction": "DESC" } }],
+        "offset": offset,
+        "count": page_size
+    })
+}
+
 fn refresh_nexus_status_from_headers(
     app: &AppHandle,
     state: &State<'_, ProviderConnectionCache>,
@@ -5882,58 +7127,793 @@ async fn nexus_catalog_mods(
     app: AppHandle,
     state: State<'_, ProviderConnectionCache>,
     game_domain: String,
-    feed: String,
-) -> Result<Vec<NexusCatalogMod>, String> {
+    query: String,
+    sort: String,
+    page: u64,
+    page_size: u64,
+    include_adult: bool,
+) -> Result<NexusCatalogPage, String> {
     let domain = game_domain.trim().to_ascii_lowercase();
     if !valid_nexus_domain(&domain) {
         return Err("Le domaine Nexus du jeu est invalide.".into());
     }
-    let endpoint = match feed.as_str() {
-        "updated" => "latest_updated",
-        "trending" | "popular" | "downloaded" => "trending",
-        _ => "latest_added",
-    };
-    let (payload, headers) =
-        nexus_api_json(&format!("games/{domain}/mods/{endpoint}.json")).await?;
+    let query = query
+        .trim()
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(120)
+        .collect::<String>();
+    let page = page.clamp(1, 100_000);
+    let page_size = page_size.clamp(10, 60);
+    const CATALOG_QUERY: &str = r#"
+        query ZailonMods($filter: ModsFilter, $sort: [ModsSort!], $offset: Int, $count: Int) {
+          mods(filter: $filter, sort: $sort, offset: $offset, count: $count) {
+            nodes {
+              modId
+              name
+              author
+              summary
+              description
+              downloads
+              endorsements
+              adultContent
+              version
+              updatedAt
+              thumbnailUrl
+              thumbnailLargeUrl
+              pictureUrl
+              game { name domainName modCount }
+            }
+            nodesCount
+            totalCount
+          }
+        }
+    "#;
+    let variables = nexus_catalog_variables(&domain, &query, &sort, page, page_size, include_adult);
+    let (payload, headers) = nexus_graphql_json(CATALOG_QUERY, variables).await?;
     refresh_nexus_status_from_headers(&app, &state, &headers);
-    let rows = payload
-        .as_array()
-        .or_else(|| payload.get("mods").and_then(|value| value.as_array()))
+    let page_payload = payload
+        .get("data")
+        .and_then(|data| data.get("mods"))
+        .ok_or_else(|| "Nexus n'a renvoyé aucune page de catalogue exploitable.".to_string())?;
+    let rows = page_payload
+        .get("nodes")
+        .and_then(|value| value.as_array())
         .cloned()
         .unwrap_or_default();
-    Ok(rows
+    let results = rows
         .iter()
-        .filter_map(|row| {
-            let mod_id = nexus_json_u64(row, &["mod_id", "game_scoped_id", "id"]);
-            let name = nexus_json_string(row, &["name"]);
-            if mod_id == 0 || name.is_empty() {
-                return None;
+        .filter_map(|row| nexus_mod_from_graphql(row, &domain))
+        .collect::<Vec<_>>();
+    let total_results = nexus_json_u64(page_payload, &["totalCount"]);
+    let total_pages = if total_results == 0 {
+        1
+    } else {
+        total_results.saturating_add(page_size - 1) / page_size
+    };
+    let provider_game_total_mods = rows.first().and_then(|row| {
+        row.get("game")
+            .map(|game| nexus_json_u64(game, &["modCount"]))
+            .filter(|value| *value > 0)
+    });
+    Ok(NexusCatalogPage {
+        pagination: NexusPaginationMetadata {
+            page,
+            page_size,
+            total_results,
+            total_pages,
+            loaded_result_count: results.len() as u64,
+            provider_game_total_mods,
+            provider_game_total_collections: None,
+            has_previous: page > 1,
+            has_next: page < total_pages,
+            total_is_exact: true,
+        },
+        results,
+        source: "nexus-graphql-v2".into(),
+        fetched_at: unix_timestamp(),
+    })
+}
+
+#[tauri::command]
+async fn nexus_catalog_collections(
+    app: AppHandle,
+    state: State<'_, ProviderConnectionCache>,
+    game_domain: String,
+    query: String,
+    sort: String,
+    page: u64,
+    page_size: u64,
+    include_adult: bool,
+) -> Result<NexusCollectionPage, String> {
+    let domain = game_domain.trim().to_ascii_lowercase();
+    if !valid_nexus_domain(&domain) {
+        return Err("Le domaine Nexus du jeu est invalide.".into());
+    }
+    let query = query
+        .trim()
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(120)
+        .collect::<String>();
+    let page = page.clamp(1, 100_000);
+    let page_size = page_size.clamp(10, 60);
+    const COLLECTIONS_QUERY: &str = r#"
+        query ZailonCollections($filter: CollectionsSearchFilter, $sort: [CollectionsSearchSort!], $offset: Int, $count: Int) {
+          collectionsV2(filter: $filter, sort: $sort, offset: $offset, count: $count) {
+            nodes {
+              id
+              slug
+              name
+              summary
+              endorsements
+              totalDownloads
+              uniqueDownloads
+              updatedAt
+              adultContent
+              collectionSchemaId
+              game { name domainName collectionCount }
+              user { name }
+              tileImage { url thumbnailUrl(size: med) }
+              headerImage { url thumbnailUrl(size: large) }
+              latestPublishedRevision {
+                id
+                revisionNumber
+                modCount
+                totalSize
+                updatedAt
+                adultContent
+                collectionSchemaId
+                gameVersions { reference }
+              }
             }
-            Some(NexusCatalogMod {
-                id: format!("nexus-{domain}-{mod_id}"),
-                mod_id,
-                name,
-                author: nexus_json_string(row, &["author", "uploaded_by", "user_name"]),
-                game: nexus_json_string(row, &["game_name", "game"])
-                    .trim()
-                    .to_string(),
-                game_domain: domain.clone(),
-                thumbnail: safe_remote_image(nexus_json_string(
-                    row,
-                    &["picture_url", "thumbnail_url"],
-                )),
-                downloads: nexus_json_u64(row, &["mod_downloads", "downloads", "download_count"]),
-                endorsements: nexus_json_u64(row, &["endorsement_count", "endorsements"]),
-                description: nexus_json_string(row, &["summary", "description"]),
-                version: Some(nexus_json_string(row, &["version"]))
-                    .filter(|value| !value.is_empty()),
-                updated_at: Some(nexus_json_u64(row, &["updated_timestamp", "updated_at"]))
-                    .filter(|value| *value > 0),
-                nsfw: nexus_json_bool(row, &["contains_adult_content", "adult_content", "nsfw"]),
-                url: format!("https://www.nexusmods.com/{domain}/mods/{mod_id}"),
-            })
+            nodesCount
+            totalCount
+          }
+        }
+    "#;
+    let variables =
+        nexus_collection_variables(&domain, &query, &sort, page, page_size, include_adult);
+    let (payload, headers) = nexus_graphql_json(COLLECTIONS_QUERY, variables).await?;
+    refresh_nexus_status_from_headers(&app, &state, &headers);
+    let page_payload = payload
+        .get("data")
+        .and_then(|data| data.get("collectionsV2"))
+        .ok_or_else(|| "Nexus n'a renvoyé aucune page de Collections exploitable.".to_string())?;
+    let rows = page_payload
+        .get("nodes")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let results = rows
+        .iter()
+        .filter_map(|node| nexus_collection_from_graphql(node, &domain))
+        .collect::<Vec<_>>();
+    let total_results = nexus_json_u64(page_payload, &["totalCount"]);
+    let total_pages = if total_results == 0 {
+        1
+    } else {
+        total_results.saturating_add(page_size - 1) / page_size
+    };
+    let provider_game_total_collections = results
+        .first()
+        .and_then(|item| item.provider_game_collection_count);
+    Ok(NexusCollectionPage {
+        pagination: NexusPaginationMetadata {
+            page,
+            page_size,
+            total_results,
+            total_pages,
+            loaded_result_count: results.len() as u64,
+            provider_game_total_mods: None,
+            provider_game_total_collections,
+            has_previous: page > 1,
+            has_next: page < total_pages,
+            total_is_exact: true,
+        },
+        results,
+        source: "nexus-graphql-v2-collections".into(),
+        fetched_at: unix_timestamp(),
+    })
+}
+
+fn valid_collection_slug(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+}
+
+async fn nexus_collection_detail_value(
+    game_domain: &str,
+    slug: &str,
+    revision: Option<u64>,
+    include_adult: bool,
+) -> Result<(NexusCollectionDetail, reqwest::header::HeaderMap), String> {
+    if !valid_nexus_domain(game_domain) || !valid_collection_slug(slug) {
+        return Err("La référence de Collection Nexus est invalide.".into());
+    }
+    const DETAIL_QUERY: &str = r#"
+        query ZailonCollectionDetail($slug: String, $revision: Int, $viewAdultContent: Boolean, $domainName: String) {
+          collection(slug: $slug, viewAdultContent: $viewAdultContent, domainName: $domainName) {
+            id
+            slug
+            name
+            summary
+            description
+            endorsements
+            totalDownloads
+            uniqueDownloads
+            updatedAt
+            adultContent
+            collectionSchemaId
+            game { name domainName collectionCount }
+            user { name }
+            tileImage { url thumbnailUrl(size: med) }
+            headerImage { url thumbnailUrl(size: large) }
+            latestPublishedRevision {
+              id
+              revisionNumber
+              modCount
+              totalSize
+              updatedAt
+              adultContent
+              collectionSchemaId
+              gameVersions { reference }
+            }
+          }
+          collectionRevision(slug: $slug, revision: $revision, viewAdultContent: $viewAdultContent, domainName: $domainName) {
+            id
+            revisionNumber
+            revisionStatus
+            totalSize
+            assetsSizeBytes
+            modCount
+            collectionSchemaId
+            collectionSchema { version }
+            installationInfo
+            adultContent
+            gameVersions { reference }
+            externalResources {
+              id
+              name
+              author
+              optional
+              resourceType
+              resourceUrl
+              fileExpression
+            }
+            modFiles {
+              id
+              fileId
+              gameId
+              optional
+              updatePolicy
+              version
+              file {
+                fileId
+                modId
+                name
+                version
+                sizeInBytes
+                category
+                scannedV2
+                mod { name author game { domainName } }
+              }
+            }
+          }
+        }
+    "#;
+    let revision_value = revision.and_then(|value| i64::try_from(value).ok());
+    let (payload, headers) = nexus_graphql_json(
+        DETAIL_QUERY,
+        serde_json::json!({
+            "slug": slug,
+            "revision": revision_value,
+            "viewAdultContent": include_adult,
+            "domainName": game_domain
+        }),
+    )
+    .await?;
+    let data = payload
+        .get("data")
+        .ok_or_else(|| "La fiche Collection Nexus est absente.".to_string())?;
+    let collection_node = data
+        .get("collection")
+        .ok_or_else(|| "La Collection Nexus est introuvable.".to_string())?;
+    let mut collection = nexus_collection_from_graphql(collection_node, game_domain)
+        .ok_or_else(|| "La fiche Collection Nexus est incomplète.".to_string())?;
+    let revision_node = data
+        .get("collectionRevision")
+        .ok_or_else(|| "La révision Nexus demandée est introuvable.".to_string())?;
+    let revision_id = nexus_json_u64(revision_node, &["id"]);
+    let revision_number = nexus_json_u64(revision_node, &["revisionNumber"]);
+    if revision_id == 0 || revision_number == 0 {
+        return Err("La révision Nexus n'a pas d'identifiant stable.".into());
+    }
+    collection.description = nexus_json_string(collection_node, &["description"]);
+    collection.latest_revision_id = Some(revision_id);
+    collection.latest_revision_number = Some(revision_number);
+    collection.mod_count = nexus_json_u64(revision_node, &["modCount"]);
+    collection.total_size = nexus_json_u64(revision_node, &["totalSize"]);
+    let game_versions = revision_node
+        .get("gameVersions")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| nexus_json_string(item, &["reference"]))
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
         })
-        .collect())
+        .unwrap_or_default();
+    collection.game_versions = game_versions.clone();
+    let rows = revision_node
+        .get("modFiles")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let entries = rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let file = row.get("file").unwrap_or(&serde_json::Value::Null);
+            let mod_node = file.get("mod").unwrap_or(&serde_json::Value::Null);
+            let game = mod_node
+                .get("game")
+                .unwrap_or(&serde_json::Value::Null);
+            let domain = nexus_json_string(game, &["domainName"]);
+            let nexus_game_domain = if valid_nexus_domain(&domain) {
+                domain
+            } else {
+                game_domain.to_string()
+            };
+            let mod_id = nexus_json_u64(file, &["modId"]);
+            let file_id = nexus_json_u64(row, &["fileId"]).max(nexus_json_u64(file, &["fileId"]));
+            let scan = nexus_json_string(file, &["scannedV2"]);
+            let category = nexus_json_string(file, &["category"]);
+            let available = mod_id > 0
+                && file_id > 0
+                && !matches!(category.as_str(), "REMOVED")
+                && !matches!(scan.as_str(), "QUARANTINED" | "MOD_DOES_NOT_EXIST" | "FILE_NOT_FOUND");
+            NexusCollectionEntry {
+                collection_entry_id: nexus_json_string(row, &["id"]),
+                nexus_game_domain: nexus_game_domain.clone(),
+                mod_id,
+                file_id,
+                expected_version: nexus_json_string(row, &["version"]),
+                display_name: nexus_json_string(mod_node, &["name"]),
+                file_name: nexus_json_string(file, &["name"]),
+                author: nexus_json_string(mod_node, &["author"]),
+                required: !nexus_json_bool(row, &["optional"]),
+                install_order: index as u64,
+                priority: index as i64,
+                update_policy: nexus_json_string(row, &["updatePolicy"]),
+                expected_size: Some(nexus_json_u64(file, &["sizeInBytes"]))
+                    .filter(|value| *value > 0),
+                virus_scan_status: scan,
+                source_url: if mod_id > 0 {
+                    format!(
+                        "https://www.nexusmods.com/{nexus_game_domain}/mods/{mod_id}?tab=files&file_id={file_id}"
+                    )
+                } else {
+                    String::new()
+                },
+                status: if available { "Ready" } else { "Unavailable" }.into(),
+                local_path: None,
+            }
+        })
+        .collect::<Vec<_>>();
+    let external_requirements = revision_node
+        .get("externalResources")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| {
+                    let raw_url = nexus_json_string(item, &["resourceUrl"]);
+                    let resource_url = url::Url::parse(&raw_url)
+                        .ok()
+                        .filter(|url| url.scheme() == "https" && url.host_str().is_some())
+                        .map(|url| url.to_string());
+                    NexusExternalRequirement {
+                        id: nexus_json_u64(item, &["id"]),
+                        name: nexus_json_string(item, &["name"]),
+                        author: nexus_json_string(item, &["author"]),
+                        required: !nexus_json_bool(item, &["optional"]),
+                        resource_type: nexus_json_string(item, &["resourceType"]),
+                        resource_url,
+                        file_expression: nexus_json_string(item, &["fileExpression"]),
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let schema_version = revision_node
+        .get("collectionSchema")
+        .map(|value| nexus_json_string(value, &["version"]))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown".into());
+    let installation_info = nexus_json_string(revision_node, &["installationInfo"]);
+    let mut unsupported_instructions = Vec::new();
+    let mut warnings = Vec::new();
+    if schema_version != "1" {
+        unsupported_instructions.push(format!(
+            "Le schéma Collection {schema_version} n'est pas interprété par le moteur déclaratif ZAILON."
+        ));
+    }
+    if !installation_info.is_empty() {
+        unsupported_instructions.push(
+            "La révision contient des instructions d'installation destinées au gestionnaire recommandé ; elles nécessitent une validation humaine.".into(),
+        );
+    }
+    if external_requirements
+        .iter()
+        .any(|item| item.required && item.resource_type != "direct")
+    {
+        unsupported_instructions.push(
+            "Au moins une ressource externe obligatoire demande une acquisition manuelle.".into(),
+        );
+    }
+    let unavailable_required = entries
+        .iter()
+        .filter(|entry| entry.required && entry.status == "Unavailable")
+        .count();
+    if unavailable_required > 0 {
+        warnings.push(format!(
+            "{unavailable_required} fichier(s) obligatoire(s) sont indisponibles ; le profil ne pourra pas devenir Ready."
+        ));
+    }
+    let assets_size_bytes = nexus_json_u64(revision_node, &["assetsSizeBytes"]);
+    let total_size = nexus_json_u64(revision_node, &["totalSize"]);
+    Ok((
+        NexusCollectionDetail {
+            collection,
+            revision_id,
+            revision_number,
+            revision_status: nexus_json_string(revision_node, &["revisionStatus", "status"]),
+            collection_schema_version: schema_version,
+            mod_count: nexus_json_u64(revision_node, &["modCount"]),
+            total_size,
+            assets_size_bytes,
+            temporary_bytes: total_size
+                .saturating_add(assets_size_bytes)
+                .saturating_mul(2),
+            installation_info,
+            adult: nexus_json_bool(revision_node, &["adultContent"]),
+            game_versions,
+            entries,
+            external_requirements,
+            unsupported_instructions,
+            warnings,
+        },
+        headers,
+    ))
+}
+
+#[tauri::command]
+async fn nexus_collection_detail(
+    app: AppHandle,
+    state: State<'_, ProviderConnectionCache>,
+    game_domain: String,
+    slug: String,
+    revision: Option<u64>,
+    include_adult: bool,
+) -> Result<NexusCollectionDetail, String> {
+    let domain = game_domain.trim().to_ascii_lowercase();
+    let slug = slug.trim().to_ascii_lowercase();
+    let (detail, headers) =
+        nexus_collection_detail_value(&domain, &slug, revision, include_adult).await?;
+    refresh_nexus_status_from_headers(&app, &state, &headers);
+    Ok(detail)
+}
+
+fn collection_installs_root(app: &AppHandle, game_id: &str) -> Result<PathBuf, String> {
+    Ok(update_data_root(app)?
+        .join("games")
+        .join(safe_game_id(game_id)?)
+        .join("collection-installs"))
+}
+
+fn collection_install_plan_path(
+    app: &AppHandle,
+    game_id: &str,
+    install_id: &str,
+) -> Result<PathBuf, String> {
+    Ok(collection_installs_root(app, game_id)?
+        .join(safe_game_id(install_id)?)
+        .join("plan.json"))
+}
+
+fn read_collection_install_plan(path: &Path) -> Result<CollectionInstallPlan, String> {
+    serde_json::from_slice(&fs::read(path).map_err(to_error)?).map_err(to_error)
+}
+
+fn write_collection_install_plan(path: &Path, plan: &CollectionInstallPlan) -> Result<(), String> {
+    write_json_atomic(path, &serde_json::to_value(plan).map_err(to_error)?)
+}
+
+fn has_exact_staged_nexus_file(
+    app: &AppHandle,
+    game_id: &str,
+    game_domain: &str,
+    mod_id: u64,
+    file_id: u64,
+) -> bool {
+    let Ok(root) = staged_mods_root(app, game_id) else {
+        return false;
+    };
+    fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .any(|entry| {
+            let Ok(payload) = fs::read(entry.path().join("manifest.json")) else {
+                return false;
+            };
+            let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&payload) else {
+                return false;
+            };
+            nexus_json_string(&manifest, &["nexusGameDomain"]).eq_ignore_ascii_case(game_domain)
+                && nexus_json_u64(&manifest, &["nexusModId"]) == mod_id
+                && nexus_json_u64(&manifest, &["nexusFileId"]) == file_id
+        })
+}
+
+#[tauri::command]
+async fn prepare_nexus_collection_install(
+    app: AppHandle,
+    provider_state: State<'_, ProviderConnectionCache>,
+    task_state: State<'_, BackgroundTaskRegistry>,
+    game_id: String,
+    install_id: String,
+    profile: serde_json::Value,
+    game_domain: String,
+    slug: String,
+    revision: Option<u64>,
+    include_adult: bool,
+) -> Result<PreparedCollectionInstall, String> {
+    let game_id = safe_game_id(&game_id)?.to_string();
+    let install_id = safe_game_id(&install_id)?.to_string();
+    let profile_id = profile
+        .get("id")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "Le nouveau profil Collection n'a pas d'identifiant.".to_string())?
+        .to_string();
+    safe_game_id(&profile_id)?;
+    if profile.get("gameId").and_then(|value| value.as_str()) != Some(game_id.as_str()) {
+        return Err("Le profil Collection ne correspond pas au jeu cible.".into());
+    }
+    if profile
+        .get("modStates")
+        .and_then(|value| value.as_object())
+        .is_none()
+    {
+        return Err("Le profil Collection doit contenir un état de mods explicite.".into());
+    }
+    let profile_name = profile
+        .get("name")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 160)
+        .ok_or_else(|| "Le nom du profil Collection est invalide.".to_string())?
+        .to_string();
+    let domain = game_domain.trim().to_ascii_lowercase();
+    let slug = slug.trim().to_ascii_lowercase();
+    let (detail, detail_headers) =
+        nexus_collection_detail_value(&domain, &slug, revision, include_adult).await?;
+    refresh_nexus_status_from_headers(&app, &provider_state, &detail_headers);
+
+    let (validation, validation_headers) = nexus_api_json("users/validate.json").await?;
+    refresh_nexus_status_from_headers(&app, &provider_state, &validation_headers);
+    let capabilities = nexus_capabilities_from_validation(&validation, &validation_headers);
+    let premium_automation = capabilities.supports_automatic_collection_downloads == Some(true);
+
+    let mut entries = detail.entries.clone();
+    let mut already_downloaded = 0u64;
+    let mut unavailable_required = 0u64;
+    let mut waiting_for_user = 0u64;
+    for entry in &mut entries {
+        if entry.status == "Unavailable" {
+            if entry.required {
+                unavailable_required += 1;
+            }
+            continue;
+        }
+        if has_exact_staged_nexus_file(
+            &app,
+            &game_id,
+            &entry.nexus_game_domain,
+            entry.mod_id,
+            entry.file_id,
+        ) {
+            entry.status = "Downloaded".into();
+            already_downloaded += 1;
+        } else if premium_automation {
+            entry.status = "Queued".into();
+        } else {
+            entry.status = "WaitingForUser".into();
+            waiting_for_user += 1;
+        }
+    }
+
+    let mut warnings = detail.warnings.clone();
+    warnings.extend(detail.unsupported_instructions.clone());
+    if waiting_for_user > 0 {
+        warnings.push(format!(
+            "{waiting_for_user} fichier(s) attendent une confirmation sur la page Nexus officielle."
+        ));
+    }
+    if unavailable_required > 0 {
+        warnings.push(format!(
+            "{unavailable_required} fichier(s) obligatoire(s) sont indisponibles."
+        ));
+    }
+    if already_downloaded > 0 {
+        warnings.push(format!(
+            "{already_downloaded} fichier(s) exact(s) sont déjà présents dans le store ZAILON."
+        ));
+    }
+    let profile_state = if unavailable_required > 0
+        || !detail.unsupported_instructions.is_empty()
+        || detail
+            .external_requirements
+            .iter()
+            .any(|item| item.required)
+    {
+        "NeedsAttention"
+    } else {
+        "Preparing"
+    };
+    let now = unix_timestamp();
+    let plan = CollectionInstallPlan {
+        schema_version: 1,
+        install_id: install_id.clone(),
+        collection_id: detail.collection.id,
+        collection_slug: detail.collection.slug.clone(),
+        collection_name: detail.collection.name.clone(),
+        revision_id: detail.revision_id,
+        revision_number: detail.revision_number,
+        game_id: game_id.clone(),
+        game_domain: domain.clone(),
+        profile_id: profile_id.clone(),
+        profile_name: profile_name.clone(),
+        profile_state: profile_state.into(),
+        entries,
+        external_requirements: detail.external_requirements.clone(),
+        download_bytes: detail.total_size,
+        temporary_bytes: detail.temporary_bytes,
+        final_additional_bytes: detail.total_size.saturating_add(detail.assets_size_bytes),
+        account_capabilities: capabilities,
+        warnings,
+        created_at: now,
+        updated_at: now,
+        open_next_required_page: waiting_for_user > 0,
+        automatic_execution: false,
+    };
+    let mut persisted_profile = profile;
+    if let Some(object) = persisted_profile.as_object_mut() {
+        object.insert("locked".into(), serde_json::json!(true));
+        object.insert("collectionState".into(), serde_json::json!(profile_state));
+        object.insert(
+            "collectionMetadata".into(),
+            serde_json::json!({
+                "installId": install_id.clone(),
+                "collectionId": detail.collection.id,
+                "slug": detail.collection.slug.clone(),
+                "installedRevisionId": serde_json::Value::Null,
+                "latestKnownRevisionId": detail.revision_id,
+                "sourceGameDomain": domain,
+                "selections": [],
+                "localOverrides": []
+            }),
+        );
+    }
+
+    let plan_path = collection_install_plan_path(&app, &game_id, &install_id)?;
+    if plan_path.exists() {
+        return Err("Ce plan d'installation Collection existe déjà.".into());
+    }
+    write_collection_install_plan(&plan_path, &plan)?;
+    let profile_paths =
+        match sync_profile_state_inner(&app, &game_id, &profile_id, &persisted_profile) {
+            Ok(paths) => paths,
+            Err(error) => {
+                let _ = fs::remove_file(&plan_path);
+                return Err(format!(
+                    "Création du profil Collection annulée et restaurée : {error}"
+                ));
+            }
+        };
+
+    let task_id = format!("collection-{install_id}");
+    register_background_task(
+        &app,
+        task_state.inner(),
+        task_id.clone(),
+        "collection-install",
+        &format!("Collection Nexus · {}", detail.collection.name),
+        plan.entries.len() as u64,
+    )?;
+    finish_background_task(
+        &app,
+        task_state.inner(),
+        None,
+        &task_id,
+        "awaiting_user_decision",
+        if premium_automation {
+            "Plan vérifié. La file Premium attend votre confirmation de démarrage.".into()
+        } else {
+            "Plan vérifié. Les téléchargements gratuits attendent les confirmations Nexus officielles.".into()
+        },
+        None,
+    );
+    let _ = app.emit("collection-install-changed", plan.clone());
+    Ok(PreparedCollectionInstall {
+        plan,
+        profile: persisted_profile,
+        profile_paths,
+        plan_path: plan_path.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+fn list_collection_install_plans(
+    app: AppHandle,
+    game_id: String,
+) -> Result<Vec<CollectionInstallPlan>, String> {
+    let root = collection_installs_root(&app, &game_id)?;
+    let mut plans = fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| read_collection_install_plan(&entry.path().join("plan.json")).ok())
+        .collect::<Vec<_>>();
+    plans.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+    Ok(plans)
+}
+
+#[tauri::command]
+fn update_collection_install(
+    app: AppHandle,
+    game_id: String,
+    install_id: String,
+    action: String,
+) -> Result<CollectionInstallPlan, String> {
+    let path = collection_install_plan_path(&app, &game_id, &install_id)?;
+    let mut plan = read_collection_install_plan(&path)?;
+    match action.as_str() {
+        "pause" => {
+            if !matches!(plan.profile_state.as_str(), "Ready" | "Cancelled") {
+                plan.profile_state = "Paused".into();
+                plan.automatic_execution = false;
+            }
+        }
+        "resume" => {
+            if plan.profile_state == "Paused" {
+                plan.profile_state = if plan
+                    .entries
+                    .iter()
+                    .any(|entry| entry.status == "WaitingForUser")
+                {
+                    "NeedsAttention".into()
+                } else {
+                    "Preparing".into()
+                };
+            }
+        }
+        "cancel" => {
+            plan.profile_state = "Cancelled".into();
+            plan.automatic_execution = false;
+        }
+        _ => return Err("Action de plan Collection inconnue.".into()),
+    }
+    plan.updated_at = unix_timestamp();
+    write_collection_install_plan(&path, &plan)?;
+    let _ = app.emit("collection-install-changed", plan.clone());
+    Ok(plan)
 }
 
 fn parse_shortcut_launch_url(raw: &str) -> Result<ShortcutLaunchRequest, String> {
@@ -6171,8 +8151,411 @@ fn parse_nxm_url(raw: &str) -> Result<NxmRequest, String> {
 }
 
 #[cfg(desktop)]
+fn collection_plan_paths(app: &AppHandle) -> Vec<PathBuf> {
+    let Ok(games_root) = update_data_root(app).map(|root| root.join("games")) else {
+        return Vec::new();
+    };
+    fs::read_dir(games_root)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|game| game.path().join("collection-installs"))
+        .filter(|root| root.is_dir())
+        .flat_map(|root| {
+            fs::read_dir(root)
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .map(|entry| entry.path().join("plan.json"))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[cfg(desktop)]
+fn update_collection_entry_download(
+    app: &AppHandle,
+    request: &NxmRequest,
+    status: &str,
+    local_path: Option<&Path>,
+) {
+    for plan_path in collection_plan_paths(app) {
+        let Ok(mut plan) = read_collection_install_plan(&plan_path) else {
+            continue;
+        };
+        let mut changed = false;
+        for entry in &mut plan.entries {
+            if entry
+                .nexus_game_domain
+                .eq_ignore_ascii_case(&request.game_domain)
+                && entry.mod_id == request.mod_id
+                && entry.file_id == request.file_id
+                && entry.status != "Unavailable"
+            {
+                entry.status = status.into();
+                entry.local_path = local_path.map(|path| path.to_string_lossy().to_string());
+                changed = true;
+            }
+        }
+        if changed {
+            plan.profile_state = if status == "Failed" {
+                "NeedsAttention"
+            } else if plan.entries.iter().all(|entry| {
+                matches!(
+                    entry.status.as_str(),
+                    "Downloaded" | "Installed" | "Skipped" | "Unavailable"
+                )
+            }) {
+                "NeedsAttention"
+            } else {
+                "Downloading"
+            }
+            .into();
+            plan.updated_at = unix_timestamp();
+            let _ = write_collection_install_plan(&plan_path, &plan);
+            let _ = app.emit("collection-install-changed", plan);
+        }
+    }
+}
+
+#[cfg(desktop)]
+async fn download_collection_nxm_file(
+    app: AppHandle,
+    request: NxmRequest,
+) -> Result<PathBuf, String> {
+    if request
+        .expires
+        .is_some_and(|expires| expires <= unix_timestamp())
+    {
+        update_collection_entry_download(&app, &request, "Failed", None);
+        return Err("Le lien NXM a expiré ; ouvrez de nouveau la page Nexus officielle.".into());
+    }
+    let mut query = url::form_urlencoded::Serializer::new(String::new());
+    if let Some(key) = request.key.as_deref() {
+        query.append_pair("key", key);
+    }
+    if let Some(expires) = request.expires {
+        query.append_pair("expires", &expires.to_string());
+    }
+    if let Some(user_id) = request.user_id {
+        query.append_pair("user_id", &user_id.to_string());
+    }
+    let query = query.finish();
+    let endpoint = format!(
+        "games/{}/mods/{}/files/{}/download_link.json{}{}",
+        request.game_domain,
+        request.mod_id,
+        request.file_id,
+        if query.is_empty() { "" } else { "?" },
+        query
+    );
+    let (payload, _) = nexus_api_json(&endpoint).await?;
+    let uri = payload
+        .as_array()
+        .and_then(|items| items.first())
+        .and_then(|item| {
+            item.get("URI")
+                .or_else(|| item.get("uri"))
+                .and_then(|value| value.as_str())
+        })
+        .ok_or_else(|| "Nexus n'a fourni aucun serveur autorisé pour ce fichier.".to_string())?;
+    let download_url = url::Url::parse(uri)
+        .ok()
+        .filter(|url| {
+            url.scheme() == "https"
+                && url.host_str().is_some_and(|host| {
+                    let host = host.to_ascii_lowercase();
+                    host == "nexusmods.com"
+                        || host.ends_with(".nexusmods.com")
+                        || host == "nexus-cdn.com"
+                        || host.ends_with(".nexus-cdn.com")
+                })
+        })
+        .ok_or_else(|| {
+            "Nexus a fourni une destination de téléchargement non autorisée.".to_string()
+        })?;
+
+    let expected = collection_plan_paths(&app)
+        .into_iter()
+        .filter_map(|path| read_collection_install_plan(&path).ok())
+        .flat_map(|plan| plan.entries.into_iter())
+        .find(|entry| {
+            entry
+                .nexus_game_domain
+                .eq_ignore_ascii_case(&request.game_domain)
+                && entry.mod_id == request.mod_id
+                && entry.file_id == request.file_id
+        });
+    let safe_name = expected
+        .as_ref()
+        .map(|entry| safe_archive_component(&entry.file_name))
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| format!("nexus-{}-{}.archive", request.mod_id, request.file_id));
+    let cache = update_data_root(&app)?
+        .join("collection-download-cache")
+        .join(&request.game_domain)
+        .join(request.mod_id.to_string())
+        .join(request.file_id.to_string());
+    fs::create_dir_all(&cache).map_err(to_error)?;
+    let output = cache.join(safe_name);
+    if output.is_file() {
+        let size = fs::metadata(&output).map_err(to_error)?.len();
+        if size > 0
+            && expected
+                .as_ref()
+                .and_then(|entry| entry.expected_size)
+                .map_or(true, |expected_size| expected_size == size)
+        {
+            update_collection_entry_download(&app, &request, "Downloaded", Some(&output));
+            return Ok(output);
+        }
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60 * 60))
+        .user_agent(format!("ZAILON/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|_| "Impossible de préparer le téléchargement Nexus.".to_string())?;
+    let mut response = client
+        .get(download_url)
+        .send()
+        .await
+        .map_err(|_| "Le téléchargement Nexus a échoué.".to_string())?
+        .error_for_status()
+        .map_err(|_| "Le serveur de fichiers Nexus a refusé le téléchargement.".to_string())?;
+    const MAX_COLLECTION_FILE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+    if response
+        .content_length()
+        .is_some_and(|size| size > MAX_COLLECTION_FILE_BYTES)
+    {
+        return Err("Le fichier Nexus dépasse la limite de sécurité de 8 Gio.".into());
+    }
+    let partial = output.with_extension(format!("part-{}", unix_timestamp()));
+    let mut file = fs::File::create(&partial).map_err(to_error)?;
+    let mut downloaded = 0u64;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| "Le flux Nexus a été interrompu.".to_string())?
+    {
+        downloaded = downloaded.saturating_add(chunk.len() as u64);
+        if downloaded > MAX_COLLECTION_FILE_BYTES {
+            let _ = fs::remove_file(&partial);
+            return Err("Le fichier Nexus dépasse la limite de sécurité de 8 Gio.".into());
+        }
+        file.write_all(&chunk).map_err(to_error)?;
+    }
+    drop(file);
+    if downloaded == 0 {
+        let _ = fs::remove_file(&partial);
+        return Err("Nexus a renvoyé un fichier vide.".into());
+    }
+    if let Some(expected_size) = expected.and_then(|entry| entry.expected_size) {
+        if expected_size != downloaded {
+            let _ = fs::remove_file(&partial);
+            return Err(format!(
+                "Taille Nexus inattendue : {downloaded} octets reçus, {expected_size} attendus."
+            ));
+        }
+    }
+    if output.exists() {
+        fs::remove_file(&output).map_err(to_error)?;
+    }
+    fs::rename(&partial, &output).map_err(to_error)?;
+    update_collection_entry_download(&app, &request, "Downloaded", Some(&output));
+    Ok(output)
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+async fn start_collection_install(
+    app: AppHandle,
+    state: State<'_, ProviderConnectionCache>,
+    game_id: String,
+    install_id: String,
+) -> Result<CollectionInstallPlan, String> {
+    let plan_path = collection_install_plan_path(&app, &game_id, &install_id)?;
+    let mut plan = read_collection_install_plan(&plan_path)?;
+    if plan.profile_state == "Cancelled" {
+        return Err("Cette installation Collection a été annulée.".into());
+    }
+    if plan.automatic_execution && plan.profile_state == "Downloading" {
+        return Err("Les téléchargements Premium sont déjà en cours.".into());
+    }
+    let (validation, headers) = nexus_api_json("users/validate.json").await?;
+    refresh_nexus_status_from_headers(&app, &state, &headers);
+    let capabilities = nexus_capabilities_from_validation(&validation, &headers);
+    if capabilities.supports_automatic_collection_downloads != Some(true) {
+        return Err(
+            "Le compte Nexus connecté ne permet pas les téléchargements automatiques de Collections. Utilisez les validations officielles Nexus.".into(),
+        );
+    }
+    plan.account_capabilities = capabilities;
+    for entry in &mut plan.entries {
+        if matches!(entry.status.as_str(), "WaitingForUser" | "Failed") {
+            entry.status = "Queued".into();
+        }
+    }
+    if !plan.entries.iter().any(|entry| entry.status == "Queued") {
+        return Err("Aucun fichier Nexus ne reste dans la file Premium.".into());
+    }
+    plan.profile_state = "Downloading".into();
+    plan.automatic_execution = true;
+    plan.open_next_required_page = false;
+    plan.updated_at = unix_timestamp();
+    write_collection_install_plan(&plan_path, &plan)?;
+    let _ = app.emit("collection-install-changed", plan.clone());
+
+    let worker_app = app.clone();
+    let worker_plan_path = plan_path.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let Ok(current) = read_collection_install_plan(&worker_plan_path) else {
+                return;
+            };
+            if !current.automatic_execution
+                || matches!(current.profile_state.as_str(), "Paused" | "Cancelled")
+            {
+                return;
+            }
+            let Some(entry) = current
+                .entries
+                .iter()
+                .find(|entry| entry.status == "Queued")
+                .cloned()
+            else {
+                let mut completed = current;
+                completed.automatic_execution = false;
+                completed.profile_state = "NeedsAttention".into();
+                completed.updated_at = unix_timestamp();
+                if !completed
+                    .warnings
+                    .iter()
+                    .any(|warning| warning.contains("téléchargements sont terminés"))
+                {
+                    completed.warnings.push(
+                        "Les téléchargements sont terminés. L’analyse, le staging et les instructions de la Collection doivent encore être validés avant de marquer le profil prêt.".into(),
+                    );
+                }
+                let _ = write_collection_install_plan(&worker_plan_path, &completed);
+                let _ = worker_app.emit("collection-install-changed", completed);
+                return;
+            };
+            let request = NxmRequest {
+                raw_url: String::new(),
+                request_id: format!(
+                    "collection-{}-{}-{}",
+                    current.install_id, entry.mod_id, entry.file_id
+                ),
+                game_domain: entry.nexus_game_domain,
+                mod_id: entry.mod_id,
+                file_id: entry.file_id,
+                key: None,
+                expires: None,
+                user_id: None,
+            };
+            update_collection_entry_download(&worker_app, &request, "Downloading", None);
+            if let Err(error) =
+                download_collection_nxm_file(worker_app.clone(), request.clone()).await
+            {
+                update_collection_entry_download(&worker_app, &request, "Failed", None);
+                if let Ok(mut failed) = read_collection_install_plan(&worker_plan_path) {
+                    failed.automatic_execution = false;
+                    failed.profile_state = "NeedsAttention".into();
+                    failed.updated_at = unix_timestamp();
+                    failed.warnings.push(format!(
+                        "Téléchargement interrompu pour le fichier Nexus {} : {}",
+                        request.file_id, error
+                    ));
+                    let _ = write_collection_install_plan(&worker_plan_path, &failed);
+                    let _ = worker_app.emit("collection-install-changed", failed);
+                }
+                let _ = worker_app.emit(
+                    "collection-download-failed",
+                    serde_json::json!({
+                        "gameDomain": request.game_domain,
+                        "modId": request.mod_id,
+                        "fileId": request.file_id,
+                        "error": error
+                    }),
+                );
+                return;
+            }
+        }
+    });
+    Ok(plan)
+}
+
+#[cfg(desktop)]
+fn record_collection_nxm_match(
+    app: &AppHandle,
+    request: &NxmRequest,
+) -> Vec<PendingCollectionDownloadMatch> {
+    let mut matched = Vec::new();
+    for plan_path in collection_plan_paths(app) {
+        let Ok(mut plan) = read_collection_install_plan(&plan_path) else {
+            continue;
+        };
+        let mut changed = false;
+        for entry in &mut plan.entries {
+            if entry
+                .nexus_game_domain
+                .eq_ignore_ascii_case(&request.game_domain)
+                && entry.mod_id == request.mod_id
+                && entry.file_id == request.file_id
+                && !matches!(
+                    entry.status.as_str(),
+                    "Downloaded" | "Installed" | "Unavailable"
+                )
+            {
+                entry.status = "NxmReceived".into();
+                matched.push(PendingCollectionDownloadMatch {
+                    collection_install_id: plan.install_id.clone(),
+                    entry_id: entry.collection_entry_id.clone(),
+                    game_domain: entry.nexus_game_domain.clone(),
+                    mod_id: entry.mod_id,
+                    file_id: entry.file_id,
+                });
+                changed = true;
+            }
+        }
+        if changed {
+            plan.profile_state = "Downloading".into();
+            plan.updated_at = unix_timestamp();
+            let _ = write_collection_install_plan(&plan_path, &plan);
+            let _ = app.emit("collection-install-changed", plan);
+        }
+    }
+    matched
+}
+
+#[cfg(desktop)]
 fn enqueue_nxm(app: &AppHandle, raw: &str) {
     if let Ok(request) = parse_nxm_url(raw) {
+        let collection_matches = record_collection_nxm_match(app, &request);
+        if !collection_matches.is_empty() {
+            // Never emit or persist the raw NXM URL because it may contain
+            // short-lived credentials.
+            let _ = app.emit("collection-nxm-matched", collection_matches);
+            let worker_app = app.clone();
+            let worker_request = request.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(error) =
+                    download_collection_nxm_file(worker_app.clone(), worker_request.clone()).await
+                {
+                    update_collection_entry_download(&worker_app, &worker_request, "Failed", None);
+                    let _ = worker_app.emit(
+                        "collection-download-failed",
+                        serde_json::json!({
+                            "gameDomain": worker_request.game_domain,
+                            "modId": worker_request.mod_id,
+                            "fileId": worker_request.file_id,
+                            "error": error
+                        }),
+                    );
+                }
+            });
+            return;
+        }
         if let Ok(mut pending) = app.state::<PendingExternalInstalls>().0.lock() {
             if !pending.iter().any(|item| item.raw_url == request.raw_url) {
                 pending.push(request.clone());
@@ -6764,6 +9147,38 @@ mod tests {
     }
 
     #[test]
+    fn nexus_catalog_variables_use_real_server_page_offsets() {
+        let variables =
+            nexus_catalog_variables("cyberpunk2077", "vehicle", "downloaded", 50, 20, false);
+        assert_eq!(variables["offset"], 980);
+        assert_eq!(variables["count"], 20);
+        assert_eq!(
+            variables["filter"]["gameDomainName"][0]["value"],
+            "cyberpunk2077"
+        );
+        assert_eq!(variables["filter"]["adultContent"][0]["value"], false);
+        assert_eq!(variables["sort"][0]["downloads"]["direction"], "DESC");
+    }
+
+    #[test]
+    fn nexus_collection_variables_keep_filters_and_page_offset_separate() {
+        let variables =
+            nexus_collection_variables("cyberpunk2077", "essentials", "updated", 3, 40, true);
+        assert_eq!(variables["offset"], 80);
+        assert_eq!(variables["count"], 40);
+        assert_eq!(
+            variables["filter"]["gameDomain"][0]["value"],
+            "cyberpunk2077"
+        );
+        assert_eq!(
+            variables["filter"]["generalSearch"][0]["value"],
+            "essentials"
+        );
+        assert!(variables["filter"].get("adultContent").is_none());
+        assert_eq!(variables["sort"][0]["updatedAt"]["direction"], "DESC");
+    }
+
+    #[test]
     fn limits_resource_extensions_by_slot() {
         assert!(allowed_resource_extension("cover", "webp"));
         assert!(allowed_resource_extension("background", "svg"));
@@ -6818,6 +9233,136 @@ mod tests {
         assert!(content.join("archive/pc/mod/example.archive").is_file());
         assert!(content.join("r6/scripts/example/main.reds").is_file());
         fs::remove_dir_all(root).expect("remove layout test");
+    }
+
+    #[test]
+    fn bulk_cyberpunk_game_root_is_split_into_independent_candidates() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-cyberpunk-bulk-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(root.join("archive/pc/mod")).expect("archive root");
+        fs::create_dir_all(root.join("r6/scripts/VehicleHandling")).expect("script root");
+        fs::create_dir_all(root.join("red4ext/plugins/TweakXL")).expect("plugin root");
+        fs::write(root.join("archive/pc/mod/vehicle.archive"), b"archive").expect("archive one");
+        fs::write(root.join("archive/pc/mod/ui.archive"), b"archive").expect("archive two");
+        fs::write(root.join("r6/scripts/VehicleHandling/main.reds"), b"script")
+            .expect("redscript mod");
+        fs::write(root.join("red4ext/plugins/TweakXL/TweakXL.dll"), b"dll")
+            .expect("TweakXL plugin");
+
+        let candidates = import_candidate_roots(&root);
+        assert!(candidates.len() >= 4);
+        assert!(!candidates.iter().any(|candidate| candidate == &root));
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.ends_with("VehicleHandling")));
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.ends_with("TweakXL")));
+        fs::remove_dir_all(root).expect("remove bulk test");
+    }
+
+    #[test]
+    fn nested_cyberpunk_candidate_reports_stripped_container_and_real_paths() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-cyberpunk-root-detection-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let selected = root.join("download/redscript-v1/redscript");
+        fs::create_dir_all(selected.join("r6/scripts")).expect("scripts");
+        fs::create_dir_all(selected.join("engine/tools")).expect("tools");
+        fs::write(selected.join("engine/tools/scc.exe"), b"compiler").expect("compiler");
+        let detection = detect_candidate_root(&root.join("download"));
+        assert!(detection.detected_root.ends_with("redscript"));
+        assert!(detection
+            .relative_game_paths
+            .iter()
+            .any(|path| path == "r6"));
+        assert!(detection
+            .relative_game_paths
+            .iter()
+            .any(|path| path == "engine"));
+        assert!(!detection.stripped_segments.is_empty());
+        fs::remove_dir_all(root).expect("remove root detection test");
+    }
+
+    #[test]
+    fn stages_a_split_redscript_mod_at_its_game_relative_path() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-cyberpunk-normalized-stage-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let source = root.join("r6/scripts/VehicleHandling");
+        fs::create_dir_all(&source).expect("source");
+        fs::write(source.join("main.reds"), b"script").expect("script");
+        let content = root.join("content");
+        fs::create_dir_all(&content).expect("content");
+        let cancel = AtomicBool::new(false);
+        let mut security = test_security_context(&root, &content, "Cyberpunk 2077", "quarantine");
+        let (layout, _) =
+            stage_content(&source, &content, "Cyberpunk 2077", &cancel, &mut security)
+                .expect("stage normalized redscript");
+        assert_eq!(layout, "CyberpunkNormalizedFragment");
+        assert!(content
+            .join("r6/scripts/VehicleHandling/main.reds")
+            .is_file());
+        assert!(!content.join("mods/VehicleHandling").exists());
+        fs::remove_dir_all(root).expect("remove normalized stage test");
+    }
+
+    #[test]
+    fn detects_cyberpunk_frameworks_from_files_not_only_folder_names() {
+        assert_eq!(
+            detect_cyberpunk_framework(
+                Path::new("package"),
+                &["engine/tools/scc.exe".into(), "redscript.toml".into()]
+            ),
+            "redscript"
+        );
+        assert_eq!(
+            detect_cyberpunk_framework(
+                Path::new("package"),
+                &["red4ext/plugins/ArchiveXL/ArchiveXL.dll".into()]
+            ),
+            "ArchiveXL"
+        );
+        assert_eq!(
+            detect_cyberpunk_framework(
+                Path::new("package"),
+                &["red4ext/plugins/Example/plugin.dll".into()]
+            ),
+            "RED4ext plugin"
+        );
+    }
+
+    #[test]
+    fn repair_normalizer_removes_only_proven_cyberpunk_containers() {
+        assert_eq!(
+            cyberpunk_repair_target(Path::new("mods/redscript/r6/scripts/core.reds")),
+            Some(PathBuf::from("r6/scripts/core.reds"))
+        );
+        assert_eq!(
+            cyberpunk_repair_target(Path::new(
+                "Cyberpunk 2077/red4ext/plugins/Example/plugin.dll"
+            )),
+            Some(PathBuf::from("red4ext/plugins/Example/plugin.dll"))
+        );
+        assert_eq!(
+            cyberpunk_repair_target(Path::new("redscript/engine/tools/scc.exe")),
+            Some(PathBuf::from("engine/tools/scc.exe"))
+        );
+        assert_eq!(
+            cyberpunk_repair_target(Path::new("mods/real-redmod/info.json")),
+            None
+        );
+        assert_eq!(
+            cyberpunk_repair_target(Path::new("archive/pc/mod/already-correct.archive")),
+            None
+        );
     }
 
     #[test]
@@ -7378,6 +9923,9 @@ pub fn run() {
             toggle_mod,
             delete_mod,
             delete_staged_mod,
+            preview_cyberpunk_structure_repair,
+            apply_cyberpunk_structure_repair,
+            rollback_cyberpunk_structure_repair,
             sync_profile_state,
             apply_profile_transaction,
             profile_integrity,
@@ -7397,8 +9945,16 @@ pub fn run() {
             delete_provider_secret,
             provider_connection_statuses,
             test_provider_connection,
+            nexus_account_capabilities,
             nexus_catalog_games,
             nexus_catalog_mods,
+            nexus_catalog_collections,
+            nexus_collection_detail,
+            prepare_nexus_collection_install,
+            list_collection_install_plans,
+            update_collection_install,
+            #[cfg(desktop)]
+            start_collection_install,
             set_nxm_association,
             nxm_association_status,
             store_game_resource,

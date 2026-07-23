@@ -1,8 +1,9 @@
-import { AlertTriangle, Archive, Boxes, CheckSquare2, Copy, Download, FileArchive, FolderInput, FolderOpen, FolderPlus, Lock, MonitorDown, Plus, Radar, RefreshCw, RotateCcw, Search, ShieldAlert, Tag, Trash2, Unlock, Upload, Wrench, X } from 'lucide-react'
+import { AlertTriangle, Archive, Boxes, CheckSquare2, Copy, Download, ExternalLink, FileArchive, FolderInput, FolderOpen, FolderPlus, Lock, MonitorDown, Pause, Play, Plus, Radar, RefreshCw, RotateCcw, Search, ShieldAlert, Tag, Trash2, Unlock, Upload, Wrench, X } from 'lucide-react'
 import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
-import { BackgroundTaskSnapshot, native, pickExecutable, pickFolder, pickFolders, pickProfileArchive, resourceUrl, saveProfileArchive } from '../../lib/native'
+import { BackgroundTaskSnapshot, CollectionInstallPlan, native, pickExecutable, pickFolder, pickFolders, pickProfileArchive, resourceUrl, saveProfileArchive } from '../../lib/native'
 import { ModCard } from '../UI/ModCard'
 import { formatTime, timeAgo } from '../../utils'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
@@ -184,6 +185,39 @@ export function GamesView() {
     }
   }
 
+  const repairCyberpunkStructure = async () => {
+    try {
+      const preview = await native.previewCyberpunkStructureRepair(selectedGame.id)
+      if (!preview.items.length) {
+        window.alert(`Aucune structure Cyberpunk mal imbriquée détectée dans ${preview.packagesScanned} paquet(s).`)
+        return
+      }
+      const examples = preview.items.slice(0, 8).flatMap(item =>
+        item.moves.slice(0, 2).map(move => `${item.name}\n  ${move.from}\n  → ${move.to}`),
+      )
+      const conflicts = preview.items.reduce((sum, item) => sum + item.conflicts.length, 0)
+      const message = [
+        `${preview.items.length} paquet(s), ${preview.filesAffected} chemin(s) à réparer.`,
+        conflicts ? `${conflicts} collision(s) bloquent la réparation automatique.` : 'Aucune collision détectée.',
+        '',
+        ...examples,
+        preview.items.length > 8 ? `… ${preview.items.length - 8} paquet(s) supplémentaire(s)` : '',
+        '',
+        'Un snapshot complet sera créé avant toute modification. Appliquer cette réparation ?',
+      ].filter(Boolean).join('\n')
+      if (conflicts || !window.confirm(message)) return
+      const result = await native.applyCyberpunkStructureRepair(selectedGame.id, preview.items.map(item => item.stageId))
+      await scanMods(selectedGame.id)
+      window.alert([
+        `${result.packagesRepaired} paquet(s) réparé(s), ${result.filesMoved} fichier(s) replacé(s).`,
+        `Snapshot : ${result.snapshotPath}`,
+        `Identifiant de rollback : ${result.repairId}`,
+      ].join('\n'))
+    } catch (error) {
+      window.alert(`Réparation Cyberpunk annulée : ${String(error)}`)
+    }
+  }
+
   return <div className="flex h-full">
     <aside className="flex w-72 flex-col border-r border-white/[0.05] bg-black/10">
       <div className="flex items-center justify-between px-3 pb-2 pt-3"><span className="text-xs font-mono uppercase tracking-widest text-white/38">Bibliothèque</span><button onClick={() => void addGameFromExecutable()} title="Ajouter un jeu" className="text-white/40 hover:text-gold"><Plus size={15} /></button></div>
@@ -220,6 +254,7 @@ export function GamesView() {
         <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.05] p-3">
           <button onClick={() => setImportOpen(true)} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-ink-400"><FolderInput size={13} /> Importer des dossiers</button>
           <button onClick={() => void scanMods(selectedGame.id)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05]"><RefreshCw size={13} /> Analyser</button>
+          {selectedGame.name.toLocaleLowerCase().includes('cyberpunk') && <button onClick={() => void repairCyberpunkStructure()} className="flex items-center gap-1.5 rounded-lg border border-amber-300/18 bg-amber-300/[0.035] px-3 py-2 text-[11px] text-amber-100/68 hover:bg-amber-300/[0.07]"><Wrench size={13} />Réparer les racines Cyberpunk</button>}
           {bulkHistory.some(operation => operation.gameId === selectedGame.id && operation.undoable) && <button onClick={() => void undoLastBulkOperation()} title="Annuler la dernière opération groupée" className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]"><RotateCcw size={13} />Annuler</button>}
           <label className="flex items-center gap-2 rounded-lg border border-white/[0.08] px-2.5 text-[11px] text-white/55"><input ref={selectAllRef} type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedModIds(current => { const next = new Set(current); if (allVisibleSelected) filteredMods.forEach(mod => next.delete(mod.id)); else filteredMods.forEach(mod => next.add(mod.id)); return next })} className="accent-gold" />Tout visible <span className="text-white/30">{selectedVisible}/{filteredMods.length}</span></label>
           {availableTags.length > 0 && <select value={tagFilter} onChange={event => setTagFilter(event.target.value)} className="rounded-lg border border-white/[0.08] bg-[#101313] px-2 py-2 text-[11px] text-white/58"><option value="">Toutes les étiquettes</option>{availableTags.map(tag => <option key={tag.id} value={tag.id}>{tag.label}</option>)}</select>}
@@ -232,7 +267,7 @@ export function GamesView() {
 
       {tab === 'profiles' && <div className="flex-1 space-y-4 overflow-y-auto p-4"><div className="rounded-xl border border-gold/15 bg-gold/[0.035] p-3"><p className="text-xs font-semibold text-white/72">Profils réellement isolés</p><p className="mt-1 text-xs leading-relaxed text-white/45">« Créer vide » produit toujours 0 mod actif, sans ordre, réglage ni overwrite hérité. « Dupliquer » est la seule action qui recopie explicitement l’état du profil source. Les paquets restent dans le store immuable commun.</p></div><div className="space-y-2">{selectedGame.profiles.map(profile => <div key={profile.id} className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-3 ${profile.id === selectedProfile.id ? 'border-gold/20 bg-gold/[0.04]' : 'border-white/[0.07] bg-white/[0.02]'}`}><input value={profile.name} disabled={profile.locked} onChange={event => renameProfile(profile.id, event.target.value)} className="min-w-40 flex-1 bg-transparent text-xs font-medium text-white/78 outline-none disabled:opacity-55" /><span className="rounded-full bg-white/[0.035] px-2 py-1 text-[11px] text-white/38">{Object.keys(profile.modStates).length} référencé(s) · {resolveProfileMods(selectedGame, profile).filter(mod => mod.enabled).length} actif(s)</span>{profile.clonedFromProfileId && <span className="text-[11px] text-white/28">copie explicite</span>}<button onClick={() => void openProfileDirectory(profile.id)} title="Ouvrir le dossier racine du profil" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><FolderOpen size={13} /></button><button onClick={() => void checkProfileIntegrity(profile.id)} title="Vérifier l’intégrité" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><ShieldAlert size={13} /></button><button onClick={() => toggleProfileLock(profile.id)} title={profile.locked ? 'Déverrouiller' : 'Verrouiller'} className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white">{profile.locked ? <Lock size={13} /> : <Unlock size={13} />}</button><button onClick={() => duplicateProfile(profile.id)} title="Dupliquer explicitement" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><Copy size={13} /></button><button onClick={() => removeProfile(profile.id)} disabled={selectedGame.profiles.length < 2 || profile.isDefault || profile.locked} title="Placer le profil dans la corbeille ZAILON" className="rounded-lg p-2 text-white/30 hover:bg-red-400/10 hover:text-red-300 disabled:opacity-20"><Trash2 size={13} /></button></div>)}</div><div className="flex gap-2"><input value={profileName} onChange={event => setProfileName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { addProfile(profileName); setProfileName('') } }} placeholder="Nom du nouveau profil vide" className="flex-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[11px] text-white/70 outline-none focus:border-gold/30" /><button onClick={() => { addProfile(profileName); setProfileName('') }} className="rounded-lg bg-gold px-3 text-[11px] font-semibold text-[var(--zailon-accent-text)]">Créer vide</button></div><div className="grid gap-2 sm:grid-cols-3"><button onClick={() => void openProfileDirectory(selectedProfile.id, 'root')} className="rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-white/55">Ouvrir la racine</button><button onClick={() => void openProfileDirectory(selectedProfile.id, 'overwrite')} className="rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-white/55">Ouvrir overwrite</button><button onClick={() => void openProfileDirectory(selectedProfile.id, 'generated')} className="rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-white/55">Ouvrir generated</button></div></div>}
 
-      {tab === 'downloads' && <EmptyPanel icon={Download} title="Aucun téléchargement en attente" detail="Les installations GameBanana terminées rejoignent directement le catalogue du jeu. Les téléchargements Nexus nécessitant une action manuelle resteront listés ici dans une prochaine étape." />}
+      {tab === 'downloads' && <CollectionDownloadsPanel gameId={selectedGame.id} onOpenProfile={profileId => { void setSelectedProfile(profileId); setTab('profiles') }} />}
       {tab === 'conflicts' && <div className="flex-1 overflow-y-auto p-4">{resolvedConflicts.length ? <div><div className="mb-3 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] p-3 text-xs text-amber-100/65">TemporaryCopy déploie un seul gagnant par chemin. Sans règle explicite, le dernier mod dans l’ordre du profil gagne.</div><div className="overflow-x-auto rounded-xl border border-white/[0.07]"><table className="w-full text-left text-xs"><thead className="bg-white/[0.03] text-white/42"><tr><th className="px-3 py-2">Chemin résolu</th><th className="px-3 py-2">Fournisseurs</th><th className="px-3 py-2">Gagnant</th></tr></thead><tbody>{resolvedConflicts.map(conflict => <tr key={conflict.path} className="border-t border-white/[0.06]"><td className="max-w-sm break-all px-3 py-2 font-mono text-white/52">{conflict.path}</td><td className="px-3 py-2 text-white/45">{conflict.owners.map(owner => owner.name).join(' → ')}</td><td className="px-3 py-2"><select value={conflict.winner.id} onChange={event => setConflictWinner(conflict.path, event.target.value)} className="rounded-lg border border-white/[0.08] bg-[#101313] px-2 py-1.5 text-xs text-white/68">{conflict.owners.map(owner => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></td></tr>)}</tbody></table></div></div> : <EmptyPanel icon={ShieldAlert} title="Aucun conflit de fichiers" detail="L’analyse compare les chemins relatifs réellement fournis par chaque mod actif." />}</div>}
       {tab === 'tools' && <div className="grid flex-1 auto-rows-min gap-3 overflow-y-auto p-4 sm:grid-cols-2"><ActionCard icon={RefreshCw} title="Analyser le dossier Mods" detail="Actualise le catalogue, les tailles, les frameworks et les conflits." onClick={() => void scanMods(selectedGame.id)} /><ActionCard icon={FolderOpen} title="Ouvrir le dossier Mods" detail={selectedGame.modsPath || 'Configurez d’abord un dossier.'} disabled={!selectedGame.modsPath} onClick={() => selectedGame.modsPath && void native.openPath(selectedGame.modsPath)} /><ActionCard icon={FolderInput} title="Importer des dossiers" detail="Prévisualise les racines détectées avant toute copie." onClick={() => setImportOpen(true)} /></div>}
       {tab === 'backups' && <div className="grid flex-1 auto-rows-min gap-3 overflow-y-auto p-4 sm:grid-cols-2"><ActionCard icon={FileArchive} title="Exporter un profil léger" detail="Métadonnées, liens, versions, ordre et réglages. Aucun chemin personnel ni secret." onClick={() => void exportProfile(false)} /><ActionCard icon={Archive} title="Exporter un profil complet" detail={`${formatBytes(profileMods.reduce((sum, mod) => sum + (mod.sizeBytes || 0), 0))} maximum avant compression.`} onClick={() => void exportProfile(true)} /><ActionCard icon={Upload} title="Importer un profil" detail="Valide l’archive et affiche un aperçu avant création d’un nouveau profil." onClick={() => void importProfile()} /></div>}
@@ -250,6 +285,129 @@ export function GamesView() {
       clearBulkSelection(); setBulkDialog(undefined)
     }} />}
   </div>
+}
+
+function CollectionDownloadsPanel({ gameId, onOpenProfile }: { gameId: string; onOpenProfile: (profileId: string) => void }) {
+  const [plans, setPlans] = useState<CollectionInstallPlan[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busyId, setBusyId] = useState<string>()
+  const [error, setError] = useState<string>()
+  const knownStatuses = useRef<Map<string, string>>(new Map())
+  const openedEntry = useRef<string>()
+
+  const rememberStatuses = useCallback((items: CollectionInstallPlan[]) => {
+    const next = new Map<string, string>()
+    items.forEach(plan => plan.entries.forEach(entry => next.set(`${plan.installId}:${entry.collectionEntryId}`, entry.status)))
+    knownStatuses.current = next
+  }, [])
+
+  const loadPlans = useCallback(async () => {
+    setLoading(true)
+    setError(undefined)
+    try {
+      const items = await native.listCollectionInstallPlans(gameId)
+      setPlans(items)
+      rememberStatuses(items)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setLoading(false)
+    }
+  }, [gameId, rememberStatuses])
+
+  useEffect(() => {
+    void loadPlans()
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    void listen<CollectionInstallPlan>('collection-install-changed', event => {
+      const plan = event.payload
+      if (plan.gameId !== gameId) return
+      const completedNow = plan.entries.some(entry => {
+        const key = `${plan.installId}:${entry.collectionEntryId}`
+        return entry.status === 'Downloaded' && knownStatuses.current.get(key) !== 'Downloaded'
+      })
+      setPlans(current => {
+        const next = [plan, ...current.filter(item => item.installId !== plan.installId)]
+          .sort((left, right) => right.updatedAt - left.updatedAt)
+        rememberStatuses(next)
+        return next
+      })
+      if (completedNow && plan.openNextRequiredPage && !plan.automaticExecution) {
+        const nextEntry = plan.entries.find(entry => entry.status === 'WaitingForUser' && entry.sourceUrl)
+        const key = nextEntry ? `${plan.installId}:${nextEntry.collectionEntryId}` : undefined
+        if (nextEntry && key && openedEntry.current !== key) {
+          openedEntry.current = key
+          void native.openExternalUrl(nextEntry.sourceUrl)
+        }
+      }
+    }).then(listener => {
+      if (disposed) listener()
+      else unlisten = listener
+    }).catch(reason => setError(reason instanceof Error ? reason.message : String(reason)))
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [gameId, loadPlans, rememberStatuses])
+
+  const runAction = async (plan: CollectionInstallPlan, action: 'pause' | 'resume' | 'cancel' | 'start') => {
+    if (action === 'cancel' && !window.confirm(`Annuler l’installation de « ${plan.collectionName} » ? Les fichiers déjà téléchargés resteront dans le cache.`)) return
+    setBusyId(plan.installId)
+    setError(undefined)
+    try {
+      const updated = action === 'start'
+        ? await native.startCollectionInstall(gameId, plan.installId)
+        : await native.updateCollectionInstall(gameId, plan.installId, action)
+      setPlans(current => [updated, ...current.filter(item => item.installId !== updated.installId)].sort((left, right) => right.updatedAt - left.updatedAt))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusyId(undefined)
+    }
+  }
+
+  if (loading) return <EmptyPanel icon={Download} title="Chargement des téléchargements" detail="Lecture des plans persistants de Collections…" />
+  if (!plans.length && !error) return <EmptyPanel icon={Download} title="Aucune Collection en attente" detail="Installez une Collection depuis Explorer > Nexus. Son plan et sa progression resteront disponibles après un redémarrage." />
+
+  return <div className="min-h-0 flex-1 overflow-y-auto p-4">
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <div><h2 className="text-sm font-semibold text-white/78">Installations de Collections</h2><p className="mt-1 text-[11px] text-white/38">File persistante, téléchargement Nexus officiel et reprise après fermeture.</p></div>
+      <button type="button" onClick={() => void loadPlans()} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]"><RefreshCw size={13} />Actualiser</button>
+    </div>
+    {error && <p className="mb-3 rounded-lg border border-red-300/15 bg-red-300/[0.035] p-3 text-[11px] text-red-100/70">{error}</p>}
+    <div className="space-y-3">{plans.map(plan => {
+      const completed = plan.entries.filter(entry => matchesCollectionStatus(entry.status, ['Downloaded', 'Installed', 'Skipped'])).length
+      const waiting = plan.entries.filter(entry => entry.status === 'WaitingForUser').length
+      const failed = plan.entries.filter(entry => entry.status === 'Failed' || entry.status === 'Unavailable').length
+      const queued = plan.entries.filter(entry => entry.status === 'Queued').length
+      const nextEntry = plan.entries.find(entry => entry.status === 'WaitingForUser' && entry.sourceUrl)
+      const progress = plan.entries.length ? Math.round(completed / plan.entries.length * 100) : 0
+      const premium = plan.accountCapabilities.supportsAutomaticCollectionDownloads === true
+      const running = plan.profileState === 'Downloading' && plan.automaticExecution
+      const paused = plan.profileState === 'Paused'
+      return <article key={plan.installId} className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0"><h3 className="truncate text-sm font-semibold text-white/78">{plan.collectionName}</h3><p className="mt-1 text-[11px] text-white/38">Profil « {plan.profileName} » · Révision {plan.revisionNumber} · {plan.entries.length} fichiers · {formatBytes(plan.downloadBytes)}</p></div>
+          <span className={`rounded-full px-2.5 py-1 text-[11px] ${plan.profileState === 'Cancelled' ? 'bg-red-300/10 text-red-200/70' : failed ? 'bg-amber-300/10 text-amber-100/70' : 'bg-sky-300/10 text-sky-100/68'}`}>{plan.profileState}</span>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/[0.06]"><div className="h-full rounded-full bg-gold transition-[width]" style={{ width: `${progress}%` }} /></div>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-white/42"><span>{completed} téléchargé(s)</span><span>{waiting} confirmation(s)</span><span>{queued} en file</span><span>{failed} problème(s)</span><span>{progress}%</span></div>
+        {nextEntry && <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gold/15 bg-gold/[0.025] p-3"><div className="min-w-0"><p className="text-[11px] font-semibold text-white/68">Téléchargement requis · {nextEntry.displayName}</p><p className="mt-1 truncate text-[11px] text-white/36">Fichier exact : {nextEntry.fileName} · ID {nextEntry.fileId}</p></div><button type="button" onClick={() => void native.openExternalUrl(nextEntry.sourceUrl)} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><ExternalLink size={13} />Ouvrir la page Nexus</button></div>}
+        {plan.warnings.length > 0 && <p className="mt-3 text-[11px] leading-relaxed text-amber-100/55">{plan.warnings[plan.warnings.length - 1]}</p>}
+        <div className="mt-3 flex flex-wrap gap-2">
+          {premium && queued > 0 && !running && plan.profileState !== 'Cancelled' && <button type="button" disabled={busyId === plan.installId} onClick={() => void runAction(plan, 'start')} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><Play size={13} />{paused ? 'Reprendre Premium' : 'Démarrer Premium'}</button>}
+          {running && <button type="button" disabled={busyId === plan.installId} onClick={() => void runAction(plan, 'pause')} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/58"><Pause size={13} />Pause</button>}
+          {!premium && paused && <button type="button" disabled={busyId === plan.installId} onClick={() => void runAction(plan, 'resume')} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/58"><Play size={13} />Reprendre</button>}
+          <button type="button" onClick={() => onOpenProfile(plan.profileId)} className="rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/55">Voir le profil</button>
+          {!matchesCollectionStatus(plan.profileState, ['Cancelled', 'Ready']) && <button type="button" disabled={busyId === plan.installId} onClick={() => void runAction(plan, 'cancel')} className="rounded-lg border border-red-300/12 px-3 py-2 text-[11px] text-red-200/65">Annuler</button>}
+        </div>
+      </article>
+    })}</div>
+  </div>
+}
+
+function matchesCollectionStatus(status: string, values: string[]) {
+  return values.includes(status)
 }
 
 function BulkActionDialog({ mode, count, source, profiles, onClose, onConfirm }: {
@@ -382,7 +540,7 @@ function ModImportDialog({ gameId, profileId, gameName, destination, onClose, on
       {dragActive && <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[#101313]/90 backdrop-blur-sm"><div className="text-center text-gold"><FolderInput size={36} className="mx-auto" /><p className="mt-3 text-sm font-semibold">Déposez le dossier contenant tous vos mods</p><p className="mt-1 text-[11px] text-white/48">Tous les sous-dossiers détectés seront ajoutés, sans limite de nombre.</p></div></div>}
       <header className="flex items-center gap-3 border-b border-white/[0.07] p-4"><FolderInput size={18} className="text-gold" /><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-white">Import intelligent — {gameName}</h2><p className="mt-0.5 text-[11px] text-white/38">Glissez le dossier racine de votre collection, ou sélectionnez-le. Aucun dossier n’est copié avant confirmation.</p></div><button onClick={onClose} title={busy ? 'Réduire : la tâche continue en arrière-plan' : 'Fermer'} className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><X size={15} /></button></header>
       <div className="min-h-48 flex-1 overflow-y-auto p-4">
-        {!candidates.length ? <button onClick={() => void choose()} disabled={busy} className="flex min-h-44 w-full flex-col items-center justify-center rounded-xl border border-dashed border-gold/25 bg-gold/[0.015] text-white/50 hover:bg-gold/[0.035]"><FolderPlus size={26} /><span className="mt-3 text-xs font-semibold">Glissez ici le dossier contenant tous les mods</span><span className="mt-1 text-[11px]">ou cliquez pour sélectionner le dossier racine — aucun maximum de mods</span><span className="mt-1 text-[11px] text-white/28">Générique, Cyberpunk, Bethesda, Unreal Pak, XXMI et BepInEx</span></button> : <div className="space-y-2">{visibleCandidates.map(candidate => <label key={candidate.path} className="flex items-start gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"><input type="checkbox" checked={selected.has(candidate.path)} onChange={() => setSelected(current => { const next = new Set(current); next.has(candidate.path) ? next.delete(candidate.path) : next.add(candidate.path); return next })} className="mt-1 accent-gold" /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-white/78">{candidate.name}</span><span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[11px] text-white/45">{candidate.framework}</span><span className="text-[11px] text-white/30">confiance {candidate.confidence}</span></div><p className="mt-1 truncate font-mono text-[11px] text-white/30" title={candidate.path}>{candidate.path}</p>{candidate.sourceUrl && <p className="mt-1 text-[11px] text-emerald-200/55">Source détectée : {candidate.sourceUrl}</p>}{candidate.warnings.map(warning => <p key={warning} className="mt-1 text-[11px] text-amber-200/55">{warning}</p>)}</div><span className="text-[11px] text-white/30">{formatBytes(candidate.sizeBytes)}</span></label>)}{visibleCount < candidates.length && <button onClick={() => setVisibleCount(count => count + 250)} className="w-full rounded-lg border border-white/[0.08] py-2 text-[11px] text-white/45 hover:bg-white/[0.04]">Afficher 250 résultats supplémentaires ({candidates.length - visibleCount} restants)</button>}</div>}
+        {!candidates.length ? <button onClick={() => void choose()} disabled={busy} className="flex min-h-44 w-full flex-col items-center justify-center rounded-xl border border-dashed border-gold/25 bg-gold/[0.015] text-white/50 hover:bg-gold/[0.035]"><FolderPlus size={26} /><span className="mt-3 text-xs font-semibold">Glissez ici le dossier contenant tous les mods</span><span className="mt-1 text-[11px]">ou cliquez pour sélectionner le dossier racine — aucun maximum de mods</span><span className="mt-1 text-[11px] text-white/28">Générique, Cyberpunk, Bethesda, Unreal Pak, XXMI et BepInEx</span></button> : <div className="space-y-2">{visibleCandidates.map(candidate => <label key={candidate.path} className="flex items-start gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"><input type="checkbox" checked={selected.has(candidate.path)} onChange={() => setSelected(current => { const next = new Set(current); next.has(candidate.path) ? next.delete(candidate.path) : next.add(candidate.path); return next })} className="mt-1 accent-gold" /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-white/78">{candidate.name}</span><span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[11px] text-white/45">{candidate.detectedFramework !== 'Unknown' ? candidate.detectedFramework : candidate.framework}</span><span className="text-[11px] text-white/30">racine {candidate.rootConfidence}</span></div><p className="mt-1 truncate font-mono text-[11px] text-white/30" title={candidate.sourcePath}>{candidate.sourcePath}</p><p className="mt-1 text-[11px] text-white/42">Racine détectée : <span className="font-mono text-white/55">{candidate.detectedRoot}</span></p>{candidate.relativeGamePaths.length > 0 && <p className="mt-1 text-[11px] text-emerald-100/55">Destination(s) : {candidate.relativeGamePaths.join(' · ')}</p>}{candidate.strippedSegments.length > 0 && <p className="mt-1 text-[11px] text-sky-100/50">Conteneur(s) ignoré(s) : {candidate.strippedSegments.join(' / ')}</p>}<p className="mt-1 text-[11px] text-white/32">{candidate.rootReason}</p>{candidate.sourceUrl && <p className="mt-1 text-[11px] text-emerald-200/55">Source détectée : {candidate.sourceUrl}</p>}{candidate.warnings.map(warning => <p key={warning} className="mt-1 text-[11px] text-amber-200/55">{warning}</p>)}</div><span className="text-[11px] text-white/30">{formatBytes(candidate.sizeBytes)}</span></label>)}{visibleCount < candidates.length && <button onClick={() => setVisibleCount(count => count + 250)} className="w-full rounded-lg border border-white/[0.08] py-2 text-[11px] text-white/45 hover:bg-white/[0.04]">Afficher 250 résultats supplémentaires ({candidates.length - visibleCount} restants)</button>}</div>}
         {task && <div className="mt-3 rounded-xl border border-gold/15 bg-gold/[0.025] p-3"><div className="flex items-center justify-between gap-3 text-[11px]"><span className="truncate text-white/62">{task.message}</span><span className="shrink-0 font-mono text-gold/70">{task.total ? `${progress}%` : '…'}</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.06]"><div className="h-full rounded-full bg-gold transition-[width]" style={{ width: `${progress}%` }} /></div><div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-white/32"><span>{task.processed} / {task.total || '?'} · {task.status}</span>{busy && taskId && <button type="button" onClick={cancelTask} className="rounded border border-red-300/15 px-2 py-1 text-red-200/64">Annuler la tâche</button>}</div></div>}
         {candidates.length > 0 && <label className="mt-3 flex cursor-pointer items-start justify-between gap-3 rounded-xl border border-white/[0.07] bg-white/[0.018] p-3 text-[11px] text-white/58"><span><strong className="block text-white/72">Activer pour le prochain lancement</strong><span className="mt-1 block leading-relaxed text-white/34">Les fichiers restent stockés hors du jeu. Au lancement, TemporaryCopy résout les conflits, sauvegarde les originaux, copie chaque fichier vers sa vraie racine, vérifie sa visibilité puis restaure le jeu à sa fermeture. Ce backend n’est pas le VFS de MO2.</span></span><input type="checkbox" checked={deployNow} onChange={event => setDeployNow(event.target.checked)} className="mt-1 accent-gold" /></label>}
         {error && <p className="mt-3 rounded-lg border border-red-400/15 bg-red-400/[0.04] p-3 text-[11px] text-red-200/70">{error}</p>}

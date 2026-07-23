@@ -19,7 +19,16 @@ import {
 } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import type { ExplodMod, Platform } from '../../types'
-import { native, NexusCatalogGame, NexusCatalogMod, ProviderConnectionStatus } from '../../lib/native'
+import {
+  native,
+  NexusAccountCapabilities,
+  NexusCatalogGame,
+  NexusCatalogPage,
+  NexusCollectionDetail,
+  NexusCollectionPage,
+  NexusCollectionSummary,
+  ProviderConnectionStatus,
+} from '../../lib/native'
 import { NexusExplorerAdapter } from '../../lib/explorerProviders'
 import { GridColumnCycleButton, ProviderExplorerToolbar, ProviderFilters, ProviderPagination, ProviderSearchResults, ProviderSortControl, ProviderViewModeToggle } from '../Explorer/ProviderExplorer'
 
@@ -34,6 +43,73 @@ const formatCount = (value: number) => new Intl.NumberFormat('fr-FR', {
   notation: value >= 10_000 ? 'compact' : 'standard',
   maximumFractionDigits: 1,
 }).format(value)
+
+const NEXUS_SESSION_KEY = 'zailon:nexus-explorer:v2'
+const NEXUS_CACHE_TTL = 5 * 60 * 1000
+const nexusPageCache = new Map<string, { page: NexusCatalogPage; cachedAt: number }>()
+const nexusCollectionPageCache = new Map<string, { page: NexusCollectionPage; cachedAt: number }>()
+
+type NexusExplorerSession = {
+  mode?: 'mods' | 'collections'
+  domain: string
+  gameFilter: string
+  query: string
+  sort: 'recent' | 'updated' | 'popular' | 'downloaded'
+  page: number
+  pageSize: number
+}
+
+const readNexusSession = (): NexusExplorerSession => {
+  const fallback: NexusExplorerSession = { mode: 'mods', domain: '', gameFilter: '', query: '', sort: 'recent', page: 1, pageSize: 20 }
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(NEXUS_SESSION_KEY) || '{}') as Partial<NexusExplorerSession>
+    return {
+      mode: parsed.mode === 'collections' ? 'collections' : 'mods',
+      domain: typeof parsed.domain === 'string' ? parsed.domain : fallback.domain,
+      gameFilter: typeof parsed.gameFilter === 'string' ? parsed.gameFilter : fallback.gameFilter,
+      query: typeof parsed.query === 'string' ? parsed.query : fallback.query,
+      sort: ['recent', 'updated', 'popular', 'downloaded'].includes(parsed.sort || '') ? parsed.sort as NexusExplorerSession['sort'] : fallback.sort,
+      page: typeof parsed.page === 'number' && parsed.page >= 1 ? Math.floor(parsed.page) : fallback.page,
+      pageSize: [20, 40, 60].includes(parsed.pageSize || 0) ? parsed.pageSize as number : fallback.pageSize,
+    }
+  } catch {
+    return fallback
+  }
+}
+
+const writeNexusSession = (session: NexusExplorerSession) => {
+  try { window.localStorage.setItem(NEXUS_SESSION_KEY, JSON.stringify(session)) } catch { /* Le cache de session reste facultatif. */ }
+}
+
+const nexusCacheKey = (domain: string, query: string, sort: string, page: number, pageSize: number, showNsfw: boolean) =>
+  [domain, query.trim().toLocaleLowerCase(), sort, page, pageSize, showNsfw ? 'adult' : 'safe'].join('|')
+
+const cacheNexusPage = (key: string, page: NexusCatalogPage) => {
+  nexusPageCache.set(key, { page, cachedAt: Date.now() })
+  while (nexusPageCache.size > 80) {
+    const oldest = nexusPageCache.keys().next().value
+    if (typeof oldest !== 'string') break
+    nexusPageCache.delete(oldest)
+  }
+}
+
+const cacheNexusCollectionPage = (key: string, page: NexusCollectionPage) => {
+  nexusCollectionPageCache.set(key, { page, cachedAt: Date.now() })
+  while (nexusCollectionPageCache.size > 80) {
+    const oldest = nexusCollectionPageCache.keys().next().value
+    if (typeof oldest !== 'string') break
+    nexusCollectionPageCache.delete(oldest)
+  }
+}
+
+const formatBytes = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return '—'
+  const units = ['o', 'Ko', 'Mo', 'Go', 'To']
+  let size = value
+  let unit = 0
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1 }
+  return `${size.toLocaleString('fr-FR', { maximumFractionDigits: unit > 1 ? 1 : 0 })} ${units[unit]}`
+}
 
 export function ExploreView() {
   const platform = useStore(state => state.explorePlatform)
@@ -150,7 +226,7 @@ export function ExploreView() {
       })}
     </section>
 
-    {!readyProvider ? <ProviderUnavailable provider={providers.find(item => item.id === platform)?.name || platform} onConfigure={() => setView('settings')} /> : platform === 'nexus' ? <NexusCatalog selectedGameName={selectedGame?.name} showNsfw={showNsfw} /> : <>
+    {!readyProvider ? <ProviderUnavailable provider={providers.find(item => item.id === platform)?.name || platform} onConfigure={() => setView('settings')} /> : platform === 'nexus' ? <NexusCatalogV2 selectedGameName={selectedGame?.name} showNsfw={showNsfw} /> : <>
       <section className="mt-4 rounded-xl border border-white/[0.07] bg-black/10 p-3">
         <ProviderExplorerToolbar>
           <div className="relative min-w-0 flex-1">
@@ -218,21 +294,25 @@ function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: strin
   const grid = useStore(state => state.exploreGrid)
   const setGrid = useStore(state => state.setExploreGrid)
   const setColumns = useStore(state => state.setExploreColumns)
+  const restored = useRef<NexusExplorerSession>(readNexusSession())
   const [games, setGames] = useState<NexusCatalogGame[]>([])
-  const [domain, setDomain] = useState('')
-  const [gameFilter, setGameFilter] = useState(selectedGameName || '')
-  const [feed, setFeed] = useState<'recent' | 'updated' | 'trending'>('trending')
-  const [query, setQuery] = useState('')
-  const [sort, setSort] = useState<'recent' | 'updated' | 'popular' | 'downloaded'>('recent')
-  const [page, setPage] = useState(1)
-  const [pageLoading, setPageLoading] = useState(false)
-  const [mods, setMods] = useState<NexusCatalogMod[]>([])
+  const [domain, setDomain] = useState(restored.current.domain)
+  const [gameFilter, setGameFilter] = useState(selectedGameName || restored.current.gameFilter)
+  const [query, setQuery] = useState(restored.current.query)
+  const [serverQuery, setServerQuery] = useState(restored.current.query.trim())
+  const [sort, setSort] = useState<NexusExplorerSession['sort']>(restored.current.sort)
+  const [page, setPage] = useState(restored.current.page)
+  const [pageSize, setPageSize] = useState(restored.current.pageSize)
+  const [catalogPage, setCatalogPage] = useState<NexusCatalogPage>()
   const [loadingGames, setLoadingGames] = useState(true)
   const [loadingMods, setLoadingMods] = useState(false)
   const [error, setError] = useState<string>()
   const [previewMod, setPreviewMod] = useState<ExplodMod>()
   const requestSerial = useRef(0)
   const resultsRef = useRef<HTMLElement>(null)
+  const pendingScroll = useRef(false)
+  const firstQueryEffect = useRef(true)
+  const previousNsfw = useRef(showNsfw)
 
   useEffect(() => {
     let active = true
@@ -241,8 +321,10 @@ function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: strin
       if (!active) return
       setGames(items)
       const normalized = (selectedGameName || '').toLocaleLowerCase()
-      const match = items.find(game => game.name.toLocaleLowerCase() === normalized)
+      const selectedMatch = items.find(game => game.name.toLocaleLowerCase() === normalized)
         || items.find(game => normalized && (game.name.toLocaleLowerCase().includes(normalized) || normalized.includes(game.name.toLocaleLowerCase())))
+      const restoredMatch = items.find(game => game.domain === restored.current.domain)
+      const match = selectedMatch || restoredMatch
       if (match) {
         setDomain(match.domain)
         setGameFilter(match.name)
@@ -256,14 +338,38 @@ function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: strin
     return () => { active = false }
   }, [selectedGameName])
 
-  const loadMods = async (nextDomain = domain, nextFeed = feed) => {
+  const loadMods = async (force = false) => {
+    const nextDomain = domain
     if (!nextDomain) return
+    const key = nexusCacheKey(nextDomain, serverQuery, sort, page, pageSize, showNsfw)
+    const cached = nexusPageCache.get(key)
+    if (!force && cached && Date.now() - cached.cachedAt < NEXUS_CACHE_TTL) {
+      ++requestSerial.current
+      setCatalogPage(cached.page)
+      setError(undefined)
+      setLoadingMods(false)
+      if (pendingScroll.current) {
+        pendingScroll.current = false
+        window.requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+      }
+      return
+    }
+    if (force) nexusPageCache.delete(key)
     const request = ++requestSerial.current
     setLoadingMods(true)
     setError(undefined)
     try {
-      const result = await native.nexusCatalogMods(nextDomain, nextFeed)
-      if (request === requestSerial.current) setMods(result)
+      const result = await native.nexusCatalogMods(nextDomain, serverQuery, sort, page, pageSize, showNsfw)
+      if (request === requestSerial.current) {
+        cacheNexusPage(key, result)
+        setCatalogPage(result)
+        if (result.pagination.totalPages > 0 && page > result.pagination.totalPages) {
+          setPage(result.pagination.totalPages)
+        } else if (pendingScroll.current) {
+          pendingScroll.current = false
+          window.requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+        }
+      }
     } catch (reason) {
       if (request === requestSerial.current) setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -272,29 +378,43 @@ function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: strin
   }
 
   useEffect(() => {
-    if (domain) { setPage(1); void loadMods(domain, feed) }
-  }, [domain, feed])
+    if (domain) void loadMods()
+  }, [domain, serverQuery, sort, page, pageSize, showNsfw])
+
+  useEffect(() => {
+    if (firstQueryEffect.current) {
+      firstQueryEffect.current = false
+      return
+    }
+    const timer = window.setTimeout(() => {
+      setPage(1)
+      setServerQuery(query.trim())
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [query])
+
+  useEffect(() => {
+    if (previousNsfw.current === showNsfw) return
+    previousNsfw.current = showNsfw
+    setPage(1)
+  }, [showNsfw])
+
+  useEffect(() => {
+    writeNexusSession({ domain, gameFilter, query, sort, page, pageSize })
+  }, [domain, gameFilter, query, sort, page, pageSize])
 
   const gameMatches = gameFilter.trim().length < 2 ? games.slice(0, 25) : games
     .filter(game => `${game.name} ${game.domain}`.toLocaleLowerCase().includes(gameFilter.trim().toLocaleLowerCase()))
     .slice(0, 25)
-  const normalizedQuery = query.trim().toLocaleLowerCase()
-  const visibleMods = mods.filter(mod => (showNsfw || !mod.nsfw) && (!normalizedQuery || `${mod.name} ${mod.author} ${mod.description}`.toLocaleLowerCase().includes(normalizedQuery))).sort((left, right) => sort === 'downloaded' ? right.downloads - left.downloads : sort === 'popular' ? right.endorsements - left.endorsements : sort === 'updated' ? (right.updatedAt || 0) - (left.updatedAt || 0) : right.modId - left.modId)
+  const mods = catalogPage?.results || []
   const selectedCatalogGame = games.find(game => game.domain === domain)
-  const pageSize = 9
-  const pageCount = Math.max(1, Math.ceil(visibleMods.length / pageSize))
-  const pageMods = visibleMods.slice((page - 1) * pageSize, page * pageSize)
+  const pageCount = Math.max(1, catalogPage?.pagination.totalPages || 1)
   const changePage = (next: number) => {
     const target = Math.max(1, Math.min(pageCount, next))
-    setPageLoading(true)
-    window.setTimeout(() => {
-      setPage(target)
-      setPageLoading(false)
-      resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 120)
+    if (target === page) return
+    pendingScroll.current = true
+    setPage(target)
   }
-
-  useEffect(() => { setPage(1) }, [query, sort, showNsfw])
 
   return <section className="mt-4">
     <div className="rounded-xl border border-white/[0.07] bg-black/10 p-3">
@@ -303,36 +423,255 @@ function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: strin
           <div className="relative mt-1.5">
             <input value={gameFilter} onChange={event => setGameFilter(event.target.value)} placeholder={loadingGames ? 'Chargement des jeux Nexus…' : 'Nom ou domaine Nexus…'} className="w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-white/78 outline-none focus:border-gold/26" />
             {gameFilter && gameFilter !== selectedCatalogGame?.name && gameMatches.length > 0 && <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-white/[0.1] bg-[#101313] p-1 shadow-2xl">
-              {gameMatches.map(game => <button key={game.domain} type="button" onClick={() => { setDomain(game.domain); setGameFilter(game.name) }} className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-[11px] text-white/62 hover:bg-white/[0.06] hover:text-white"><span className="truncate">{game.name}</span><span className="shrink-0 font-mono text-white/28">{game.domain}</span></button>)}
+              {gameMatches.map(game => <button key={game.domain} type="button" onClick={() => { setDomain(game.domain); setGameFilter(game.name); setPage(1) }} className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-[11px] text-white/62 hover:bg-white/[0.06] hover:text-white"><span className="truncate">{game.name}</span><span className="shrink-0 font-mono text-white/28">{game.domain}</span></button>)}
             </div>}
           </div>
         </label>
-        <label className="text-[11px] text-white/48">Flux
-          <select value={feed} onChange={event => setFeed(event.target.value as typeof feed)} className="mt-1.5 block w-full rounded-lg border border-white/[0.08] bg-[#101313] px-3 py-2 text-xs text-white/76"><option value="trending">Tendances</option><option value="recent">Nouveautés</option><option value="updated">Mis à jour</option></select>
+        <label className="min-w-0 flex-1 text-[11px] text-white/48">Rechercher sur Nexus
+          <span className="mt-1.5 flex items-center rounded-lg border border-white/[0.08] bg-black/20 px-3"><Search size={14} className="text-white/30" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Titre, auteur ou description…" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-xs text-white/78 outline-none" /></span>
         </label>
-        <label className="min-w-0 flex-1 text-[11px] text-white/48">Filtrer les résultats
-          <span className="mt-1.5 flex items-center rounded-lg border border-white/[0.08] bg-black/20 px-3"><Search size={14} className="text-white/30" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Nom, auteur, description…" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-xs text-white/78 outline-none" /></span>
-        </label>
-        <button type="button" onClick={() => void loadMods()} disabled={!domain || loadingMods} className="flex h-9 items-center gap-2 rounded-lg border border-white/[0.1] px-3 text-[11px] font-semibold text-white/62 hover:bg-white/[0.06] disabled:opacity-35"><RefreshCw size={14} className={loadingMods ? 'animate-spin' : ''} />Actualiser</button>
+        <button type="button" onClick={() => void loadMods(true)} disabled={!domain || loadingMods} className="flex h-9 items-center gap-2 rounded-lg border border-white/[0.1] px-3 text-[11px] font-semibold text-white/62 hover:bg-white/[0.06] disabled:opacity-35"><RefreshCw size={14} className={loadingMods ? 'animate-spin' : ''} />Actualiser</button>
         <ProviderViewModeToggle grid={grid} onChange={setGrid} />
         {grid && <GridColumnCycleButton currentColumnCount={columns} onChange={setColumns} />}
       </ProviderExplorerToolbar>
-      <div className="mt-3 flex flex-wrap items-center gap-2"><ProviderSortControl value={sort} onChange={setSort} /><ProviderFilters onReset={() => { setQuery(''); setSort('recent'); setFeed('trending'); setPage(1) }} /><span className="ml-auto text-[11px] text-white/30">Page {page} / {pageCount}</span></div>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/34"><span>{selectedCatalogGame ? `${selectedCatalogGame.name} · ${formatCount(selectedCatalogGame.modCount)} mods` : 'Choisissez un jeu Nexus pour charger son catalogue.'}</span><span>La clé reste dans le coffre système ; seules les données du catalogue arrivent dans l’interface.</span></div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <ProviderSortControl value={sort} onChange={value => { setSort(value); setPage(1) }} />
+        <label className="text-[11px] text-white/45">Par page <select value={pageSize} onChange={event => { setPageSize(Number(event.target.value)); setPage(1) }} className="ml-1 rounded border border-white/[0.08] bg-[#101313] px-2 py-1.5 text-[11px] text-white/75"><option value={20}>20</option><option value={40}>40</option><option value={60}>60</option></select></label>
+        <ProviderFilters onReset={() => { setQuery(''); setServerQuery(''); setSort('recent'); setPage(1); setPageSize(20) }} />
+        <span className="ml-auto text-[11px] text-white/30">Page {page} / {pageCount}</span>
+      </div>
+      <div className="mt-3 grid gap-2 text-[11px] text-white/38 sm:grid-cols-3">
+        <span className="rounded-lg border border-white/[0.06] bg-white/[0.018] px-3 py-2">Catalogue du jeu <strong className="ml-1 text-white/65">{selectedCatalogGame ? formatCount(selectedCatalogGame.modCount) : '—'}</strong></span>
+        <span className="rounded-lg border border-white/[0.06] bg-white/[0.018] px-3 py-2">Résultats filtrés <strong className="ml-1 text-white/65">{catalogPage ? formatCount(catalogPage.pagination.totalResults) : '—'}</strong></span>
+        <span className="rounded-lg border border-white/[0.06] bg-white/[0.018] px-3 py-2">Chargés sur cette page <strong className="ml-1 text-white/65">{catalogPage?.pagination.loadedResultCount ?? 0}</strong></span>
+      </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-white/30">Recherche, tri, filtre adulte et pagination sont exécutés par Nexus. La clé reste dans le coffre système ; les pages sont mises en cache cinq minutes.</p>
     </div>
 
-    {error && <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-400/18 bg-red-400/[0.04] p-4 text-[11px] text-red-200/70"><AlertTriangle size={15} className="mt-0.5 shrink-0" /><span>{error}</span></div>}
+    {error && <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-red-400/18 bg-red-400/[0.04] p-4 text-[11px] text-red-200/70"><AlertTriangle size={15} className="shrink-0" /><span className="min-w-0 flex-1">{error}</span>{page > 1 && <button type="button" onClick={() => setPage(page - 1)} className="rounded-lg border border-red-200/15 px-3 py-1.5 font-semibold hover:bg-red-200/[0.06]">Page précédente</button>}<button type="button" onClick={() => void loadMods(true)} className="rounded-lg bg-red-200/10 px-3 py-1.5 font-semibold hover:bg-red-200/15">Réessayer</button></div>}
     <section ref={resultsRef} className="scroll-mt-4">
-    <ProviderSearchResults grid={grid} columns={columns} loading={loadingMods || pageLoading} empty={Boolean(domain && !visibleMods.length && !error)} loadingFallback={<LoadingGrid />} emptyFallback={<EmptyResults onReset={() => { setQuery(''); void loadMods() }} />}>
-      {pageMods.map(item => {
+    {loadingMods && mods.length > 0 && <div className="my-3 flex items-center gap-2 text-[11px] text-white/38"><Loader2 size={13} className="animate-spin" />Mise à jour de la page depuis Nexus…</div>}
+    <ProviderSearchResults grid={grid} columns={columns} loading={loadingMods && !mods.length} empty={Boolean(domain && !mods.length && !error)} loadingFallback={<LoadingGrid />} emptyFallback={<EmptyResults onReset={() => { setQuery(''); setServerQuery(''); setPage(1) }} />}>
+      {mods.map(item => {
         const mod = NexusExplorerAdapter.toResult(item, selectedCatalogGame?.name)
         return <ModResult key={mod.id} mod={mod} grid={grid} installing={false} canInstall={false} sourceOnly targetName={selectedCatalogGame?.name} onPreview={() => setPreviewMod(mod)} onInstall={() => undefined} />
       })}
     </ProviderSearchResults>
-    {domain && visibleMods.length > 0 && <ProviderPagination provider="Nexus Mods" page={page} pageCount={pageCount} hasNextPage={page < pageCount} loading={loadingMods || pageLoading} onPageChange={changePage} />}
+    {domain && catalogPage && catalogPage.pagination.totalResults > 0 && <ProviderPagination provider="Nexus Mods" page={page} pageCount={pageCount} hasNextPage={catalogPage.pagination.hasNext} loading={loadingMods} onPageChange={changePage} />}
     </section>
     {previewMod && <ModPreviewModal mod={previewMod} canInstall={false} sourceOnly installing={false} onInstall={() => undefined} onClose={() => setPreviewMod(undefined)} />}
   </section>
+}
+
+function NexusCatalogV2({ selectedGameName, showNsfw }: { selectedGameName?: string; showNsfw: boolean }) {
+  const [mode, setMode] = useState<'mods' | 'collections'>(readNexusSession().mode || 'mods')
+  useEffect(() => {
+    const current = readNexusSession()
+    writeNexusSession({ ...current, mode })
+  }, [mode])
+  return <section>
+    <div className="mt-4 inline-flex rounded-lg border border-white/[0.08] bg-black/20 p-1" aria-label="Type de contenu Nexus">
+      <button type="button" onClick={() => setMode('mods')} className={`rounded-md px-4 py-2 text-xs font-semibold ${mode === 'mods' ? 'bg-gold text-[#101313]' : 'text-white/48 hover:text-white'}`}>Mods</button>
+      <button type="button" onClick={() => setMode('collections')} className={`rounded-md px-4 py-2 text-xs font-semibold ${mode === 'collections' ? 'bg-gold text-[#101313]' : 'text-white/48 hover:text-white'}`}>Collections</button>
+    </div>
+    {mode === 'mods'
+      ? <NexusCatalog selectedGameName={selectedGameName} showNsfw={showNsfw} />
+      : <NexusCollectionsCatalog selectedGameName={selectedGameName} showNsfw={showNsfw} />}
+  </section>
+}
+
+function NexusCollectionsCatalog({ selectedGameName, showNsfw }: { selectedGameName?: string; showNsfw: boolean }) {
+  const columns = useStore(state => state.exploreColumns)
+  const grid = useStore(state => state.exploreGrid)
+  const setGrid = useStore(state => state.setExploreGrid)
+  const setColumns = useStore(state => state.setExploreColumns)
+  const prepareCollectionProfile = useStore(state => state.prepareCollectionProfile)
+  const selectedGame = useStore(state => state.games.find(game => game.id === state.selectedGameId))
+  const restored = useRef(readNexusSession())
+  const [games, setGames] = useState<NexusCatalogGame[]>([])
+  const [domain, setDomain] = useState(restored.current.domain)
+  const [gameFilter, setGameFilter] = useState(selectedGameName || restored.current.gameFilter)
+  const [query, setQuery] = useState(restored.current.query)
+  const [serverQuery, setServerQuery] = useState(restored.current.query.trim())
+  const [sort, setSort] = useState<NexusExplorerSession['sort']>(restored.current.sort)
+  const [page, setPage] = useState(restored.current.page)
+  const [pageSize, setPageSize] = useState(restored.current.pageSize)
+  const [catalog, setCatalog] = useState<NexusCollectionPage>()
+  const [capabilities, setCapabilities] = useState<NexusAccountCapabilities>()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string>()
+  const [selectedCollection, setSelectedCollection] = useState<NexusCollectionSummary>()
+  const [detail, setDetail] = useState<NexusCollectionDetail>()
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState<string>()
+  const [installing, setInstalling] = useState(false)
+  const requestSerial = useRef(0)
+  const resultsRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    let active = true
+    void native.nexusCatalogGames().then(items => {
+      if (!active) return
+      setGames(items)
+      const normalized = (selectedGameName || '').toLocaleLowerCase()
+      const preferred = items.find(game => game.name.toLocaleLowerCase() === normalized)
+        || items.find(game => normalized && (game.name.toLocaleLowerCase().includes(normalized) || normalized.includes(game.name.toLocaleLowerCase())))
+        || items.find(game => game.domain === restored.current.domain)
+      if (preferred) {
+        setDomain(preferred.domain)
+        setGameFilter(preferred.name)
+      }
+    }).catch(reason => active && setError(reason instanceof Error ? reason.message : String(reason)))
+    void native.nexusAccountCapabilities().then(account => active && setCapabilities(account)).catch(() => undefined)
+    return () => { active = false }
+  }, [selectedGameName])
+
+  const loadCollections = async (force = false) => {
+    if (!domain) return
+    const key = nexusCacheKey(domain, serverQuery, `collections:${sort}`, page, pageSize, showNsfw)
+    const cached = nexusCollectionPageCache.get(key)
+    if (!force && cached && Date.now() - cached.cachedAt < NEXUS_CACHE_TTL) {
+      ++requestSerial.current
+      setCatalog(cached.page)
+      setError(undefined)
+      return
+    }
+    if (force) nexusCollectionPageCache.delete(key)
+    const request = ++requestSerial.current
+    setLoading(true)
+    setError(undefined)
+    try {
+      const result = await native.nexusCatalogCollections(domain, serverQuery, sort, page, pageSize, showNsfw)
+      if (request !== requestSerial.current) return
+      cacheNexusCollectionPage(key, result)
+      setCatalog(result)
+      if (page > result.pagination.totalPages) setPage(Math.max(1, result.pagination.totalPages))
+    } catch (reason) {
+      if (request === requestSerial.current) setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      if (request === requestSerial.current) setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (domain) void loadCollections()
+  }, [domain, serverQuery, sort, page, pageSize, showNsfw])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setPage(1)
+      setServerQuery(query.trim())
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [query])
+
+  const openCollection = async (collection: NexusCollectionSummary) => {
+    setSelectedCollection(collection)
+    setDetail(undefined)
+    setDetailError(undefined)
+    setDetailLoading(true)
+    try {
+      setDetail(await native.nexusCollectionDetail(collection.gameDomain, collection.slug, collection.latestRevisionNumber, showNsfw))
+    } catch (reason) {
+      setDetailError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  const installCollection = async (profileName: string) => {
+    if (!detail || !selectedGame) return
+    setInstalling(true)
+    try {
+      const profileId = await prepareCollectionProfile(detail, profileName, showNsfw)
+      if (profileId) {
+        setSelectedCollection(undefined)
+        setDetail(undefined)
+      }
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  const selectedCatalogGame = games.find(game => game.domain === domain)
+  const gameMatches = gameFilter.trim().length < 2 ? games.slice(0, 25) : games
+    .filter(game => `${game.name} ${game.domain}`.toLocaleLowerCase().includes(gameFilter.trim().toLocaleLowerCase()))
+    .slice(0, 25)
+  const results = catalog?.results || []
+  const pageCount = Math.max(1, catalog?.pagination.totalPages || 1)
+
+  return <section className="mt-4">
+    <div className="rounded-xl border border-white/[0.07] bg-black/10 p-3">
+      <ProviderExplorerToolbar>
+        <label className="min-w-0 flex-1 text-[11px] text-white/48">Jeu Nexus
+          <div className="relative mt-1.5">
+            <input value={gameFilter} onChange={event => setGameFilter(event.target.value)} placeholder="Nom ou domaine Nexus…" className="w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-white/78 outline-none focus:border-gold/26" />
+            {gameFilter && gameFilter !== selectedCatalogGame?.name && gameMatches.length > 0 && <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-white/[0.1] bg-[#101313] p-1 shadow-2xl">{gameMatches.map(game => <button key={game.domain} type="button" onClick={() => { setDomain(game.domain); setGameFilter(game.name); setPage(1) }} className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-[11px] text-white/62 hover:bg-white/[0.06]"><span>{game.name}</span><span className="font-mono text-white/28">{game.domain}</span></button>)}</div>}
+          </div>
+        </label>
+        <label className="min-w-0 flex-1 text-[11px] text-white/48">Rechercher des Collections
+          <span className="mt-1.5 flex items-center rounded-lg border border-white/[0.08] bg-black/20 px-3"><Search size={14} className="text-white/30" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Titre, auteur ou description…" className="min-w-0 flex-1 bg-transparent px-2 py-2 text-xs text-white/78 outline-none" /></span>
+        </label>
+        <button type="button" onClick={() => void loadCollections(true)} disabled={!domain || loading} className="flex h-9 items-center gap-2 rounded-lg border border-white/[0.1] px-3 text-[11px] font-semibold text-white/62 disabled:opacity-35"><RefreshCw size={14} className={loading ? 'animate-spin' : ''} />Actualiser</button>
+        <ProviderViewModeToggle grid={grid} onChange={setGrid} />
+        {grid && <GridColumnCycleButton currentColumnCount={columns} onChange={setColumns} />}
+      </ProviderExplorerToolbar>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <ProviderSortControl value={sort} onChange={value => { setSort(value); setPage(1) }} />
+        <label className="text-[11px] text-white/45">Par page <select value={pageSize} onChange={event => { setPageSize(Number(event.target.value)); setPage(1) }} className="ml-1 rounded border border-white/[0.08] bg-[#101313] px-2 py-1.5 text-[11px] text-white/75"><option value={20}>20</option><option value={40}>40</option><option value={60}>60</option></select></label>
+        <span className={`rounded-full border px-2.5 py-1 text-[11px] ${capabilities?.membershipTier === 'premium' ? 'border-emerald-300/18 text-emerald-100/65' : 'border-amber-300/18 text-amber-100/60'}`}>Compte {capabilities?.membershipTier === 'premium' ? 'Premium' : capabilities?.membershipTier === 'free' ? 'gratuit' : 'à vérifier'}</span>
+        <span className="ml-auto text-[11px] text-white/30">Page {page} / {pageCount}</span>
+      </div>
+      <div className="mt-3 grid gap-2 text-[11px] text-white/38 sm:grid-cols-3"><span className="rounded-lg border border-white/[0.06] px-3 py-2">Collections du jeu <strong className="ml-1 text-white/65">{catalog?.pagination.providerGameTotalCollections ? formatCount(catalog.pagination.providerGameTotalCollections) : '—'}</strong></span><span className="rounded-lg border border-white/[0.06] px-3 py-2">Résultats filtrés <strong className="ml-1 text-white/65">{catalog ? formatCount(catalog.pagination.totalResults) : '—'}</strong></span><span className="rounded-lg border border-white/[0.06] px-3 py-2">Chargées sur cette page <strong className="ml-1 text-white/65">{catalog?.pagination.loadedResultCount || 0}</strong></span></div>
+      <p className="mt-2 text-[11px] leading-relaxed text-white/32">Résultats et pages proviennent directement de Nexus. Les comptes gratuits restent sur les pages officielles et attendent chaque confirmation NXM.</p>
+    </div>
+    {error && <div className="mt-4 flex items-center gap-3 rounded-xl border border-red-400/18 bg-red-400/[0.04] p-4 text-[11px] text-red-200/70"><AlertTriangle size={15} /><span className="flex-1">{error}</span><button type="button" onClick={() => void loadCollections(true)} className="rounded-lg border border-red-200/15 px-3 py-1.5">Réessayer</button></div>}
+    <section ref={resultsRef} className="scroll-mt-4">
+      <ProviderSearchResults grid={grid} columns={columns} loading={loading && !results.length} empty={Boolean(domain && !results.length && !error)} loadingFallback={<LoadingGrid />} emptyFallback={<EmptyResults onReset={() => { setQuery(''); setServerQuery(''); setPage(1) }} />}>
+        {results.map(collection => <CollectionResult key={collection.id} collection={collection} grid={grid} onOpen={() => void openCollection(collection)} />)}
+      </ProviderSearchResults>
+      {catalog && catalog.pagination.totalResults > 0 && <ProviderPagination provider="Nexus Collections" page={page} pageCount={pageCount} hasNextPage={catalog.pagination.hasNext} loading={loading} onPageChange={next => { setPage(Math.max(1, Math.min(pageCount, next))); window.requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })) }} />}
+    </section>
+    {selectedCollection && <CollectionDetailModal collection={selectedCollection} detail={detail} loading={detailLoading} error={detailError} account={capabilities} selectedGameName={selectedGame?.name} installing={installing} onRetry={() => void openCollection(selectedCollection)} onInstall={profileName => void installCollection(profileName)} onClose={() => { setSelectedCollection(undefined); setDetail(undefined) }} />}
+  </section>
+}
+
+function CollectionResult({ collection, grid, onOpen }: { collection: NexusCollectionSummary; grid: boolean; onOpen: () => void }) {
+  const openSource = () => native.isDesktop() ? native.openExternalUrl(collection.url) : window.open(collection.url, '_blank', 'noopener,noreferrer')
+  return <article className={`group overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.018] hover:border-white/15 ${grid ? '' : 'flex min-h-32'}`}>
+    <button type="button" onClick={onOpen} className={`relative shrink-0 overflow-hidden bg-white/[0.025] text-left ${grid ? 'aspect-[16/7] w-full' : 'w-52'}`}>{collection.tileImage ? <img src={collection.tileImage} alt="" loading="lazy" className="h-full w-full object-cover opacity-75 transition group-hover:scale-[1.02]" /> : <div className="flex h-full items-center justify-center text-white/18"><Compass size={28} /></div>}<div className="absolute inset-0 bg-gradient-to-t from-[#0d1010] via-transparent to-transparent" /><span className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-1 text-[11px] text-white/65">Révision {collection.latestRevisionNumber || '—'}</span></button>
+    <div className="flex min-w-0 flex-1 flex-col p-3.5"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><h2 className="truncate text-sm font-semibold text-white/82">{collection.name}</h2><p className="mt-0.5 truncate text-[11px] text-white/38">par {collection.author || 'auteur Nexus'}</p></div>{collection.adult && <span className="rounded border border-red-300/18 px-1.5 py-0.5 text-[11px] text-red-200/70">NSFW</span>}</div><p className="mt-2 line-clamp-2 text-[11px] leading-relaxed text-white/36">{collection.summary || 'Aucun résumé fourni.'}</p><div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-3"><span className="text-[11px] text-white/34">{collection.modCount} mods · {formatBytes(collection.totalSize)} · {collection.recommendedManager}</span><span className="flex gap-1.5"><button type="button" onClick={() => void openSource()} className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] text-white/40"><ExternalLink size={13} /></button><button type="button" onClick={onOpen} className="rounded-lg bg-[#dbe8e5] px-3 text-[11px] font-semibold text-[#101313]">Détails</button></span></div></div>
+  </article>
+}
+
+function CollectionDetailModal({ collection, detail, loading, error, account, selectedGameName, installing, onRetry, onInstall, onClose }: {
+  collection: NexusCollectionSummary
+  detail?: NexusCollectionDetail
+  loading: boolean
+  error?: string
+  account?: NexusAccountCapabilities
+  selectedGameName?: string
+  installing: boolean
+  onRetry: () => void
+  onInstall: (profileName: string) => void
+  onClose: () => void
+}) {
+  const [profileName, setProfileName] = useState(`${collection.name} · r${collection.latestRevisionNumber || 'latest'}`)
+  const openSource = (url: string) => native.isDesktop() ? native.openExternalUrl(url) : window.open(url, '_blank', 'noopener,noreferrer')
+  return <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/82 p-3 backdrop-blur-md" onPointerDown={event => { if (event.target === event.currentTarget) onClose() }}><section role="dialog" aria-modal="true" className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/[0.11] bg-[#101313] shadow-2xl">
+    <header className="relative min-h-40 overflow-hidden border-b border-white/[0.08] p-5">{collection.headerImage && <img src={collection.headerImage} alt="" className="absolute inset-0 h-full w-full object-cover opacity-30" />}<div className="absolute inset-0 bg-gradient-to-r from-[#101313] via-[#101313]/85 to-[#101313]/45" /><div className="relative flex items-start justify-between gap-4"><div><p className="font-mono text-[11px] uppercase tracking-[0.16em] text-gold/65">Nexus Collection · {collection.game}</p><h2 className="mt-2 font-display text-2xl font-bold text-white">{collection.name}</h2><p className="mt-1 text-xs text-white/48">par {collection.author} · révision {detail?.revisionNumber || collection.latestRevisionNumber || '—'}</p></div><button type="button" onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-lg bg-black/35 text-white/55"><X size={17} /></button></div></header>
+    <div className="min-h-0 flex-1 overflow-y-auto p-5">{loading && <div className="flex min-h-52 items-center justify-center gap-2 text-sm text-white/48"><Loader2 size={17} className="animate-spin" />Lecture de la révision exacte…</div>}{error && <div className="rounded-xl border border-red-300/18 bg-red-300/[0.04] p-4"><p className="text-xs text-red-100/70">{error}</p><p className="mt-2 text-[11px] text-white/38">Si Nexus bloque le contenu adulte, activez NSFW dans ZAILON. Aucun contrôle n’est contourné.</p><button type="button" onClick={onRetry} className="mt-3 rounded-lg border border-red-200/20 px-3 py-2 text-[11px]">Réessayer</button></div>}
+      {detail && <div className="space-y-4"><div className="grid gap-2 sm:grid-cols-4"><Metric label="Mods exacts" value={String(detail.entries.length)} /><Metric label="Téléchargement" value={formatBytes(detail.totalSize)} /><Metric label="Espace temporaire" value={formatBytes(detail.temporaryBytes)} /><Metric label="Schéma" value={`${collection.recommendedManager} ${detail.collectionSchemaVersion}`} /></div><p className="text-xs leading-relaxed text-white/48">{detail.collection.description || detail.collection.summary || 'Aucune description fournie.'}</p>
+        {(detail.warnings.length > 0 || detail.unsupportedInstructions.length > 0) && <div className="rounded-xl border border-amber-300/16 bg-amber-300/[0.035] p-3 text-[11px] leading-relaxed text-amber-50/65">{[...detail.warnings, ...detail.unsupportedInstructions].map(message => <p key={message}>• {message}</p>)}</div>}
+        <div><div className="mb-2 flex items-center justify-between"><h3 className="text-xs font-semibold text-white/72">Fichiers de la révision</h3><span className="text-[11px] text-white/35">{detail.entries.length} ID(s) exact(s)</span></div><div className="max-h-64 overflow-y-auto rounded-xl border border-white/[0.07]">{detail.entries.slice(0, 250).map(entry => <div key={`${entry.collectionEntryId}-${entry.fileId}`} className="flex items-center gap-3 border-b border-white/[0.05] px-3 py-2.5 last:border-0"><span className={`h-2 w-2 rounded-full ${entry.status === 'Unavailable' ? 'bg-red-300/70' : 'bg-emerald-300/60'}`} /><div className="min-w-0 flex-1"><p className="truncate text-[11px] font-semibold text-white/65">{entry.displayName || entry.fileName}</p><p className="truncate font-mono text-[11px] text-white/28">mod {entry.modId} · fichier {entry.fileId} · {entry.expectedVersion || 'version inconnue'}</p></div><button type="button" disabled={!entry.sourceUrl} onClick={() => void openSource(entry.sourceUrl)} className="rounded-lg border border-white/[0.08] px-2 py-1 text-[11px] text-white/45 disabled:opacity-25">Nexus</button></div>)}</div>{detail.entries.length > 250 && <p className="mt-1 text-[11px] text-white/30">Aperçu limité ; le plan conserve les {detail.entries.length} entrées.</p>}</div>
+        <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4"><label className="text-[11px] text-white/48">Nom du nouveau profil vide<input value={profileName} onChange={event => setProfileName(event.target.value)} maxLength={160} className="mt-1.5 w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-white/75 outline-none" /></label><p className="mt-2 text-[11px] leading-relaxed text-white/38">Cible : {selectedGameName || 'aucun jeu sélectionné'}. Le profil est verrouillé et n’hérite d’aucun mod. {account?.membershipTier === 'premium' ? 'La file Premium attendra votre confirmation.' : 'Compte gratuit : Nexus demandera chaque confirmation et renverra le lien NXM.'}</p></div></div>}
+    </div>
+    <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.08] p-4"><button type="button" onClick={() => void openSource(collection.url)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] text-white/58"><ExternalLink size={13} />Page officielle</button><div className="flex gap-2"><button type="button" onClick={onClose} className="px-3 py-2 text-[11px] text-white/45">Fermer</button><button type="button" disabled={!detail || !selectedGameName || !profileName.trim() || installing} onClick={() => onInstall(profileName)} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[#101313] disabled:opacity-35">{installing ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}{installing ? 'Préparation…' : 'Créer le profil et le plan'}</button></div></footer>
+  </section></div>
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3"><p className="text-[11px] text-white/32">{label}</p><p className="mt-1 text-sm font-semibold text-white/72">{value}</p></div>
 }
 
 function ProviderUnavailable({ provider, onConfigure }: { provider: string; onConfigure: () => void }) {

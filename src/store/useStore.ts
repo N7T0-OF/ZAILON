@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { BulkOperation, ExplodMod, ExploreColumns, ExploreSort, Game, GameResources, GameTab, GamebananaGame, LiquidGlassMode, LiquidGlassSettings, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType, WindowEffectsDiagnostic } from '../types'
-import { BackgroundTaskSnapshot, DetectedGame, native, NativeMod, pickExecutable } from '../lib/native'
+import { BackgroundTaskSnapshot, DetectedGame, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
 
@@ -299,6 +299,7 @@ export interface Store {
   setGameHidden: (gameId: string, hidden?: boolean) => void
   setGameCategories: (gameId: string, categories: string[]) => void
   addProfile: (name: string) => void
+  prepareCollectionProfile: (collection: NexusCollectionDetail, name: string, includeAdult: boolean) => Promise<string | undefined>
   duplicateProfile: (profileId: string) => void
   importProfileManifest: (manifest: ProfileArchiveManifest) => void
   renameProfile: (profileId: string, name: string) => void
@@ -645,6 +646,69 @@ export const useStore = create<Store>()(persist((set, get) => ({
     if (native.isDesktop()) void native.syncProfileState(game.id, next).then(paths => {
       set(state => ({ games: updateProfile(state.games, game.id, next.id, profile => withProfilePaths(profile, paths)) }))
     }).catch(error => set({ notice: `Profil créé localement, mais sa persistance native a échoué : ${asError(error)}` }))
+  },
+  prepareCollectionProfile: async (collection, name, includeAdult) => {
+    const { game } = selected(get())
+    if (!game) {
+      set({ notice: 'Sélectionnez un jeu ZAILON avant de préparer une Collection.' })
+      return undefined
+    }
+    if (!native.isDesktop()) {
+      set({ notice: 'Les Collections Nexus exigent l’application bureau ZAILON.' })
+      return undefined
+    }
+    const baseName = name.trim() || `${collection.collection.name} · r${collection.revisionNumber}`
+    const existing = new Set(game.profiles.map(profile => profile.name.toLocaleLowerCase()))
+    let profileName = baseName
+    let suffix = 2
+    while (existing.has(profileName.toLocaleLowerCase())) profileName = `${baseName} (${suffix++})`
+    const installId = createId()
+    const profile: Profile = {
+      id: createId(),
+      gameId: game.id,
+      name: profileName,
+      description: `Collection Nexus ${collection.collection.name}, révision ${collection.revisionNumber}.`,
+      modStates: {},
+      playtime: 0,
+      createdAt: Date.now(),
+      isDefault: false,
+      locked: true,
+      collectionState: 'Preparing',
+      collectionMetadata: {
+        installId,
+        collectionId: collection.collection.id,
+        slug: collection.collection.slug,
+        latestKnownRevisionId: collection.revisionId,
+        sourceGameDomain: collection.collection.gameDomain,
+        selections: [],
+        localOverrides: [],
+      },
+    }
+    try {
+      const prepared = await native.prepareNexusCollectionInstall(
+        game.id,
+        installId,
+        profile,
+        collection.collection.gameDomain,
+        collection.collection.slug,
+        collection.revisionNumber,
+        includeAdult,
+      )
+      const persisted = withProfilePaths(prepared.profile, prepared.profilePaths)
+      set(state => ({
+        games: state.games.map(item => item.id === game.id
+          ? { ...item, profiles: [...item.profiles, persisted] }
+          : item),
+        selectedProfileId: persisted.id,
+        notice: prepared.plan.accountCapabilities.membershipTier === 'premium'
+          ? `Profil « ${persisted.name} » préparé. La file Premium attend votre confirmation.`
+          : `Profil « ${persisted.name} » préparé. Nexus demandera les confirmations de téléchargement officielles.`,
+      }))
+      return persisted.id
+    } catch (error) {
+      set({ notice: `La Collection n’a créé aucun profil local : ${asError(error)}` })
+      return undefined
+    }
   },
   duplicateProfile: profileId => {
     const { game } = selected(get())

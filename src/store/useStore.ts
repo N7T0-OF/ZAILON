@@ -121,7 +121,7 @@ function statesFromMods(mods: Mod[]): Record<string, ProfileModState> {
 export function resolveProfileMods(game?: Game, profile?: Profile): Mod[] {
   if (!game || !profile) return []
   const catalog = game.installedMods?.length ? game.installedMods : profile.mods || []
-  return decorateMods(catalog.map((mod, index) => {
+  return decorateMods(catalog.filter(mod => Object.prototype.hasOwnProperty.call(profile.modStates || {}, mod.id)).map((mod, index) => {
     const state = profile.modStates?.[mod.id]
     return {
       ...mod,
@@ -300,6 +300,7 @@ export interface Store {
   setGameCategories: (gameId: string, categories: string[]) => void
   addProfile: (name: string) => void
   prepareCollectionProfile: (collection: NexusCollectionDetail, name: string, includeAdult: boolean) => Promise<string | undefined>
+  installCollectionDownloads: (gameId: string, installId: string, gameName: string) => Promise<boolean>
   duplicateProfile: (profileId: string) => void
   importProfileManifest: (manifest: ProfileArchiveManifest) => void
   renameProfile: (profileId: string, name: string) => void
@@ -359,7 +360,9 @@ export interface Store {
   setWindowEffectDiagnostic: (diagnostic: WindowEffectsDiagnostic) => void
   bulkSetEnabled: (modIds: string[], enabled: boolean) => Promise<void>
   bulkTransferMods: (modIds: string[], destinationProfileId: string, mode: 'copy' | 'move') => Promise<void>
-  bulkDeleteMods: (modIds: string[], scope: 'current' | 'all') => Promise<void>
+  bulkDeleteMods: (modIds: string[], scope: 'current' | 'all' | 'permanent') => Promise<void>
+  deduplicateStagedMods: (gameId: string) => Promise<void>
+  purgeUnreferencedStagedMods: (gameId: string) => Promise<void>
   bulkAddTag: (modIds: string[], label: string) => Promise<void>
   undoLastBulkOperation: () => Promise<void>
   toggleProfileLock: (profileId: string) => void
@@ -710,6 +713,33 @@ export const useStore = create<Store>()(persist((set, get) => ({
       return undefined
     }
   },
+  installCollectionDownloads: async (gameId, installId, gameName) => {
+    if (!native.isDesktop()) return false
+    try {
+      const result = await native.installCollectionDownloads(gameId, installId, gameName)
+      const stagedMods = await native.listStagedMods(gameId)
+      set(state => ({
+        games: state.games.map(game => {
+          if (game.id !== gameId) return game
+          const installedMods = scannedMods(stagedMods, game.installedMods)
+          return {
+            ...game,
+            installedMods,
+            profiles: game.profiles.map(profile => profile.id === result.plan.profileId
+              ? { ...profile, ...result.profile, mods: undefined }
+              : profile),
+          }
+        }),
+        notice: result.plan.profileState === 'Ready'
+          ? `Collection « ${result.plan.collectionName} » prête dans le profil « ${result.plan.profileName} ».`
+          : `${result.installedPaths.length} paquet(s) installé(s). La Collection demande encore une intervention.`,
+      }))
+      return true
+    } catch (error) {
+      set({ notice: `Installation de la Collection interrompue : ${asError(error)}` })
+      return false
+    }
+  },
   duplicateProfile: profileId => {
     const { game } = selected(get())
     const source = game?.profiles.find(profile => profile.id === profileId)
@@ -813,12 +843,14 @@ export const useStore = create<Store>()(persist((set, get) => ({
       const previous = resolveProfileMods(game, profile)
       const catalog = scannedMods(mods, game.installedMods || previous)
       const previousStates = profile.modStates || statesFromMods(previous)
-      const nextStates = Object.fromEntries(catalog.map((mod, index) => [mod.id, previousStates[mod.id] || {
-        enabled: mod.storage === 'staged'
-          ? Boolean(mod.profileIds?.includes(profile.id) && mod.deploymentStatus !== 'stored')
-          : mod.enabled,
-        priority: index,
-      }]))
+      const nextStates = Object.fromEntries(catalog.flatMap((mod, index) => {
+        const stagedReference = mod.storage === 'staged' && mod.profileIds?.includes(profile.id)
+        if (mod.storage === 'staged' && !stagedReference) return []
+        return [[mod.id, previousStates[mod.id] || {
+          enabled: mod.storage === 'staged' ? mod.deploymentStatus !== 'stored' : mod.enabled,
+          priority: index,
+        }]]
+      }))
       set(state => ({
         games: state.games.map(item => item.id !== game.id ? item : {
           ...item,
@@ -1155,6 +1187,59 @@ export const useStore = create<Store>()(persist((set, get) => ({
   bulkDeleteMods: async (modIds, scope) => {
     const { game, profile } = selected(get())
     if (!game || !profile || !modIds.length) return
+    if (scope === 'permanent') {
+      if (!native.isDesktop()) {
+        set({ notice: 'La suppression physique est disponible uniquement dans l’application ZAILON.' })
+        return
+      }
+      const requested = new Set(modIds)
+      const candidates = game.installedMods.filter(mod => requested.has(mod.id))
+      const succeeded = new Set<string>()
+      const failures: string[] = []
+      for (const mod of candidates) {
+        try {
+          if (mod.storage === 'staged' && mod.stageId) await native.deleteStagedMod(game.id, mod.stageId)
+          else if (mod.path) await native.deleteMod(mod.path, game.modsPath || '')
+          else throw new Error('aucun chemin physique vérifiable')
+          succeeded.add(mod.id)
+        } catch (error) {
+          failures.push(`${mod.name} : ${asError(error)}`)
+        }
+      }
+      if (!succeeded.size) {
+        set({ notice: `Aucun fichier supprimé. ${failures[0] || 'Les paquets sont introuvables.'}` })
+        return
+      }
+      const before = game.profiles.map(cloneProfile)
+      const after = game.profiles.map(current => {
+        const next = cloneProfile(current)
+        succeeded.forEach(modId => delete next.modStates[modId])
+        return next
+      })
+      let persisted = after
+      let profileError = ''
+      try {
+        persisted = await persistProfileTransaction(game.id, createId(), before, after)
+      } catch (error) {
+        profileError = asError(error)
+      }
+      const id = createId()
+      const operation: BulkOperation = {
+        id, kind: 'delete', gameId: game.id, profileIds: game.profiles.map(item => item.id),
+        modIds: [...succeeded], createdAt: Date.now(),
+        label: `Suppression définitive de ${succeeded.size} mod(s) du PC`,
+        beforeProfiles: [], afterProfiles: persisted.map(cloneProfile), undoable: false,
+      }
+      set(state => ({
+        games: state.games.map(item => item.id !== game.id ? item : {
+          ...replaceProfiles(item, persisted),
+          installedMods: item.installedMods.filter(mod => !succeeded.has(mod.id)),
+        }),
+        bulkHistory: [...state.bulkHistory, operation].slice(-30),
+        notice: `${operation.label}. Les fichiers ont été effacés et ne peuvent pas être restaurés par ZAILON.${failures.length ? ` ${failures.length} échec(s) conservé(s).` : ''}${profileError ? ` Manifestes à resynchroniser : ${profileError}` : ''}`,
+      }))
+      return
+    }
     const targets = scope === 'all' ? game.profiles : [profile]
     if (targets.some(item => item.locked)) { set({ notice: 'Au moins un profil ciblé est verrouillé.' }); return }
     const before = targets.map(cloneProfile)
@@ -1177,6 +1262,89 @@ export const useStore = create<Store>()(persist((set, get) => ({
         notice: `${operation.label}. Les paquets partagés restent dans le store et peuvent être restaurés.`,
       }))
     } catch (error) { set({ notice: asError(error) }) }
+  },
+  deduplicateStagedMods: async gameId => {
+    const game = get().games.find(item => item.id === gameId)
+    if (!game) return
+    try {
+      const preview = await native.previewStagedDuplicates(gameId)
+      if (!preview.duplicatePackages) {
+        set({ notice: `Aucun doublon physique parmi ${preview.packagesScanned} paquet(s) du store.` })
+        return
+      }
+      const confirmed = window.confirm(
+        `${preview.duplicatePackages} copie(s) strictement identique(s) détectée(s) dans ${preview.groups.length} groupe(s).\n\n` +
+        `${formatBytes(preview.reclaimableBytes)} seront supprimés du disque. Les profils seront automatiquement reliés à une seule copie.\n\nContinuer ?`,
+      )
+      if (!confirmed) return
+      const result = await native.deduplicateStagedMods(gameId)
+      const replacements = new Map(result.replacements.map(item => [item.duplicateId, item.canonicalId]))
+      const mergeStates = (profile: Profile): Profile => {
+        const modStates = { ...profile.modStates }
+        for (const [duplicateId, canonicalId] of replacements) {
+          const duplicate = modStates[duplicateId]
+          if (!duplicate) continue
+          const canonical = modStates[canonicalId]
+          modStates[canonicalId] = canonical ? {
+            ...canonical,
+            enabled: canonical.enabled || duplicate.enabled,
+            priority: Math.min(canonical.priority, duplicate.priority),
+            note: canonical.note || duplicate.note,
+          } : duplicate
+          delete modStates[duplicateId]
+        }
+        return { ...profile, modStates }
+      }
+      set(state => ({
+        games: state.games.map(item => item.id !== gameId ? item : {
+          ...item,
+          installedMods: item.installedMods.filter(mod => !replacements.has(mod.id)),
+          profiles: item.profiles.map(mergeStates),
+        }),
+        notice: `${result.removedPackages} doublon(s) supprimé(s) définitivement · ${formatBytes(result.reclaimedBytes)} récupérés.${result.warnings.length ? ` ${result.warnings.length} avertissement(s).` : ''}`,
+      }))
+      await get().scanMods(gameId)
+    } catch (error) {
+      set({ notice: asError(error) })
+    }
+  },
+  purgeUnreferencedStagedMods: async gameId => {
+    const game = get().games.find(item => item.id === gameId)
+    if (!game) return
+    try {
+      if (!native.isDesktop()) throw new Error('Le nettoyage physique est disponible uniquement dans l’application ZAILON.')
+      await Promise.all(game.profiles.map(profile => native.syncProfileState(gameId, profile)))
+      const staged = await native.listStagedMods(gameId)
+      const orphaned = staged.filter(mod => !mod.profileIds.length && mod.stageId)
+      if (!orphaned.length) {
+        set({ notice: `Aucun paquet sans profil parmi ${staged.length} paquet(s) du store.` })
+        return
+      }
+      const bytes = orphaned.reduce((sum, mod) => sum + mod.sizeBytes, 0)
+      if (!window.confirm(
+        `${orphaned.length} paquet(s) ne sont référencés par aucun profil.\n\n` +
+        `${formatBytes(bytes)} seront supprimés définitivement du disque. Cette action n’est pas annulable.\n\nContinuer ?`,
+      )) return
+      const removed = new Set<string>()
+      const failures: string[] = []
+      for (const mod of orphaned) {
+        try {
+          await native.deleteStagedMod(gameId, mod.stageId!)
+          removed.add(mod.id)
+        } catch (error) {
+          failures.push(`${mod.name} : ${asError(error)}`)
+        }
+      }
+      set(state => ({
+        games: state.games.map(item => item.id !== gameId ? item : {
+          ...item,
+          installedMods: item.installedMods.filter(mod => !removed.has(mod.id)),
+        }),
+        notice: `${removed.size} paquet(s) non référencé(s) supprimé(s) définitivement.${failures.length ? ` ${failures.length} échec(s) conservé(s).` : ''}`,
+      }))
+    } catch (error) {
+      set({ notice: asError(error) })
+    }
   },
   bulkAddTag: async (modIds, label) => {
     const { game } = selected(get())

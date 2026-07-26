@@ -520,6 +520,8 @@ struct CollectionInstallPlan {
     final_additional_bytes: u64,
     account_capabilities: NexusAccountCapabilities,
     warnings: Vec<String>,
+    #[serde(default)]
+    unsupported_instructions: Vec<String>,
     created_at: u64,
     updated_at: u64,
     open_next_required_page: bool,
@@ -533,6 +535,51 @@ struct PreparedCollectionInstall {
     profile: serde_json::Value,
     profile_paths: ProfilePaths,
     plan_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CollectionStagingResult {
+    plan: CollectionInstallPlan,
+    profile: serde_json::Value,
+    installed_paths: Vec<String>,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StagedDuplicateGroup {
+    canonical_id: String,
+    duplicate_ids: Vec<String>,
+    name: String,
+    reclaimable_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StagedDuplicatePreview {
+    game_id: String,
+    packages_scanned: u64,
+    duplicate_packages: u64,
+    reclaimable_bytes: u64,
+    groups: Vec<StagedDuplicateGroup>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StagedDedupReplacement {
+    duplicate_id: String,
+    canonical_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StagedDedupResult {
+    game_id: String,
+    removed_packages: u64,
+    reclaimed_bytes: u64,
+    replacements: Vec<StagedDedupReplacement>,
+    warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1042,6 +1089,7 @@ fn sync_profile_state_inner(
         }),
     )?;
     write_json_atomic(&load_order_path, &serde_json::json!(load_order))?;
+    reconcile_staged_profile_reference(app, game_id, profile_id, &states)?;
     Ok(ProfilePaths {
         directory: root.to_string_lossy().to_string(),
         manifest_path: manifest_path.to_string_lossy().to_string(),
@@ -1155,6 +1203,7 @@ fn trash_profile_state(
     game_id: String,
     profile_id: String,
 ) -> Result<String, String> {
+    reconcile_staged_profile_reference(&app, &game_id, &profile_id, &serde_json::json!({}))?;
     let root = profile_directory(&app, &game_id, &profile_id)?;
     if !root.exists() {
         return Ok(String::new());
@@ -5359,6 +5408,87 @@ fn staged_mods_root(app: &AppHandle, game_id: &str) -> Result<PathBuf, String> {
         .join("store"))
 }
 
+fn staged_storage_roots(app: &AppHandle, game_id: &str) -> Result<Vec<PathBuf>, String> {
+    let root = staged_mods_root(app, game_id)?;
+    Ok(vec![
+        root.clone(),
+        root.parent()
+            .map(|parent| parent.join("mods"))
+            .unwrap_or_default(),
+    ])
+}
+
+fn reconcile_staged_profile_reference(
+    app: &AppHandle,
+    game_id: &str,
+    profile_id: &str,
+    states: &serde_json::Value,
+) -> Result<(), String> {
+    safe_game_id(profile_id)?;
+    let referenced = states
+        .as_object()
+        .map(|items| items.keys().map(String::as_str).collect::<HashSet<_>>())
+        .unwrap_or_default();
+    for root in staged_storage_roots(app, game_id)? {
+        for entry in fs::read_dir(root)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().is_dir())
+        {
+            let manifest_path = entry.path().join("manifest.json");
+            let Ok(payload) = fs::read(&manifest_path) else {
+                continue;
+            };
+            let Ok(mut manifest) = serde_json::from_slice::<serde_json::Value>(&payload) else {
+                continue;
+            };
+            let stage_id = entry.file_name().to_string_lossy().to_string();
+            if safe_game_id(&stage_id).is_err() {
+                continue;
+            }
+            let mut profiles = manifest
+                .get("profiles")
+                .and_then(|value| value.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                        .filter(|id| id != profile_id)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if referenced.contains(stage_id.as_str()) {
+                profiles.push(profile_id.to_string());
+            }
+            profiles.sort();
+            profiles.dedup();
+            let profiles_value = serde_json::json!(profiles);
+            if manifest.get("profiles") != Some(&profiles_value) {
+                manifest["profiles"] = profiles_value;
+                write_json_atomic(&manifest_path, &manifest)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn staged_package_by_fingerprint(root: &Path, fingerprint: &str) -> Option<PathBuf> {
+    fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .find_map(|entry| {
+            let manifest_path = entry.path().join("manifest.json");
+            let manifest = fs::read(&manifest_path)
+                .ok()
+                .and_then(|payload| serde_json::from_slice::<serde_json::Value>(&payload).ok())?;
+            (manifest.get("fingerprint").and_then(|value| value.as_str()) == Some(fingerprint))
+                .then(|| entry.path())
+        })
+}
+
 fn staged_native_mod(stage_directory: &Path) -> Result<NativeMod, String> {
     let manifest_path = stage_directory.join("manifest.json");
     let manifest: serde_json::Value =
@@ -5463,6 +5593,382 @@ fn delete_staged_mod(app: AppHandle, game_id: String, stage_id: String) -> Resul
         }
     }
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct StagedPackageDigest {
+    id: String,
+    name: String,
+    path: PathBuf,
+    fingerprint: String,
+    content_digest: String,
+    size_bytes: u64,
+    primary: bool,
+}
+
+#[derive(Debug, Clone)]
+struct StagedDuplicatePlanGroup {
+    canonical: StagedPackageDigest,
+    duplicates: Vec<StagedPackageDigest>,
+}
+
+fn content_tree_sha256(root: &Path) -> Result<String, String> {
+    if !root.is_dir() {
+        return Err("Stored mod content is missing.".into());
+    }
+    let mut files = WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .map(|entry| entry.map_err(to_error))
+        .filter_map(|entry| match entry {
+            Ok(entry) if entry.file_type().is_symlink() => Some(Err(
+                "A symbolic link prevents exact duplicate verification.".into(),
+            )),
+            Ok(entry) if entry.file_type().is_file() => Some(Ok(entry.path().to_path_buf())),
+            Ok(_) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    files.sort_by_key(|path| {
+        path.strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/")
+            .to_ascii_lowercase()
+    });
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    for path in files {
+        let relative = path.strip_prefix(root).map_err(to_error)?;
+        validate_archive_relative(relative)?;
+        let normalized = relative.to_string_lossy().replace('\\', "/");
+        hasher.update((normalized.len() as u64).to_le_bytes());
+        hasher.update(normalized.as_bytes());
+        hasher.update(fs::metadata(&path).map_err(to_error)?.len().to_le_bytes());
+        let mut file = fs::File::open(&path).map_err(to_error)?;
+        loop {
+            let read = file.read(&mut buffer).map_err(to_error)?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn staged_duplicate_plan(
+    app: &AppHandle,
+    game_id: &str,
+) -> Result<(u64, Vec<StagedDuplicatePlanGroup>), String> {
+    let game_id = safe_game_id(game_id)?;
+    let primary_root = staged_mods_root(app, game_id)?;
+    let mut packages_scanned = 0u64;
+    let mut candidates: HashMap<String, Vec<(String, String, PathBuf, u64, bool)>> = HashMap::new();
+    for root in staged_storage_roots(app, game_id)? {
+        for entry in fs::read_dir(&root)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().is_dir())
+        {
+            let path = entry.path();
+            let manifest_path = path.join("manifest.json");
+            let content = path.join("content");
+            if !manifest_path.is_file() || !content.is_dir() {
+                continue;
+            }
+            let id = entry.file_name().to_string_lossy().to_string();
+            if safe_game_id(&id).is_err() {
+                continue;
+            }
+            let manifest = fs::read(&manifest_path)
+                .ok()
+                .and_then(|payload| serde_json::from_slice::<serde_json::Value>(&payload).ok())
+                .unwrap_or_else(|| serde_json::json!({}));
+            let fingerprint = manifest
+                .get("fingerprint")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| fingerprint_path(&content));
+            let name = manifest
+                .get("name")
+                .and_then(|value| value.as_str())
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| id.clone());
+            packages_scanned += 1;
+            candidates.entry(fingerprint).or_default().push((
+                id,
+                name,
+                path.clone(),
+                entry_size(&path),
+                path.starts_with(&primary_root),
+            ));
+        }
+    }
+    let mut groups = Vec::new();
+    for (fingerprint, entries) in candidates {
+        if entries.len() < 2 {
+            continue;
+        }
+        let mut exact: HashMap<String, Vec<StagedPackageDigest>> = HashMap::new();
+        for (id, name, path, size_bytes, primary) in entries {
+            let content_digest = content_tree_sha256(&path.join("content"))?;
+            exact
+                .entry(content_digest.clone())
+                .or_default()
+                .push(StagedPackageDigest {
+                    id,
+                    name,
+                    path,
+                    fingerprint: fingerprint.clone(),
+                    content_digest,
+                    size_bytes,
+                    primary,
+                });
+        }
+        for mut packages in exact.into_values().filter(|items| items.len() > 1) {
+            packages.sort_by(|left, right| {
+                right
+                    .primary
+                    .cmp(&left.primary)
+                    .then_with(|| left.id.cmp(&right.id))
+                    .then_with(|| left.path.cmp(&right.path))
+            });
+            let canonical = packages.remove(0);
+            groups.push(StagedDuplicatePlanGroup {
+                canonical,
+                duplicates: packages,
+            });
+        }
+    }
+    groups.sort_by(|left, right| {
+        left.canonical
+            .name
+            .to_ascii_lowercase()
+            .cmp(&right.canonical.name.to_ascii_lowercase())
+    });
+    Ok((packages_scanned, groups))
+}
+
+fn staged_duplicate_preview_inner(
+    app: &AppHandle,
+    game_id: &str,
+) -> Result<StagedDuplicatePreview, String> {
+    let game_id = safe_game_id(game_id)?.to_string();
+    let (packages_scanned, groups) = staged_duplicate_plan(app, &game_id)?;
+    let duplicate_packages = groups
+        .iter()
+        .map(|group| group.duplicates.len() as u64)
+        .sum();
+    let reclaimable_bytes = groups
+        .iter()
+        .flat_map(|group| &group.duplicates)
+        .map(|package| package.size_bytes)
+        .sum();
+    Ok(StagedDuplicatePreview {
+        game_id,
+        packages_scanned,
+        duplicate_packages,
+        reclaimable_bytes,
+        groups: groups
+            .into_iter()
+            .map(|group| {
+                let reclaimable_bytes = group
+                    .duplicates
+                    .iter()
+                    .map(|package| package.size_bytes)
+                    .sum();
+                StagedDuplicateGroup {
+                    canonical_id: group.canonical.id,
+                    duplicate_ids: group
+                        .duplicates
+                        .into_iter()
+                        .map(|package| package.id)
+                        .collect(),
+                    name: group.canonical.name,
+                    reclaimable_bytes,
+                }
+            })
+            .collect(),
+    })
+}
+
+#[tauri::command]
+fn preview_staged_duplicates(
+    app: AppHandle,
+    game_id: String,
+) -> Result<StagedDuplicatePreview, String> {
+    staged_duplicate_preview_inner(&app, &game_id)
+}
+
+fn merge_profile_mod_state(
+    states: &mut serde_json::Map<String, serde_json::Value>,
+    canonical_id: &str,
+    duplicate_id: &str,
+) -> bool {
+    let Some(duplicate) = states.remove(duplicate_id) else {
+        return false;
+    };
+    let Some(canonical) = states.get(canonical_id).cloned() else {
+        states.insert(canonical_id.to_string(), duplicate);
+        return true;
+    };
+    let enabled = canonical
+        .get("enabled")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+        || duplicate
+            .get("enabled")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+    let priority = canonical
+        .get("priority")
+        .and_then(|value| value.as_i64())
+        .unwrap_or(i64::MAX)
+        .min(
+            duplicate
+                .get("priority")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(i64::MAX),
+        );
+    let note = canonical
+        .get("note")
+        .and_then(|value| value.as_str())
+        .or_else(|| duplicate.get("note").and_then(|value| value.as_str()))
+        .map(ToOwned::to_owned);
+    let mut merged = canonical;
+    merged["enabled"] = serde_json::json!(enabled);
+    merged["priority"] = serde_json::json!(priority);
+    if let Some(note) = note {
+        merged["note"] = serde_json::json!(note);
+    }
+    states.insert(canonical_id.to_string(), merged);
+    true
+}
+
+#[tauri::command]
+fn deduplicate_staged_mods(app: AppHandle, game_id: String) -> Result<StagedDedupResult, String> {
+    let game_id = safe_game_id(&game_id)?.to_string();
+    let (_, groups) = staged_duplicate_plan(&app, &game_id)?;
+    let mut replacements = Vec::new();
+    let mut warnings = Vec::new();
+    let mut removed_packages = 0u64;
+    let mut reclaimed_bytes = 0u64;
+
+    let profiles_root = update_data_root(&app)?
+        .join("games")
+        .join(&game_id)
+        .join("profiles");
+    for entry in fs::read_dir(&profiles_root)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+    {
+        let profile_path = entry.path().join("profile.json");
+        let Ok(payload) = fs::read(&profile_path) else {
+            continue;
+        };
+        let Ok(mut profile) = serde_json::from_slice::<serde_json::Value>(&payload) else {
+            warnings.push(format!(
+                "Profil illisible ignoré : {}.",
+                profile_path.to_string_lossy()
+            ));
+            continue;
+        };
+        let Some(profile_id) = profile
+            .get("id")
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned)
+        else {
+            continue;
+        };
+        let mut changed = false;
+        if let Some(states) = profile
+            .get_mut("modStates")
+            .and_then(|value| value.as_object_mut())
+        {
+            for group in &groups {
+                for duplicate in &group.duplicates {
+                    if duplicate.id != group.canonical.id {
+                        changed |=
+                            merge_profile_mod_state(states, &group.canonical.id, &duplicate.id);
+                    }
+                }
+            }
+        }
+        if changed {
+            sync_profile_state_inner(&app, &game_id, &profile_id, &profile)?;
+        }
+    }
+
+    for group in groups {
+        let canonical_manifest_path = group.canonical.path.join("manifest.json");
+        let mut canonical_manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&canonical_manifest_path).map_err(to_error)?)
+                .map_err(to_error)?;
+        let mut profile_ids = canonical_manifest
+            .get("profiles")
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for duplicate in &group.duplicates {
+            if duplicate.fingerprint != group.canonical.fingerprint
+                || duplicate.content_digest != group.canonical.content_digest
+            {
+                return Err("Le plan de doublons a changé ; relancez l’analyse.".into());
+            }
+            if let Ok(payload) = fs::read(duplicate.path.join("manifest.json")) {
+                if let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&payload) {
+                    profile_ids.extend(
+                        manifest
+                            .get("profiles")
+                            .and_then(|value| value.as_array())
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|value| value.as_str().map(ToOwned::to_owned)),
+                    );
+                }
+            }
+        }
+        profile_ids.sort();
+        profile_ids.dedup();
+        canonical_manifest["profiles"] = serde_json::json!(profile_ids);
+        canonical_manifest["deduplicatedAt"] = serde_json::json!(unix_timestamp());
+        write_json_atomic(&canonical_manifest_path, &canonical_manifest)?;
+
+        for duplicate in group.duplicates {
+            if duplicate.id != group.canonical.id {
+                replacements.push(StagedDedupReplacement {
+                    duplicate_id: duplicate.id.clone(),
+                    canonical_id: group.canonical.id.clone(),
+                });
+            }
+            match fs::remove_dir_all(&duplicate.path) {
+                Ok(()) => {
+                    removed_packages += 1;
+                    reclaimed_bytes = reclaimed_bytes.saturating_add(duplicate.size_bytes);
+                }
+                Err(error) => warnings.push(format!(
+                    "{} n’a pas pu être supprimé : {error}",
+                    duplicate.path.to_string_lossy()
+                )),
+            }
+        }
+    }
+    Ok(StagedDedupResult {
+        game_id,
+        removed_packages,
+        reclaimed_bytes,
+        replacements,
+        warnings,
+    })
 }
 
 fn cyberpunk_repair_target(relative: &Path) -> Option<PathBuf> {
@@ -5835,7 +6341,7 @@ fn rollback_cyberpunk_structure_repair(
 fn import_mods_with_staging(
     app: &AppHandle,
     registry: &BackgroundTaskRegistry,
-    channel: &Channel<BackgroundTaskEvent>,
+    channel: Option<&Channel<BackgroundTaskEvent>>,
     task_id: &str,
     game_id: &str,
     profile_ids: &[String],
@@ -5865,6 +6371,37 @@ fn import_mods_with_staging(
             return Err("One of the selected import sources no longer exists.".into());
         }
         let inspected = inspect_native_mod(&source);
+        if let Some(existing_stage) =
+            staged_package_by_fingerprint(&staging_root, &inspected.fingerprint)
+        {
+            for profile_id in profile_ids {
+                attach_staged_package_to_profile(&existing_stage, profile_id)?;
+            }
+            if deploy_now {
+                let manifest_path = existing_stage.join("manifest.json");
+                let mut manifest: serde_json::Value =
+                    serde_json::from_slice(&fs::read(&manifest_path).map_err(to_error)?)
+                        .map_err(to_error)?;
+                manifest["deploymentStatus"] = serde_json::json!("enabled");
+                manifest["lastReusedAt"] = serde_json::json!(unix_timestamp());
+                write_json_atomic(&manifest_path, &manifest)?;
+            }
+            installed.push(existing_stage.to_string_lossy().to_string());
+            report_background_task(
+                app,
+                registry,
+                channel,
+                task_id,
+                index as u64 + 1,
+                total,
+                format!(
+                    "{} déjà présent : paquet réutilisé sans nouvelle copie ({}/{total})",
+                    inspected.name,
+                    index + 1
+                ),
+            );
+            continue;
+        }
         let stage_directory = unique_destination(&staging_root, &inspected.id);
         let stage_id = stage_directory
             .file_name()
@@ -5887,7 +6424,7 @@ fn import_mods_with_staging(
         report_background_task(
             app,
             registry,
-            Some(channel),
+            channel,
             task_id,
             index as u64,
             total,
@@ -5978,7 +6515,7 @@ fn import_mods_with_staging(
         report_background_task(
             app,
             registry,
-            Some(channel),
+            channel,
             task_id,
             index as u64 + 1,
             total,
@@ -6032,7 +6569,7 @@ async fn import_mod_candidates_background(
         import_mods_with_staging(
             &worker_app,
             &worker_registry,
-            &on_event,
+            Some(&on_event),
             &worker_task_id,
             &game_id,
             &profile_ids,
@@ -7646,32 +8183,51 @@ fn write_collection_install_plan(path: &Path, plan: &CollectionInstallPlan) -> R
     write_json_atomic(path, &serde_json::to_value(plan).map_err(to_error)?)
 }
 
-fn has_exact_staged_nexus_file(
+fn exact_staged_nexus_file(
     app: &AppHandle,
     game_id: &str,
     game_domain: &str,
     mod_id: u64,
     file_id: u64,
-) -> bool {
+) -> Option<PathBuf> {
     let Ok(root) = staged_mods_root(app, game_id) else {
-        return false;
+        return None;
     };
     fs::read_dir(root)
         .into_iter()
         .flatten()
         .filter_map(Result::ok)
         .filter(|entry| entry.path().is_dir())
-        .any(|entry| {
+        .find_map(|entry| {
             let Ok(payload) = fs::read(entry.path().join("manifest.json")) else {
-                return false;
+                return None;
             };
             let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&payload) else {
-                return false;
+                return None;
             };
-            nexus_json_string(&manifest, &["nexusGameDomain"]).eq_ignore_ascii_case(game_domain)
+            (nexus_json_string(&manifest, &["nexusGameDomain"]).eq_ignore_ascii_case(game_domain)
                 && nexus_json_u64(&manifest, &["nexusModId"]) == mod_id
-                && nexus_json_u64(&manifest, &["nexusFileId"]) == file_id
+                && nexus_json_u64(&manifest, &["nexusFileId"]) == file_id)
+                .then(|| entry.path())
         })
+}
+
+fn attach_staged_package_to_profile(stage: &Path, profile_id: &str) -> Result<(), String> {
+    let manifest_path = stage.join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).map_err(to_error)?).map_err(to_error)?;
+    let profiles = manifest
+        .get_mut("profiles")
+        .and_then(|value| value.as_array_mut())
+        .ok_or_else(|| "Le manifeste du paquet ne contient pas de liste de profils.".to_string())?;
+    if !profiles
+        .iter()
+        .any(|value| value.as_str() == Some(profile_id))
+    {
+        profiles.push(serde_json::json!(profile_id));
+        write_json_atomic(&manifest_path, &manifest)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -7727,6 +8283,7 @@ async fn prepare_nexus_collection_install(
     let mut already_downloaded = 0u64;
     let mut unavailable_required = 0u64;
     let mut waiting_for_user = 0u64;
+    let mut reused_stages = Vec::new();
     for entry in &mut entries {
         if entry.status == "Unavailable" {
             if entry.required {
@@ -7734,14 +8291,23 @@ async fn prepare_nexus_collection_install(
             }
             continue;
         }
-        if has_exact_staged_nexus_file(
+        if let Some(stage) = exact_staged_nexus_file(
             &app,
             &game_id,
             &entry.nexus_game_domain,
             entry.mod_id,
             entry.file_id,
         ) {
-            entry.status = "Downloaded".into();
+            let stage_id = stage
+                .file_name()
+                .and_then(|value| value.to_str())
+                .ok_or_else(|| "Identifiant de paquet Nexus local invalide.".to_string())?
+                .to_string();
+            safe_game_id(&stage_id)?;
+            attach_staged_package_to_profile(&stage, &profile_id)?;
+            entry.status = "Installed".into();
+            entry.local_path = Some(stage.join("content").to_string_lossy().to_string());
+            reused_stages.push((stage_id, entry.priority));
             already_downloaded += 1;
         } else if premium_automation {
             entry.status = "Queued".into();
@@ -7800,6 +8366,7 @@ async fn prepare_nexus_collection_install(
         final_additional_bytes: detail.total_size.saturating_add(detail.assets_size_bytes),
         account_capabilities: capabilities,
         warnings,
+        unsupported_instructions: detail.unsupported_instructions.clone(),
         created_at: now,
         updated_at: now,
         open_next_required_page: waiting_for_user > 0,
@@ -7809,6 +8376,20 @@ async fn prepare_nexus_collection_install(
     if let Some(object) = persisted_profile.as_object_mut() {
         object.insert("locked".into(), serde_json::json!(true));
         object.insert("collectionState".into(), serde_json::json!(profile_state));
+        if let Some(states) = object
+            .get_mut("modStates")
+            .and_then(|value| value.as_object_mut())
+        {
+            for (stage_id, priority) in &reused_stages {
+                states.insert(
+                    stage_id.clone(),
+                    serde_json::json!({
+                        "enabled": true,
+                        "priority": priority
+                    }),
+                );
+            }
+        }
         object.insert(
             "collectionMetadata".into(),
             serde_json::json!({
@@ -7926,6 +8507,364 @@ fn update_collection_install(
     write_collection_install_plan(&path, &plan)?;
     let _ = app.emit("collection-install-changed", plan.clone());
     Ok(plan)
+}
+
+fn extract_collection_zip(archive_path: &Path, destination: &Path) -> Result<PathBuf, String> {
+    let extension = archive_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if !extension.eq_ignore_ascii_case("zip") {
+        return Err(
+            "Cette archive n’est pas un ZIP. Les formats 7z/RAR restent en intervention manuelle."
+                .into(),
+        );
+    }
+    let file = fs::File::open(archive_path).map_err(to_error)?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|_| "L’archive ZIP de la Collection est illisible.".to_string())?;
+    if archive.len() > 100_000 {
+        return Err("L’archive ZIP contient trop d’entrées.".into());
+    }
+    fs::create_dir_all(destination).map_err(to_error)?;
+    const MAX_COLLECTION_EXTRACTED_BYTES: u64 = 32 * 1024 * 1024 * 1024;
+    let extraction = (|| -> Result<(), String> {
+        let mut total = 0u64;
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index).map_err(to_error)?;
+            if archive_is_symlink(entry.unix_mode()) {
+                return Err("L’archive ZIP contient un lien symbolique refusé.".into());
+            }
+            let relative = entry
+                .enclosed_name()
+                .ok_or_else(|| "L’archive ZIP contient un chemin de traversal.".to_string())?;
+            validate_archive_relative(&relative)?;
+            total = total.saturating_add(entry.size());
+            if total > MAX_COLLECTION_EXTRACTED_BYTES {
+                return Err("L’archive ZIP dépasse la limite extraite de 32 Gio.".into());
+            }
+            let output = destination.join(relative);
+            if entry.is_dir() {
+                fs::create_dir_all(&output).map_err(to_error)?;
+            } else {
+                if let Some(parent) = output.parent() {
+                    fs::create_dir_all(parent).map_err(to_error)?;
+                }
+                let mut file = fs::File::create(output).map_err(to_error)?;
+                copy(&mut entry, &mut file).map_err(to_error)?;
+            }
+        }
+        Ok(())
+    })();
+    if let Err(error) = extraction {
+        let _ = fs::remove_dir_all(destination);
+        return Err(error);
+    }
+    Ok(destination.to_path_buf())
+}
+
+fn install_collection_downloads_inner(
+    app: &AppHandle,
+    registry: &BackgroundTaskRegistry,
+    task_id: &str,
+    game_id: &str,
+    install_id: &str,
+    game_name: &str,
+    cancel: &AtomicBool,
+) -> Result<CollectionStagingResult, String> {
+    let plan_path = collection_install_plan_path(app, game_id, install_id)?;
+    let mut plan = read_collection_install_plan(&plan_path)?;
+    let profile_path = profile_directory(app, game_id, &plan.profile_id)?.join("profile.json");
+    let mut profile: serde_json::Value =
+        serde_json::from_slice(&fs::read(&profile_path).map_err(to_error)?).map_err(to_error)?;
+    let work_root = plan_path
+        .parent()
+        .ok_or_else(|| "Dossier du plan Collection invalide.".to_string())?
+        .join("staging-work");
+    fs::create_dir_all(&work_root).map_err(to_error)?;
+    let mut installed_paths = Vec::new();
+    let mut operation_warnings = Vec::new();
+    let installable = plan
+        .entries
+        .iter()
+        .filter(|entry| entry.status == "Downloaded")
+        .count();
+    let mut processed = 0u64;
+
+    for index in 0..plan.entries.len() {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("TASK_CANCELLED".into());
+        }
+        if plan.entries[index].status != "Downloaded" {
+            continue;
+        }
+        let entry = plan.entries[index].clone();
+        let archive_path = entry
+            .local_path
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(|path| path.is_file());
+        let Some(archive_path) = archive_path else {
+            let message = format!(
+                "{} : le fichier téléchargé exact est introuvable.",
+                entry.display_name
+            );
+            plan.entries[index].status = if entry.required { "Failed" } else { "Skipped" }.into();
+            operation_warnings.push(message);
+            continue;
+        };
+        let extraction = unique_destination(
+            &work_root,
+            &format!(
+                "{}-{}",
+                safe_archive_component(&entry.collection_entry_id),
+                entry.file_id
+            ),
+        );
+        report_background_task(
+            app,
+            registry,
+            None,
+            task_id,
+            processed,
+            installable as u64,
+            format!("Analyse de {}.", entry.display_name),
+        );
+        let staged = (|| -> Result<(PathBuf, SecureImportResult), String> {
+            let extracted = extract_collection_zip(&archive_path, &extraction)?;
+            let imported = import_mods_with_staging(
+                app,
+                registry,
+                None,
+                task_id,
+                game_id,
+                &[plan.profile_id.clone()],
+                vec![extracted.to_string_lossy().to_string()],
+                game_name,
+                String::new(),
+                true,
+                "quarantine",
+                cancel,
+            )?;
+            let stage = imported
+                .installed_paths
+                .first()
+                .map(PathBuf::from)
+                .ok_or_else(|| "Le staging n’a créé aucun paquet.".to_string())?;
+            Ok((stage, imported))
+        })();
+        let _ = fs::remove_dir_all(&extraction);
+        match staged {
+            Ok((stage, imported)) => {
+                let stage_id = stage
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .ok_or_else(|| "Identifiant du paquet Collection invalide.".to_string())?
+                    .to_string();
+                safe_game_id(&stage_id)?;
+                let manifest_path = stage.join("manifest.json");
+                let mut manifest: serde_json::Value =
+                    serde_json::from_slice(&fs::read(&manifest_path).map_err(to_error)?)
+                        .map_err(to_error)?;
+                manifest["name"] = serde_json::json!(entry.display_name);
+                manifest["version"] = serde_json::json!(entry.expected_version);
+                manifest["sourceUrl"] = serde_json::json!(entry.source_url);
+                manifest["nexusGameDomain"] = serde_json::json!(entry.nexus_game_domain);
+                manifest["nexusModId"] = serde_json::json!(entry.mod_id);
+                manifest["nexusFileId"] = serde_json::json!(entry.file_id);
+                manifest["collectionInstallId"] = serde_json::json!(plan.install_id);
+                manifest["collectionEntryId"] = serde_json::json!(entry.collection_entry_id);
+                manifest["collectionRevisionId"] = serde_json::json!(plan.revision_id);
+                write_json_atomic(&manifest_path, &manifest)?;
+                let states = profile
+                    .get_mut("modStates")
+                    .and_then(|value| value.as_object_mut())
+                    .ok_or_else(|| {
+                        "Le profil Collection ne contient plus de modStates.".to_string()
+                    })?;
+                states.insert(
+                    stage_id,
+                    serde_json::json!({
+                        "enabled": true,
+                        "priority": entry.priority
+                    }),
+                );
+                plan.entries[index].status = "Installed".into();
+                installed_paths.push(stage.to_string_lossy().to_string());
+                operation_warnings.extend(imported.warnings);
+            }
+            Err(error) => {
+                plan.entries[index].status =
+                    if entry.required { "Failed" } else { "Skipped" }.into();
+                operation_warnings.push(format!("{} : {error}", entry.display_name));
+            }
+        }
+        processed += 1;
+        plan.updated_at = unix_timestamp();
+        write_collection_install_plan(&plan_path, &plan)?;
+        let _ = app.emit("collection-install-changed", plan.clone());
+    }
+    let _ = fs::remove_dir_all(&work_root);
+
+    let required_ready = plan
+        .entries
+        .iter()
+        .all(|entry| !entry.required || entry.status == "Installed");
+    let external_ready = !plan
+        .external_requirements
+        .iter()
+        .any(|requirement| requirement.required);
+    let ready = required_ready && external_ready && plan.unsupported_instructions.is_empty();
+    let profile_state = if ready { "Ready" } else { "NeedsAttention" };
+    if let Some(object) = profile.as_object_mut() {
+        object.insert("collectionState".into(), serde_json::json!(profile_state));
+        if ready {
+            if let Some(metadata) = object
+                .get_mut("collectionMetadata")
+                .and_then(|value| value.as_object_mut())
+            {
+                metadata.insert(
+                    "installedRevisionId".into(),
+                    serde_json::json!(plan.revision_id),
+                );
+                metadata.insert("installedAt".into(), serde_json::json!(unix_timestamp()));
+            }
+        }
+    }
+    sync_profile_state_inner(app, game_id, &plan.profile_id, &profile)?;
+    plan.profile_state = profile_state.into();
+    plan.automatic_execution = false;
+    plan.updated_at = unix_timestamp();
+    plan.warnings.extend(operation_warnings.clone());
+    write_collection_install_plan(&plan_path, &plan)?;
+    let _ = app.emit("collection-install-changed", plan.clone());
+    Ok(CollectionStagingResult {
+        plan,
+        profile,
+        installed_paths,
+        warnings: operation_warnings,
+    })
+}
+
+#[tauri::command]
+async fn install_collection_downloads(
+    app: AppHandle,
+    state: State<'_, BackgroundTaskRegistry>,
+    game_id: String,
+    install_id: String,
+    game_name: String,
+) -> Result<CollectionStagingResult, String> {
+    let game_id = safe_game_id(&game_id)?.to_string();
+    let install_id = safe_game_id(&install_id)?.to_string();
+    let game_name = game_name.trim().chars().take(160).collect::<String>();
+    if game_name.is_empty() {
+        return Err("Le nom du jeu cible est invalide.".into());
+    }
+    let plan_path = collection_install_plan_path(&app, &game_id, &install_id)?;
+    let mut plan = read_collection_install_plan(&plan_path)?;
+    if plan.profile_state == "Cancelled" {
+        return Err("Cette installation Collection a été annulée.".into());
+    }
+    if !plan
+        .entries
+        .iter()
+        .any(|entry| matches!(entry.status.as_str(), "Downloaded" | "Installed"))
+    {
+        return Err("Aucun fichier Collection téléchargé n’est prêt à analyser.".into());
+    }
+    plan.profile_state = "Installing".into();
+    plan.automatic_execution = false;
+    plan.updated_at = unix_timestamp();
+    write_collection_install_plan(&plan_path, &plan)?;
+    let _ = app.emit("collection-install-changed", plan.clone());
+
+    let registry = state.inner().clone();
+    let task_id = format!("collection-stage-{install_id}");
+    let cancel = register_background_task(
+        &app,
+        &registry,
+        task_id.clone(),
+        "collection-install",
+        &format!("Installation de {}", plan.collection_name),
+        plan.entries
+            .iter()
+            .filter(|entry| entry.status == "Downloaded")
+            .count() as u64,
+    )?;
+    let worker_app = app.clone();
+    let worker_registry = registry.clone();
+    let worker_task_id = task_id.clone();
+    let worker_game_id = game_id.clone();
+    let worker_install_id = install_id.clone();
+    let result = match tauri::async_runtime::spawn_blocking(move || {
+        install_collection_downloads_inner(
+            &worker_app,
+            &worker_registry,
+            &worker_task_id,
+            &worker_game_id,
+            &worker_install_id,
+            &game_name,
+            &cancel,
+        )
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err("Le moteur d’installation Collection s’est arrêté.".to_string()),
+    };
+    if let Err(error) = &result {
+        if let Ok(mut failed_plan) = read_collection_install_plan(&plan_path) {
+            failed_plan.profile_state = if error == "TASK_CANCELLED" {
+                "Paused".into()
+            } else {
+                "NeedsAttention".into()
+            };
+            failed_plan.automatic_execution = false;
+            failed_plan.updated_at = unix_timestamp();
+            failed_plan
+                .warnings
+                .push(format!("Installation locale interrompue : {error}"));
+            let _ = write_collection_install_plan(&plan_path, &failed_plan);
+            let _ = app.emit("collection-install-changed", failed_plan);
+        }
+    }
+    match &result {
+        Ok(staging) => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            if staging.plan.profile_state == "Ready" {
+                "completed"
+            } else {
+                "completed_with_warnings"
+            },
+            format!(
+                "{} paquet(s) Collection ajouté(s) au profil.",
+                staging.installed_paths.len()
+            ),
+            None,
+        ),
+        Err(error) if error == "TASK_CANCELLED" => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            "cancelled",
+            "Installation Collection annulée.".into(),
+            None,
+        ),
+        Err(error) => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            "failed",
+            "Installation Collection interrompue.".into(),
+            Some(error.clone()),
+        ),
+    }
+    result
 }
 
 fn parse_shortcut_launch_url(raw: &str) -> Result<ShortcutLaunchRequest, String> {
@@ -9805,6 +10744,48 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_verification_hashes_the_complete_content_tree() {
+        let root =
+            std::env::temp_dir().join(format!("zailon-dedup-hash-test-{}", unix_timestamp()));
+        let first = root.join("first");
+        let second = root.join("second");
+        fs::create_dir_all(first.join("nested")).expect("first tree");
+        fs::create_dir_all(second.join("nested")).expect("second tree");
+        fs::write(first.join("nested/mod.archive"), b"same-content").expect("first file");
+        fs::write(second.join("nested/mod.archive"), b"same-content").expect("second file");
+        assert_eq!(
+            content_tree_sha256(&first).expect("first digest"),
+            content_tree_sha256(&second).expect("second digest")
+        );
+        fs::write(second.join("nested/mod.archive"), b"changed-content").expect("changed file");
+        assert_ne!(
+            content_tree_sha256(&first).expect("first digest"),
+            content_tree_sha256(&second).expect("changed digest")
+        );
+        fs::remove_dir_all(root).expect("remove dedup hash test");
+    }
+
+    #[test]
+    fn duplicate_profile_states_keep_enabled_and_highest_precedence_data() {
+        let mut states = serde_json::json!({
+            "canonical": { "enabled": false, "priority": 20 },
+            "duplicate": { "enabled": true, "priority": 4, "note": "keep me" }
+        })
+        .as_object()
+        .expect("states object")
+        .clone();
+        assert!(merge_profile_mod_state(
+            &mut states,
+            "canonical",
+            "duplicate"
+        ));
+        assert!(states.get("duplicate").is_none());
+        assert_eq!(states["canonical"]["enabled"], true);
+        assert_eq!(states["canonical"]["priority"], 4);
+        assert_eq!(states["canonical"]["note"], "keep me");
+    }
+
+    #[test]
     fn imports_a_collection_with_more_than_one_hundred_mod_folders() {
         let root =
             std::env::temp_dir().join(format!("zailon-unlimited-import-test-{}", unix_timestamp()));
@@ -9937,6 +10918,8 @@ pub fn run() {
             toggle_mod,
             delete_mod,
             delete_staged_mod,
+            preview_staged_duplicates,
+            deduplicate_staged_mods,
             preview_cyberpunk_structure_repair,
             apply_cyberpunk_structure_repair,
             rollback_cyberpunk_structure_repair,
@@ -9967,6 +10950,7 @@ pub fn run() {
             prepare_nexus_collection_install,
             list_collection_install_plans,
             update_collection_install,
+            install_collection_downloads,
             #[cfg(desktop)]
             start_collection_install,
             set_nxm_association,

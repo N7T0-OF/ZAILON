@@ -77,6 +77,34 @@ export interface CyberpunkRepairResult {
   diagnostics: string[]
 }
 
+export interface StagedDuplicateGroup {
+  canonicalId: string
+  duplicateIds: string[]
+  name: string
+  reclaimableBytes: number
+}
+
+export interface StagedDuplicatePreview {
+  gameId: string
+  packagesScanned: number
+  duplicatePackages: number
+  reclaimableBytes: number
+  groups: StagedDuplicateGroup[]
+}
+
+export interface StagedDedupReplacement {
+  duplicateId: string
+  canonicalId: string
+}
+
+export interface StagedDedupResult {
+  gameId: string
+  removedPackages: number
+  reclaimedBytes: number
+  replacements: StagedDedupReplacement[]
+  warnings: string[]
+}
+
 export interface DetectedGame {
   name: string
   execPath: string
@@ -344,6 +372,7 @@ export interface CollectionInstallPlan {
   finalAdditionalBytes: number
   accountCapabilities: NexusAccountCapabilities
   warnings: string[]
+  unsupportedInstructions: string[]
   createdAt: number
   updatedAt: number
   openNextRequiredPage: boolean
@@ -355,6 +384,13 @@ export interface PreparedCollectionInstall {
   profile: Profile
   profilePaths: ProfilePaths
   planPath: string
+}
+
+export interface CollectionStagingResult {
+  plan: CollectionInstallPlan
+  profile: Profile
+  installedPaths: string[]
+  warnings: string[]
 }
 
 export interface ArtworkCandidate {
@@ -444,6 +480,10 @@ export const native = {
   toggleMod: (modPath: string, modsRoot: string, enable: boolean) => desktopOnly<string>('toggle_mod', { modPath, modsRoot, enable }),
   deleteMod: (modPath: string, modsRoot: string) => desktopOnly<void>('delete_mod', { modPath, modsRoot }),
   deleteStagedMod: (gameId: string, stageId: string) => desktopOnly<void>('delete_staged_mod', { gameId, stageId }),
+  previewStagedDuplicates: (gameId: string) =>
+    desktopOnly<StagedDuplicatePreview>('preview_staged_duplicates', { gameId }),
+  deduplicateStagedMods: (gameId: string) =>
+    desktopOnly<StagedDedupResult>('deduplicate_staged_mods', { gameId }),
   previewCyberpunkStructureRepair: (gameId: string) =>
     desktopOnly<CyberpunkRepairPreview>('preview_cyberpunk_structure_repair', { gameId }),
   applyCyberpunkStructureRepair: (gameId: string, stageIds: string[]) =>
@@ -513,6 +553,8 @@ export const native = {
     desktopOnly<CollectionInstallPlan>('update_collection_install', { gameId, installId, action }),
   startCollectionInstall: (gameId: string, installId: string) =>
     desktopOnly<CollectionInstallPlan>('start_collection_install', { gameId, installId }),
+  installCollectionDownloads: (gameId: string, installId: string, gameName: string) =>
+    desktopOnly<CollectionStagingResult>('install_collection_downloads', { gameId, installId, gameName }),
   setNxmAssociation: (enabled: boolean) => desktopOnly<boolean>('set_nxm_association', { enabled }),
   nxmAssociationStatus: () => desktopOnly<boolean>('nxm_association_status'),
   pendingExternalInstalls: () => desktopOnly<NxmRequest[]>('pending_external_installs'),

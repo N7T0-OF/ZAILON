@@ -305,6 +305,7 @@ export interface Store {
   importProfileManifest: (manifest: ProfileArchiveManifest) => void
   renameProfile: (profileId: string, name: string) => void
   removeProfile: (profileId: string) => void
+  registerImportedStages: (gameId: string, profileId: string, installedPaths: string[], enabled: boolean) => Promise<void>
   scanMods: (gameId?: string) => Promise<void>
   toggleMod: (modId: string) => Promise<void>
   deleteMod: (modId: string) => Promise<void>
@@ -829,12 +830,32 @@ export const useStore = create<Store>()(persist((set, get) => ({
       if (path) set({ notice: `Profil placé dans la corbeille ZAILON : ${path}` })
     }).catch(error => set({ notice: asError(error) }))
   },
+  registerImportedStages: async (gameId, profileId, installedPaths, enabled) => {
+    const game = get().games.find(item => item.id === gameId)
+    const profile = game?.profiles.find(item => item.id === profileId)
+    if (!game || !profile) return
+    const stageIds = [...new Set(installedPaths.map(path => path.split(/[\\/]/).pop()).filter((id): id is string => Boolean(id)))]
+    if (!stageIds.length) return
+    const modStates = { ...profile.modStates }
+    let priority = Object.keys(modStates).length
+    stageIds.forEach(stageId => {
+      modStates[stageId] = modStates[stageId] || { enabled, priority: priority++ }
+    })
+    const updated = { ...profile, modStates }
+    set(state => ({ games: updateProfile(state.games, gameId, profileId, () => updated) }))
+    if (native.isDesktop()) await native.syncProfileState(gameId, updated)
+  },
   scanMods: async gameId => {
     const state = get()
     const game = state.games.find(item => item.id === (gameId ?? state.selectedGameId))
     const profile = game?.profiles.find(item => item.id === state.selectedProfileId) ?? game?.profiles[0]
     if (!game || !profile) return
     try {
+      if (native.isDesktop()) {
+        for (const currentProfile of game.profiles) {
+          await native.syncProfileState(game.id, currentProfile)
+        }
+      }
       const [folderMods, stagedMods] = await Promise.all([
         game.modsPath ? native.scanMods(game.modsPath) : Promise.resolve([]),
         native.listStagedMods(game.id),
@@ -1099,6 +1120,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       }
       const taskId = createId()
       const imported = await native.importModCandidatesBackground(taskId, game.id, [profile.id], [download.path], game.name, game.modsPath || game.installDirectory || '', true, 'quarantine', task => get().upsertBackgroundTask(task))
+      await get().registerImportedStages(game.id, profile.id, imported.installedPaths, true)
       await get().scanMods(game.id)
       set({ notice: imported.status === 'CompletedWithWarnings' || download.status === 'CompletedWithWarnings' ? `${mod.name} a été importé avec avertissement : ${(download.sensitiveFiles.length + imported.sensitiveFiles.length)} fichier(s) sensible(s) isolé(s). Aucun n’a été exécuté.` : `${mod.name} a été téléchargé, validé et stocké. Il sera rendu visible dans ${game.name} au prochain lancement après vérification.` })
     } catch (error) {
@@ -1313,7 +1335,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
     if (!game) return
     try {
       if (!native.isDesktop()) throw new Error('Le nettoyage physique est disponible uniquement dans l’application ZAILON.')
-      await Promise.all(game.profiles.map(profile => native.syncProfileState(gameId, profile)))
+      for (const profile of game.profiles) {
+        await native.syncProfileState(gameId, profile)
+      }
       const staged = await native.listStagedMods(gameId)
       const orphaned = staged.filter(mod => !mod.profileIds.length && mod.stageId)
       if (!orphaned.length) {

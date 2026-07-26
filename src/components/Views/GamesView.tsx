@@ -446,6 +446,7 @@ function BulkActionDialog({ mode, count, source, profiles, onClose, onConfirm }:
 function ModImportDialog({ gameId, profileId, gameName, destination, onClose, onImported }: { gameId: string; profileId: string; gameName: string; destination?: string; onClose: () => void; onImported: () => void }) {
   const autoReduce = useStore(state => state.taskAutoReduceImports)
   const upsertBackgroundTask = useStore(state => state.upsertBackgroundTask)
+  const registerImportedStages = useStore(state => state.registerImportedStages)
   const [candidates, setCandidates] = useState<ModImportCandidate[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
@@ -517,6 +518,7 @@ function ModImportDialog({ gameId, profileId, gameName, destination, onClose, on
         setTask(nextTask)
         if (autoReduce && nextTask.status === 'running' && nextTask.processed > 0 && !reduceTimer.current) reduceTimer.current = window.setTimeout(onClose, 1_500)
       })
+      await registerImportedStages(gameId, profileId, result.installedPaths, deployNow)
       if (result.status === 'CompletedWithWarnings') setError(`Import terminé avec avertissement : ${result.sensitiveFiles.length} fichier(s) sensible(s) traité(s). Aucun n’a été exécuté.`)
       onImported()
       onClose()

@@ -94,6 +94,99 @@ struct BaseSnapshotResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct Mo2ProfilePreview {
+    name: String,
+    mod_count: u64,
+    enabled_count: u64,
+    disabled_count: u64,
+    separator_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Mo2ExecutablePreview {
+    title: String,
+    binary_present: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Mo2ImportPreview {
+    root: String,
+    version: Option<String>,
+    install_type: String,
+    game_name: Option<String>,
+    selected_profile: Option<String>,
+    profiles: Vec<Mo2ProfilePreview>,
+    executables: Vec<Mo2ExecutablePreview>,
+    installed_mods: u64,
+    downloads: u64,
+    overwrite_files: u64,
+    overwrite_bytes: u64,
+    plugin_files: u64,
+    hidden_files: u64,
+    secret_keys_detected: u64,
+    required_bytes: u64,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Mo2ProfileMapping {
+    source_name: String,
+    target_id: String,
+    target_name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Mo2ImportOptions {
+    mods: bool,
+    metadata: bool,
+    overwrite: bool,
+    downloads: bool,
+    executables: bool,
+    categories: bool,
+    notes: bool,
+    hidden_files: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Mo2ImportRequest {
+    source_path: String,
+    game_id: String,
+    game_name: String,
+    profiles: Vec<Mo2ProfileMapping>,
+    options: Mo2ImportOptions,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Mo2ImportResult {
+    profiles: Vec<serde_json::Value>,
+    installed_paths: Vec<String>,
+    managed_executables: Vec<serde_json::Value>,
+    imported_mods: u64,
+    skipped_mods: u64,
+    copied_downloads: u64,
+    overwrite_files: u64,
+    report_path: String,
+    snapshot_path: String,
+    source_unchanged: bool,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct Mo2ModListEntry {
+    name: String,
+    enabled: bool,
+    separator: bool,
+    priority: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ModImportCandidate {
     id: String,
     name: String,
@@ -6338,6 +6431,855 @@ fn rollback_cyberpunk_structure_repair(
     })
 }
 
+type IniDocument = HashMap<String, HashMap<String, String>>;
+
+fn read_ini_document(path: &Path) -> Result<IniDocument, String> {
+    let payload = fs::read(path).map_err(to_error)?;
+    let text = String::from_utf8_lossy(&payload);
+    let mut document = IniDocument::new();
+    let mut section = String::new();
+    for raw_line in text.lines() {
+        let line = raw_line.trim().trim_start_matches('\u{feff}');
+        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_ascii_lowercase();
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        document
+            .entry(section.clone())
+            .or_default()
+            .insert(key.trim().to_ascii_lowercase(), value.trim().to_string());
+    }
+    Ok(document)
+}
+
+fn ini_value(document: &IniDocument, keys: &[&str]) -> Option<String> {
+    for values in document.values() {
+        for key in keys {
+            if let Some(value) = values.get(&key.to_ascii_lowercase()) {
+                let value = value.trim().trim_matches('"').to_string();
+                if !value.is_empty() {
+                    return Some(value);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn ini_leaf_value(document: &IniDocument, leaf: &str) -> Option<String> {
+    let leaf = leaf.to_ascii_lowercase();
+    for values in document.values() {
+        for (key, value) in values {
+            let normalized = key.replace('\\', "/");
+            if normalized.rsplit('/').next() == Some(leaf.as_str()) {
+                let value = value.trim().trim_matches('"').to_string();
+                if !value.is_empty() {
+                    return Some(value);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn mo2_root(source_path: &str) -> Result<PathBuf, String> {
+    let root = fs::canonicalize(source_path)
+        .map_err(|_| "Le dossier Mod Organizer 2 est introuvable ou inaccessible.".to_string())?;
+    if !root.is_dir()
+        || !root.join("ModOrganizer.exe").is_file()
+        || !root.join("ModOrganizer.ini").is_file()
+        || !root.join("mods").is_dir()
+        || !root.join("profiles").is_dir()
+    {
+        return Err(
+            "Ce dossier ne ressemble pas à une instance portable Mod Organizer 2 valide.".into(),
+        );
+    }
+    Ok(root)
+}
+
+fn safe_mo2_child(root: &Path, name: &str) -> Result<PathBuf, String> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0')
+    {
+        return Err("Nom de dossier MO2 invalide.".into());
+    }
+    let root = fs::canonicalize(root).map_err(to_error)?;
+    let candidate = root.join(name);
+    if fs::symlink_metadata(&candidate)
+        .map_err(to_error)?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("Les liens symboliques MO2 ne sont pas importés.".into());
+    }
+    let child = fs::canonicalize(candidate).map_err(to_error)?;
+    if child.parent() != Some(root.as_path()) || !child.is_dir() {
+        return Err("Un dossier MO2 sort de la racine autorisée.".into());
+    }
+    Ok(child)
+}
+
+fn parse_mo2_modlist(path: &Path) -> Result<Vec<Mo2ModListEntry>, String> {
+    let payload = fs::read(path).map_err(to_error)?;
+    let text = String::from_utf8_lossy(&payload);
+    let records = text
+        .lines()
+        .filter_map(|raw_line| {
+            let line = raw_line.trim().trim_start_matches('\u{feff}');
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let (enabled, name) = match line.chars().next() {
+                Some('+') | Some('*') => (true, &line[1..]),
+                Some('-') => (false, &line[1..]),
+                _ => (true, line),
+            };
+            let name = name.trim();
+            (!name.is_empty()).then(|| (name.to_string(), enabled))
+        })
+        .collect::<Vec<_>>();
+    let total = records.len() as i64;
+    Ok(records
+        .into_iter()
+        .enumerate()
+        .map(|(index, (name, enabled))| Mo2ModListEntry {
+            separator: name.to_ascii_lowercase().ends_with("_separator"),
+            name,
+            enabled,
+            // MO2 écrit modlist.txt dans l'ordre inverse. ZAILON utilise un ordre
+            // croissant où le dernier gagne, donc on inverse explicitement ici.
+            priority: total - index as i64 - 1,
+        })
+        .collect())
+}
+
+fn tree_stats(root: &Path) -> Result<(u64, u64), String> {
+    if !root.is_dir() {
+        return Ok((0, 0));
+    }
+    let mut files = 0u64;
+    let mut bytes = 0u64;
+    for entry in WalkDir::new(root).follow_links(false) {
+        let entry = entry.map_err(to_error)?;
+        if entry.file_type().is_symlink() {
+            continue;
+        }
+        if entry.file_type().is_file() {
+            files += 1;
+            bytes = bytes.saturating_add(entry.metadata().map_err(to_error)?.len());
+        }
+    }
+    Ok((files, bytes))
+}
+
+fn direct_directory_count(root: &Path) -> u64 {
+    fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .count() as u64
+}
+
+fn mo2_secret_key_count(document: &IniDocument) -> u64 {
+    let sensitive = [
+        "apikey",
+        "api_key",
+        "token",
+        "cookie",
+        "password",
+        "credential",
+        "secret",
+    ];
+    document
+        .values()
+        .flat_map(|values| values.keys())
+        .filter(|key| sensitive.iter().any(|needle| key.contains(needle)))
+        .count() as u64
+}
+
+fn clean_qt_ini_value(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches('"')
+        .replace("\\\\", "\\")
+        .replace("%BASE_DIR%", ".")
+}
+
+fn mo2_executables(root: &Path, document: &IniDocument) -> Vec<(String, PathBuf)> {
+    let mut values = HashMap::<String, HashMap<String, String>>::new();
+    for (section, entries) in document {
+        for (key, value) in entries {
+            let combined = format!("{section}/{key}").replace('\\', "/");
+            if !combined.to_ascii_lowercase().contains("customexecutables") {
+                continue;
+            }
+            let parts = combined.split('/').collect::<Vec<_>>();
+            let Some(field) = parts.last() else { continue };
+            if !matches!(*field, "title" | "binary") {
+                continue;
+            }
+            let group = parts
+                .get(parts.len().saturating_sub(2))
+                .copied()
+                .unwrap_or("0")
+                .to_string();
+            values
+                .entry(group)
+                .or_default()
+                .insert((*field).to_string(), clean_qt_ini_value(value));
+        }
+    }
+    let mut executables = values
+        .into_values()
+        .filter_map(|entry| {
+            let title = entry.get("title")?.trim().to_string();
+            let binary = PathBuf::from(entry.get("binary")?);
+            let binary = if binary.is_absolute() {
+                binary
+            } else {
+                root.join(binary)
+            };
+            (!title.is_empty()).then_some((title, binary))
+        })
+        .collect::<Vec<_>>();
+    executables.sort_by(|left, right| {
+        left.0
+            .to_ascii_lowercase()
+            .cmp(&right.0.to_ascii_lowercase())
+    });
+    executables
+}
+
+fn mo2_configuration_snapshot(
+    root: &Path,
+    profile_names: &[String],
+) -> Result<HashMap<String, String>, String> {
+    let mut files = vec![root.join("ModOrganizer.ini")];
+    for name in profile_names {
+        let profile = safe_mo2_child(&root.join("profiles"), name)?;
+        for file_name in [
+            "modlist.txt",
+            "archives.txt",
+            "settings.ini",
+            "initweaks.ini",
+        ] {
+            let path = profile.join(file_name);
+            if path.is_file() {
+                files.push(path);
+            }
+        }
+    }
+    files
+        .into_iter()
+        .map(|path| {
+            let relative = path.strip_prefix(root).map_err(to_error)?;
+            Ok((
+                relative.to_string_lossy().replace('\\', "/"),
+                file_sha256(&path)?,
+            ))
+        })
+        .collect()
+}
+
+fn mo2_metadata(
+    source_mod: &Path,
+    options: &Mo2ImportOptions,
+) -> Result<serde_json::Value, String> {
+    let path = source_mod.join("meta.ini");
+    if !options.metadata || !path.is_file() {
+        return Ok(serde_json::json!({}));
+    }
+    let document = read_ini_document(&path)?;
+    let mut output = serde_json::Map::new();
+    for key in [
+        "modid",
+        "fileid",
+        "gamename",
+        "repository",
+        "url",
+        "version",
+        "newestversion",
+        "installationfile",
+        "validated",
+        "converted",
+        "endorsed",
+        "tracked",
+    ] {
+        if let Some(value) = ini_leaf_value(&document, key) {
+            output.insert(key.to_string(), serde_json::json!(value));
+        }
+    }
+    if options.categories {
+        for key in ["category", "nexuscategory"] {
+            if let Some(value) = ini_leaf_value(&document, key) {
+                output.insert(key.to_string(), serde_json::json!(value));
+            }
+        }
+    }
+    if options.notes {
+        for key in ["notes", "comments", "color"] {
+            if let Some(value) = ini_leaf_value(&document, key) {
+                output.insert(key.to_string(), serde_json::json!(value));
+            }
+        }
+    }
+    Ok(serde_json::Value::Object(output))
+}
+
+fn mo2_hidden_rules(source_mod: &Path, stage_id: &str) -> Result<Vec<serde_json::Value>, String> {
+    let mut rules = Vec::new();
+    for entry in WalkDir::new(source_mod).follow_links(false) {
+        let entry = entry.map_err(to_error)?;
+        if entry.file_type().is_symlink() {
+            return Err("Un lien symbolique bloque l'import des fichiers cachés MO2.".into());
+        }
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let relative = entry.path().strip_prefix(source_mod).map_err(to_error)?;
+        validate_archive_relative(relative)?;
+        let normalized = relative.to_string_lossy().replace('\\', "/");
+        if let Some(original) = normalized.strip_suffix(".mohidden") {
+            rules.push(serde_json::json!({
+                "modId": stage_id,
+                "path": original,
+                "sourceConvention": ".mohidden"
+            }));
+        }
+    }
+    Ok(rules)
+}
+
+fn copy_mo2_downloads(source: &Path, destination: &Path) -> Result<u64, String> {
+    if !source.is_dir() {
+        return Ok(0);
+    }
+    let mut copied = 0u64;
+    for entry in WalkDir::new(source).follow_links(false) {
+        let entry = entry.map_err(to_error)?;
+        if entry.file_type().is_symlink() {
+            return Err("Un lien symbolique bloque l'import des téléchargements MO2.".into());
+        }
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let relative = entry.path().strip_prefix(source).map_err(to_error)?;
+        validate_archive_relative(relative)?;
+        let lower = relative.to_string_lossy().to_ascii_lowercase();
+        if lower.ends_with(".unfinished") || lower.ends_with(".part") {
+            continue;
+        }
+        let mut target = destination.join(relative);
+        if lower.ends_with(".meta") {
+            let document = read_ini_document(entry.path())?;
+            let mut sanitized = serde_json::Map::new();
+            for key in [
+                "category",
+                "description",
+                "filecategory",
+                "fileid",
+                "filetime",
+                "gamename",
+                "installed",
+                "modid",
+                "modname",
+                "name",
+                "newestversion",
+                "paused",
+                "removed",
+                "repository",
+                "uninstalled",
+                "version",
+            ] {
+                if let Some(value) = ini_leaf_value(&document, key) {
+                    sanitized.insert(key.to_string(), serde_json::json!(value));
+                }
+            }
+            target = PathBuf::from(format!("{}.sanitized.json", target.to_string_lossy()));
+            write_json_atomic(&target, &serde_json::Value::Object(sanitized))?;
+            copied += 1;
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(to_error)?;
+        }
+        fs::copy(entry.path(), target).map_err(to_error)?;
+        copied += 1;
+    }
+    Ok(copied)
+}
+
+#[tauri::command]
+fn preview_mo2_import(source_path: String) -> Result<Mo2ImportPreview, String> {
+    let root = mo2_root(&source_path)?;
+    let ini = read_ini_document(&root.join("ModOrganizer.ini"))?;
+    let profiles_root = root.join("profiles");
+    let mut profiles = Vec::new();
+    for entry in fs::read_dir(&profiles_root)
+        .map_err(to_error)?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+    {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let modlist = entry.path().join("modlist.txt");
+        if !modlist.is_file() {
+            continue;
+        }
+        let entries = parse_mo2_modlist(&modlist)?;
+        let mods = entries
+            .iter()
+            .filter(|item| !item.separator)
+            .collect::<Vec<_>>();
+        profiles.push(Mo2ProfilePreview {
+            name,
+            mod_count: mods.len() as u64,
+            enabled_count: mods.iter().filter(|item| item.enabled).count() as u64,
+            disabled_count: mods.iter().filter(|item| !item.enabled).count() as u64,
+            separator_count: entries.iter().filter(|item| item.separator).count() as u64,
+        });
+    }
+    profiles.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+    });
+    let (mods_files, mods_bytes) = tree_stats(&root.join("mods"))?;
+    let (overwrite_files, overwrite_bytes) = tree_stats(&root.join("overwrite"))?;
+    let (download_files, download_bytes) = tree_stats(&root.join("downloads"))?;
+    let (plugin_files, _) = tree_stats(&root.join("plugins"))?;
+    let hidden_files = WalkDir::new(root.join("mods"))
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_type().is_file()
+                && entry
+                    .file_name()
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .ends_with(".mohidden")
+        })
+        .count() as u64;
+    let executables = mo2_executables(&root, &ini)
+        .into_iter()
+        .map(|(title, binary)| Mo2ExecutablePreview {
+            title,
+            binary_present: binary.is_file(),
+        })
+        .collect();
+    let mut warnings = vec![
+        "Aucun binaire, plugin, thème, icône ou traduction MO2 ne sera copié.".into(),
+        "Les DLL et exécutables contenus dans les mods restent soumis au contrôle de sécurité ZAILON.".into(),
+        "Le moteur TemporaryCopy de ZAILON n'est pas le VFS usvfs de MO2.".into(),
+    ];
+    let secret_keys_detected = mo2_secret_key_count(&ini);
+    if secret_keys_detected > 0 {
+        warnings.push(format!(
+            "{secret_keys_detected} clé(s) potentiellement sensible(s) détectée(s) : elles seront ignorées."
+        ));
+    }
+    Ok(Mo2ImportPreview {
+        root: root.to_string_lossy().to_string(),
+        version: ini_value(&ini, &["version", "modorganizerversion"]),
+        install_type: "Portable".into(),
+        game_name: ini_value(&ini, &["gamename", "game_name"]),
+        selected_profile: ini_value(&ini, &["selected_profile", "selectedprofile"]),
+        profiles,
+        executables,
+        installed_mods: direct_directory_count(&root.join("mods")),
+        downloads: download_files,
+        overwrite_files,
+        overwrite_bytes,
+        plugin_files,
+        hidden_files,
+        secret_keys_detected,
+        required_bytes: mods_bytes
+            .saturating_add(overwrite_bytes)
+            .saturating_add(download_bytes),
+        warnings,
+    })
+}
+
+fn import_mo2_instance_inner(
+    app: &AppHandle,
+    registry: &BackgroundTaskRegistry,
+    task_id: &str,
+    request: Mo2ImportRequest,
+    cancel: &AtomicBool,
+) -> Result<Mo2ImportResult, String> {
+    let root = mo2_root(&request.source_path)?;
+    let game_id = safe_game_id(&request.game_id)?.to_string();
+    if request.profiles.is_empty() {
+        return Err("Sélectionnez au moins un profil MO2.".into());
+    }
+    let mut target_ids = HashSet::new();
+    let mut source_names = HashSet::new();
+    for mapping in &request.profiles {
+        safe_game_id(&mapping.target_id)?;
+        if mapping.target_name.trim().is_empty()
+            || !target_ids.insert(mapping.target_id.clone())
+            || !source_names.insert(mapping.source_name.to_ascii_lowercase())
+        {
+            return Err(
+                "Le mapping des profils MO2 contient un doublon ou un nom invalide.".into(),
+            );
+        }
+    }
+    let source_profile_names = request
+        .profiles
+        .iter()
+        .map(|mapping| mapping.source_name.clone())
+        .collect::<Vec<_>>();
+    let before_snapshot = mo2_configuration_snapshot(&root, &source_profile_names)?;
+    let ini = read_ini_document(&root.join("ModOrganizer.ini"))?;
+    let selected_source_profile =
+        ini_value(&ini, &["selected_profile", "selectedprofile"]).unwrap_or_default();
+    let mut parsed_profiles = HashMap::<String, Vec<Mo2ModListEntry>>::new();
+    let mut references = HashMap::<String, (String, Vec<String>)>::new();
+    for mapping in &request.profiles {
+        let source_profile = safe_mo2_child(&root.join("profiles"), &mapping.source_name)?;
+        let entries = parse_mo2_modlist(&source_profile.join("modlist.txt"))?;
+        for entry in entries.iter().filter(|entry| !entry.separator) {
+            let key = entry.name.to_ascii_lowercase();
+            let reference = references
+                .entry(key)
+                .or_insert_with(|| (entry.name.clone(), Vec::new()));
+            if !reference.1.contains(&mapping.target_id) {
+                reference.1.push(mapping.target_id.clone());
+            }
+        }
+        parsed_profiles.insert(mapping.source_name.to_ascii_lowercase(), entries);
+    }
+    let total = if request.options.mods {
+        references.len() as u64
+    } else {
+        0
+    };
+    report_background_task(
+        app,
+        registry,
+        None,
+        task_id,
+        0,
+        total,
+        "Validation de l'instance MO2 terminée.".into(),
+    );
+    let destination = update_data_root(app)?
+        .join("games")
+        .join(&game_id)
+        .join("legacy-import-target");
+    let mut stage_by_name = HashMap::<String, String>::new();
+    let mut installed_paths = Vec::new();
+    let mut warnings = Vec::new();
+    let mut skipped_mods = 0u64;
+    if request.options.mods {
+        let mut ordered = references.into_iter().collect::<Vec<_>>();
+        ordered.sort_by(|left, right| left.0.cmp(&right.0));
+        for (index, (key, (name, profile_ids))) in ordered.into_iter().enumerate() {
+            if cancel.load(Ordering::Relaxed) {
+                return Err("TASK_CANCELLED".into());
+            }
+            let source_mod = match safe_mo2_child(&root.join("mods"), &name) {
+                Ok(path) => path,
+                Err(_) => {
+                    skipped_mods += 1;
+                    warnings.push(format!("Mod MO2 absent ou non sûr ignoré : {name}"));
+                    continue;
+                }
+            };
+            let imported = import_mods_with_staging(
+                app,
+                registry,
+                None,
+                task_id,
+                &game_id,
+                &profile_ids,
+                vec![source_mod.to_string_lossy().to_string()],
+                &request.game_name,
+                destination.to_string_lossy().to_string(),
+                false,
+                "quarantine",
+                cancel,
+            )?;
+            let Some(stage_path) = imported.installed_paths.first() else {
+                skipped_mods += 1;
+                continue;
+            };
+            let stage = PathBuf::from(stage_path);
+            let stage_id = stage
+                .file_name()
+                .and_then(|value| value.to_str())
+                .ok_or_else(|| "Identifiant de paquet importé invalide.".to_string())?
+                .to_string();
+            safe_game_id(&stage_id)?;
+            let metadata = mo2_metadata(&source_mod, &request.options)?;
+            let manifest_path = stage.join("manifest.json");
+            let mut manifest: serde_json::Value =
+                serde_json::from_slice(&fs::read(&manifest_path).map_err(to_error)?)
+                    .map_err(to_error)?;
+            manifest["importedFrom"] = serde_json::json!("Mod Organizer 2");
+            manifest["mo2Metadata"] = metadata;
+            manifest["mo2SourceDigest"] = serde_json::json!(content_tree_sha256(&source_mod)?);
+            write_json_atomic(&manifest_path, &manifest)?;
+            warnings.extend(imported.warnings);
+            stage_by_name.insert(key, stage_id);
+            installed_paths.push(stage_path.clone());
+            report_background_task(
+                app,
+                registry,
+                None,
+                task_id,
+                index as u64 + 1,
+                total,
+                format!("Import MO2 : {} / {total}", index + 1),
+            );
+        }
+    }
+    let mut profiles = Vec::new();
+    for mapping in &request.profiles {
+        let entries = parsed_profiles
+            .get(&mapping.source_name.to_ascii_lowercase())
+            .ok_or_else(|| "Profil MO2 analysé introuvable.".to_string())?;
+        let mut states = serde_json::Map::new();
+        let mut separators = Vec::new();
+        let mut hidden_rules = Vec::new();
+        for entry in entries {
+            if entry.separator {
+                separators.push(serde_json::json!({
+                    "name": entry.name.trim_end_matches("_separator"),
+                    "priority": entry.priority
+                }));
+                continue;
+            }
+            let Some(stage_id) = stage_by_name.get(&entry.name.to_ascii_lowercase()) else {
+                continue;
+            };
+            states.insert(
+                stage_id.clone(),
+                serde_json::json!({
+                    "enabled": entry.enabled,
+                    "priority": entry.priority
+                }),
+            );
+            if request.options.hidden_files {
+                if let Ok(source_mod) = safe_mo2_child(&root.join("mods"), &entry.name) {
+                    hidden_rules.extend(mo2_hidden_rules(&source_mod, stage_id)?);
+                }
+            }
+        }
+        let profile = serde_json::json!({
+            "id": mapping.target_id,
+            "gameId": game_id,
+            "name": mapping.target_name,
+            "modStates": states,
+            "modSeparators": separators,
+            "hiddenFileRules": hidden_rules,
+            "playtime": 0,
+            "createdAt": unix_timestamp().saturating_mul(1000),
+            "description": format!("Importé depuis Mod Organizer 2 · {}", mapping.source_name),
+            "installOptions": {
+                "mo2Metadata": request.options.metadata,
+                "mo2Categories": request.options.categories,
+                "mo2Notes": request.options.notes,
+                "mo2HiddenFiles": request.options.hidden_files
+            }
+        });
+        sync_profile_state_inner(app, &game_id, &mapping.target_id, &profile)?;
+        profiles.push(profile);
+    }
+    let mut overwrite_files = 0u64;
+    if request.options.overwrite && root.join("overwrite").is_dir() {
+        if let Some(mapping) = request.profiles.iter().find(|mapping| {
+            mapping
+                .source_name
+                .eq_ignore_ascii_case(&selected_source_profile)
+        }) {
+            let target = profile_directory(app, &game_id, &mapping.target_id)?.join("overwrite");
+            copy_tree_for_snapshot(&root.join("overwrite"), &target)?;
+            overwrite_files = tree_stats(&target)?.0;
+        } else {
+            warnings.push(
+                "Le profil MO2 actif n'était pas sélectionné : le dossier Overwrite global n'a pas été copié."
+                    .into(),
+            );
+        }
+    }
+    let migration_id = format!("mo2-{}-{}", unix_timestamp(), std::process::id());
+    let migration_root = update_data_root(app)?
+        .join("games")
+        .join(&game_id)
+        .join("migrations")
+        .join("mo2")
+        .join(&migration_id);
+    fs::create_dir_all(&migration_root).map_err(to_error)?;
+    let copied_downloads = if request.options.downloads {
+        copy_mo2_downloads(&root.join("downloads"), &migration_root.join("downloads"))?
+    } else {
+        0
+    };
+    let managed_executables = if request.options.executables {
+        mo2_executables(&root, &ini)
+            .into_iter()
+            .filter(|(_, binary)| binary.is_file())
+            .map(|(title, binary)| {
+                serde_json::json!({
+                    "id": format!("mo2-executable-{}", safe_archive_component(&title)),
+                    "name": title,
+                    "path": binary.to_string_lossy(),
+                    "source": "Mod Organizer 2",
+                    "enabled": false
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let after_snapshot = mo2_configuration_snapshot(&root, &source_profile_names)?;
+    let source_unchanged = before_snapshot == after_snapshot;
+    if !source_unchanged {
+        warnings.push(
+            "Les fichiers de configuration source ont changé pendant l'import ; vérifiez qu'aucun autre programme ne modifiait MO2."
+                .into(),
+        );
+    }
+    let snapshot_path = migration_root.join("source-snapshot.json");
+    write_json_atomic(
+        &snapshot_path,
+        &serde_json::json!({
+            "schemaVersion": 1,
+            "createdAt": unix_timestamp(),
+            "sourceConfigurationBefore": before_snapshot,
+            "sourceConfigurationAfter": after_snapshot,
+            "sourceUnchanged": source_unchanged
+        }),
+    )?;
+    let report_path = migration_root.join("migration-report.json");
+    write_json_atomic(
+        &report_path,
+        &serde_json::json!({
+            "schemaVersion": 1,
+            "migrationId": migration_id,
+            "createdAt": unix_timestamp(),
+            "sourceManager": "Mod Organizer 2",
+            "sourceRoot": root,
+            "gameId": game_id,
+            "profilesCreated": profiles.len(),
+            "modsImported": installed_paths.len(),
+            "modsSkipped": skipped_mods,
+            "downloadsCopied": copied_downloads,
+            "overwriteFilesCopied": overwrite_files,
+            "sourceUnchanged": source_unchanged,
+            "options": {
+                "mods": request.options.mods,
+                "metadata": request.options.metadata,
+                "overwrite": request.options.overwrite,
+                "downloads": request.options.downloads,
+                "executables": request.options.executables,
+                "categories": request.options.categories,
+                "notes": request.options.notes,
+                "hiddenFiles": request.options.hidden_files
+            },
+            "warnings": warnings
+        }),
+    )?;
+    Ok(Mo2ImportResult {
+        imported_mods: installed_paths.len() as u64,
+        skipped_mods,
+        profiles,
+        installed_paths,
+        managed_executables,
+        copied_downloads,
+        overwrite_files,
+        report_path: report_path.to_string_lossy().to_string(),
+        snapshot_path: snapshot_path.to_string_lossy().to_string(),
+        source_unchanged,
+        warnings,
+    })
+}
+
+#[tauri::command]
+async fn import_mo2_instance(
+    app: AppHandle,
+    state: State<'_, BackgroundTaskRegistry>,
+    task_id: String,
+    request: Mo2ImportRequest,
+) -> Result<Mo2ImportResult, String> {
+    let registry = state.inner().clone();
+    let total = if request.options.mods {
+        preview_mo2_import(request.source_path.clone())?.installed_mods
+    } else {
+        0
+    };
+    let cancel = register_background_task(
+        &app,
+        &registry,
+        task_id.clone(),
+        "mo2-import",
+        "Import depuis Mod Organizer 2",
+        total,
+    )?;
+    let worker_app = app.clone();
+    let worker_registry = registry.clone();
+    let worker_task_id = task_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        import_mo2_instance_inner(
+            &worker_app,
+            &worker_registry,
+            &worker_task_id,
+            request,
+            &cancel,
+        )
+    })
+    .await
+    .map_err(|_| "L'import MO2 s'est arrêté de façon inattendue.".to_string())?;
+    match &result {
+        Ok(import) => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            "completed",
+            format!(
+                "{} mod(s) et {} profil(s) importés depuis MO2.",
+                import.imported_mods,
+                import.profiles.len()
+            ),
+            None,
+        ),
+        Err(error) if error == "TASK_CANCELLED" => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            "cancelled",
+            "Import MO2 annulé. Les paquets déjà stockés restent récupérables.".into(),
+            None,
+        ),
+        Err(error) => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            "failed",
+            "Échec de l'import MO2. La source n'a pas été modifiée.".into(),
+            Some(error.clone()),
+        ),
+    }
+    result
+}
+
 fn import_mods_with_staging(
     app: &AppHandle,
     registry: &BackgroundTaskRegistry,
@@ -10100,6 +11042,124 @@ mod tests {
     }
 
     #[test]
+    fn converts_mo2_reverse_modlist_order_and_preserves_separators() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-mo2-modlist-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("fixture root");
+        let path = root.join("modlist.txt");
+        fs::write(
+            &path,
+            "# This file was automatically generated by Mod Organizer.\n+Winning Mod\n+Visuals_separator\n-Disabled Mod\n+Lowest Mod\n",
+        )
+        .expect("modlist fixture");
+        let entries = parse_mo2_modlist(&path).expect("parse MO2 modlist");
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[0].name, "Winning Mod");
+        assert_eq!(entries[0].priority, 3);
+        assert!(entries[0].enabled);
+        assert!(entries[1].separator);
+        assert_eq!(entries[2].priority, 1);
+        assert!(!entries[2].enabled);
+        assert_eq!(entries[3].priority, 0);
+        fs::remove_dir_all(root).expect("remove MO2 modlist fixture");
+    }
+
+    #[test]
+    fn mo2_ini_reader_counts_sensitive_keys_without_exposing_values() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-mo2-ini-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("fixture root");
+        let path = root.join("ModOrganizer.ini");
+        fs::write(
+            &path,
+            "[General]\nversion=2.5.2\ngameName=Cyberpunk 2077\nnexusApiKey=never-return-this\nselected_profile=Default\n",
+        )
+        .expect("ini fixture");
+        let document = read_ini_document(&path).expect("parse MO2 ini");
+        assert_eq!(ini_value(&document, &["version"]).as_deref(), Some("2.5.2"));
+        assert_eq!(mo2_secret_key_count(&document), 1);
+        let serialized = serde_json::to_string(&Mo2ImportPreview {
+            root: "fixture".into(),
+            version: ini_value(&document, &["version"]),
+            install_type: "Portable".into(),
+            game_name: ini_value(&document, &["gamename"]),
+            selected_profile: ini_value(&document, &["selected_profile"]),
+            profiles: Vec::new(),
+            executables: Vec::new(),
+            installed_mods: 0,
+            downloads: 0,
+            overwrite_files: 0,
+            overwrite_bytes: 0,
+            plugin_files: 0,
+            hidden_files: 0,
+            secret_keys_detected: mo2_secret_key_count(&document),
+            required_bytes: 0,
+            warnings: Vec::new(),
+        })
+        .expect("serialize preview");
+        assert!(!serialized.contains("never-return-this"));
+        fs::remove_dir_all(root).expect("remove MO2 ini fixture");
+    }
+
+    #[test]
+    fn mo2_hidden_files_become_profile_rules() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-mo2-hidden-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(root.join("archive/pc/mod")).expect("fixture tree");
+        fs::write(
+            root.join("archive/pc/mod/disabled.archive.mohidden"),
+            b"hidden",
+        )
+        .expect("hidden fixture");
+        fs::write(root.join("archive/pc/mod/visible.archive"), b"visible")
+            .expect("visible fixture");
+        let rules = mo2_hidden_rules(&root, "stage-1").expect("hidden rules");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0]["modId"], "stage-1");
+        assert_eq!(rules[0]["path"], "archive/pc/mod/disabled.archive");
+        fs::remove_dir_all(root).expect("remove MO2 hidden fixture");
+    }
+
+    #[test]
+    fn mo2_download_metadata_is_sanitized_before_copy() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-mo2-download-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::create_dir_all(&source).expect("download fixture root");
+        fs::write(source.join("mod.zip"), b"archive").expect("download archive");
+        fs::write(
+            source.join("mod.zip.meta"),
+            "[General]\nmodName=Example\nmodID=42\nurl=https://example.invalid/?token=private-token\nuserData=private-user-data\n",
+        )
+        .expect("download metadata");
+        assert_eq!(
+            copy_mo2_downloads(&source, &destination).expect("sanitized download copy"),
+            2
+        );
+        let metadata = fs::read_to_string(destination.join("mod.zip.meta.sanitized.json"))
+            .expect("sanitized metadata");
+        assert!(metadata.contains("Example"));
+        assert!(metadata.contains("\"modid\": \"42\""));
+        assert!(!metadata.contains("private-token"));
+        assert!(!metadata.contains("private-user-data"));
+        assert!(!destination.join("mod.zip.meta").exists());
+        fs::remove_dir_all(root).expect("remove MO2 download fixture");
+    }
+
+    #[test]
     fn nexus_catalog_variables_use_real_server_page_offsets() {
         let variables =
             nexus_catalog_variables("cyberpunk2077", "vehicle", "downloaded", 50, 20, false);
@@ -10923,6 +11983,8 @@ pub fn run() {
             preview_cyberpunk_structure_repair,
             apply_cyberpunk_structure_repair,
             rollback_cyberpunk_structure_repair,
+            preview_mo2_import,
+            import_mo2_instance,
             sync_profile_state,
             apply_profile_transaction,
             profile_integrity,

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { BulkOperation, ExplodMod, ExploreColumns, ExploreSort, Game, GameResources, GameTab, GamebananaGame, LiquidGlassMode, LiquidGlassSettings, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType, WindowEffectsDiagnostic } from '../types'
-import { BackgroundTaskSnapshot, DetectedGame, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
+import { BackgroundTaskSnapshot, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
 
@@ -306,6 +306,7 @@ export interface Store {
   renameProfile: (profileId: string, name: string) => void
   removeProfile: (profileId: string) => void
   registerImportedStages: (gameId: string, profileId: string, installedPaths: string[], enabled: boolean) => Promise<void>
+  completeMo2Import: (gameId: string, result: Mo2ImportResult) => Promise<void>
   scanMods: (gameId?: string) => Promise<void>
   toggleMod: (modId: string) => Promise<void>
   deleteMod: (modId: string) => Promise<void>
@@ -844,6 +845,36 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const updated = { ...profile, modStates }
     set(state => ({ games: updateProfile(state.games, gameId, profileId, () => updated) }))
     if (native.isDesktop()) await native.syncProfileState(gameId, updated)
+  },
+  completeMo2Import: async (gameId, result) => {
+    const game = get().games.find(item => item.id === gameId)
+    if (!game) return
+    const importedProfiles = await Promise.all(result.profiles.map(async profile =>
+      native.isDesktop() ? withProfilePaths(profile, await native.syncProfileState(gameId, profile)) : profile,
+    ))
+    const [folderMods, stagedMods] = await Promise.all([
+      game.modsPath ? native.scanMods(game.modsPath) : Promise.resolve([]),
+      native.listStagedMods(gameId),
+    ])
+    const nativeMods = [
+      ...stagedMods,
+      ...folderMods.filter(folderMod => !stagedMods.some(staged => staged.fingerprint === folderMod.fingerprint)),
+    ]
+    const catalog = scannedMods(nativeMods, game.installedMods)
+    const importedIds = new Set(importedProfiles.map(profile => profile.id))
+    const executables = new Map((game.managedExecutables || []).map(item => [normalizedPath(item.path), item]))
+    result.managedExecutables.forEach(item => executables.set(normalizedPath(item.path), item))
+    set(state => ({
+      games: state.games.map(item => item.id !== gameId ? item : {
+        ...item,
+        installedMods: catalog,
+        profiles: [...item.profiles.filter(profile => !importedIds.has(profile.id)), ...importedProfiles],
+        managedExecutables: [...executables.values()],
+      }),
+      selectedGameId: gameId,
+      selectedProfileId: importedProfiles[0]?.id ?? state.selectedProfileId,
+      notice: `Import MO2 terminé : ${result.importedMods} mod(s), ${importedProfiles.length} profil(s), ${result.skippedMods} élément(s) ignoré(s). Source ${result.sourceUnchanged ? 'inchangée' : 'à vérifier'}.`,
+    }))
   },
   scanMods: async gameId => {
     const state = get()

@@ -26,6 +26,77 @@ export interface BaseSnapshotResult {
   created: boolean
 }
 
+export interface Mo2ProfilePreview {
+  name: string
+  modCount: number
+  enabledCount: number
+  disabledCount: number
+  separatorCount: number
+}
+
+export interface Mo2ExecutablePreview {
+  title: string
+  binaryPresent: boolean
+}
+
+export interface Mo2ImportPreview {
+  root: string
+  version?: string
+  installType: string
+  gameName?: string
+  selectedProfile?: string
+  profiles: Mo2ProfilePreview[]
+  executables: Mo2ExecutablePreview[]
+  installedMods: number
+  downloads: number
+  overwriteFiles: number
+  overwriteBytes: number
+  pluginFiles: number
+  hiddenFiles: number
+  secretKeysDetected: number
+  requiredBytes: number
+  warnings: string[]
+}
+
+export interface Mo2ProfileMapping {
+  sourceName: string
+  targetId: string
+  targetName: string
+}
+
+export interface Mo2ImportOptions {
+  mods: boolean
+  metadata: boolean
+  overwrite: boolean
+  downloads: boolean
+  executables: boolean
+  categories: boolean
+  notes: boolean
+  hiddenFiles: boolean
+}
+
+export interface Mo2ImportRequest {
+  sourcePath: string
+  gameId: string
+  gameName: string
+  profiles: Mo2ProfileMapping[]
+  options: Mo2ImportOptions
+}
+
+export interface Mo2ImportResult {
+  profiles: Profile[]
+  installedPaths: string[]
+  managedExecutables: Array<{ id: string; name: string; path: string; source: string; enabled: boolean }>
+  importedMods: number
+  skippedMods: number
+  copiedDownloads: number
+  overwriteFiles: number
+  reportPath: string
+  snapshotPath: string
+  sourceUnchanged: boolean
+  warnings: string[]
+}
+
 export interface NativeMod {
   id: string
   name: string
@@ -490,6 +561,10 @@ export const native = {
     desktopOnly<CyberpunkRepairResult>('apply_cyberpunk_structure_repair', { gameId, stageIds }),
   rollbackCyberpunkStructureRepair: (gameId: string, repairId: string) =>
     desktopOnly<CyberpunkRepairResult>('rollback_cyberpunk_structure_repair', { gameId, repairId }),
+  previewMo2Import: (sourcePath: string) =>
+    desktopOnly<Mo2ImportPreview>('preview_mo2_import', { sourcePath }),
+  importMo2Instance: (taskId: string, request: Mo2ImportRequest) =>
+    desktopOnly<Mo2ImportResult>('import_mo2_instance', { taskId, request }),
   syncProfileState: (gameId: string, profile: Profile) => desktopOnly<ProfilePaths>('sync_profile_state', { gameId, profileId: profile.id, profile }),
   applyProfileTransaction: (gameId: string, operationId: string, beforeProfiles: Profile[], afterProfiles: Profile[]) =>
     desktopOnly<ProfileTransactionResult>('apply_profile_transaction', { gameId, operationId, beforeProfiles, afterProfiles }),

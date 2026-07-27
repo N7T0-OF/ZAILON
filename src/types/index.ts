@@ -94,6 +94,25 @@ export interface ProfileModState {
   versionId?: string
 }
 
+export interface ModSeparator {
+  name: string
+  priority: number
+}
+
+export interface HiddenFileRule {
+  modId: string
+  path: string
+  sourceConvention?: string
+}
+
+export interface ManagedExecutable {
+  id: string
+  name: string
+  path: string
+  source: string
+  enabled: boolean
+}
+
 export interface Profile {
   id: string
   gameId: string
@@ -114,6 +133,8 @@ export interface Profile {
   runtime?: string
   conflictRules?: Array<{ path: string; winnerModId: string }>
   installOptions?: Record<string, string | boolean | number>
+  modSeparators?: ModSeparator[]
+  hiddenFileRules?: HiddenFileRule[]
   clonedFromProfileId?: string
   templateId?: string
   temporary?: boolean
@@ -232,6 +253,7 @@ export interface Game {
   favorite?: boolean
   hidden?: boolean
   categories?: string[]
+  managedExecutables?: ManagedExecutable[]
 }
 
 export interface ExplodMod {

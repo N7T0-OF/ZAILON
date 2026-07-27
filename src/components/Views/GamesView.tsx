@@ -3,7 +3,7 @@ import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef,
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
-import { BackgroundTaskSnapshot, CollectionInstallPlan, native, pickExecutable, pickFolder, pickFolders, pickProfileArchive, resourceUrl, saveProfileArchive } from '../../lib/native'
+import { BackgroundTaskSnapshot, CollectionInstallPlan, Mo2ImportOptions, Mo2ImportPreview, Mo2ImportResult, native, pickExecutable, pickFolder, pickFolders, pickProfileArchive, resourceUrl, saveProfileArchive } from '../../lib/native'
 import { ModCard } from '../UI/ModCard'
 import { formatTime, timeAgo } from '../../utils'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
@@ -60,12 +60,14 @@ export function GamesView() {
   const repairProfileStorage = useStore(state => state.repairProfileStorage)
   const deduplicateStagedMods = useStore(state => state.deduplicateStagedMods)
   const purgeUnreferencedStagedMods = useStore(state => state.purgeUnreferencedStagedMods)
+  const completeMo2Import = useStore(state => state.completeMo2Import)
   const [search, setSearch] = useState('')
   const [librarySearch, setLibrarySearch] = useState('')
   const [onlyWithoutCover, setOnlyWithoutCover] = useState(false)
   const [profileName, setProfileName] = useState('')
   const [steamDialogOpen, setSteamDialogOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [mo2ImportOpen, setMo2ImportOpen] = useState(false)
   const [selectedModIds, setSelectedModIds] = useState<Set<string>>(new Set())
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number>()
   const [bulkDialog, setBulkDialog] = useState<'move' | 'copy' | 'delete' | 'tag'>()
@@ -272,7 +274,7 @@ export function GamesView() {
 
       {tab === 'downloads' && <CollectionDownloadsPanel gameId={selectedGame.id} gameName={selectedGame.name} onOpenProfile={profileId => { void setSelectedProfile(profileId); setTab('profiles') }} />}
       {tab === 'conflicts' && <div className="flex-1 overflow-y-auto p-4">{resolvedConflicts.length ? <div><div className="mb-3 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] p-3 text-xs text-amber-100/65">TemporaryCopy déploie un seul gagnant par chemin. Sans règle explicite, le dernier mod dans l’ordre du profil gagne.</div><div className="overflow-x-auto rounded-xl border border-white/[0.07]"><table className="w-full text-left text-xs"><thead className="bg-white/[0.03] text-white/42"><tr><th className="px-3 py-2">Chemin résolu</th><th className="px-3 py-2">Fournisseurs</th><th className="px-3 py-2">Gagnant</th></tr></thead><tbody>{resolvedConflicts.map(conflict => <tr key={conflict.path} className="border-t border-white/[0.06]"><td className="max-w-sm break-all px-3 py-2 font-mono text-white/52">{conflict.path}</td><td className="px-3 py-2 text-white/45">{conflict.owners.map(owner => owner.name).join(' → ')}</td><td className="px-3 py-2"><select value={conflict.winner.id} onChange={event => setConflictWinner(conflict.path, event.target.value)} className="rounded-lg border border-white/[0.08] bg-[#101313] px-2 py-1.5 text-xs text-white/68">{conflict.owners.map(owner => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></td></tr>)}</tbody></table></div></div> : <EmptyPanel icon={ShieldAlert} title="Aucun conflit de fichiers" detail="L’analyse compare les chemins relatifs réellement fournis par chaque mod actif." />}</div>}
-      {tab === 'tools' && <div className="grid flex-1 auto-rows-min gap-3 overflow-y-auto p-4 sm:grid-cols-2"><ActionCard icon={RefreshCw} title="Analyser le dossier Mods" detail="Actualise le catalogue, les tailles, les frameworks et les conflits." onClick={() => void scanMods(selectedGame.id)} /><ActionCard icon={Boxes} title="Nettoyer les doublons" detail="Compare le contenu exact, rattache les profils à une copie unique puis efface uniquement les copies identiques." onClick={() => void deduplicateStagedMods(selectedGame.id)} /><ActionCard icon={Trash2} title="Purger les paquets retirés" detail="Resynchronise les profils, trouve les paquets qui ne sont plus référencés nulle part puis propose leur suppression physique." onClick={() => void purgeUnreferencedStagedMods(selectedGame.id)} /><ActionCard icon={FolderOpen} title="Ouvrir le dossier Mods" detail={selectedGame.modsPath || 'Configurez d’abord un dossier.'} disabled={!selectedGame.modsPath} onClick={() => selectedGame.modsPath && void native.openPath(selectedGame.modsPath)} /><ActionCard icon={FolderInput} title="Importer des dossiers" detail="Prévisualise les racines détectées avant toute copie." onClick={() => setImportOpen(true)} /></div>}
+      {tab === 'tools' && <div className="grid flex-1 auto-rows-min gap-3 overflow-y-auto p-4 sm:grid-cols-2"><ActionCard icon={RefreshCw} title="Analyser le dossier Mods" detail="Actualise le catalogue, les tailles, les frameworks et les conflits." onClick={() => void scanMods(selectedGame.id)} /><ActionCard icon={Boxes} title="Nettoyer les doublons" detail="Compare le contenu exact, rattache les profils à une copie unique puis efface uniquement les copies identiques." onClick={() => void deduplicateStagedMods(selectedGame.id)} /><ActionCard icon={Trash2} title="Purger les paquets retirés" detail="Resynchronise les profils, trouve les paquets qui ne sont plus référencés nulle part puis propose leur suppression physique." onClick={() => void purgeUnreferencedStagedMods(selectedGame.id)} /><ActionCard icon={FolderOpen} title="Ouvrir le dossier Mods" detail={selectedGame.modsPath || 'Configurez d’abord un dossier.'} disabled={!selectedGame.modsPath} onClick={() => selectedGame.modsPath && void native.openPath(selectedGame.modsPath)} /><ActionCard icon={FolderInput} title="Importer des dossiers" detail="Prévisualise les racines détectées avant toute copie." onClick={() => setImportOpen(true)} /><ActionCard icon={Archive} title="Importer depuis Mod Organizer 2" detail="Analyse une instance portable, recrée ses profils et copie uniquement les données choisies. La source reste en lecture seule." onClick={() => setMo2ImportOpen(true)} /></div>}
       {tab === 'backups' && <div className="grid flex-1 auto-rows-min gap-3 overflow-y-auto p-4 sm:grid-cols-2"><ActionCard icon={FileArchive} title="Exporter un profil léger" detail="Métadonnées, liens, versions, ordre et réglages. Aucun chemin personnel ni secret." onClick={() => void exportProfile(false)} /><ActionCard icon={Archive} title="Exporter un profil complet" detail={`${formatBytes(profileMods.reduce((sum, mod) => sum + (mod.sizeBytes || 0), 0))} maximum avant compression.`} onClick={() => void exportProfile(true)} /><ActionCard icon={Upload} title="Importer un profil" detail="Valide l’archive et affiche un aperçu avant création d’un nouveau profil." onClick={() => void importProfile()} /></div>}
       {tab === 'appearance' && <div className="min-h-0 flex-1 overflow-hidden p-3"><GameAppearanceEditor game={selectedGame} embedded onSave={resources => setGameResources(selectedGame.id, resources)} /></div>}
       {tab === 'settings' && <div className="flex-1 space-y-4 overflow-y-auto p-4"><Field label="Exécutable du jeu" value={selectedGame.execPath || ''} placeholder="Sélectionnez l’exécutable" onChange={value => void setGamePath(selectedGame.id, value)} onBrowse={() => void browseExecutable()} /><Field label="Dossier Mods" value={selectedGame.modsPath || ''} placeholder="Sélectionnez le dossier Mods" onChange={value => setModsPath(selectedGame.id, value)} onBrowse={() => void browseModsFolder()} /><div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[11px] font-semibold text-white/68">Raccourci de lancement sécurisé</p><p className="mt-1 text-[11px] leading-relaxed text-white/34">Crée un raccourci bureau ZAILON lié à ce jeu et au profil « {selectedProfile.name} ». Le lien contient uniquement leurs identifiants internes.</p></div><button type="button" onClick={() => void native.createDesktopShortcut(selectedGame.id, selectedProfile.id, selectedGame.name, selectedGame.resources?.iconPath || selectedGame.execPath).then(path => window.alert(`Raccourci créé :\n${path}`)).catch(error => window.alert(String(error)))} className="flex items-center gap-2 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313]"><MonitorDown size={14} />Créer sur le bureau</button></div></div><p className="pt-1 text-[11px] font-mono text-white/35">Temps de jeu total : {formatTime(selectedGame.totalPlaytime)}</p></div>}
@@ -280,6 +282,7 @@ export function GamesView() {
 
     {steamDialogOpen && <SteamDetectionDialog onClose={() => setSteamDialogOpen(false)} onImport={importDetectedGames} />}
     {importOpen && <ModImportDialog gameId={selectedGame.id} profileId={selectedProfile.id} gameName={selectedGame.name} destination={selectedGame.modsPath} onClose={() => setImportOpen(false)} onImported={() => void scanMods(selectedGame.id)} />}
+    {mo2ImportOpen && <Mo2ImportDialog gameId={selectedGame.id} gameName={selectedGame.name} onClose={() => setMo2ImportOpen(false)} onImported={async result => completeMo2Import(selectedGame.id, result)} />}
     {bulkDialog && <BulkActionDialog mode={bulkDialog} count={selectedModIds.size} source={selectedProfile} profiles={selectedGame.profiles} onClose={() => setBulkDialog(undefined)} onConfirm={async value => {
       const ids = [...selectedModIds]
       if (bulkDialog === 'move' || bulkDialog === 'copy') await bulkTransferMods(ids, value, bulkDialog)
@@ -441,6 +444,130 @@ function BulkActionDialog({ mode, count, source, profiles, onClose, onConfirm }:
   const title = mode === 'move' ? 'Transférer la sélection' : mode === 'copy' ? 'Copier la sélection' : mode === 'delete' ? 'Retirer la sélection' : 'Ajouter une étiquette'
   const valid = mode === 'tag' ? value.trim().length > 0 : Boolean(value)
   return <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/78 p-4 backdrop-blur-md" onPointerDown={event => { if (event.target === event.currentTarget) onClose() }}><section role="dialog" aria-modal="true" className="w-full max-w-lg rounded-2xl border border-white/[0.1] bg-[#101313] p-4 shadow-2xl"><header className="flex items-start justify-between gap-3"><div><h2 className="font-display text-xl font-bold text-white">{title}</h2><p className="mt-1 text-xs text-white/42">Source : {source.name} · {count} mod(s)</p></div><button onClick={onClose} className="rounded-lg p-2 text-white/40 hover:bg-white/[0.05]"><X size={16} /></button></header>{mode === 'move' || mode === 'copy' ? <><label className="mt-4 block text-xs text-white/50">Profil de destination<select value={value} onChange={event => setValue(event.target.value)} className="mt-1.5 block w-full rounded-lg border border-white/[0.09] bg-[#0b0d0d] px-3 py-2 text-white/75">{destinations.map(profile => <option key={profile.id} value={profile.id} disabled={profile.locked}>{profile.name}{profile.locked ? ' — verrouillé' : ''}</option>)}</select></label><div className="mt-3 rounded-lg border border-sky-300/15 bg-sky-300/[0.04] p-3 text-xs leading-relaxed text-sky-100/58">{mode === 'copy' ? 'La copie ajoute des références au même paquet immuable. Les futurs fichiers générés restent dans l’overwrite du profil destination : aucun fichier source partagé n’est modifié.' : 'Le transfert ajoute d’abord les références à la destination, valide les manifestes, puis les retire de la source. En cas d’échec, la transaction restaure les deux profils.'}</div></> : mode === 'delete' ? <><label className="mt-4 block text-xs text-white/50">Portée<select value={value} onChange={event => setValue(event.target.value)} className="mt-1.5 block w-full rounded-lg border border-white/[0.09] bg-[#0b0d0d] px-3 py-2 text-white/75"><option value="current">Retirer du profil courant — fichiers conservés</option><option value="all">Retirer de tous les profils — fichiers conservés</option><option value="permanent">Supprimer définitivement du PC</option></select></label><p className={`mt-3 rounded-lg border p-3 text-xs leading-relaxed ${value === 'permanent' ? 'border-red-300/20 bg-red-300/[0.05] text-red-100/70' : 'border-amber-300/15 bg-amber-300/[0.04] text-amber-100/58'}`}>{value === 'permanent' ? 'Suppression réelle : ZAILON effacera les paquets du store ou du dossier Mods et les retirera de tous les profils. Cette action est irréversible et demandera une seconde confirmation.' : 'Le retrait logique est annulable. Les fichiers restent dans le store partagé, mais ils ne seront plus comptés dans ce profil.'}</p></> : <label className="mt-4 block text-xs text-white/50">Étiquette personnalisée<input autoFocus value={value} onChange={event => setValue(event.target.value)} placeholder="Ex. Graphismes, Correctifs…" className="mt-1.5 block w-full rounded-lg border border-white/[0.09] bg-[#0b0d0d] px-3 py-2 text-white/75 outline-none focus:border-gold/35" /></label>}<footer className="mt-5 flex justify-end gap-2"><button onClick={onClose} className="rounded-lg px-3 py-2 text-xs text-white/48">Annuler</button><button disabled={!valid} onClick={() => void onConfirm(value)} className={`rounded-lg px-4 py-2 text-xs font-semibold disabled:opacity-35 ${value === 'permanent' ? 'bg-red-500 text-white' : 'bg-gold text-[var(--zailon-accent-text)]'}`}>Confirmer</button></footer></section></div>
+}
+
+const DEFAULT_MO2_IMPORT_OPTIONS: Mo2ImportOptions = {
+  mods: true,
+  metadata: true,
+  overwrite: true,
+  downloads: false,
+  executables: false,
+  categories: true,
+  notes: true,
+  hiddenFiles: true,
+}
+
+function Mo2ImportDialog({ gameId, gameName, onClose, onImported }: { gameId: string; gameName: string; onClose: () => void; onImported: (result: Mo2ImportResult) => Promise<void> }) {
+  const [sourcePath, setSourcePath] = useState('G:\\2_Logiciel\\MOD ORGANIZER')
+  const [preview, setPreview] = useState<Mo2ImportPreview>()
+  const [selectedProfiles, setSelectedProfiles] = useState<Set<string>>(new Set())
+  const [profileNames, setProfileNames] = useState<Record<string, string>>({})
+  const [options, setOptions] = useState<Mo2ImportOptions>(DEFAULT_MO2_IMPORT_OPTIONS)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+
+  const analyze = async (path = sourcePath) => {
+    if (!path.trim()) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      const result = await native.previewMo2Import(path.trim())
+      setPreview(result)
+      setSourcePath(result.root)
+      setSelectedProfiles(new Set(result.profiles.map(profile => profile.name)))
+      setProfileNames(Object.fromEntries(result.profiles.map(profile => [profile.name, `MO2 · ${profile.name}`])))
+    } catch (reason) {
+      setPreview(undefined)
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const browse = async () => {
+    const path = await pickFolder('Sélectionnez la racine de Mod Organizer 2')
+    if (path) {
+      setSourcePath(path)
+      await analyze(path)
+    }
+  }
+
+  const setOption = (key: keyof Mo2ImportOptions, value: boolean) =>
+    setOptions(current => ({ ...current, [key]: value }))
+
+  const commit = async () => {
+    if (!preview || !selectedProfiles.size) return
+    const selected = preview.profiles.filter(profile => selectedProfiles.has(profile.name))
+    const estimated = preview.requiredBytes
+    const confirmation = [
+      `Importer ${selected.length} profil(s) et jusqu’à ${preview.installedMods} mod(s) depuis Mod Organizer 2 ?`,
+      '',
+      options.overwrite ? `${preview.overwriteFiles} fichier(s) Overwrite seront copiés vers le profil MO2 actif.` : 'Overwrite ne sera pas copié.',
+      options.downloads ? `Les ${preview.downloads} fichiers de téléchargement seront aussi copiés.` : 'Les archives téléchargées resteront dans MO2.',
+      options.executables ? 'Les exécutables locaux valides seront référencés, jamais lancés automatiquement.' : 'Les exécutables MO2 seront ignorés.',
+      `Volume source maximal concerné : ${formatBytes(estimated)}.`,
+      '',
+      'La source MO2 restera en lecture seule. Continuer ?',
+    ].join('\n')
+    if (!window.confirm(confirmation)) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      const result = await native.importMo2Instance(crypto.randomUUID(), {
+        sourcePath: preview.root,
+        gameId,
+        gameName,
+        profiles: selected.map(profile => ({
+          sourceName: profile.name,
+          targetId: crypto.randomUUID(),
+          targetName: profileNames[profile.name]?.trim() || `MO2 · ${profile.name}`,
+        })),
+        options,
+      })
+      await onImported(result)
+      window.alert([
+        `Import MO2 terminé : ${result.importedMods} mod(s), ${result.profiles.length} profil(s).`,
+        result.skippedMods ? `${result.skippedMods} mod(s) ignoré(s).` : '',
+        result.sourceUnchanged ? 'Contrôle réussi : les configurations MO2 sont inchangées.' : 'Attention : les configurations MO2 ont changé pendant l’import.',
+        `Rapport : ${result.reportPath}`,
+      ].filter(Boolean).join('\n'))
+      onClose()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const optionRows: Array<{ key: keyof Mo2ImportOptions; title: string; detail: string }> = [
+    { key: 'mods', title: 'Mods et ordre des profils', detail: 'Copie chaque paquet une seule fois dans le store ZAILON et convertit les priorités MO2.' },
+    { key: 'metadata', title: 'Métadonnées sûres', detail: 'Version, dépôt, identifiants de mod et URL. Les secrets sont toujours exclus.' },
+    { key: 'overwrite', title: 'Dossier Overwrite', detail: 'Copie l’Overwrite global uniquement vers le profil qui était actif dans MO2.' },
+    { key: 'downloads', title: 'Archives téléchargées', detail: 'Option lourde : copie les archives et leurs fichiers .meta, sans cache incomplet.' },
+    { key: 'executables', title: 'Exécutables configurés', detail: 'Référence seulement les chemins encore valides. Aucun exécutable n’est copié ou lancé.' },
+    { key: 'categories', title: 'Catégories', detail: 'Conserve les catégories présentes dans les meta.ini des mods.' },
+    { key: 'notes', title: 'Notes des mods', detail: 'Conserve notes, commentaires et couleur sans importer les journaux.' },
+    { key: 'hiddenFiles', title: 'Fichiers .mohidden', detail: 'Convertit la convention MO2 en règles de fichiers cachés par profil.' },
+  ]
+
+  return <div className="fixed inset-0 z-[190] flex items-center justify-center bg-black/75 p-5 backdrop-blur-sm" onMouseDown={event => { if (event.target === event.currentTarget && !busy) onClose() }}>
+    <section role="dialog" aria-modal="true" aria-labelledby="mo2-import-title" className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-[#111414] shadow-2xl">
+      <header className="flex items-start gap-3 border-b border-white/[0.07] p-4"><Archive size={19} className="mt-0.5 text-gold" /><div className="min-w-0 flex-1"><h2 id="mo2-import-title" className="text-base font-semibold text-white">Importer depuis Mod Organizer 2</h2><p className="mt-1 text-[11px] leading-relaxed text-white/42">Assistant indépendant : aucune DLL, interface, icône, traduction ou ressource MO2 n’entre dans ZAILON.</p></div><button onClick={onClose} disabled={busy} aria-label="Fermer" className="rounded-lg p-2 text-white/38 hover:bg-white/[0.06] disabled:opacity-30"><X size={16} /></button></header>
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+        <div><label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-widest text-white/38">Instance portable MO2</label><div className="flex gap-2"><input value={sourcePath} onChange={event => setSourcePath(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2.5 font-mono text-[11px] text-white/68 outline-none focus:border-gold/35" /><button type="button" onClick={() => void browse()} disabled={busy} className="rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/62 hover:bg-white/[0.05]">Parcourir</button><button type="button" onClick={() => void analyze()} disabled={busy || !sourcePath.trim()} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-ink-400 disabled:opacity-35">{busy ? 'Analyse…' : 'Analyser'}</button></div></div>
+        {preview && <><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"><Metric label="Version MO2" value={preview.version || 'Inconnue'} /><Metric label="Mods installés" value={String(preview.installedMods)} /><Metric label="Profils" value={String(preview.profiles.length)} /><Metric label="Volume maximal" value={formatBytes(preview.requiredBytes)} /></div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <section className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-3"><h3 className="text-xs font-semibold text-white/72">Profils à recréer</h3><div className="mt-3 space-y-2">{preview.profiles.map(profile => <div key={profile.name} className="rounded-lg border border-white/[0.06] bg-black/15 p-2.5"><label className="flex items-start gap-2"><input type="checkbox" checked={selectedProfiles.has(profile.name)} onChange={() => setSelectedProfiles(current => { const next = new Set(current); next.has(profile.name) ? next.delete(profile.name) : next.add(profile.name); return next })} className="mt-1 accent-gold" /><span className="min-w-0 flex-1"><span className="block text-[11px] font-semibold text-white/72">{profile.name}{preview.selectedProfile === profile.name && <span className="ml-2 rounded bg-gold/10 px-1.5 py-0.5 text-gold">actif</span>}</span><span className="mt-1 block text-[11px] text-white/38">{profile.modCount} mods · {profile.enabledCount} actifs · {profile.disabledCount} désactivés · {profile.separatorCount} séparateurs</span></span></label>{selectedProfiles.has(profile.name) && <input value={profileNames[profile.name] || ''} onChange={event => setProfileNames(current => ({ ...current, [profile.name]: event.target.value }))} aria-label={`Nom ZAILON pour ${profile.name}`} className="mt-2 w-full rounded-md border border-white/[0.07] bg-white/[0.03] px-2 py-1.5 text-[11px] text-white/65 outline-none focus:border-gold/30" />}</div>)}</div></section>
+            <section className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-3"><h3 className="text-xs font-semibold text-white/72">Données à importer</h3><div className="mt-3 space-y-1.5">{optionRows.map(option => <label key={option.key} className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-2 hover:bg-white/[0.025]"><input type="checkbox" checked={options[option.key]} disabled={(option.key === 'categories' || option.key === 'notes') && !options.metadata} onChange={event => setOption(option.key, event.target.checked)} className="mt-1 accent-gold disabled:opacity-30" /><span><strong className="block text-[11px] text-white/68">{option.title}</strong><span className="mt-0.5 block text-[11px] leading-relaxed text-white/34">{option.detail}</span></span></label>)}</div></section>
+          </div>
+          <div className="rounded-xl border border-sky-300/14 bg-sky-300/[0.035] p-3 text-[11px] leading-relaxed text-sky-100/62"><strong className="text-sky-100/82">Aperçu en lecture seule :</strong> {preview.overwriteFiles} fichier(s) Overwrite ({formatBytes(preview.overwriteBytes)}), {preview.downloads} fichier(s) téléchargé(s), {preview.executables.length} exécutable(s) déclaré(s), {preview.pluginFiles} fichier(s) de plugins MO2 exclus. {preview.secretKeysDetected > 0 && `${preview.secretKeysDetected} clé(s) sensible(s) seront ignorées.`}</div>
+          <div className="space-y-1">{preview.warnings.map(warning => <p key={warning} className="text-[11px] leading-relaxed text-amber-100/58">• {warning}</p>)}</div>
+        </>}
+        {error && <p className="rounded-lg border border-red-400/15 bg-red-400/[0.04] p-3 text-[11px] leading-relaxed text-red-200/72">{error}</p>}
+      </div>
+      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.07] p-4"><p className="text-[11px] text-white/32">Copie transactionnelle vers le stockage local ZAILON · MO2 n’est jamais modifié.</p><div className="flex gap-2"><button type="button" onClick={onClose} disabled={busy} className="rounded-lg px-3 py-2 text-[11px] text-white/48 disabled:opacity-30">Fermer</button><button type="button" onClick={() => void commit()} disabled={busy || !preview || !selectedProfiles.size} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-ink-400 disabled:opacity-35">{busy ? 'Import en cours…' : `Importer ${selectedProfiles.size || ''} profil(s)`}</button></div></footer>
+    </section>
+  </div>
 }
 
 function ModImportDialog({ gameId, profileId, gameName, destination, onClose, onImported }: { gameId: string; profileId: string; gameName: string; destination?: string; onClose: () => void; onImported: () => void }) {

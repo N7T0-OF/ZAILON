@@ -1,8 +1,7 @@
 # Audit de licence de l’installation MO2 locale
 
-ZAILON déclare actuellement `MIT` dans `src-tauri/Cargo.toml`, mais le dépôt ne possède
-pas encore de fichier `LICENSE` racine. Cette absence doit être corrigée par le
-propriétaire du projet avant une distribution intégrant un composant copyleft.
+ZAILON déclare `MIT` dans `src-tauri/Cargo.toml` et possède maintenant un fichier
+`LICENSE` racine correspondant. Aucun composant copyleft MO2 n’est intégré ou lié.
 
 | Chemin/composant | Origine officielle | Licence vérifiée | Obligations principales | Compatible | Décision |
 |---|---|---|---|---:|---|
@@ -33,4 +32,3 @@ l’assistant d’import. ZAILON peut lire les formats de données de l’utilis
 reconstruire son propre store sans redistribuer MO2. Cette option évite d’imposer la
 GPL à une partie liée ou dérivée de ZAILON et limite le risque de chaîne
 d’approvisionnement.
-

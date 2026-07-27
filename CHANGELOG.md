@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.0 — Migration sécurisée depuis Mod Organizer 2
+
+- Ajoute dans Outils un assistant « Importer depuis Mod Organizer 2 » avec analyse
+  en lecture seule, aperçu des profils et confirmation explicite avant copie.
+- Recrée des profils ZAILON séparés avec activation, désactivation, priorité inversée
+  correctement, séparateurs et règles `.mohidden`.
+- Copie chaque mod une seule fois vers le store ZAILON, réutilise les empreintes
+  existantes et conserve les métadonnées MO2 par liste blanche.
+- Isole l’Overwrite global dans le profil MO2 actif et laisse les téléchargements
+  ainsi que les exécutables décochés par défaut.
+- Filtre les `.meta` de téléchargements en JSON sans URL temporaire, jeton ni
+  `userData`, et ne lance jamais un exécutable importé.
+- Produit un snapshot SHA-256 avant/après et un rapport local de migration, sans
+  modifier l’instance MO2 source.
+- Documente l’audit local, USVFS, les plugins, les licences et les décisions de
+  réutilisation ; aucun binaire, plugin, thème, icône ou traduction MO2 n’est inclus.
+
 ## 1.6.1 — Explorer unifié et import sécurisé des exécutables
 
 - Simplifie la barre de titre en « ZAILON · version » sans le sous-titre Universal Mod Launcher.

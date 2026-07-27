@@ -474,6 +474,15 @@ struct LaunchGameResult {
     diagnostics: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeploymentProgressEvent {
+    phase: String,
+    current: usize,
+    total: usize,
+    message: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LaunchConflictRule {
@@ -4295,10 +4304,238 @@ fn set_staged_deployment_status(app: &AppHandle, game_id: &str, ids: &[String], 
     }
 }
 
+fn report_deployment_progress(
+    channel: &Channel<DeploymentProgressEvent>,
+    phase: &str,
+    current: usize,
+    total: usize,
+    message: String,
+) {
+    let _ = channel.send(DeploymentProgressEvent {
+        phase: phase.into(),
+        current,
+        total,
+        message,
+    });
+}
+
+fn update_deployment_session_state(
+    session: &DeploymentSession,
+    status: &str,
+    process_id: Option<u32>,
+) -> Result<(), String> {
+    let path = session.session_root.join("session.json");
+    let mut state = fs::read(&path)
+        .ok()
+        .and_then(|payload| serde_json::from_slice::<serde_json::Value>(&payload).ok())
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "schemaVersion": 3,
+                "createdAt": unix_timestamp(),
+                "gameRoot": session.game_root.to_string_lossy(),
+                "overwriteRoot": session.overwrite_root.to_string_lossy()
+            })
+        });
+    state["status"] = serde_json::json!(status);
+    state["updatedAt"] = serde_json::json!(unix_timestamp());
+    state["processId"] = process_id
+        .map(serde_json::Value::from)
+        .unwrap_or(serde_json::Value::Null);
+    write_json_atomic(&path, &state)
+}
+
+fn append_deployment_journal(
+    session: &DeploymentSession,
+    entry: &DeploymentEntry,
+) -> Result<(), String> {
+    let path = session.session_root.join("journal.jsonl");
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(to_error)?;
+    let payload = serde_json::to_string(&serde_json::json!({
+        "relative": entry.relative.to_string_lossy().replace('\\', "/"),
+        "hadOriginal": entry.had_original,
+        "deployedSignature": entry.deployed_signature,
+        "recordedAt": unix_timestamp()
+    }))
+    .map_err(to_error)?;
+    writeln!(file, "{payload}").map_err(to_error)?;
+    file.sync_data().map_err(to_error)
+}
+
+fn deployment_journal_entries(path: &Path) -> Result<Vec<DeploymentEntry>, String> {
+    let payload = fs::read_to_string(path).map_err(to_error)?;
+    let mut entries = Vec::new();
+    for line in payload.lines().filter(|line| !line.trim().is_empty()) {
+        let value: serde_json::Value = serde_json::from_str(line).map_err(to_error)?;
+        let relative = PathBuf::from(
+            value
+                .get("relative")
+                .and_then(|item| item.as_str())
+                .ok_or_else(|| "Entrée de journal sans chemin.".to_string())?,
+        );
+        validate_archive_relative(&relative)?;
+        entries.push(DeploymentEntry {
+            relative,
+            had_original: value
+                .get("hadOriginal")
+                .and_then(|item| item.as_bool())
+                .unwrap_or(false),
+            deployed_signature: value
+                .get("deployedSignature")
+                .and_then(|item| item.as_u64())
+                .ok_or_else(|| "Entrée de journal sans signature.".to_string())?,
+        });
+    }
+    Ok(entries)
+}
+
+fn process_is_running(process_id: u32) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let filter = format!("PID eq {process_id}");
+        return Command::new("tasklist")
+            .args(["/FI", &filter, "/FO", "CSV", "/NH"])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| {
+                String::from_utf8_lossy(&output.stdout)
+                    .split(',')
+                    .nth(1)
+                    .map(|value| {
+                        value.trim_matches(['"', ' ', '\r', '\n']) == process_id.to_string()
+                    })
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return Path::new("/proc").join(process_id.to_string()).exists();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return Command::new("kill")
+            .args(["-0", &process_id.to_string()])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+    }
+    #[allow(unreachable_code)]
+    false
+}
+
+fn recover_deployment_session(session_root: &Path, game_root: &Path) -> Result<usize, String> {
+    let state_path = session_root.join("session.json");
+    let payload = fs::read(&state_path).map_err(to_error)?;
+    let mut state: serde_json::Value = serde_json::from_slice(&payload).map_err(to_error)?;
+    let recorded_root = state
+        .get("gameRoot")
+        .and_then(|value| value.as_str())
+        .map(PathBuf::from)
+        .and_then(|path| fs::canonicalize(path).ok())
+        .ok_or_else(|| "Une session interrompue possède une racine de jeu invalide.".to_string())?;
+    if recorded_root != game_root {
+        return Err(
+            "Une session interrompue vise une autre racine de jeu ; récupération automatique refusée."
+                .into(),
+        );
+    }
+    let journal = session_root.join("journal.jsonl");
+    let entries = if journal.is_file() {
+        deployment_journal_entries(&journal)?
+    } else {
+        Vec::new()
+    };
+    let backup_root = session_root.join("backup");
+    for item in entries.iter().rev() {
+        let destination = game_root.join(&item.relative);
+        if !destination.starts_with(game_root) {
+            return Err("Un chemin de récupération sort de la racine du jeu.".into());
+        }
+        if item.had_original {
+            let backup = backup_root.join(&item.relative);
+            if !backup.is_file() {
+                return Err(format!(
+                    "Sauvegarde manquante pour la session interrompue : {}.",
+                    item.relative.display()
+                ));
+            }
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent).map_err(to_error)?;
+            }
+            fs::copy(backup, destination).map_err(to_error)?;
+        } else if destination.is_file() && file_signature(&destination)? == item.deployed_signature
+        {
+            fs::remove_file(destination).map_err(to_error)?;
+        }
+    }
+    state["status"] = serde_json::json!("recovered");
+    state["updatedAt"] = serde_json::json!(unix_timestamp());
+    state["recoveredAt"] = serde_json::json!(unix_timestamp());
+    state["recoveredEntries"] = serde_json::json!(entries.len());
+    write_json_atomic(&state_path, &state)?;
+    Ok(entries.len())
+}
+
+fn recover_interrupted_preparations(
+    app: &AppHandle,
+    game_id: &str,
+    game_root: &Path,
+) -> Result<usize, String> {
+    let deployments = update_data_root(app)?
+        .join("games")
+        .join(safe_game_id(game_id)?)
+        .join("deployments");
+    let mut recovered = 0usize;
+    for entry in fs::read_dir(&deployments)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+    {
+        let session_root = entry.path();
+        let state_path = session_root.join("session.json");
+        let Ok(payload) = fs::read(&state_path) else {
+            continue;
+        };
+        let state: serde_json::Value = serde_json::from_slice(&payload).map_err(to_error)?;
+        let status = state
+            .get("status")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        let recoverable = matches!(
+            status,
+            "preparing" | "prepared" | "cleaning" | "recovery-required"
+        );
+        if status == "active" {
+            let process_id = state
+                .get("processId")
+                .and_then(|value| value.as_u64())
+                .and_then(|value| u32::try_from(value).ok());
+            if process_id.is_some_and(process_is_running) {
+                return Err(
+                    "Une session de jeu ZAILON est encore active. Fermez le jeu avant de relancer."
+                        .into(),
+                );
+            }
+        } else if !recoverable {
+            continue;
+        }
+        recover_deployment_session(&session_root, game_root)?;
+        recovered += 1;
+    }
+    Ok(recovered)
+}
+
 fn finish_temporary_copy(
     session: DeploymentSession,
     capture_overwrite: bool,
 ) -> Result<(), String> {
+    let _ = update_deployment_session_state(&session, "cleaning", None);
     let backup_root = session.session_root.join("backup");
     let mut errors = Vec::new();
     for entry in session.entries.iter().rev() {
@@ -4341,14 +4578,17 @@ fn finish_temporary_copy(
             ));
         }
     }
-    if let Err(error) = fs::remove_dir_all(&session.session_root) {
-        if session.session_root.exists() {
-            errors.push(format!("Nettoyage de la session impossible : {error}"));
+    if errors.is_empty() {
+        if let Err(error) = fs::remove_dir_all(&session.session_root) {
+            if session.session_root.exists() {
+                errors.push(format!("Nettoyage de la session impossible : {error}"));
+            }
         }
     }
     if errors.is_empty() {
         Ok(())
     } else {
+        let _ = update_deployment_session_state(&session, "recovery-required", None);
         Err(errors.join(" "))
     }
 }
@@ -4522,9 +4762,17 @@ fn prepare_profile_deployment(
     game_root: &Path,
     enabled_mod_ids: &[String],
     conflict_rules: &[LaunchConflictRule],
+    on_event: &Channel<DeploymentProgressEvent>,
 ) -> Result<PreparedDeployment, String> {
     safe_game_id(game_id)?;
     safe_game_id(profile_id)?;
+    report_deployment_progress(
+        on_event,
+        "indexing",
+        0,
+        enabled_mod_ids.len(),
+        format!("Analyse de {} mod(s) actif(s)…", enabled_mod_ids.len()),
+    );
     let game_root = fs::canonicalize(game_root)
         .map_err(|_| "Le dossier d’installation du jeu est introuvable.".to_string())?;
     let virtual_map = build_virtual_profile_map(
@@ -4578,6 +4826,13 @@ fn prepare_profile_deployment(
         virtual_map.conflicts
     ));
     if virtual_map.entries.is_empty() {
+        report_deployment_progress(
+            on_event,
+            "ready",
+            0,
+            0,
+            "Aucun fichier temporaire à déployer.".into(),
+        );
         return Ok(PreparedDeployment {
             session: None,
             deployed_files: 0,
@@ -4603,9 +4858,20 @@ fn prepare_profile_deployment(
         overwrite_root,
         entries: Vec::new(),
     };
+    update_deployment_session_state(&session, "preparing", None)?;
+    report_deployment_progress(
+        on_event,
+        "copying",
+        0,
+        virtual_map.entries.len(),
+        format!(
+            "Préparation de {} fichier(s) sans bloquer l’interface…",
+            virtual_map.entries.len()
+        ),
+    );
     let result = (|| {
         let mut resolved_manifest = Vec::new();
-        for entry in &virtual_map.entries {
+        for (index, entry) in virtual_map.entries.iter().enumerate() {
             let source = PathBuf::from(&entry.source_physical_path);
             if !source.is_file() {
                 return Err(format!(
@@ -4631,11 +4897,13 @@ fn prepare_profile_deployment(
             if let Some(parent) = destination.parent() {
                 fs::create_dir_all(parent).map_err(to_error)?;
             }
-            session.entries.push(DeploymentEntry {
+            let deployment_entry = DeploymentEntry {
                 relative: relative.clone(),
                 had_original,
                 deployed_signature: source_signature,
-            });
+            };
+            append_deployment_journal(&session, &deployment_entry)?;
+            session.entries.push(deployment_entry);
             fs::copy(&source, &destination).map_err(to_error)?;
             if file_signature(&destination)? != source_signature {
                 return Err(format!(
@@ -4650,6 +4918,19 @@ fn prepare_profile_deployment(
                 "hash": entry.hash,
                 "runtimeVisible": true
             }));
+            let completed = index + 1;
+            if completed == virtual_map.entries.len() || completed % 10 == 0 {
+                report_deployment_progress(
+                    on_event,
+                    "copying",
+                    completed,
+                    virtual_map.entries.len(),
+                    format!(
+                        "Préparation des mods : {completed}/{} fichier(s)…",
+                        virtual_map.entries.len()
+                    ),
+                );
+            }
         }
         write_json_atomic(
             &session_root.join("resolved-files.json"),
@@ -4661,7 +4942,8 @@ fn prepare_profile_deployment(
                 "deployedFiles": session.entries.len(),
                 "files": resolved_manifest
             }),
-        )
+        )?;
+        update_deployment_session_state(&session, "prepared", None)
     })();
     if let Err(error) = result {
         let _ = finish_temporary_copy(session, false);
@@ -4675,6 +4957,16 @@ fn prepare_profile_deployment(
             "Déploiement incomplet : {planned} fichier(s) planifié(s), {deployed} déployé(s)."
         ));
     }
+    report_deployment_progress(
+        on_event,
+        "ready",
+        session.entries.len(),
+        virtual_map.entries.len(),
+        format!(
+            "{} fichier(s) vérifié(s). Démarrage du jeu…",
+            session.entries.len()
+        ),
+    );
     Ok(PreparedDeployment {
         deployed_files: session.entries.len(),
         conflicts_resolved: virtual_map.conflicts as usize,
@@ -4698,7 +4990,7 @@ fn test_discord_connection(
 }
 
 #[tauri::command]
-fn launch_game(
+async fn launch_game(
     app: AppHandle,
     state: State<'_, DiscordRuntime>,
     exec_path: String,
@@ -4711,25 +5003,58 @@ fn launch_game(
     enabled_mod_ids: Vec<String>,
     conflict_rules: Vec<LaunchConflictRule>,
     discord: Option<DiscordPresenceConfig>,
+    on_event: Channel<DeploymentProgressEvent>,
 ) -> Result<LaunchGameResult, String> {
-    let executable = fs::canonicalize(PathBuf::from(exec_path))
-        .map_err(|_| "The game executable was not found.".to_string())?;
-    if !executable.is_file() {
-        return Err("The game executable was not found.".into());
-    }
-    let game_root_path = fs::canonicalize(PathBuf::from(game_root))
-        .map_err(|_| "Le dossier d’installation du jeu est introuvable.".to_string())?;
-    if !executable.starts_with(&game_root_path) {
-        return Err("L’exécutable ne se trouve pas dans le dossier d’installation configuré. Corrigez le chemin du jeu avant le lancement.".into());
-    }
-    let prepared = match prepare_profile_deployment(
-        &app,
-        &game_id,
-        &profile_id,
-        &game_root_path,
-        &enabled_mod_ids,
-        &conflict_rules,
-    ) {
+    let runtime = state.inner().clone();
+    let preparation_app = app.clone();
+    let preparation_game_id = game_id.clone();
+    let preparation_profile_id = profile_id.clone();
+    let preparation_enabled_mod_ids = enabled_mod_ids.clone();
+    let preparation = tauri::async_runtime::spawn_blocking(move || {
+        let executable = fs::canonicalize(PathBuf::from(exec_path))
+            .map_err(|_| "L’exécutable du jeu est introuvable.".to_string())?;
+        if !executable.is_file() {
+            return Err("L’exécutable du jeu est introuvable.".into());
+        }
+        let game_root_path = fs::canonicalize(PathBuf::from(game_root))
+            .map_err(|_| "Le dossier d’installation du jeu est introuvable.".to_string())?;
+        if !executable.starts_with(&game_root_path) {
+            return Err("L’exécutable ne se trouve pas dans le dossier d’installation configuré. Corrigez le chemin du jeu avant le lancement.".into());
+        }
+        report_deployment_progress(
+            &on_event,
+            "recovery",
+            0,
+            0,
+            "Vérification des préparations précédentes…".into(),
+        );
+        let recovered = recover_interrupted_preparations(
+            &preparation_app,
+            &preparation_game_id,
+            &game_root_path,
+        )?;
+        let mut prepared = prepare_profile_deployment(
+            &preparation_app,
+            &preparation_game_id,
+            &preparation_profile_id,
+            &game_root_path,
+            &preparation_enabled_mod_ids,
+            &conflict_rules,
+            &on_event,
+        )?;
+        if recovered > 0 {
+            prepared.diagnostics.insert(
+                0,
+                format!(
+                    "{recovered} préparation(s) interrompue(s) restaurée(s) automatiquement."
+                ),
+            );
+        }
+        Ok::<_, String>((executable, prepared))
+    })
+    .await
+    .map_err(|_| "La tâche de préparation des mods s’est interrompue.".to_string())?;
+    let (executable, mut prepared) = match preparation {
         Ok(prepared) => prepared,
         Err(error) => {
             set_staged_deployment_status(&app, &game_id, &enabled_mod_ids, "failed");
@@ -4751,7 +5076,21 @@ fn launch_game(
     };
     set_staged_deployment_status(&app, &game_id, &enabled_mod_ids, "runtime-visible");
     let pid = child.id();
-    let runtime = state.inner().clone();
+    if let Some(session) = prepared.session.as_ref() {
+        if let Err(error) = update_deployment_session_state(session, "active", Some(pid)) {
+            let session = prepared.session.take().expect("session checked above");
+            let _ = child.kill();
+            let _ = child.wait();
+            let cleanup_error = finish_temporary_copy(session, false).err();
+            set_staged_deployment_status(&app, &game_id, &enabled_mod_ids, "failed");
+            return Err(match cleanup_error {
+                Some(cleanup) => format!(
+                    "Impossible de sécuriser la session de lancement : {error} Restauration incomplète : {cleanup}"
+                ),
+                None => format!("Impossible de sécuriser la session de lancement : {error}"),
+            });
+        }
+    }
     let (discord_connected, discord_message) =
         match discord.as_ref().filter(|config| config.enabled) {
             Some(config) => {
@@ -13138,6 +13477,112 @@ mod tests {
             b"changed-by-game"
         );
         fs::remove_dir_all(root).expect("remove rollback test");
+    }
+
+    #[test]
+    fn interrupted_deployment_journal_restores_originals_and_removes_deployed_files() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-interrupted-deployment-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let game_root = root.join("game");
+        let session_root = root.join("session");
+        let overwrite_root = root.join("overwrite");
+        let original_relative = PathBuf::from("bin/x64/original.dll");
+        let added_relative = PathBuf::from("red4ext/plugins/example.dll");
+        let original_destination = game_root.join(&original_relative);
+        let added_destination = game_root.join(&added_relative);
+        let original_backup = session_root.join("backup").join(&original_relative);
+        fs::create_dir_all(original_destination.parent().expect("original parent"))
+            .expect("original tree");
+        fs::create_dir_all(added_destination.parent().expect("added parent")).expect("added tree");
+        fs::create_dir_all(original_backup.parent().expect("backup parent")).expect("backup tree");
+        fs::write(&original_backup, b"original-runtime").expect("original backup");
+        fs::write(&original_destination, b"deployed-runtime").expect("deployed replacement");
+        fs::write(&added_destination, b"new-mod-file").expect("new deployed file");
+        let session = DeploymentSession {
+            game_root: fs::canonicalize(&game_root).expect("canonical game root"),
+            session_root: session_root.clone(),
+            overwrite_root,
+            entries: Vec::new(),
+        };
+        update_deployment_session_state(&session, "preparing", None).expect("session state");
+        append_deployment_journal(
+            &session,
+            &DeploymentEntry {
+                relative: original_relative.clone(),
+                had_original: true,
+                deployed_signature: file_signature(&original_destination)
+                    .expect("replacement signature"),
+            },
+        )
+        .expect("replacement journal");
+        append_deployment_journal(
+            &session,
+            &DeploymentEntry {
+                relative: added_relative.clone(),
+                had_original: false,
+                deployed_signature: file_signature(&added_destination).expect("added signature"),
+            },
+        )
+        .expect("added journal");
+
+        assert_eq!(
+            recover_deployment_session(&session_root, &session.game_root)
+                .expect("recover interrupted deployment"),
+            2
+        );
+        assert_eq!(
+            fs::read(original_destination).expect("restored original"),
+            b"original-runtime"
+        );
+        assert!(!added_destination.exists());
+        let state: serde_json::Value = serde_json::from_slice(
+            &fs::read(session_root.join("session.json")).expect("recovered state"),
+        )
+        .expect("valid recovered state");
+        assert_eq!(state["status"], "recovered");
+        assert_eq!(state["recoveredEntries"], 2);
+        fs::remove_dir_all(root).expect("remove interrupted deployment test");
+    }
+
+    #[test]
+    fn failed_cleanup_preserves_backup_and_marks_session_for_recovery() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-failed-cleanup-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let game_root = root.join("game");
+        let session_root = root.join("session");
+        let relative = PathBuf::from("archive/pc/mod/original.archive");
+        let destination = game_root.join(&relative);
+        fs::create_dir_all(destination.parent().expect("destination parent"))
+            .expect("destination tree");
+        fs::create_dir_all(&session_root).expect("session tree");
+        fs::write(&destination, b"deployed").expect("deployed file");
+        let result = finish_temporary_copy(
+            DeploymentSession {
+                game_root,
+                session_root: session_root.clone(),
+                overwrite_root: root.join("overwrite"),
+                entries: vec![DeploymentEntry {
+                    relative,
+                    had_original: true,
+                    deployed_signature: file_signature(&destination).expect("deployed signature"),
+                }],
+            },
+            false,
+        );
+        assert!(result.is_err());
+        assert!(session_root.exists());
+        let state: serde_json::Value = serde_json::from_slice(
+            &fs::read(session_root.join("session.json")).expect("recovery state"),
+        )
+        .expect("valid recovery state");
+        assert_eq!(state["status"], "recovery-required");
+        fs::remove_dir_all(root).expect("remove failed cleanup test");
     }
 
     #[test]

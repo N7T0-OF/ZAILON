@@ -1,4 +1,4 @@
-import { Boxes, Clock3, FolderPlus, Gamepad2, MoreHorizontal, Palette, Play, Radar, Settings2 } from 'lucide-react'
+import { Boxes, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2 } from 'lucide-react'
 import { useState } from 'react'
 import { Game } from '../../types'
 import { resourceUrl } from '../../lib/native'
@@ -17,6 +17,8 @@ export function HomeView() {
   const importDetectedGames = useStore(state => state.importDetectedGames)
   const setGameResources = useStore(state => state.setGameResources)
   const launchSelectedGame = useStore(state => state.launchSelectedGame)
+  const isLaunching = useStore(state => state.isLaunching)
+  const launchProgress = useStore(state => state.launchProgress)
   const isPlaying = useStore(state => state.isPlaying)
   const sessionTime = useStore(state => state.sessionTime)
   const setView = useStore(state => state.setView)
@@ -24,6 +26,9 @@ export function HomeView() {
   const [discoveryOpen, setDiscoveryOpen] = useState(false)
   const [menu, setMenu] = useState<{ game: Game; position: { x: number; y: number } }>()
   const [resourcesGameId, setResourcesGameId] = useState<string>()
+  const launchPercent = launchProgress?.total
+    ? Math.min(100, Math.round((launchProgress.current / launchProgress.total) * 100))
+    : undefined
 
   const resourcesGame = games.find(game => game.id === resourcesGameId)
   if (!selectedGame || !selectedProfile) {
@@ -89,8 +94,8 @@ export function HomeView() {
 
           <div className="flex items-center gap-2">
             <div className="mr-1 hidden text-right sm:block">
-              <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-white/74">{isPlaying ? 'En jeu' : 'Prêt à jouer'}</p>
-              <p className="mt-0.5 text-[11px] text-white/27">{isPlaying ? formatSeconds(sessionTime) : selectedGame.lastPlayed ? timeAgo(selectedGame.lastPlayed) : 'Jamais lancé'}</p>
+              <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-white/74">{isLaunching ? 'Préparation' : isPlaying ? 'En jeu' : 'Prêt à jouer'}</p>
+              <p className="mt-0.5 max-w-72 truncate text-[11px] text-white/36">{isLaunching ? launchProgress?.message || 'Analyse des mods…' : isPlaying ? formatSeconds(sessionTime) : selectedGame.lastPlayed ? timeAgo(selectedGame.lastPlayed) : 'Jamais lancé'}</p>
             </div>
             <CircleAction label="Détecter" onClick={() => setDiscoveryOpen(true)}><Radar size={11} /></CircleAction>
             <CircleAction label="Modifier l’apparence" onClick={() => setResourcesGameId(selectedGame.id)}><Palette size={11} /></CircleAction>
@@ -108,11 +113,18 @@ export function HomeView() {
             : <h1 className="mt-3 max-w-3xl font-display text-[clamp(3.2rem,6.7vw,7rem)] font-black uppercase leading-[0.78] tracking-[-0.025em] text-white">{selectedGame.shortName || selectedGame.name}</h1>}
           <p className="mt-5 text-[11px] text-white/38">Profil <span className="font-semibold text-white/70">{selectedProfile.name}</span><span className="mx-2 text-white/18">•</span>{activeMods} mod{activeMods !== 1 ? 's' : ''} actif{activeMods !== 1 ? 's' : ''}</p>
           <div className="mt-5 flex items-center gap-2">
-            <button type="button" disabled={isPlaying} title={isPlaying ? 'Le déploiement sera restauré automatiquement à la fermeture du jeu.' : 'Préparer les mods et lancer le jeu'} onClick={() => void launchSelectedGame()} className={`flex min-w-28 items-center justify-center gap-2 rounded-full px-5 py-2.5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all ${isPlaying ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
-              <Play size={10} fill="currentColor" />{isPlaying ? 'En cours' : 'Jouer'}
+            <button type="button" disabled={isPlaying || isLaunching} title={isLaunching ? launchProgress?.message || 'Préparation des mods en arrière-plan' : isPlaying ? 'Le déploiement sera restauré automatiquement à la fermeture du jeu.' : 'Préparer les mods et lancer le jeu'} onClick={() => void launchSelectedGame()} className={`flex min-w-36 items-center justify-center gap-2 rounded-full px-5 py-2.5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all ${isPlaying || isLaunching ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
+              {isLaunching ? <Loader2 size={12} className="animate-spin" /> : <Play size={10} fill="currentColor" />}
+              {isLaunching ? `Préparation${launchPercent === undefined ? '…' : ` ${launchPercent}%`}` : isPlaying ? 'En cours' : 'Jouer'}
             </button>
             <button type="button" onClick={() => setActiveGameTab('mods')} aria-label="Gérer les mods" title="Gérer les mods" className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.12] bg-black/25 text-white/50 backdrop-blur hover:bg-white/[0.08] hover:text-white"><Settings2 size={12} /></button>
           </div>
+          {isLaunching && <div className="mt-3 w-full max-w-md" role="status" aria-live="polite">
+            <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
+              <div className={`h-full rounded-full bg-[#dbe8e5] transition-[width] duration-300 ${launchPercent === undefined ? 'w-1/3 animate-pulse' : ''}`} style={launchPercent === undefined ? undefined : { width: `${launchPercent}%` }} />
+            </div>
+            <p className="mt-2 truncate text-[11px] text-white/48">{launchProgress?.message || 'Préparation du jeu en arrière-plan…'}</p>
+          </div>}
         </div>
 
         <div className="mt-auto grid gap-2 pt-8 min-[800px]:grid-cols-[1.08fr_0.92fr_1.14fr]">

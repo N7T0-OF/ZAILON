@@ -1,11 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { BulkOperation, ExplodMod, ExploreColumns, ExploreSort, Game, GameResources, GameTab, GamebananaGame, LiquidGlassMode, LiquidGlassSettings, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType, WindowEffectsDiagnostic } from '../types'
-import { BackgroundTaskSnapshot, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
+import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
 
-const APP_VERSION = '1.7.2'
+const APP_VERSION = '1.7.3'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 export const DEFAULT_LIQUID_GLASS: LiquidGlassSettings = { opacity: 0.86, blur: 18, darkTint: 0.58, saturation: 1.08, border: 0.12, reflection: 0.08, shadow: 0.5, animations: true, reduceWhenUnfocused: true, preferNative: true }
 
@@ -251,6 +251,8 @@ export interface Store {
   lastUpdateVersion?: string
   lastUpdateError?: string
   lastInstalledUpdate?: { version: string; notes?: string; date?: string; installedAt: number }
+  isLaunching: boolean
+  launchProgress?: DeploymentProgressEvent
   isPlaying: boolean
   playStartTime?: number
   sessionTime: number
@@ -438,6 +440,11 @@ export function migratePersistedState(persisted: unknown) {
     accentColor: /^#[0-9a-f]{6}$/i.test(state.accentColor || '') ? state.accentColor : '#f3faf8',
     bulkHistory: state.bulkHistory || [],
     notificationHistory: state.notificationHistory || [],
+    isLaunching: false,
+    launchProgress: undefined,
+    isPlaying: false,
+    playStartTime: undefined,
+    sessionTime: 0,
   }
 }
 
@@ -465,6 +472,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   autoDownloadModUpdates: false,
   autoInstallModUpdates: false,
   updateChannel: 'stable',
+  isLaunching: false,
   isPlaying: false,
   sessionTime: 0,
   explorePlatform: 'gamebanana',
@@ -1023,7 +1031,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   dismissInstalledUpdate: () => set({ lastInstalledUpdate: undefined }),
   launchSelectedGame: async () => {
     const state = get()
-    if (state.isPlaying) { set({ notice: 'Un jeu est déjà en cours. Fermez son processus avant un nouveau lancement afin que ZAILON restaure proprement les fichiers temporaires.' }); return }
+    if (state.isPlaying || state.isLaunching) { set({ notice: state.isLaunching ? 'La préparation du jeu est déjà en cours.' : 'Un jeu est déjà en cours. Fermez son processus avant un nouveau lancement afin que ZAILON restaure proprement les fichiers temporaires.' }); return }
     const { game, profile } = selected(state)
     if (!game?.execPath) { set({ notice: 'Select a game executable before launching.' }); return }
     if (!profile) { set({ notice: 'Select a profile before launching.' }); return }
@@ -1036,6 +1044,11 @@ export const useStore = create<Store>()(persist((set, get) => ({
       const stagedModIds = enabledMods
         .map(mod => mod.stageId || (mod.storage === 'staged' ? mod.id : undefined))
         .filter((id): id is string => Boolean(id))
+      set({
+        isLaunching: true,
+        launchProgress: { phase: 'starting', current: 0, total: 0, message: 'Préparation du jeu…' },
+        notice: 'Préparation du jeu en arrière-plan…',
+      })
       const result = await native.launchGame(game.execPath, game.id, game.name, game.installDirectory || knownRoot, profile.id, profile.name, enabledMods.length, stagedModIds, profile.conflictRules || [], state.discordPresence ? {
         enabled: true,
         clientId: state.discordClientId,
@@ -1043,8 +1056,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
         showProfile: state.discordShowProfile,
         showModCount: state.discordShowModCount,
         showElapsed: state.discordShowElapsed,
-      } : undefined)
+      } : undefined, progress => set({ launchProgress: progress }))
       set(current => ({
+        isLaunching: false,
+        launchProgress: undefined,
         isPlaying: true,
         playStartTime: Date.now(),
         sessionTime: 0,
@@ -1052,14 +1067,14 @@ export const useStore = create<Store>()(persist((set, get) => ({
         notice: `${game.name} lancé (PID ${result.pid}) après vérification de ${result.deployedFiles} fichier(s) via ${result.deploymentBackend}. ${result.discordMessage}`,
       }))
     } catch (error) {
-      set({ notice: asError(error) })
+      set({ isLaunching: false, launchProgress: undefined, notice: asError(error) })
     }
   },
   stopPlaying: (gameId, profileId, cleanupError) => {
     const state = get()
     const game = state.games.find(item => item.id === gameId) ?? state.games.find(item => item.id === state.selectedGameId)
     const profile = game?.profiles.find(item => item.id === profileId) ?? game?.profiles.find(item => item.id === state.selectedProfileId) ?? game?.profiles[0]
-    if (!game || !profile) { set({ isPlaying: false, playStartTime: undefined, sessionTime: 0 }); return }
+    if (!game || !profile) { set({ isLaunching: false, launchProgress: undefined, isPlaying: false, playStartTime: undefined, sessionTime: 0 }); return }
     const minutes = state.playStartTime ? Math.floor((Date.now() - state.playStartTime) / 60_000) : 0
     const now = Date.now()
     const restoredStatus: NonNullable<Mod['deploymentStatus']> = cleanupError ? 'failed' : 'enabled'
@@ -1072,7 +1087,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
           ? { ...mod, deploymentStatus: restoredStatus, diagnostics: cleanupError ? [...(mod.diagnostics || []), cleanupError] : mod.diagnostics }
           : mod),
       } : item)
-    set({ games, isPlaying: false, playStartTime: undefined, sessionTime: 0, notice: cleanupError ? `Restauration du jeu incomplète : ${cleanupError}` : state.notice })
+    set({ games, isLaunching: false, launchProgress: undefined, isPlaying: false, playStartTime: undefined, sessionTime: 0, notice: cleanupError ? `Restauration du jeu incomplète : ${cleanupError}` : state.notice })
   },
   tick: () => {
     const { isPlaying, playStartTime } = get()

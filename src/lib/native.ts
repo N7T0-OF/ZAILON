@@ -577,6 +577,13 @@ export interface LaunchGameResult {
   diagnostics: string[]
 }
 
+export interface DeploymentProgressEvent {
+  phase: string
+  current: number
+  total: number
+  message: string
+}
+
 export interface GameProcessEvent {
   pid: number
   gameId: string
@@ -636,8 +643,12 @@ export const native = {
   profileIntegrity: (gameId: string, profileId: string) => desktopOnly<ProfileIntegrity>('profile_integrity', { gameId, profileId }),
   trashProfileState: (gameId: string, profileId: string) => desktopOnly<string>('trash_profile_state', { gameId, profileId }),
   initializeFiveMBase: (gameId: string, installDirectory: string) => desktopOnly<BaseSnapshotResult>('initialize_fivem_base', { gameId, installDirectory }),
-  launchGame: (execPath: string, gameId: string, gameName: string, gameRoot: string, profileId: string, profileName: string, activeMods: number, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, discord?: DiscordPresenceConfig) =>
-    desktopOnly<LaunchGameResult>('launch_game', { execPath, gameId, gameName, gameRoot, profileId, profileName, activeMods, enabledModIds, conflictRules, discord }),
+  launchGame: (execPath: string, gameId: string, gameName: string, gameRoot: string, profileId: string, profileName: string, activeMods: number, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, discord: DiscordPresenceConfig | undefined, onProgress: (event: DeploymentProgressEvent) => void) => {
+    if (!isTauri()) return Promise.reject(new Error('Le lancement est uniquement disponible dans l’application ZAILON.'))
+    const channel = new Channel<DeploymentProgressEvent>()
+    channel.onmessage = onProgress
+    return invoke<LaunchGameResult>('launch_game', { execPath, gameId, gameName, gameRoot, profileId, profileName, activeMods, enabledModIds, conflictRules, discord, onEvent: channel })
+  },
   testDiscordConnection: (clientId: string) => desktopOnly<DiscordConnectionStatus>('test_discord_connection', { clientId }),
   guessModsPath: (execPath: string) => desktopOnly<string>('guess_mods_path', { execPath }),
   scanSteamGames: (steamPath: string | undefined, onEvent: (event: SteamScanEvent) => void) => {

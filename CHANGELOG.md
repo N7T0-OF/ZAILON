@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.7.3 — Lancement fluide et récupération après interruption
+
+- Déplace l’analyse, le hachage, la sauvegarde et la copie des mods sur une tâche
+  bloquante dédiée afin que la fenêtre Windows reste réactive pendant la préparation.
+- Affiche la phase, le nombre de fichiers et la progression réelle directement sur
+  le bouton Jouer, tout en empêchant les doubles lancements.
+- Écrit un état de session atomique et un journal durable avant chaque remplacement
+  de fichier pour pouvoir restaurer une préparation interrompue au lancement suivant.
+- Détecte une session de jeu encore active avant toute récupération afin de ne jamais
+  retirer ses fichiers pendant que son processus fonctionne.
+- Conserve désormais les sauvegardes lorsqu’une restauration échoue et marque la
+  session pour récupération, au lieu de supprimer les seules copies originales.
+- Ajoute des tests de restauration après interruption et de conservation des
+  sauvegardes en cas d’erreur de nettoyage.
+
 ## 1.7.2 — Auto-réparation des frameworks déjà dédupliqués
 
 - Corrige la réutilisation d’un paquet déjà présent : redscript, RED4ext et CET sont

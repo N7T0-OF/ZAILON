@@ -72,6 +72,7 @@ export function GamesView() {
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number>()
   const [bulkDialog, setBulkDialog] = useState<'move' | 'copy' | 'delete' | 'tag'>()
   const [tagFilter, setTagFilter] = useState('')
+  const [deploymentToolBusy, setDeploymentToolBusy] = useState(false)
   const modsListRef = useRef<HTMLDivElement>(null)
   const selectAllRef = useRef<HTMLInputElement>(null)
 
@@ -159,7 +160,7 @@ export function GamesView() {
       schemaVersion: 1,
       exportedAt: new Date().toISOString(),
       app: 'ZAILON',
-      appVersion: '1.6.0',
+      appVersion: '1.7.1',
       exportMode: complete ? 'complete' : 'light',
       game: { name: selectedGame.name, provider: selectedGame.provider, providerGameId: selectedGame.providerGameId },
       profile,
@@ -185,6 +186,110 @@ export function GamesView() {
     if (preview.embeddedFiles && selectedGame.modsPath && window.confirm('Extraire aussi les fichiers intégrés dans le dossier Mods de ce jeu ?')) {
       await native.extractProfileArchive(archivePath, selectedGame.modsPath)
       await scanMods(selectedGame.id)
+    }
+  }
+
+  const deploymentArguments = () => {
+    const enabledModIds = profileMods
+      .filter(mod => mod.enabled)
+      .map(mod => mod.stageId || (mod.storage === 'staged' ? mod.id : undefined))
+      .filter((id): id is string => Boolean(id))
+    const executableRoot = selectedGame.name.toLocaleLowerCase().includes('cyberpunk')
+      && /[\\/]bin[\\/]x64(?:[\\/]|$)/i.test(selectedGame.execPath || '')
+      ? selectedGame.execPath?.split(/[\\/]bin[\\/]x64/i)[0]
+      : selectedGame.execPath?.replace(/[\\/][^\\/]+$/, '')
+    const gameRoot = selectedGame.installDirectory
+      || executableRoot
+      || undefined
+    return {
+      enabledModIds,
+      conflictRules: selectedProfile.conflictRules || [],
+      gameRoot,
+    }
+  }
+
+  const auditDeployment = async () => {
+    setDeploymentToolBusy(true)
+    try {
+      const input = deploymentArguments()
+      const audit = await native.auditProfileDeployment(
+        selectedGame.id,
+        selectedProfile.id,
+        input.enabledModIds,
+        input.conflictRules,
+        input.gameRoot,
+      )
+      const providers = audit.providers.length
+        ? audit.providers.map(provider => provider.frameworkId).join(', ')
+        : 'aucun fournisseur complet détecté'
+      window.alert([
+        audit.deployable ? 'Audit réussi : le profil peut être préparé.' : 'Audit incomplet : une réparation est nécessaire.',
+        '',
+        `${audit.referencedPackages} paquet(s) actif(s), ${audit.accessiblePackages} accessible(s), ${audit.brokenReferences} référence(s) cassée(s).`,
+        `${audit.manifestedFiles} fichier(s) manifesté(s), ${audit.virtualFileCount} gagnant(s) dans la carte virtuelle, ${audit.conflicts} conflit(s).`,
+        `Frameworks complets : ${providers}.`,
+        '',
+        ...audit.diagnostics.slice(0, 8),
+      ].join('\n'))
+    } catch (error) {
+      window.alert(`Audit du déploiement impossible : ${String(error)}`)
+    } finally {
+      setDeploymentToolBusy(false)
+    }
+  }
+
+  const repairMo2Deployment = async () => {
+    const sourcePath = await pickFolder('Sélectionnez la racine Mod Organizer 2 utilisée pour cet import')
+    if (!sourcePath) return
+    setDeploymentToolBusy(true)
+    try {
+      const input = deploymentArguments()
+      const before = await native.auditProfileDeployment(
+        selectedGame.id,
+        selectedProfile.id,
+        input.enabledModIds,
+        input.conflictRules,
+        input.gameRoot,
+      )
+      const confirmation = [
+        `Réparer le profil « ${selectedProfile.name} » depuis cette instance MO2 ?`,
+        '',
+        `${before.referencedPackages} paquet(s) actif(s), ${before.virtualFileCount} fichier(s) actuellement déployables.`,
+        `${before.brokenReferences} référence(s) cassée(s), ${before.providers.length} fournisseur(s) complet(s).`,
+        '',
+        'ZAILON créera un snapshot, restaurera seulement les fichiers runtime dont le fournisseur est confirmé par plusieurs signatures, reconstruira les manifestes et recalculera la carte virtuelle.',
+        'La source MO2 restera strictement en lecture seule.',
+      ].join('\n')
+      if (!window.confirm(confirmation)) return
+      const result = await native.repairMo2ProfileDeployment(
+        selectedGame.id,
+        selectedProfile.id,
+        sourcePath,
+        selectedGame.name,
+        input.enabledModIds,
+        input.conflictRules,
+        input.gameRoot,
+      )
+      await scanMods(selectedGame.id)
+      const providers = result.providers.length
+        ? result.providers.map(provider => provider.frameworkId).join(', ')
+        : 'aucun'
+      window.alert([
+        result.deployable ? 'Réparation terminée : le profil est prêt pour le bouton Jouer.' : 'Réparation terminée, mais le profil reste non déployable.',
+        '',
+        `${result.packagesAudited} paquet(s) audité(s), ${result.packagesRestaged} fournisseur(s) restagé(s).`,
+        `${result.manifestsRebuilt} manifeste(s) reconstruit(s), ${result.virtualFileCount} fichier(s) dans la carte virtuelle.`,
+        `${result.brokenReferences} référence(s) cassée(s). Frameworks complets : ${providers}.`,
+        '',
+        `Rapport : ${result.reportPath}`,
+        `Snapshot : ${result.snapshotPath}`,
+        '',
+        ...result.diagnostics.slice(0, 6),
+      ].join('\n'))
+    } catch (error) {
+      window.alert(`Réparation MO2 annulée : ${String(error)}`)
+    } finally {
+      setDeploymentToolBusy(false)
     }
   }
 
@@ -274,8 +379,8 @@ export function GamesView() {
 
       {tab === 'downloads' && <CollectionDownloadsPanel gameId={selectedGame.id} gameName={selectedGame.name} onOpenProfile={profileId => { void setSelectedProfile(profileId); setTab('profiles') }} />}
       {tab === 'conflicts' && <div className="flex-1 overflow-y-auto p-4">{resolvedConflicts.length ? <div><div className="mb-3 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] p-3 text-xs text-amber-100/65">TemporaryCopy déploie un seul gagnant par chemin. Sans règle explicite, le dernier mod dans l’ordre du profil gagne.</div><div className="overflow-x-auto rounded-xl border border-white/[0.07]"><table className="w-full text-left text-xs"><thead className="bg-white/[0.03] text-white/42"><tr><th className="px-3 py-2">Chemin résolu</th><th className="px-3 py-2">Fournisseurs</th><th className="px-3 py-2">Gagnant</th></tr></thead><tbody>{resolvedConflicts.map(conflict => <tr key={conflict.path} className="border-t border-white/[0.06]"><td className="max-w-sm break-all px-3 py-2 font-mono text-white/52">{conflict.path}</td><td className="px-3 py-2 text-white/45">{conflict.owners.map(owner => owner.name).join(' → ')}</td><td className="px-3 py-2"><select value={conflict.winner.id} onChange={event => setConflictWinner(conflict.path, event.target.value)} className="rounded-lg border border-white/[0.08] bg-[#101313] px-2 py-1.5 text-xs text-white/68">{conflict.owners.map(owner => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></td></tr>)}</tbody></table></div></div> : <EmptyPanel icon={ShieldAlert} title="Aucun conflit de fichiers" detail="L’analyse compare les chemins relatifs réellement fournis par chaque mod actif." />}</div>}
-      {tab === 'tools' && <div className="grid flex-1 auto-rows-min gap-3 overflow-y-auto p-4 sm:grid-cols-2"><ActionCard icon={RefreshCw} title="Analyser le dossier Mods" detail="Actualise le catalogue, les tailles, les frameworks et les conflits." onClick={() => void scanMods(selectedGame.id)} /><ActionCard icon={Boxes} title="Nettoyer les doublons" detail="Compare le contenu exact, rattache les profils à une copie unique puis efface uniquement les copies identiques." onClick={() => void deduplicateStagedMods(selectedGame.id)} /><ActionCard icon={Trash2} title="Purger les paquets retirés" detail="Resynchronise les profils, trouve les paquets qui ne sont plus référencés nulle part puis propose leur suppression physique." onClick={() => void purgeUnreferencedStagedMods(selectedGame.id)} /><ActionCard icon={FolderOpen} title="Ouvrir le dossier Mods" detail={selectedGame.modsPath || 'Configurez d’abord un dossier.'} disabled={!selectedGame.modsPath} onClick={() => selectedGame.modsPath && void native.openPath(selectedGame.modsPath)} /><ActionCard icon={FolderInput} title="Importer des dossiers" detail="Prévisualise les racines détectées avant toute copie." onClick={() => setImportOpen(true)} /><ActionCard icon={Archive} title="Importer depuis Mod Organizer 2" detail="Analyse une instance portable, recrée ses profils et copie uniquement les données choisies. La source reste en lecture seule." onClick={() => setMo2ImportOpen(true)} /></div>}
-      {tab === 'backups' && <div className="grid flex-1 auto-rows-min gap-3 overflow-y-auto p-4 sm:grid-cols-2"><ActionCard icon={FileArchive} title="Exporter un profil léger" detail="Métadonnées, liens, versions, ordre et réglages. Aucun chemin personnel ni secret." onClick={() => void exportProfile(false)} /><ActionCard icon={Archive} title="Exporter un profil complet" detail={`${formatBytes(profileMods.reduce((sum, mod) => sum + (mod.sizeBytes || 0), 0))} maximum avant compression.`} onClick={() => void exportProfile(true)} /><ActionCard icon={Upload} title="Importer un profil" detail="Valide l’archive et affiche un aperçu avant création d’un nouveau profil." onClick={() => void importProfile()} /></div>}
+      {tab === 'tools' && <div className="grid flex-1 auto-rows-min gap-3 overflow-y-auto p-4 sm:grid-cols-2"><ActionCard icon={ShieldAlert} title="Auditer le déploiement réel" detail="Vérifie les paquets physiques, reconstruit la carte virtuelle en mémoire et contrôle les fournisseurs redscript, RED4ext et CET." disabled={deploymentToolBusy} onClick={() => void auditDeployment()} />{selectedGame.name.toLocaleLowerCase().includes('cyberpunk') && <ActionCard icon={Wrench} title="Réparer l’import MO2 et le déploiement" detail="Snapshot, restaging sécurisé des runtimes confirmés, manifestes normalisés et nouvelle carte virtuelle. La source MO2 reste intacte." disabled={deploymentToolBusy} onClick={() => void repairMo2Deployment()} />}<ActionCard icon={RefreshCw} title="Analyser le dossier Mods" detail="Actualise le catalogue, les tailles, les frameworks et les conflits." onClick={() => void scanMods(selectedGame.id)} /><ActionCard icon={Boxes} title="Nettoyer les doublons" detail="Compare le contenu exact, rattache les profils à une copie unique puis efface uniquement les copies identiques." onClick={() => void deduplicateStagedMods(selectedGame.id)} /><ActionCard icon={Trash2} title="Purger les paquets retirés" detail="Resynchronise les profils, trouve les paquets qui ne sont plus référencés nulle part puis propose leur suppression physique." onClick={() => void purgeUnreferencedStagedMods(selectedGame.id)} /><ActionCard icon={FolderOpen} title="Ouvrir le dossier Mods" detail={selectedGame.modsPath || 'Configurez d’abord un dossier.'} disabled={!selectedGame.modsPath} onClick={() => selectedGame.modsPath && void native.openPath(selectedGame.modsPath)} /><ActionCard icon={FolderInput} title="Importer des dossiers" detail="Prévisualise les racines détectées avant toute copie." onClick={() => setImportOpen(true)} /><ActionCard icon={Archive} title="Importer depuis Mod Organizer 2" detail="Analyse une instance portable, recrée ses profils et copie uniquement les données choisies. La source reste en lecture seule." onClick={() => setMo2ImportOpen(true)} /></div>}
+      {tab === 'backups' && <div className="grid flex-1 auto-rows-min gap-3 overflow-y-auto p-4 sm:grid-cols-2"><ActionCard icon={FileArchive} title="Exporter un profil léger" detail="Archive de partage : métadonnées, liens, versions, ordre et réglages. L’export ne déploie aucun fichier dans le jeu." onClick={() => void exportProfile(false)} /><ActionCard icon={Archive} title="Exporter un profil complet" detail={`Archive de partage avec jusqu’à ${formatBytes(profileMods.reduce((sum, mod) => sum + (mod.sizeBytes || 0), 0))} avant compression. Le déploiement se fait uniquement avec Jouer.`} onClick={() => void exportProfile(true)} /><ActionCard icon={Upload} title="Importer un profil" detail="Valide l’archive et affiche un aperçu avant création d’un nouveau profil." onClick={() => void importProfile()} /></div>}
       {tab === 'appearance' && <div className="min-h-0 flex-1 overflow-hidden p-3"><GameAppearanceEditor game={selectedGame} embedded onSave={resources => setGameResources(selectedGame.id, resources)} /></div>}
       {tab === 'settings' && <div className="flex-1 space-y-4 overflow-y-auto p-4"><Field label="Exécutable du jeu" value={selectedGame.execPath || ''} placeholder="Sélectionnez l’exécutable" onChange={value => void setGamePath(selectedGame.id, value)} onBrowse={() => void browseExecutable()} /><Field label="Dossier Mods" value={selectedGame.modsPath || ''} placeholder="Sélectionnez le dossier Mods" onChange={value => setModsPath(selectedGame.id, value)} onBrowse={() => void browseModsFolder()} /><div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-[11px] font-semibold text-white/68">Raccourci de lancement sécurisé</p><p className="mt-1 text-[11px] leading-relaxed text-white/34">Crée un raccourci bureau ZAILON lié à ce jeu et au profil « {selectedProfile.name} ». Le lien contient uniquement leurs identifiants internes.</p></div><button type="button" onClick={() => void native.createDesktopShortcut(selectedGame.id, selectedProfile.id, selectedGame.name, selectedGame.resources?.iconPath || selectedGame.execPath).then(path => window.alert(`Raccourci créé :\n${path}`)).catch(error => window.alert(String(error)))} className="flex items-center gap-2 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313]"><MonitorDown size={14} />Créer sur le bureau</button></div></div><p className="pt-1 text-[11px] font-mono text-white/35">Temps de jeu total : {formatTime(selectedGame.totalPlaytime)}</p></div>}
     </section>

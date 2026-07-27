@@ -177,6 +177,97 @@ struct Mo2ImportResult {
     warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PackageFileEntry {
+    source_physical_path: String,
+    package_relative_path: String,
+    game_relative_path: String,
+    hash: String,
+    size: u64,
+    deployable: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PackageReferenceStatus {
+    profile_id: String,
+    package_id: String,
+    package_directory: String,
+    exists: bool,
+    manifest_exists: bool,
+    files_exist: bool,
+    source_still_available: bool,
+    normalized: bool,
+    deployable: bool,
+    file_count: u64,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FrameworkProviderStatus {
+    framework_id: String,
+    package_id: String,
+    files: Vec<String>,
+    enabled: bool,
+    runtime_visible: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VirtualFileMapEntry {
+    game_relative_path: String,
+    package_id: String,
+    source_physical_path: String,
+    hash: String,
+    size: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProfileDeploymentAudit {
+    game_id: String,
+    profile_id: String,
+    referenced_packages: u64,
+    accessible_packages: u64,
+    broken_references: u64,
+    manifested_files: u64,
+    virtual_file_count: u64,
+    conflicts: u64,
+    deployable: bool,
+    packages: Vec<PackageReferenceStatus>,
+    providers: Vec<FrameworkProviderStatus>,
+    virtual_files: Vec<VirtualFileMapEntry>,
+    diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Mo2DeploymentRepairResult {
+    repair_id: String,
+    packages_audited: u64,
+    packages_restaged: u64,
+    manifests_rebuilt: u64,
+    normalized_files: u64,
+    virtual_file_count: u64,
+    broken_references: u64,
+    providers: Vec<FrameworkProviderStatus>,
+    snapshot_path: String,
+    report_path: String,
+    deployable: bool,
+    diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct VirtualProfileMap {
+    entries: Vec<VirtualFileMapEntry>,
+    packages: Vec<PackageReferenceStatus>,
+    providers: Vec<FrameworkProviderStatus>,
+    conflicts: u64,
+    diagnostics: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 struct Mo2ModListEntry {
     name: String,
@@ -4424,6 +4515,174 @@ fn prepare_temporary_copy(
     })
 }
 
+fn prepare_profile_deployment(
+    app: &AppHandle,
+    game_id: &str,
+    profile_id: &str,
+    game_root: &Path,
+    enabled_mod_ids: &[String],
+    conflict_rules: &[LaunchConflictRule],
+) -> Result<PreparedDeployment, String> {
+    safe_game_id(game_id)?;
+    safe_game_id(profile_id)?;
+    let game_root = fs::canonicalize(game_root)
+        .map_err(|_| "Le dossier d’installation du jeu est introuvable.".to_string())?;
+    let virtual_map = build_virtual_profile_map(
+        app,
+        game_id,
+        profile_id,
+        enabled_mod_ids,
+        conflict_rules,
+        true,
+    )?;
+    let broken = virtual_map
+        .packages
+        .iter()
+        .filter(|package| !package.deployable)
+        .collect::<Vec<_>>();
+    if !broken.is_empty() {
+        let examples = broken
+            .iter()
+            .take(4)
+            .map(|package| format!("{} ({})", package.package_id, package.errors.join(" ")))
+            .collect::<Vec<_>>();
+        return Err(format!(
+            "Préparation bloquée : {} référence(s) de paquet ne sont pas déployables. {} Utilisez « Réparer l’import MO2 et le déploiement ».",
+            broken.len(),
+            examples.join(" · ")
+        ));
+    }
+    if !enabled_mod_ids.is_empty() && virtual_map.entries.is_empty() {
+        return Err(format!(
+            "Préparation bloquée : le profil contient {} mod(s) actif(s), mais 0 fichier déployable a été produit.",
+            enabled_mod_ids.len()
+        ));
+    }
+    let mut diagnostics = framework_diagnostics(
+        &game_root,
+        &virtual_map
+            .entries
+            .iter()
+            .map(|entry| PathBuf::from(&entry.game_relative_path))
+            .collect::<Vec<_>>(),
+    )?;
+    diagnostics.extend(virtual_map.diagnostics.clone());
+    diagnostics.push(format!(
+        "Table virtuelle construite : {} fichier(s), {} paquet(s), {} framework(s) fournisseur(s).",
+        virtual_map.entries.len(),
+        virtual_map.packages.len(),
+        virtual_map.providers.len()
+    ));
+    diagnostics.push(format!(
+        "{} conflit(s) résolu(s) selon l’ordre du profil et ses règles explicites.",
+        virtual_map.conflicts
+    ));
+    if virtual_map.entries.is_empty() {
+        return Ok(PreparedDeployment {
+            session: None,
+            deployed_files: 0,
+            conflicts_resolved: virtual_map.conflicts as usize,
+            diagnostics,
+        });
+    }
+    let data_root = update_data_root(app)?.join("games").join(game_id);
+    let session_root = unique_destination(
+        &data_root.join("deployments"),
+        &format!("session-{}", unix_timestamp()),
+    );
+    let backup_root = session_root.join("backup");
+    let overwrite_root = data_root
+        .join("profiles")
+        .join(profile_id)
+        .join("overwrite");
+    fs::create_dir_all(&backup_root).map_err(to_error)?;
+    fs::create_dir_all(&overwrite_root).map_err(to_error)?;
+    let mut session = DeploymentSession {
+        game_root: game_root.clone(),
+        session_root: session_root.clone(),
+        overwrite_root,
+        entries: Vec::new(),
+    };
+    let result = (|| {
+        let mut resolved_manifest = Vec::new();
+        for entry in &virtual_map.entries {
+            let source = PathBuf::from(&entry.source_physical_path);
+            if !source.is_file() {
+                return Err(format!(
+                    "Le fichier source du paquet {} est introuvable : {}.",
+                    entry.package_id, entry.game_relative_path
+                ));
+            }
+            let relative = PathBuf::from(&entry.game_relative_path);
+            validate_archive_relative(&relative)?;
+            let destination = game_root.join(&relative);
+            if !destination.starts_with(&game_root) {
+                return Err("Un chemin de déploiement sort du dossier du jeu.".to_string());
+            }
+            let had_original = destination.is_file();
+            let source_signature = file_signature(&source)?;
+            if had_original {
+                let backup = backup_root.join(&relative);
+                if let Some(parent) = backup.parent() {
+                    fs::create_dir_all(parent).map_err(to_error)?;
+                }
+                fs::copy(&destination, backup).map_err(to_error)?;
+            }
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent).map_err(to_error)?;
+            }
+            session.entries.push(DeploymentEntry {
+                relative: relative.clone(),
+                had_original,
+                deployed_signature: source_signature,
+            });
+            fs::copy(&source, &destination).map_err(to_error)?;
+            if file_signature(&destination)? != source_signature {
+                return Err(format!(
+                    "Vérification RuntimeVisible échouée pour {}.",
+                    relative.display()
+                ));
+            }
+            resolved_manifest.push(serde_json::json!({
+                "path": entry.game_relative_path,
+                "winnerModId": entry.package_id,
+                "sourcePhysicalPath": entry.source_physical_path,
+                "hash": entry.hash,
+                "runtimeVisible": true
+            }));
+        }
+        write_json_atomic(
+            &session_root.join("resolved-files.json"),
+            &serde_json::json!({
+                "schemaVersion": 2,
+                "profileId": profile_id,
+                "backend": "TemporaryCopy",
+                "plannedFiles": virtual_map.entries.len(),
+                "deployedFiles": session.entries.len(),
+                "files": resolved_manifest
+            }),
+        )
+    })();
+    if let Err(error) = result {
+        let _ = finish_temporary_copy(session, false);
+        return Err(error);
+    }
+    if session.entries.len() != virtual_map.entries.len() {
+        let planned = virtual_map.entries.len();
+        let deployed = session.entries.len();
+        let _ = finish_temporary_copy(session, false);
+        return Err(format!(
+            "Déploiement incomplet : {planned} fichier(s) planifié(s), {deployed} déployé(s)."
+        ));
+    }
+    Ok(PreparedDeployment {
+        deployed_files: session.entries.len(),
+        conflicts_resolved: virtual_map.conflicts as usize,
+        diagnostics,
+        session: Some(session),
+    })
+}
+
 #[tauri::command]
 fn test_discord_connection(
     app: AppHandle,
@@ -4463,7 +4722,7 @@ fn launch_game(
     if !executable.starts_with(&game_root_path) {
         return Err("L’exécutable ne se trouve pas dans le dossier d’installation configuré. Corrigez le chemin du jeu avant le lancement.".into());
     }
-    let prepared = match prepare_temporary_copy(
+    let prepared = match prepare_profile_deployment(
         &app,
         &game_id,
         &profile_id,
@@ -4726,6 +4985,68 @@ fn game_adapter_allows_sensitive(game_name: &str, destination: &str, extension: 
         return matches!(extension, "dll" | "asi") && destination.starts_with("fivem.app/plugins/");
     }
     false
+}
+
+fn normalized_cyberpunk_game_relative(relative: &Path) -> PathBuf {
+    cyberpunk_repair_target(relative).unwrap_or_else(|| relative.to_path_buf())
+}
+
+fn normalized_tree_paths(root: &Path) -> HashSet<String> {
+    WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .filter_map(|entry| {
+            let relative = entry.path().strip_prefix(root).ok()?;
+            Some(deployment_key(&normalized_cyberpunk_game_relative(
+                relative,
+            )))
+        })
+        .collect()
+}
+
+fn detect_cyberpunk_framework_providers(root: &Path) -> HashSet<String> {
+    let paths = normalized_tree_paths(root);
+    let has = |path: &str| paths.contains(path);
+    let mut providers = HashSet::new();
+    if has("engine/tools/scc.exe")
+        && has("engine/tools/scc_lib.dll")
+        && has("engine/config/base/scripts.ini")
+        && has("r6/config/cybercmd/scc.toml")
+    {
+        providers.insert("redscript".into());
+    }
+    if has("red4ext/red4ext.dll") && has("bin/x64/winmm.dll") {
+        providers.insert("red4ext".into());
+    }
+    if has("bin/x64/plugins/cyber_engine_tweaks.asi")
+        && (has("bin/x64/version.dll") || has("bin/x64/winmm.dll"))
+    {
+        providers.insert("cyber-engine-tweaks".into());
+    }
+    providers
+}
+
+fn framework_provider_allows_sensitive(providers: &HashSet<String>, destination: &Path) -> bool {
+    let destination = deployment_key(destination);
+    (providers.contains("redscript")
+        && matches!(
+            destination.as_str(),
+            "engine/tools/scc.exe" | "engine/tools/scc_lib.dll"
+        ))
+        || (providers.contains("red4ext")
+            && matches!(
+                destination.as_str(),
+                "red4ext/red4ext.dll" | "bin/x64/winmm.dll"
+            ))
+        || (providers.contains("cyber-engine-tweaks")
+            && matches!(
+                destination.as_str(),
+                "bin/x64/plugins/cyber_engine_tweaks.asi"
+                    | "bin/x64/version.dll"
+                    | "bin/x64/winmm.dll"
+            ))
 }
 
 fn assess_sensitive_file(
@@ -5076,6 +5397,7 @@ fn copy_tree_cancellable(
 struct SensitiveImportContext {
     action: String,
     game_name: String,
+    framework_providers: HashSet<String>,
     content_root: PathBuf,
     inactive_root: PathBuf,
     quarantine_root: PathBuf,
@@ -5125,6 +5447,18 @@ fn copy_sensitive_aware_file(
         fs::copy(source, destination).map_err(to_error)?;
         return Ok(());
     };
+    if !assessment.may_deploy
+        && framework_provider_allows_sensitive(&context.framework_providers, relative_destination)
+    {
+        assessment.expected_by_manifest = true;
+        assessment.expected_by_game_adapter = true;
+        assessment.may_deploy = true;
+        assessment.recommended_action = "include-framework-runtime".into();
+        assessment.reasons.push(
+            "Fichier runtime confirmé par plusieurs signatures du framework dans le même paquet."
+                .into(),
+        );
+    }
     if assessment.may_deploy {
         assessment.decision = Some("deployed-by-game-adapter".into());
         if let Some(parent) = destination.parent() {
@@ -5257,6 +5591,25 @@ fn unwrap_package_root(source: &Path) -> PathBuf {
     current
 }
 
+fn cyberpunk_package_root(source: &Path) -> PathBuf {
+    let unwrapped = unwrap_package_root(source);
+    if !unwrapped.is_dir() {
+        return unwrapped;
+    }
+    for wrapper in ["root", "game", "cyberpunk 2077"] {
+        let Some(candidate) = case_insensitive_relative(&unwrapped, wrapper) else {
+            continue;
+        };
+        if candidate.parent() == Some(unwrapped.as_path())
+            && candidate.is_dir()
+            && contains_game_root_layout(&candidate)
+        {
+            return unwrap_package_root(&candidate);
+        }
+    }
+    unwrapped
+}
+
 fn stage_content(
     source: &Path,
     content: &Path,
@@ -5268,10 +5621,17 @@ fn stage_content(
     let cyberpunk = lower_game.contains("cyberpunk");
     let fivem_client = lower_game.contains("fivem");
     let root = if source.is_dir() {
-        unwrap_package_root(source)
+        if cyberpunk {
+            cyberpunk_package_root(source)
+        } else {
+            unwrap_package_root(source)
+        }
     } else {
         source.to_path_buf()
     };
+    if cyberpunk {
+        security.framework_providers = detect_cyberpunk_framework_providers(&root);
+    }
     if fivem_client {
         let server_markers = WalkDir::new(&root)
             .max_depth(4)
@@ -5509,6 +5869,372 @@ fn staged_storage_roots(app: &AppHandle, game_id: &str) -> Result<Vec<PathBuf>, 
             .map(|parent| parent.join("mods"))
             .unwrap_or_default(),
     ])
+}
+
+fn staged_package_directory(app: &AppHandle, game_id: &str, package_id: &str) -> Option<PathBuf> {
+    if safe_game_id(package_id).is_err() {
+        return None;
+    }
+    staged_storage_roots(app, game_id)
+        .ok()?
+        .into_iter()
+        .map(|root| root.join(package_id))
+        .find(|path| path.is_dir())
+}
+
+fn manager_metadata_file(relative: &Path) -> bool {
+    if relative.components().count() != 1 {
+        return false;
+    }
+    matches!(
+        relative
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase())
+            .as_deref(),
+        Some(
+            "meta.ini"
+                | "modlist.txt"
+                | "archives.txt"
+                | "lockedorder.txt"
+                | "settings.ini"
+                | "usersettings.json"
+        )
+    )
+}
+
+fn framework_providers_from_entries(
+    package_id: &str,
+    entries: &[PackageFileEntry],
+    enabled: bool,
+    runtime_visible: bool,
+) -> Vec<FrameworkProviderStatus> {
+    let paths = entries
+        .iter()
+        .filter(|entry| entry.deployable)
+        .map(|entry| entry.game_relative_path.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let mut providers = Vec::new();
+    let mut add = |framework_id: &str, required: &[&str]| {
+        if required.iter().all(|path| paths.contains(*path)) {
+            providers.push(FrameworkProviderStatus {
+                framework_id: framework_id.into(),
+                package_id: package_id.into(),
+                files: required.iter().map(|path| (*path).to_string()).collect(),
+                enabled,
+                runtime_visible,
+            });
+        }
+    };
+    add(
+        "redscript",
+        &[
+            "engine/tools/scc.exe",
+            "engine/tools/scc_lib.dll",
+            "engine/config/base/scripts.ini",
+            "r6/config/cybercmd/scc.toml",
+        ],
+    );
+    add("RED4ext", &["red4ext/red4ext.dll", "bin/x64/winmm.dll"]);
+    if paths.contains("bin/x64/plugins/cyber_engine_tweaks.asi")
+        && (paths.contains("bin/x64/version.dll") || paths.contains("bin/x64/winmm.dll"))
+    {
+        let loader = if paths.contains("bin/x64/version.dll") {
+            "bin/x64/version.dll"
+        } else {
+            "bin/x64/winmm.dll"
+        };
+        providers.push(FrameworkProviderStatus {
+            framework_id: "Cyber Engine Tweaks".into(),
+            package_id: package_id.into(),
+            files: vec![
+                "bin/x64/plugins/cyber_engine_tweaks.asi".into(),
+                loader.into(),
+            ],
+            enabled,
+            runtime_visible,
+        });
+    }
+    providers
+}
+
+fn package_manifest_entries(
+    stage: &Path,
+    game_id: &str,
+    persist: bool,
+) -> Result<(Vec<PackageFileEntry>, Vec<FrameworkProviderStatus>), String> {
+    let package_id = stage
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "Identifiant de paquet stocké invalide.".to_string())?;
+    safe_game_id(package_id)?;
+    let content = stage.join("content");
+    if !content.is_dir() {
+        return Err("Le paquet physique ne contient aucun dossier content.".into());
+    }
+    let mut entries = Vec::new();
+    for item in WalkDir::new(&content)
+        .follow_links(false)
+        .into_iter()
+        .map(|entry| entry.map_err(to_error))
+    {
+        let item = item?;
+        if item.file_type().is_symlink() {
+            return Err("Un lien symbolique empêche la construction du manifeste.".into());
+        }
+        if !item.file_type().is_file() {
+            continue;
+        }
+        let relative = item.path().strip_prefix(&content).map_err(to_error)?;
+        validate_archive_relative(relative)?;
+        let normalized = normalized_cyberpunk_game_relative(relative);
+        validate_archive_relative(&normalized)?;
+        let hidden = relative
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(|name| name.to_ascii_lowercase().ends_with(".mohidden"));
+        let deployable = !hidden && !manager_metadata_file(relative);
+        entries.push(PackageFileEntry {
+            source_physical_path: item.path().to_string_lossy().to_string(),
+            package_relative_path: relative.to_string_lossy().replace('\\', "/"),
+            game_relative_path: normalized.to_string_lossy().replace('\\', "/"),
+            hash: file_sha256(item.path())?,
+            size: item.metadata().map_err(to_error)?.len(),
+            deployable,
+        });
+    }
+    entries.sort_by(|left, right| {
+        left.game_relative_path
+            .to_ascii_lowercase()
+            .cmp(&right.game_relative_path.to_ascii_lowercase())
+    });
+    let providers = framework_providers_from_entries(package_id, &entries, true, false);
+    if persist {
+        let package_manifest_path = stage.join("package-manifest.json");
+        write_json_atomic(
+            &package_manifest_path,
+            &serde_json::json!({
+                "schemaVersion": 2,
+                "packageId": package_id,
+                "gameId": game_id,
+                "storage": {
+                    "type": "InternalStore",
+                    "path": stage,
+                    "accessible": true,
+                    "writable": true,
+                    "sourceApplication": "ZAILON"
+                },
+                "files": entries,
+                "providers": providers,
+                "generatedAt": unix_timestamp()
+            }),
+        )?;
+        let manifest_path = stage.join("manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).map_err(to_error)?)
+                .map_err(to_error)?;
+        manifest["packageManifestPath"] =
+            serde_json::json!(package_manifest_path.to_string_lossy());
+        manifest["normalized"] = serde_json::json!(true);
+        manifest["deployableFiles"] =
+            serde_json::json!(entries.iter().filter(|entry| entry.deployable).count());
+        manifest["pipelineStatus"] = serde_json::json!("Normalized");
+        manifest["providedFrameworks"] = serde_json::json!(providers
+            .iter()
+            .map(|provider| provider.framework_id.clone())
+            .collect::<Vec<_>>());
+        write_json_atomic(&manifest_path, &manifest)?;
+    }
+    Ok((entries, providers))
+}
+
+fn profile_hidden_rules(
+    app: &AppHandle,
+    game_id: &str,
+    profile_id: &str,
+) -> HashSet<(String, String)> {
+    let Ok(path) = profile_directory(app, game_id, profile_id) else {
+        return HashSet::new();
+    };
+    let Ok(payload) = fs::read(path.join("profile.json")) else {
+        return HashSet::new();
+    };
+    let Ok(profile) = serde_json::from_slice::<serde_json::Value>(&payload) else {
+        return HashSet::new();
+    };
+    profile
+        .get("hiddenFileRules")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|rule| {
+            Some((
+                rule.get("modId")?.as_str()?.to_string(),
+                rule.get("path")?
+                    .as_str()?
+                    .replace('\\', "/")
+                    .to_ascii_lowercase(),
+            ))
+        })
+        .collect()
+}
+
+fn build_virtual_profile_map(
+    app: &AppHandle,
+    game_id: &str,
+    profile_id: &str,
+    enabled_mod_ids: &[String],
+    conflict_rules: &[LaunchConflictRule],
+    persist_manifests: bool,
+) -> Result<VirtualProfileMap, String> {
+    safe_game_id(game_id)?;
+    safe_game_id(profile_id)?;
+    let hidden = profile_hidden_rules(app, game_id, profile_id);
+    let rules = conflict_rules
+        .iter()
+        .map(|rule| {
+            (
+                rule.path.replace('\\', "/").to_ascii_lowercase(),
+                rule.winner_mod_id.as_str(),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let mut owners = HashMap::<String, Vec<(String, PackageFileEntry)>>::new();
+    let mut packages = Vec::new();
+    let mut all_providers = Vec::new();
+    let mut diagnostics = Vec::new();
+    for package_id in enabled_mod_ids {
+        let mut status = PackageReferenceStatus {
+            profile_id: profile_id.into(),
+            package_id: package_id.clone(),
+            package_directory: String::new(),
+            exists: false,
+            manifest_exists: false,
+            files_exist: false,
+            source_still_available: false,
+            normalized: false,
+            deployable: false,
+            file_count: 0,
+            errors: Vec::new(),
+        };
+        let Some(stage) = staged_package_directory(app, game_id, package_id) else {
+            status
+                .errors
+                .push("Le dossier physique du paquet est introuvable.".into());
+            packages.push(status);
+            continue;
+        };
+        status.package_directory = stage.to_string_lossy().to_string();
+        status.exists = true;
+        status.source_still_available = stage.join("content").is_dir();
+        status.manifest_exists =
+            stage.join("manifest.json").is_file() && stage.join("package-manifest.json").is_file();
+        match package_manifest_entries(&stage, game_id, persist_manifests) {
+            Ok((entries, providers)) => {
+                status.files_exist = !entries.is_empty();
+                status.file_count = entries.iter().filter(|entry| entry.deployable).count() as u64;
+                status.normalized = entries.iter().all(|entry| {
+                    !entry
+                        .game_relative_path
+                        .to_ascii_lowercase()
+                        .starts_with("root/")
+                });
+                status.deployable = status.file_count > 0 && status.normalized;
+                if persist_manifests {
+                    status.manifest_exists = true;
+                }
+                if status.file_count == 0 {
+                    status
+                        .errors
+                        .push("Le manifeste ne contient aucun fichier déployable.".into());
+                }
+                if !status.normalized {
+                    status
+                        .errors
+                        .push("Un chemin de jeu conserve un préfixe de stockage.".into());
+                }
+                all_providers.extend(providers);
+                for entry in entries.into_iter().filter(|entry| entry.deployable) {
+                    let key = entry.game_relative_path.to_ascii_lowercase();
+                    if hidden.contains(&(package_id.clone(), key.clone())) {
+                        continue;
+                    }
+                    owners
+                        .entry(key)
+                        .or_default()
+                        .push((package_id.clone(), entry));
+                }
+            }
+            Err(error) => status.errors.push(error),
+        }
+        packages.push(status);
+    }
+    let mut entries = Vec::new();
+    let mut conflicts = 0u64;
+    for (path, candidates) in owners {
+        if candidates.len() > 1 {
+            conflicts += 1;
+        }
+        let winner = rules
+            .get(&path)
+            .and_then(|winner_id| {
+                candidates
+                    .iter()
+                    .find(|candidate| candidate.0 == *winner_id)
+            })
+            .unwrap_or_else(|| candidates.last().expect("non-empty virtual candidates"));
+        entries.push(VirtualFileMapEntry {
+            game_relative_path: winner.1.game_relative_path.clone(),
+            package_id: winner.0.clone(),
+            source_physical_path: winner.1.source_physical_path.clone(),
+            hash: winner.1.hash.clone(),
+            size: winner.1.size,
+        });
+    }
+    entries.sort_by(|left, right| {
+        left.game_relative_path
+            .to_ascii_lowercase()
+            .cmp(&right.game_relative_path.to_ascii_lowercase())
+    });
+    let winning_paths = entries
+        .iter()
+        .map(|entry| entry.game_relative_path.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    all_providers.retain(|provider| {
+        provider.files.iter().all(|path| {
+            winning_paths.contains(&path.to_ascii_lowercase())
+                && entries.iter().any(|entry| {
+                    entry.package_id == provider.package_id
+                        && entry.game_relative_path.eq_ignore_ascii_case(path)
+                })
+        })
+    });
+    all_providers.sort_by(|left, right| left.framework_id.cmp(&right.framework_id));
+    all_providers.dedup_by(|left, right| {
+        left.framework_id == right.framework_id && left.package_id == right.package_id
+    });
+    if !enabled_mod_ids.is_empty() && entries.is_empty() {
+        diagnostics.push(format!(
+            "Le profil contient {} mod(s) actif(s), mais 0 fichier déployable a été produit.",
+            enabled_mod_ids.len()
+        ));
+    }
+    let broken = packages
+        .iter()
+        .filter(|package| !package.deployable)
+        .count();
+    if broken > 0 {
+        diagnostics.push(format!(
+            "{broken} référence(s) de paquet sont absentes, vides ou non normalisées."
+        ));
+    }
+    Ok(VirtualProfileMap {
+        entries,
+        packages,
+        providers: all_providers,
+        conflicts,
+        diagnostics,
+    })
 }
 
 fn reconcile_staged_profile_reference(
@@ -7032,7 +7758,16 @@ fn import_mo2_instance_inner(
             manifest["importedFrom"] = serde_json::json!("Mod Organizer 2");
             manifest["mo2Metadata"] = metadata;
             manifest["mo2SourceDigest"] = serde_json::json!(content_tree_sha256(&source_mod)?);
+            manifest["mo2SourcePath"] = serde_json::json!(source_mod.to_string_lossy());
+            manifest["packageStorageLocation"] = serde_json::json!({
+                "type": "InternalStore",
+                "path": stage.to_string_lossy(),
+                "accessible": true,
+                "writable": true,
+                "sourceApplication": "Mod Organizer 2"
+            });
             write_json_atomic(&manifest_path, &manifest)?;
+            package_manifest_entries(&stage, &game_id, true)?;
             warnings.extend(imported.warnings);
             stage_by_name.insert(key, stage_id);
             installed_paths.push(stage_path.clone());
@@ -7280,6 +8015,385 @@ async fn import_mo2_instance(
     result
 }
 
+#[tauri::command]
+fn audit_profile_deployment(
+    app: AppHandle,
+    game_id: String,
+    profile_id: String,
+    enabled_mod_ids: Vec<String>,
+    conflict_rules: Vec<LaunchConflictRule>,
+    game_root: Option<String>,
+) -> Result<ProfileDeploymentAudit, String> {
+    let game_id = safe_game_id(&game_id)?.to_string();
+    let profile_id = safe_game_id(&profile_id)?.to_string();
+    let map = build_virtual_profile_map(
+        &app,
+        &game_id,
+        &profile_id,
+        &enabled_mod_ids,
+        &conflict_rules,
+        false,
+    )?;
+    let mut diagnostics = map.diagnostics.clone();
+    let dependency_ok = if let Some(root) = game_root
+        .filter(|value| !value.trim().is_empty())
+        .and_then(|value| fs::canonicalize(value).ok())
+    {
+        match framework_diagnostics(
+            &root,
+            &map.entries
+                .iter()
+                .map(|entry| PathBuf::from(&entry.game_relative_path))
+                .collect::<Vec<_>>(),
+        ) {
+            Ok(items) => {
+                diagnostics.extend(items);
+                true
+            }
+            Err(error) => {
+                diagnostics.push(error);
+                false
+            }
+        }
+    } else {
+        diagnostics.push(
+            "Racine du jeu indisponible : la visibilité d’une installation existante ne peut pas être vérifiée."
+                .into(),
+        );
+        true
+    };
+    let broken_references = map
+        .packages
+        .iter()
+        .filter(|package| !package.deployable)
+        .count() as u64;
+    let manifested_files = map.packages.iter().map(|package| package.file_count).sum();
+    Ok(ProfileDeploymentAudit {
+        game_id,
+        profile_id,
+        referenced_packages: enabled_mod_ids.len() as u64,
+        accessible_packages: map.packages.iter().filter(|package| package.exists).count() as u64,
+        broken_references,
+        manifested_files,
+        virtual_file_count: map.entries.len() as u64,
+        conflicts: map.conflicts,
+        deployable: dependency_ok
+            && broken_references == 0
+            && (enabled_mod_ids.is_empty() || !map.entries.is_empty()),
+        packages: map.packages,
+        providers: map.providers,
+        virtual_files: map.entries,
+        diagnostics,
+    })
+}
+
+fn stage_by_fingerprint_or_name(app: &AppHandle, game_id: &str, source: &Path) -> Option<PathBuf> {
+    let fingerprint = fingerprint_path(source);
+    for root in staged_storage_roots(app, game_id).ok()? {
+        if let Some(stage) = staged_package_by_fingerprint(&root, &fingerprint) {
+            return Some(stage);
+        }
+    }
+    let source_name = source.file_name()?.to_string_lossy();
+    staged_storage_roots(app, game_id)
+        .ok()?
+        .into_iter()
+        .flat_map(|root| {
+            fs::read_dir(root)
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .collect::<Vec<_>>()
+        })
+        .filter(|entry| entry.path().is_dir())
+        .find_map(|entry| {
+            let manifest = fs::read(entry.path().join("manifest.json"))
+                .ok()
+                .and_then(|payload| serde_json::from_slice::<serde_json::Value>(&payload).ok())?;
+            manifest
+                .get("name")
+                .and_then(|value| value.as_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case(&source_name))
+                .then(|| entry.path())
+        })
+}
+
+fn rollback_mo2_repair(snapshot_root: &Path, stages: &[PathBuf]) {
+    for stage in stages.iter().rev() {
+        let Some(stage_id) = stage.file_name() else {
+            continue;
+        };
+        let snapshot = snapshot_root.join(stage_id);
+        if !snapshot.is_dir() {
+            continue;
+        }
+        let rollback_displaced = snapshot_root
+            .parent()
+            .unwrap_or(snapshot_root)
+            .join("failed-repair")
+            .join(stage_id);
+        if stage.exists() {
+            let _ = fs::rename(stage, &rollback_displaced);
+        }
+        let _ = copy_tree_for_snapshot(&snapshot, stage);
+    }
+}
+
+#[tauri::command]
+fn repair_mo2_profile_deployment(
+    app: AppHandle,
+    game_id: String,
+    profile_id: String,
+    source_path: String,
+    game_name: String,
+    game_root: Option<String>,
+    enabled_mod_ids: Vec<String>,
+    conflict_rules: Vec<LaunchConflictRule>,
+) -> Result<Mo2DeploymentRepairResult, String> {
+    let game_id = safe_game_id(&game_id)?.to_string();
+    let profile_id = safe_game_id(&profile_id)?.to_string();
+    let mo2 = mo2_root(&source_path)?;
+    let repair_id = format!(
+        "mo2-deployment-v2-{}-{}",
+        unix_timestamp(),
+        std::process::id()
+    );
+    let repair_root = update_data_root(&app)?
+        .join("games")
+        .join(&game_id)
+        .join("repairs")
+        .join(&repair_id);
+    let snapshot_root = repair_root.join("snapshot");
+    let work_root = repair_root.join("work");
+    fs::create_dir_all(&snapshot_root).map_err(to_error)?;
+    fs::create_dir_all(&work_root).map_err(to_error)?;
+    let profile_snapshot = snapshot_root.join("profile");
+    let profile_source = profile_directory(&app, &game_id, &profile_id)?;
+    copy_tree_for_snapshot(&profile_source, &profile_snapshot)?;
+    let mut restaged = Vec::<PathBuf>::new();
+    let mut packages_restaged = 0u64;
+    let mut normalized_files = 0u64;
+    let repair_result = (|| -> Result<(), String> {
+        for source_entry in fs::read_dir(mo2.join("mods"))
+            .map_err(to_error)?
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().is_dir())
+        {
+            let source_mod = source_entry.path();
+            let effective_source = cyberpunk_package_root(&source_mod);
+            let source_providers = detect_cyberpunk_framework_providers(&effective_source);
+            if source_providers.is_empty() {
+                continue;
+            }
+            let Some(stage) = stage_by_fingerprint_or_name(&app, &game_id, &source_mod) else {
+                continue;
+            };
+            let package_id = stage
+                .file_name()
+                .and_then(|value| value.to_str())
+                .ok_or_else(|| "Identifiant de paquet à réparer invalide.".to_string())?;
+            if !enabled_mod_ids.iter().any(|id| id == package_id) {
+                continue;
+            }
+            let (current_entries, current_providers) =
+                package_manifest_entries(&stage, &game_id, false)?;
+            let current_ids = current_providers
+                .iter()
+                .map(|provider| provider.framework_id.to_ascii_lowercase())
+                .collect::<HashSet<_>>();
+            let providers_missing = source_providers
+                .iter()
+                .any(|provider| !current_ids.contains(&provider.to_ascii_lowercase()));
+            let malformed = current_entries.iter().any(|entry| {
+                entry.package_relative_path != entry.game_relative_path
+                    || entry
+                        .game_relative_path
+                        .to_ascii_lowercase()
+                        .starts_with("root/")
+            });
+            if !providers_missing && !malformed {
+                continue;
+            }
+            let snapshot = snapshot_root.join(package_id);
+            copy_tree_for_snapshot(&stage, &snapshot)?;
+            restaged.push(stage.clone());
+            let work_stage = work_root.join(package_id);
+            let work_content = work_stage.join("content");
+            fs::create_dir_all(&work_content).map_err(to_error)?;
+            let mut security = SensitiveImportContext {
+                action: "quarantine".into(),
+                game_name: game_name.clone(),
+                framework_providers: HashSet::new(),
+                content_root: work_content.clone(),
+                inactive_root: work_stage.join("inactive-sensitive"),
+                quarantine_root: update_data_root(&app)?
+                    .join("quarantine")
+                    .join(format!("{repair_id}-{package_id}")),
+                assessments: Vec::new(),
+                quarantine_paths: Vec::new(),
+            };
+            let cancel = AtomicBool::new(false);
+            let (layout, mut diagnostics) = stage_content(
+                &source_mod,
+                &work_content,
+                &game_name,
+                &cancel,
+                &mut security,
+            )?;
+            let normalized_inspection = inspect_native_mod(&work_content);
+            let framework = detect_cyberpunk_framework(&work_content, &normalized_inspection.files);
+            if framework == "Unknown" {
+                return Err(format!(
+                    "Le framework du paquet {package_id} reste indéterminé après normalisation."
+                ));
+            }
+            diagnostics.push(format!(
+                "Migration MO2 V2 : {} fournisseur(s) validé(s) par signatures physiques.",
+                security.framework_providers.len()
+            ));
+            let previous_content = stage.join("content");
+            let displaced = work_root.join(format!("{package_id}-previous-content"));
+            fs::rename(&previous_content, &displaced).map_err(to_error)?;
+            if let Err(error) = fs::rename(&work_content, &previous_content).map_err(to_error) {
+                let _ = fs::rename(&displaced, &previous_content);
+                return Err(error);
+            }
+            let manifest_path = stage.join("manifest.json");
+            let mut manifest: serde_json::Value =
+                serde_json::from_slice(&fs::read(&manifest_path).map_err(to_error)?)
+                    .map_err(to_error)?;
+            manifest["layout"] = serde_json::json!(layout);
+            manifest["framework"] = serde_json::json!(framework);
+            manifest["contentFiles"] = serde_json::json!(normalized_inspection.files);
+            manifest["diagnostics"] = serde_json::json!(diagnostics);
+            manifest["sensitiveFiles"] = serde_json::json!(security.assessments);
+            manifest["quarantinePaths"] = serde_json::json!(security.quarantine_paths);
+            manifest["lastMo2DeploymentRepairId"] = serde_json::json!(repair_id);
+            manifest["mo2SourcePath"] = serde_json::json!(source_mod.to_string_lossy());
+            manifest["pipelineStatus"] = serde_json::json!("Normalized");
+            write_json_atomic(&manifest_path, &manifest)?;
+            if !security.assessments.is_empty() {
+                write_sensitive_import_records(&security, &stage, &source_mod)?;
+            }
+            let (rebuilt, providers) = package_manifest_entries(&stage, &game_id, true)?;
+            let rebuilt_ids = providers
+                .iter()
+                .map(|provider| provider.framework_id.to_ascii_lowercase())
+                .collect::<HashSet<_>>();
+            if source_providers
+                .iter()
+                .any(|provider| !rebuilt_ids.contains(&provider.to_ascii_lowercase()))
+            {
+                return Err(format!(
+                    "Le fournisseur attendu du paquet {package_id} n’apparaît pas dans son manifeste reconstruit."
+                ));
+            }
+            normalized_files += rebuilt
+                .iter()
+                .filter(|entry| entry.package_relative_path != entry.game_relative_path)
+                .count() as u64;
+            packages_restaged += 1;
+        }
+        for package_id in &enabled_mod_ids {
+            if let Some(stage) = staged_package_directory(&app, &game_id, package_id) {
+                package_manifest_entries(&stage, &game_id, true)?;
+            }
+        }
+        Ok(())
+    })();
+    if let Err(error) = repair_result {
+        rollback_mo2_repair(&snapshot_root, &restaged);
+        let _ = fs::remove_dir_all(&profile_source);
+        let _ = copy_tree_for_snapshot(&profile_snapshot, &profile_source);
+        return Err(format!(
+            "Réparation MO2 annulée et rollback appliqué : {error}"
+        ));
+    }
+    let map = build_virtual_profile_map(
+        &app,
+        &game_id,
+        &profile_id,
+        &enabled_mod_ids,
+        &conflict_rules,
+        true,
+    )?;
+    let broken_references = map
+        .packages
+        .iter()
+        .filter(|package| !package.deployable)
+        .count() as u64;
+    let mut diagnostics = map.diagnostics.clone();
+    let dependencies_resolved = if let Some(root) = game_root
+        .filter(|value| !value.trim().is_empty())
+        .and_then(|value| fs::canonicalize(value).ok())
+    {
+        match framework_diagnostics(
+            &root,
+            &map.entries
+                .iter()
+                .map(|entry| PathBuf::from(&entry.game_relative_path))
+                .collect::<Vec<_>>(),
+        ) {
+            Ok(items) => {
+                diagnostics.extend(items);
+                true
+            }
+            Err(error) => {
+                diagnostics.push(error);
+                false
+            }
+        }
+    } else {
+        true
+    };
+    diagnostics.push(format!(
+        "Réparation terminée : {} paquet(s) restagé(s), {} manifeste(s), {} fichier(s) dans la table virtuelle.",
+        packages_restaged,
+        enabled_mod_ids.len(),
+        map.entries.len()
+    ));
+    let report_path = repair_root.join("repair-report.json");
+    write_json_atomic(
+        &report_path,
+        &serde_json::json!({
+            "schemaVersion": 2,
+            "repairId": repair_id,
+            "createdAt": unix_timestamp(),
+            "gameId": game_id,
+            "profileId": profile_id,
+            "backend": "TemporaryCopy",
+            "packagesAudited": enabled_mod_ids.len(),
+            "packagesRestaged": packages_restaged,
+            "manifestsRebuilt": enabled_mod_ids.len(),
+            "normalizedFiles": normalized_files,
+            "virtualFileCount": map.entries.len(),
+            "brokenReferences": broken_references,
+            "providers": map.providers,
+            "dependenciesResolved": dependencies_resolved,
+            "deployable": dependencies_resolved
+                && broken_references == 0
+                && (enabled_mod_ids.is_empty() || !map.entries.is_empty()),
+            "diagnostics": diagnostics
+        }),
+    )?;
+    Ok(Mo2DeploymentRepairResult {
+        repair_id,
+        packages_audited: enabled_mod_ids.len() as u64,
+        packages_restaged,
+        manifests_rebuilt: enabled_mod_ids.len() as u64,
+        normalized_files,
+        virtual_file_count: map.entries.len() as u64,
+        broken_references,
+        providers: map.providers,
+        snapshot_path: snapshot_root.to_string_lossy().to_string(),
+        report_path: report_path.to_string_lossy().to_string(),
+        deployable: dependencies_resolved
+            && broken_references == 0
+            && (enabled_mod_ids.is_empty() || !map.entries.is_empty()),
+        diagnostics,
+    })
+}
+
 fn import_mods_with_staging(
     app: &AppHandle,
     registry: &BackgroundTaskRegistry,
@@ -7328,6 +8442,7 @@ fn import_mods_with_staging(
                 manifest["lastReusedAt"] = serde_json::json!(unix_timestamp());
                 write_json_atomic(&manifest_path, &manifest)?;
             }
+            package_manifest_entries(&existing_stage, game_id, true)?;
             installed.push(existing_stage.to_string_lossy().to_string());
             report_background_task(
                 app,
@@ -7355,6 +8470,7 @@ fn import_mods_with_staging(
         let mut security = SensitiveImportContext {
             action: sensitive_action.clone(),
             game_name: game_name.to_string(),
+            framework_providers: HashSet::new(),
             content_root: staged_content.clone(),
             inactive_root: stage_directory.join("inactive-sensitive"),
             quarantine_root: update_data_root(app)?
@@ -7447,6 +8563,11 @@ fn import_mods_with_staging(
         )
         .map_err(to_error)
         {
+            let _ = fs::remove_dir_all(&stage_directory);
+            let _ = fs::remove_dir_all(&security.quarantine_root);
+            return Err(error);
+        }
+        if let Err(error) = package_manifest_entries(&stage_directory, game_id, true) {
             let _ = fs::remove_dir_all(&stage_directory);
             let _ = fs::remove_dir_all(&security.quarantine_root);
             return Err(error);
@@ -11026,6 +12147,7 @@ mod tests {
         SensitiveImportContext {
             action: action.into(),
             game_name: game_name.into(),
+            framework_providers: HashSet::new(),
             content_root: content.to_path_buf(),
             inactive_root: root.join("inactive"),
             quarantine_root: root.join("quarantine"),
@@ -11246,6 +12368,116 @@ mod tests {
         assert!(content.join("archive/pc/mod/example.archive").is_file());
         assert!(content.join("r6/scripts/example/main.reds").is_file());
         fs::remove_dir_all(root).expect("remove layout test");
+    }
+
+    #[test]
+    fn cyberpunk_root_wrapper_wins_over_top_level_license_directories() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-cyberpunk-wrapper-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let package = root.join("RED4ext");
+        fs::create_dir_all(package.join("red4ext")).expect("license directory");
+        fs::create_dir_all(package.join("root/red4ext")).expect("runtime directory");
+        fs::create_dir_all(package.join("root/bin/x64")).expect("loader directory");
+        fs::write(package.join("red4ext/LICENSE.txt"), b"license").expect("license");
+        fs::write(package.join("root/red4ext/RED4ext.dll"), b"MZruntime").expect("runtime");
+        fs::write(package.join("root/bin/x64/winmm.dll"), b"MZloader").expect("loader");
+
+        assert_eq!(cyberpunk_package_root(&package), package.join("root"));
+        let providers = detect_cyberpunk_framework_providers(&cyberpunk_package_root(&package));
+        assert!(providers.contains("red4ext"));
+        fs::remove_dir_all(root).expect("remove wrapper fixture");
+    }
+
+    #[test]
+    fn complete_redscript_signatures_admit_only_its_expected_runtime() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-redscript-provider-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let package = root.join("redscript");
+        fs::create_dir_all(package.join("engine/tools")).expect("tools");
+        fs::create_dir_all(package.join("engine/config/base")).expect("config");
+        fs::create_dir_all(package.join("r6/config/cybercmd")).expect("cybercmd");
+        fs::write(package.join("engine/tools/scc.exe"), b"MZcompiler").expect("compiler");
+        fs::write(package.join("engine/tools/scc_lib.dll"), b"MZlibrary").expect("library");
+        fs::write(package.join("engine/config/base/scripts.ini"), b"[Scripts]")
+            .expect("scripts config");
+        fs::write(package.join("r6/config/cybercmd/scc.toml"), b"enabled=true")
+            .expect("cybercmd config");
+        let content = root.join("content");
+        fs::create_dir_all(&content).expect("content");
+        let cancel = AtomicBool::new(false);
+        let mut security = test_security_context(&root, &content, "Cyberpunk 2077", "quarantine");
+
+        stage_content(&package, &content, "Cyberpunk 2077", &cancel, &mut security)
+            .expect("stage complete provider");
+        assert!(content.join("engine/tools/scc.exe").is_file());
+        assert!(content.join("engine/tools/scc_lib.dll").is_file());
+        assert!(!root.join("quarantine/files/engine/tools/scc.exe").exists());
+        assert!(security
+            .assessments
+            .iter()
+            .all(|assessment| assessment.may_deploy));
+        fs::remove_dir_all(root).expect("remove provider fixture");
+    }
+
+    #[test]
+    fn red4ext_plugin_is_not_mistaken_for_the_red4ext_provider() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-red4ext-provider-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(root.join("red4ext/plugins/Example")).expect("plugin");
+        fs::write(
+            root.join("red4ext/plugins/Example/Example.dll"),
+            b"MZplugin",
+        )
+        .expect("plugin file");
+        assert!(!detect_cyberpunk_framework_providers(&root).contains("red4ext"));
+        fs::create_dir_all(root.join("bin/x64")).expect("loader");
+        fs::write(root.join("red4ext/RED4ext.dll"), b"MZruntime").expect("runtime");
+        fs::write(root.join("bin/x64/winmm.dll"), b"MZloader").expect("loader file");
+        assert!(detect_cyberpunk_framework_providers(&root).contains("red4ext"));
+        fs::remove_dir_all(root).expect("remove RED4ext fixture");
+    }
+
+    #[test]
+    fn package_manifest_normalizes_legacy_storage_prefixes() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-package-manifest-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let stage = root.join("package-1");
+        fs::create_dir_all(stage.join("content/root/r6/scripts/Example")).expect("content");
+        fs::write(
+            stage.join("content/root/r6/scripts/Example/main.reds"),
+            b"script",
+        )
+        .expect("script");
+        fs::write(stage.join("manifest.json"), b"{}").expect("manifest");
+        let (entries, _) =
+            package_manifest_entries(&stage, "game-1", true).expect("package manifest");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].package_relative_path,
+            "root/r6/scripts/Example/main.reds"
+        );
+        assert_eq!(
+            entries[0].game_relative_path,
+            "r6/scripts/Example/main.reds"
+        );
+        assert!(stage.join("package-manifest.json").is_file());
+        let manifest =
+            fs::read_to_string(stage.join("package-manifest.json")).expect("read package manifest");
+        assert!(manifest.contains("\"sourcePhysicalPath\""));
+        assert!(manifest.contains("\"gameRelativePath\""));
+        fs::remove_dir_all(root).expect("remove manifest fixture");
     }
 
     #[test]
@@ -11985,6 +13217,8 @@ pub fn run() {
             rollback_cyberpunk_structure_repair,
             preview_mo2_import,
             import_mo2_instance,
+            audit_profile_deployment,
+            repair_mo2_profile_deployment,
             sync_profile_state,
             apply_profile_transaction,
             profile_integrity,

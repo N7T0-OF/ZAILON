@@ -5,7 +5,7 @@ import { BackgroundTaskSnapshot, DetectedGame, Mo2ImportResult, native, NativeMo
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
 
-const APP_VERSION = '1.7.0'
+const APP_VERSION = '1.7.1'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 export const DEFAULT_LIQUID_GLASS: LiquidGlassSettings = { opacity: 0.86, blur: 18, darkTint: 0.58, saturation: 1.08, border: 0.12, reflection: 0.08, shadow: 0.5, animations: true, reduceWhenUnfocused: true, preferNative: true }
 
@@ -1033,7 +1033,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
       const knownRoot = game.name.toLocaleLowerCase().includes('cyberpunk') && /[\\/]bin[\\/]x64(?:[\\/]|$)/i.test(game.execPath)
         ? game.execPath.split(/[\\/]bin[\\/]x64/i)[0]
         : executableParent
-      const result = await native.launchGame(game.execPath, game.id, game.name, game.installDirectory || knownRoot, profile.id, profile.name, enabledMods.length, enabledMods.map(mod => mod.stageId || mod.id), profile.conflictRules || [], state.discordPresence ? {
+      const stagedModIds = enabledMods
+        .map(mod => mod.stageId || (mod.storage === 'staged' ? mod.id : undefined))
+        .filter((id): id is string => Boolean(id))
+      const result = await native.launchGame(game.execPath, game.id, game.name, game.installDirectory || knownRoot, profile.id, profile.name, enabledMods.length, stagedModIds, profile.conflictRules || [], state.discordPresence ? {
         enabled: true,
         clientId: state.discordClientId,
         largeImageKey: state.discordLargeImageKey || undefined,

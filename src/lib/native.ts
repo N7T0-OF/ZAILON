@@ -97,6 +97,67 @@ export interface Mo2ImportResult {
   warnings: string[]
 }
 
+export interface PackageReferenceStatus {
+  profileId: string
+  packageId: string
+  packageDirectory: string
+  exists: boolean
+  manifestExists: boolean
+  filesExist: boolean
+  sourceStillAvailable: boolean
+  normalized: boolean
+  deployable: boolean
+  fileCount: number
+  errors: string[]
+}
+
+export interface FrameworkProviderStatus {
+  frameworkId: string
+  packageId: string
+  files: string[]
+  enabled: boolean
+  runtimeVisible: boolean
+}
+
+export interface VirtualFileMapEntry {
+  gameRelativePath: string
+  packageId: string
+  sourcePhysicalPath: string
+  hash: string
+  size: number
+}
+
+export interface ProfileDeploymentAudit {
+  gameId: string
+  profileId: string
+  referencedPackages: number
+  accessiblePackages: number
+  brokenReferences: number
+  manifestedFiles: number
+  virtualFileCount: number
+  conflicts: number
+  deployable: boolean
+  packages: PackageReferenceStatus[]
+  providers: FrameworkProviderStatus[]
+  virtualFiles: VirtualFileMapEntry[]
+  diagnostics: string[]
+}
+
+export interface Mo2DeploymentRepairResult {
+  repairId: string
+  packagesAudited: number
+  packagesRestaged: number
+  manifestsRebuilt: number
+  normalizedFiles: number
+  virtualFileCount: number
+  brokenReferences: number
+  providers: FrameworkProviderStatus[]
+  snapshotPath: string
+  reportPath: string
+  deployable: boolean
+  diagnostics: string[]
+}
+
 export interface NativeMod {
   id: string
   name: string
@@ -565,6 +626,10 @@ export const native = {
     desktopOnly<Mo2ImportPreview>('preview_mo2_import', { sourcePath }),
   importMo2Instance: (taskId: string, request: Mo2ImportRequest) =>
     desktopOnly<Mo2ImportResult>('import_mo2_instance', { taskId, request }),
+  auditProfileDeployment: (gameId: string, profileId: string, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, gameRoot?: string) =>
+    desktopOnly<ProfileDeploymentAudit>('audit_profile_deployment', { gameId, profileId, enabledModIds, conflictRules, gameRoot }),
+  repairMo2ProfileDeployment: (gameId: string, profileId: string, sourcePath: string, gameName: string, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, gameRoot?: string) =>
+    desktopOnly<Mo2DeploymentRepairResult>('repair_mo2_profile_deployment', { gameId, profileId, sourcePath, gameName, enabledModIds, conflictRules, gameRoot }),
   syncProfileState: (gameId: string, profile: Profile) => desktopOnly<ProfilePaths>('sync_profile_state', { gameId, profileId: profile.id, profile }),
   applyProfileTransaction: (gameId: string, operationId: string, beforeProfiles: Profile[], afterProfiles: Profile[]) =>
     desktopOnly<ProfileTransactionResult>('apply_profile_transaction', { gameId, operationId, beforeProfiles, afterProfiles }),

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.1 — Réparation du déploiement Cyberpunk importé depuis MO2
+
+- Ajoute un manifeste physique normalisé par paquet et une carte virtuelle de profil
+  construite avant le diagnostic des dépendances.
+- Distingue un vrai fournisseur redscript, RED4ext ou Cyber Engine Tweaks d’un simple
+  mod ou plugin grâce à plusieurs signatures de fichiers concordantes.
+- Autorise uniquement les runtimes centraux exacts d’un fournisseur confirmé, sans
+  exécuter de fichier pendant l’import ou la réparation.
+- Corrige les conteneurs MO2 `root/` même lorsqu’un dossier de licences ressemble déjà
+  à une racine du jeu.
+- Ajoute dans Outils un audit du déploiement réel et une réparation transactionnelle
+  des imports MO2 existants avec snapshot, rollback et rapport local.
+- Bloque tout faux succès lorsqu’un profil actif produit zéro fichier ou lorsque le
+  nombre de fichiers planifiés diffère du nombre réellement copié.
+- Clarifie que l’export crée une archive de partage ; seul le bouton Jouer prépare et
+  déploie temporairement les fichiers dans la racine du jeu.
+
 ## 1.7.0 — Migration sécurisée depuis Mod Organizer 2
 
 - Ajoute dans Outils un assistant « Importer depuis Mod Organizer 2 » avec analyse

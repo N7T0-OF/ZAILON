@@ -116,6 +116,14 @@ La réparation est transactionnelle. En cas d’erreur, les paquets modifiés et
 profil sont restaurés depuis le snapshot. Un `repair-report.json` et son chemin sont
 affichés à la fin.
 
+Depuis la version 1.7.2, cette migration couvre aussi la branche de déduplication :
+si un nouvel import retrouve l’empreinte d’un paquet ancien, ZAILON répare ce paquet
+depuis la source sélectionnée au lieu de réutiliser son contenu incomplet. Au
+prochain audit ou lancement, un paquet historique peut également récupérer ses
+runtimes depuis la quarantaine si le chemin, le SHA-256 et toutes les signatures du
+fournisseur concordent. La copie de quarantaine est conservée comme preuve et aucun
+fichier n’est exécuté.
+
 ## Limites de validation
 
 Les fixtures automatisées couvrent les conteneurs `root`, la distinction entre un

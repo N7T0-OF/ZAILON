@@ -5006,8 +5006,7 @@ fn normalized_tree_paths(root: &Path) -> HashSet<String> {
         .collect()
 }
 
-fn detect_cyberpunk_framework_providers(root: &Path) -> HashSet<String> {
-    let paths = normalized_tree_paths(root);
+fn cyberpunk_framework_providers_from_paths(paths: &HashSet<String>) -> HashSet<String> {
     let has = |path: &str| paths.contains(path);
     let mut providers = HashSet::new();
     if has("engine/tools/scc.exe")
@@ -5026,6 +5025,10 @@ fn detect_cyberpunk_framework_providers(root: &Path) -> HashSet<String> {
         providers.insert("cyber-engine-tweaks".into());
     }
     providers
+}
+
+fn detect_cyberpunk_framework_providers(root: &Path) -> HashSet<String> {
+    cyberpunk_framework_providers_from_paths(&normalized_tree_paths(root))
 }
 
 fn framework_provider_allows_sensitive(providers: &HashSet<String>, destination: &Path) -> bool {
@@ -5047,6 +5050,30 @@ fn framework_provider_allows_sensitive(providers: &HashSet<String>, destination:
                     | "bin/x64/version.dll"
                     | "bin/x64/winmm.dll"
             ))
+}
+
+fn framework_runtime_targets(providers: &HashSet<String>) -> Vec<PathBuf> {
+    let mut targets = Vec::new();
+    if providers.contains("redscript") {
+        targets.extend([
+            PathBuf::from("engine/tools/scc.exe"),
+            PathBuf::from("engine/tools/scc_lib.dll"),
+        ]);
+    }
+    if providers.contains("red4ext") {
+        targets.extend([
+            PathBuf::from("red4ext/red4ext.dll"),
+            PathBuf::from("bin/x64/winmm.dll"),
+        ]);
+    }
+    if providers.contains("cyber-engine-tweaks") {
+        targets.push(PathBuf::from("bin/x64/plugins/cyber_engine_tweaks.asi"));
+        targets.push(PathBuf::from("bin/x64/version.dll"));
+        targets.push(PathBuf::from("bin/x64/winmm.dll"));
+    }
+    targets.sort();
+    targets.dedup();
+    targets
 }
 
 fn assess_sensitive_file(
@@ -5958,6 +5985,208 @@ fn framework_providers_from_entries(
     providers
 }
 
+fn copy_verified_framework_runtime(
+    source: &Path,
+    destination: &Path,
+    expected_hash: &str,
+) -> Result<bool, String> {
+    if !source.is_file() {
+        return Ok(false);
+    }
+    let source_hash = file_sha256(source)?;
+    if !source_hash.eq_ignore_ascii_case(expected_hash) {
+        return Err(format!(
+            "Le runtime {} ne correspond plus à son empreinte validée.",
+            source.to_string_lossy()
+        ));
+    }
+    if destination.is_file() {
+        if file_sha256(destination)?.eq_ignore_ascii_case(expected_hash) {
+            return Ok(false);
+        }
+        return Err(format!(
+            "Un runtime différent existe déjà dans le paquet : {}.",
+            destination.to_string_lossy()
+        ));
+    }
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "Destination de récupération invalide.".to_string())?;
+    fs::create_dir_all(parent).map_err(to_error)?;
+    let temporary = parent.join(format!(
+        ".zailon-runtime-recovery-{}-{}",
+        unix_timestamp(),
+        std::process::id()
+    ));
+    fs::copy(source, &temporary).map_err(to_error)?;
+    if !file_sha256(&temporary)?.eq_ignore_ascii_case(expected_hash) {
+        let _ = fs::remove_file(&temporary);
+        return Err("La copie temporaire du runtime a échoué à la vérification SHA-256.".into());
+    }
+    fs::rename(&temporary, destination).map_err(to_error)?;
+    Ok(true)
+}
+
+fn record_framework_runtime_recovery(
+    stage: &Path,
+    recovered: &[String],
+    decision: &str,
+    detail: &str,
+) -> Result<(), String> {
+    if recovered.is_empty() {
+        return Ok(());
+    }
+    let manifest_path = stage.join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).map_err(to_error)?).map_err(to_error)?;
+    let recovered_keys = recovered
+        .iter()
+        .map(|path| path.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    if let Some(assessments) = manifest
+        .get_mut("sensitiveFiles")
+        .and_then(|value| value.as_array_mut())
+    {
+        for assessment in assessments {
+            let Some(relative) = assessment
+                .get("relativePath")
+                .and_then(|value| value.as_str())
+            else {
+                continue;
+            };
+            let normalized =
+                deployment_key(&normalized_cyberpunk_game_relative(Path::new(relative)));
+            if recovered_keys.contains(&normalized) {
+                assessment["decision"] = serde_json::json!(decision);
+                assessment["mayDeploy"] = serde_json::json!(true);
+                assessment["expectedByManifest"] = serde_json::json!(true);
+                assessment["expectedByGameAdapter"] = serde_json::json!(true);
+            }
+        }
+    }
+    let mut diagnostics = manifest
+        .get("diagnostics")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    diagnostics.push(serde_json::json!(detail));
+    manifest["diagnostics"] = serde_json::Value::Array(diagnostics);
+    manifest["recoveredFrameworkRuntimes"] = serde_json::json!(recovered);
+    manifest["lastFrameworkRuntimeRecoveryAt"] = serde_json::json!(unix_timestamp());
+    write_json_atomic(&manifest_path, &manifest)
+}
+
+fn repair_reused_framework_package_from_source(
+    stage: &Path,
+    source: &Path,
+    game_name: &str,
+) -> Result<Vec<String>, String> {
+    if !game_name.to_ascii_lowercase().contains("cyberpunk") || !source.is_dir() {
+        return Ok(Vec::new());
+    }
+    let source_root = cyberpunk_package_root(source);
+    let providers = detect_cyberpunk_framework_providers(&source_root);
+    if providers.is_empty() {
+        return Ok(Vec::new());
+    }
+    let content = stage.join("content");
+    let mut recovered = Vec::new();
+    for target in framework_runtime_targets(&providers) {
+        let relative = target.to_string_lossy().replace('\\', "/");
+        let Some(source_file) = case_insensitive_relative(&source_root, &relative) else {
+            continue;
+        };
+        if !source_file.is_file() || !framework_provider_allows_sensitive(&providers, &target) {
+            continue;
+        }
+        let hash = file_sha256(&source_file)?;
+        if copy_verified_framework_runtime(&source_file, &content.join(&target), &hash)? {
+            recovered.push(relative);
+        }
+    }
+    record_framework_runtime_recovery(
+        stage,
+        &recovered,
+        "restored-from-verified-source",
+        "Paquet déjà présent réparé depuis la source sélectionnée : runtimes confirmés par plusieurs signatures, copiés sans exécution.",
+    )?;
+    Ok(recovered)
+}
+
+fn recover_framework_runtimes_from_quarantine(
+    stage: &Path,
+    quarantine_root: &Path,
+) -> Result<Vec<String>, String> {
+    let manifest_path = stage.join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).map_err(to_error)?).map_err(to_error)?;
+    let Some(assessment_values) = manifest
+        .get("sensitiveFiles")
+        .and_then(|value| value.as_array())
+    else {
+        return Ok(Vec::new());
+    };
+    let assessments = assessment_values
+        .iter()
+        .filter_map(|value| serde_json::from_value::<SensitiveFileAssessment>(value.clone()).ok())
+        .filter(|assessment| assessment.decision.as_deref() == Some("quarantined"))
+        .collect::<Vec<_>>();
+    if assessments.is_empty() || !quarantine_root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let allowed_root = fs::canonicalize(quarantine_root).map_err(to_error)?;
+    let quarantine_paths = manifest
+        .get("quarantinePaths")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str().map(PathBuf::from))
+        .collect::<Vec<_>>();
+    let content = stage.join("content");
+    let mut all_paths = normalized_tree_paths(&content);
+    let mut candidates = Vec::<(PathBuf, PathBuf, String)>::new();
+    for assessment in assessments {
+        let normalized = normalized_cyberpunk_game_relative(Path::new(&assessment.relative_path));
+        let assessment_key = deployment_key(Path::new(&assessment.relative_path));
+        let Some(source) = quarantine_paths.iter().find_map(|path| {
+            let canonical = fs::canonicalize(path).ok()?;
+            if !canonical.starts_with(&allowed_root)
+                || !deployment_key(&canonical).ends_with(&assessment_key)
+            {
+                return None;
+            }
+            file_sha256(&canonical)
+                .ok()
+                .is_some_and(|hash| hash.eq_ignore_ascii_case(&assessment.hash))
+                .then_some(canonical)
+        }) else {
+            continue;
+        };
+        all_paths.insert(deployment_key(&normalized));
+        candidates.push((source, normalized, assessment.hash));
+    }
+    let providers = cyberpunk_framework_providers_from_paths(&all_paths);
+    if providers.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut recovered = Vec::new();
+    for (source, target, hash) in candidates {
+        if !framework_provider_allows_sensitive(&providers, &target) {
+            continue;
+        }
+        if copy_verified_framework_runtime(&source, &content.join(&target), &hash)? {
+            recovered.push(target.to_string_lossy().replace('\\', "/"));
+        }
+    }
+    record_framework_runtime_recovery(
+        stage,
+        &recovered,
+        "restored-from-verified-quarantine",
+        "Migration automatique : runtimes restaurés depuis la quarantaine après validation du chemin, du SHA-256 et des signatures complètes du framework. Aucun fichier n’a été exécuté.",
+    )?;
+    Ok(recovered)
+}
+
 fn package_manifest_entries(
     stage: &Path,
     game_id: &str,
@@ -6038,6 +6267,10 @@ fn package_manifest_entries(
         manifest["normalized"] = serde_json::json!(true);
         manifest["deployableFiles"] =
             serde_json::json!(entries.iter().filter(|entry| entry.deployable).count());
+        manifest["contentFiles"] = serde_json::json!(entries
+            .iter()
+            .map(|entry| entry.package_relative_path.clone())
+            .collect::<Vec<_>>());
         manifest["pipelineStatus"] = serde_json::json!("Normalized");
         manifest["providedFrameworks"] = serde_json::json!(providers
             .iter()
@@ -6129,6 +6362,17 @@ fn build_virtual_profile_map(
         status.source_still_available = stage.join("content").is_dir();
         status.manifest_exists =
             stage.join("manifest.json").is_file() && stage.join("package-manifest.json").is_file();
+        if persist_manifests {
+            let quarantine_root = update_data_root(app)?.join("quarantine");
+            let recovered = recover_framework_runtimes_from_quarantine(&stage, &quarantine_root)?;
+            if !recovered.is_empty() {
+                diagnostics.push(format!(
+                    "{} : {} runtime(s) de framework restauré(s) depuis la quarantaine vérifiée.",
+                    package_id,
+                    recovered.len()
+                ));
+            }
+        }
         match package_manifest_entries(&stage, game_id, persist_manifests) {
             Ok((entries, providers)) => {
                 status.files_exist = !entries.is_empty();
@@ -8430,6 +8674,8 @@ fn import_mods_with_staging(
         if let Some(existing_stage) =
             staged_package_by_fingerprint(&staging_root, &inspected.fingerprint)
         {
+            let recovered =
+                repair_reused_framework_package_from_source(&existing_stage, &source, game_name)?;
             for profile_id in profile_ids {
                 attach_staged_package_to_profile(&existing_stage, profile_id)?;
             }
@@ -8443,6 +8689,13 @@ fn import_mods_with_staging(
                 write_json_atomic(&manifest_path, &manifest)?;
             }
             package_manifest_entries(&existing_stage, game_id, true)?;
+            if !recovered.is_empty() {
+                warnings.push(format!(
+                    "{} : {} runtime(s) de framework restauré(s) dans le paquet existant après validation complète.",
+                    inspected.name,
+                    recovered.len()
+                ));
+            }
             installed.push(existing_stage.to_string_lossy().to_string());
             report_background_task(
                 app,
@@ -8451,11 +8704,20 @@ fn import_mods_with_staging(
                 task_id,
                 index as u64 + 1,
                 total,
-                format!(
-                    "{} déjà présent : paquet réutilisé sans nouvelle copie ({}/{total})",
-                    inspected.name,
-                    index + 1
-                ),
+                if recovered.is_empty() {
+                    format!(
+                        "{} déjà présent : paquet réutilisé sans nouvelle copie ({}/{total})",
+                        inspected.name,
+                        index + 1
+                    )
+                } else {
+                    format!(
+                        "{} déjà présent : paquet réparé, {} runtime(s) restauré(s) ({}/{total})",
+                        inspected.name,
+                        recovered.len(),
+                        index + 1
+                    )
+                },
             );
             continue;
         }
@@ -12423,6 +12685,139 @@ mod tests {
             .iter()
             .all(|assessment| assessment.may_deploy));
         fs::remove_dir_all(root).expect("remove provider fixture");
+    }
+
+    #[test]
+    fn reused_redscript_package_is_repaired_from_the_selected_source() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-redscript-reuse-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let source = root.join("source");
+        let stage = root.join("stage-1");
+        fs::create_dir_all(source.join("engine/tools")).expect("source tools");
+        fs::create_dir_all(source.join("engine/config/base")).expect("source config");
+        fs::create_dir_all(source.join("r6/config/cybercmd")).expect("source cybercmd");
+        fs::write(source.join("engine/tools/scc.exe"), b"MZcompiler").expect("compiler");
+        fs::write(source.join("engine/tools/scc_lib.dll"), b"MZlibrary").expect("library");
+        fs::write(source.join("engine/config/base/scripts.ini"), b"[Scripts]")
+            .expect("scripts config");
+        fs::write(source.join("r6/config/cybercmd/scc.toml"), b"enabled=true")
+            .expect("cybercmd config");
+        fs::create_dir_all(stage.join("content/engine/config/base")).expect("stage config");
+        fs::create_dir_all(stage.join("content/r6/config/cybercmd")).expect("stage cybercmd");
+        fs::write(
+            stage.join("content/engine/config/base/scripts.ini"),
+            b"[Scripts]",
+        )
+        .expect("staged config");
+        fs::write(
+            stage.join("content/r6/config/cybercmd/scc.toml"),
+            b"enabled=true",
+        )
+        .expect("staged cybercmd");
+        fs::write(
+            stage.join("manifest.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "diagnostics": [],
+                "sensitiveFiles": []
+            }))
+            .expect("manifest json"),
+        )
+        .expect("manifest");
+
+        let recovered =
+            repair_reused_framework_package_from_source(&stage, &source, "Cyberpunk 2077")
+                .expect("repair reused provider");
+        assert_eq!(recovered.len(), 2);
+        assert!(stage.join("content/engine/tools/scc.exe").is_file());
+        assert!(stage.join("content/engine/tools/scc_lib.dll").is_file());
+        fs::remove_dir_all(root).expect("remove reuse fixture");
+    }
+
+    #[test]
+    fn broken_redscript_package_recovers_only_verified_quarantine_files() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-redscript-quarantine-recovery-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let stage = root.join("stage-1");
+        let quarantine = root.join("quarantine");
+        fs::create_dir_all(stage.join("content/engine/config/base")).expect("stage config");
+        fs::create_dir_all(stage.join("content/r6/config/cybercmd")).expect("stage cybercmd");
+        fs::create_dir_all(quarantine.join("task/files/engine/tools")).expect("quarantine tools");
+        fs::write(
+            stage.join("content/engine/config/base/scripts.ini"),
+            b"[Scripts]",
+        )
+        .expect("staged config");
+        fs::write(
+            stage.join("content/r6/config/cybercmd/scc.toml"),
+            b"enabled=true",
+        )
+        .expect("staged cybercmd");
+        let compiler = quarantine.join("task/files/engine/tools/scc.exe");
+        let library = quarantine.join("task/files/engine/tools/scc_lib.dll");
+        fs::write(&compiler, b"MZcompiler").expect("quarantined compiler");
+        fs::write(&library, b"MZlibrary").expect("quarantined library");
+        let assessment = |relative: &str, source: &Path| SensitiveFileAssessment {
+            relative_path: relative.into(),
+            detected_type: "Executable".into(),
+            extension: source
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .into(),
+            magic_type: "PE/COFF".into(),
+            size: source.metadata().expect("metadata").len(),
+            hash: file_sha256(source).expect("hash"),
+            signature_status: "Unknown".into(),
+            publisher: None,
+            source_provider: None,
+            source_mod_id: None,
+            expected_by_manifest: false,
+            expected_by_game_adapter: false,
+            execution_required: false,
+            install_destination: relative.into(),
+            risk_level: "Caution".into(),
+            reasons: Vec::new(),
+            recommended_action: "quarantine".into(),
+            decision: Some("quarantined".into()),
+            may_deploy: false,
+        };
+        fs::write(
+            stage.join("manifest.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "diagnostics": [],
+                "sensitiveFiles": [
+                    assessment("engine/tools/scc.exe", &compiler),
+                    assessment("engine/tools/scc_lib.dll", &library)
+                ],
+                "quarantinePaths": [
+                    compiler.to_string_lossy(),
+                    library.to_string_lossy()
+                ]
+            }))
+            .expect("manifest json"),
+        )
+        .expect("manifest");
+
+        let recovered = recover_framework_runtimes_from_quarantine(&stage, &quarantine)
+            .expect("recover quarantined provider");
+        assert_eq!(recovered.len(), 2);
+        assert!(stage.join("content/engine/tools/scc.exe").is_file());
+        assert!(stage.join("content/engine/tools/scc_lib.dll").is_file());
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(stage.join("manifest.json")).expect("manifest read"))
+                .expect("manifest parse");
+        assert!(manifest["sensitiveFiles"]
+            .as_array()
+            .expect("assessments")
+            .iter()
+            .all(|item| item["decision"] == "restored-from-verified-quarantine"));
+        fs::remove_dir_all(root).expect("remove quarantine recovery fixture");
     }
 
     #[test]

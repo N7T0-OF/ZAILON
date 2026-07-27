@@ -160,7 +160,7 @@ export function GamesView() {
       schemaVersion: 1,
       exportedAt: new Date().toISOString(),
       app: 'ZAILON',
-      appVersion: '1.7.1',
+      appVersion: '1.7.2',
       exportMode: complete ? 'complete' : 'light',
       game: { name: selectedGame.name, provider: selectedGame.provider, providerGameId: selectedGame.providerGameId },
       profile,

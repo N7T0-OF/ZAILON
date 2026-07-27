@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.7.2 — Auto-réparation des frameworks déjà dédupliqués
+
+- Corrige la réutilisation d’un paquet déjà présent : redscript, RED4ext et CET sont
+  désormais réparés depuis la source sélectionnée au lieu de conserver les runtimes
+  mis en quarantaine par un ancien import.
+- Ajoute une migration automatique au prochain audit ou lancement : les runtimes
+  historiques sont restaurés depuis la quarantaine uniquement après validation du
+  chemin, du SHA-256 et de toutes les signatures physiques du fournisseur.
+- Met immédiatement à jour le manifeste, les décisions de sécurité et l’inventaire
+  de contenu après récupération, sans exécuter le moindre fichier.
+- Ajoute des tests dédiés au paquet redscript dédupliqué et à la récupération
+  sécurisée d’un ancien paquet depuis la quarantaine.
+
 ## 1.7.1 — Réparation du déploiement Cyberpunk importé depuis MO2
 
 - Ajoute un manifeste physique normalisé par paquet et une carte virtuelle de profil

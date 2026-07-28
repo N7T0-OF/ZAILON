@@ -395,6 +395,12 @@ export interface NexusCatalogPage {
   fetchedAt: number
 }
 
+export interface NexusModGallery {
+  images: string[]
+  source: string
+  fetchedAt: number
+}
+
 export interface NexusAccountCapabilities {
   authenticated: boolean
   membershipTier: 'premium' | 'free' | 'unknown' | string
@@ -730,6 +736,8 @@ export const native = {
   nexusAccountCapabilities: () => desktopOnly<NexusAccountCapabilities>('nexus_account_capabilities'),
   nexusCatalogMods: (gameDomain: string, query: string, sort: 'recent' | 'updated' | 'popular' | 'downloaded', page: number, pageSize: number, includeAdult: boolean) =>
     desktopOnly<NexusCatalogPage>('nexus_catalog_mods', { gameDomain, query, sort, page, pageSize, includeAdult }),
+  nexusModGallery: (gameDomain: string, modId: number) =>
+    desktopOnly<NexusModGallery>('nexus_mod_gallery', { gameDomain, modId }),
   nexusCatalogCollections: (gameDomain: string, query: string, sort: 'recent' | 'updated' | 'popular' | 'downloaded', page: number, pageSize: number, includeAdult: boolean) =>
     desktopOnly<NexusCollectionPage>('nexus_catalog_collections', { gameDomain, query, sort, page, pageSize, includeAdult }),
   nexusCollectionDetail: (gameDomain: string, slug: string, revision: number | undefined, includeAdult: boolean) =>

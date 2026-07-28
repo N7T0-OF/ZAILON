@@ -584,6 +584,14 @@ struct NexusCatalogPage {
     fetched_at: u64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NexusModGallery {
+    images: Vec<String>,
+    source: String,
+    fetched_at: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct NexusAccountCapabilities {
@@ -9910,6 +9918,62 @@ fn valid_nexus_domain(value: &str) -> bool {
         })
 }
 
+fn html_attribute<'a>(tag: &'a str, attribute: &str) -> Option<&'a str> {
+    let marker = format!("{attribute}=\"");
+    let start = tag.find(&marker)? + marker.len();
+    let value = tag.get(start..)?;
+    let end = value.find('"')?;
+    value.get(..end)
+}
+
+fn nexus_gallery_images_from_html(html: &str, mod_id: u64) -> Vec<String> {
+    let expected_path = format!("/images/{mod_id}/");
+    let mut images = Vec::new();
+    let mut rest = html;
+    while let Some(start) = rest.find("<a ") {
+        rest = &rest[start..];
+        let Some(end) = rest.find('>') else {
+            break;
+        };
+        let tag = &rest[..=end];
+        rest = &rest[end + 1..];
+        let class = html_attribute(tag, "class").unwrap_or_default();
+        if !class
+            .split_ascii_whitespace()
+            .any(|token| token == "mod-image")
+        {
+            continue;
+        }
+        let Some(href) = html_attribute(tag, "href") else {
+            continue;
+        };
+        let Ok(url) = url::Url::parse(href) else {
+            continue;
+        };
+        let trusted_host = matches!(
+            url.host_str(),
+            Some("staticdelivery.nexusmods.com" | "images.nexusmods.com")
+        );
+        let path = url.path().to_ascii_lowercase();
+        let is_full_mod_image = path.contains(&expected_path)
+            && !path.contains("/thumbnails/")
+            && matches!(
+                path.rsplit('.').next(),
+                Some("jpg" | "jpeg" | "png" | "webp" | "gif")
+            );
+        if url.scheme() == "https" && trusted_host && is_full_mod_image {
+            let image = url.to_string();
+            if !images.contains(&image) {
+                images.push(image);
+            }
+        }
+        if images.len() >= 100 {
+            break;
+        }
+    }
+    images
+}
+
 async fn nexus_api_json(
     path: &str,
 ) -> Result<(serde_json::Value, reqwest::header::HeaderMap), String> {
@@ -10459,6 +10523,62 @@ async fn nexus_catalog_mods(
         },
         results,
         source: "nexus-graphql-v2".into(),
+        fetched_at: unix_timestamp(),
+    })
+}
+
+#[tauri::command]
+async fn nexus_mod_gallery(game_domain: String, mod_id: u64) -> Result<NexusModGallery, String> {
+    let domain = game_domain.trim().to_ascii_lowercase();
+    if !valid_nexus_domain(&domain) || mod_id == 0 {
+        return Err("La référence du mod Nexus est invalide.".into());
+    }
+    let source = format!("https://www.nexusmods.com/{domain}/mods/{mod_id}?tab=images");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .user_agent(format!("ZAILON/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|_| "Impossible d'initialiser la galerie Nexus.".to_string())?;
+    let response = client
+        .get(&source)
+        .header(
+            reqwest::header::ACCEPT,
+            "text/html,application/xhtml+xml;q=0.9",
+        )
+        .send()
+        .await
+        .map_err(|error| {
+            if error.is_timeout() {
+                "Le chargement de la galerie Nexus a expiré.".to_string()
+            } else {
+                "La galerie Nexus est actuellement inaccessible.".to_string()
+            }
+        })?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(match status.as_u16() {
+            403 => "Nexus demande une connexion pour afficher cette galerie.".into(),
+            404 => "La galerie de ce mod Nexus n'existe plus.".into(),
+            429 => "Nexus limite temporairement le chargement des galeries.".into(),
+            _ => format!(
+                "Nexus n'a pas accepté la galerie (HTTP {}).",
+                status.as_u16()
+            ),
+        });
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length > 5_000_000)
+    {
+        return Err("La page de galerie Nexus dépasse la taille de sécurité autorisée.".into());
+    }
+    let html = response
+        .text()
+        .await
+        .map_err(|_| "Nexus a renvoyé une galerie illisible.".to_string())?;
+    Ok(NexusModGallery {
+        images: nexus_gallery_images_from_html(&html, mod_id),
+        source,
         fetched_at: unix_timestamp(),
     })
 }
@@ -12932,6 +13052,25 @@ mod tests {
     }
 
     #[test]
+    fn nexus_gallery_parser_keeps_only_full_images_for_the_requested_mod() {
+        let html = r#"
+          <a class="mod-image featured" href="https://staticdelivery.nexusmods.com/mods/3333/images/107/107-1.png"></a>
+          <a href="https://staticdelivery.nexusmods.com/mods/3333/images/107/107-2.jpeg" class="mod-image"></a>
+          <a class="mod-image" href="https://staticdelivery.nexusmods.com/mods/3333/images/thumbnails/107/107-3.png"></a>
+          <a class="mod-image" href="https://staticdelivery.nexusmods.com/mods/3333/images/108/108-1.png"></a>
+          <a class="mod-image" href="https://evil.example/mods/3333/images/107/107-4.png"></a>
+          <a class="mod-image" href="https://staticdelivery.nexusmods.com/mods/3333/images/107/107-1.png"></a>
+        "#;
+        assert_eq!(
+            nexus_gallery_images_from_html(html, 107),
+            vec![
+                "https://staticdelivery.nexusmods.com/mods/3333/images/107/107-1.png",
+                "https://staticdelivery.nexusmods.com/mods/3333/images/107/107-2.jpeg",
+            ]
+        );
+    }
+
+    #[test]
     fn nexus_collection_variables_keep_filters_and_page_offset_separate() {
         let variables =
             nexus_collection_variables("cyberpunk2077", "essentials", "updated", 3, 40, true);
@@ -14130,6 +14269,7 @@ pub fn run() {
             nexus_account_capabilities,
             nexus_catalog_games,
             nexus_catalog_mods,
+            nexus_mod_gallery,
             nexus_catalog_collections,
             nexus_collection_detail,
             prepare_nexus_collection_install,

@@ -27,6 +27,7 @@ import {
   NexusCollectionDetail,
   NexusCollectionPage,
   NexusCollectionSummary,
+  NexusModGallery,
   ProviderConnectionStatus,
 } from '../../lib/native'
 import { NexusExplorerAdapter } from '../../lib/explorerProviders'
@@ -48,6 +49,7 @@ const NEXUS_SESSION_KEY = 'zailon:nexus-explorer:v2'
 const NEXUS_CACHE_TTL = 5 * 60 * 1000
 const nexusPageCache = new Map<string, { page: NexusCatalogPage; cachedAt: number }>()
 const nexusCollectionPageCache = new Map<string, { page: NexusCollectionPage; cachedAt: number }>()
+const nexusGalleryCache = new Map<string, { gallery: NexusModGallery; cachedAt: number }>()
 
 type NexusExplorerSession = {
   mode?: 'mods' | 'collections'
@@ -308,7 +310,10 @@ function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: strin
   const [loadingMods, setLoadingMods] = useState(false)
   const [error, setError] = useState<string>()
   const [previewMod, setPreviewMod] = useState<ExplodMod>()
+  const [previewGalleryLoading, setPreviewGalleryLoading] = useState(false)
+  const [previewGalleryError, setPreviewGalleryError] = useState<string>()
   const requestSerial = useRef(0)
+  const galleryRequestSerial = useRef(0)
   const resultsRef = useRef<HTMLElement>(null)
   const pendingScroll = useRef(false)
   const firstQueryEffect = useRef(true)
@@ -416,6 +421,43 @@ function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: strin
     setPage(target)
   }
 
+  const openPreview = (item: NexusCatalogPage['results'][number]) => {
+    const mod = NexusExplorerAdapter.toResult(item, selectedCatalogGame?.name)
+    const galleryKey = `${item.gameDomain}:${item.modId}`
+    const cached = nexusGalleryCache.get(galleryKey)
+    const request = ++galleryRequestSerial.current
+    setPreviewGalleryError(undefined)
+    setPreviewMod(cached ? { ...mod, screenshots: cached.gallery.images } : mod)
+    if (cached && Date.now() - cached.cachedAt < NEXUS_CACHE_TTL) {
+      setPreviewGalleryLoading(false)
+      return
+    }
+    setPreviewGalleryLoading(true)
+    void native.nexusModGallery(item.gameDomain, item.modId).then(gallery => {
+      if (request !== galleryRequestSerial.current) return
+      nexusGalleryCache.set(galleryKey, { gallery, cachedAt: Date.now() })
+      while (nexusGalleryCache.size > 100) {
+        const oldest = nexusGalleryCache.keys().next().value
+        if (typeof oldest !== 'string') break
+        nexusGalleryCache.delete(oldest)
+      }
+      setPreviewMod(current => current?.id === mod.id ? { ...current, screenshots: gallery.images } : current)
+    }).catch(reason => {
+      if (request === galleryRequestSerial.current) {
+        setPreviewGalleryError(reason instanceof Error ? reason.message : String(reason))
+      }
+    }).finally(() => {
+      if (request === galleryRequestSerial.current) setPreviewGalleryLoading(false)
+    })
+  }
+
+  const closePreview = () => {
+    galleryRequestSerial.current += 1
+    setPreviewMod(undefined)
+    setPreviewGalleryLoading(false)
+    setPreviewGalleryError(undefined)
+  }
+
   return <section className="mt-4">
     <div className="rounded-xl border border-white/[0.07] bg-black/10 p-3">
       <ProviderExplorerToolbar>
@@ -454,12 +496,12 @@ function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: strin
     <ProviderSearchResults grid={grid} columns={columns} loading={loadingMods && !mods.length} empty={Boolean(domain && !mods.length && !error)} loadingFallback={<LoadingGrid />} emptyFallback={<EmptyResults onReset={() => { setQuery(''); setServerQuery(''); setPage(1) }} />}>
       {mods.map(item => {
         const mod = NexusExplorerAdapter.toResult(item, selectedCatalogGame?.name)
-        return <ModResult key={mod.id} mod={mod} grid={grid} installing={false} canInstall={false} sourceOnly targetName={selectedCatalogGame?.name} onPreview={() => setPreviewMod(mod)} onInstall={() => undefined} />
+        return <ModResult key={mod.id} mod={mod} grid={grid} installing={false} canInstall={false} sourceOnly targetName={selectedCatalogGame?.name} onPreview={() => openPreview(item)} onInstall={() => undefined} />
       })}
     </ProviderSearchResults>
     {domain && catalogPage && catalogPage.pagination.totalResults > 0 && <ProviderPagination provider="Nexus Mods" page={page} pageCount={pageCount} hasNextPage={catalogPage.pagination.hasNext} loading={loadingMods} onPageChange={changePage} />}
     </section>
-    {previewMod && <ModPreviewModal mod={previewMod} canInstall={false} sourceOnly installing={false} onInstall={() => undefined} onClose={() => setPreviewMod(undefined)} />}
+    {previewMod && <ModPreviewModal mod={previewMod} canInstall={false} sourceOnly installing={false} galleryLoading={previewGalleryLoading} galleryError={previewGalleryError} onInstall={() => undefined} onClose={closePreview} />}
   </section>
 }
 
@@ -683,11 +725,13 @@ function ProviderUnavailable({ provider, onConfigure }: { provider: string; onCo
   </section>
 }
 
-function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, onInstall, onClose }: {
+function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, galleryLoading = false, galleryError, onInstall, onClose }: {
   mod: ExplodMod
   canInstall: boolean
   sourceOnly?: boolean
   installing: boolean
+  galleryLoading?: boolean
+  galleryError?: string
   onInstall: () => void
   onClose: () => void
 }) {
@@ -755,7 +799,8 @@ function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, onIn
           <div ref={tiltRef} className="flex h-full w-full items-center justify-center transition-transform duration-300 ease-out will-change-transform">
             {currentImage ? <img src={currentImage} onClick={() => setLightbox(true)} onError={() => imageFailed(currentImage)} alt={`Aperçu ${imageIndex + 1} de ${mod.name}`} title="Ouvrir au format complet" className="h-full w-full cursor-zoom-in object-contain" /> : <div className="text-center text-white/24"><Compass size={38} className="mx-auto" /><p className="mt-3 text-[11px]">Aucune capture disponible</p></div>}
           </div>
-          <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/65 to-transparent p-3"><span className="rounded bg-black/45 px-2 py-1 text-[11px] text-white/56">Galerie 3D en parallaxe</span>{images.length > 0 && <span className="rounded bg-black/45 px-2 py-1 font-mono text-[11px] text-white/56">{imageIndex + 1} / {images.length}</span>}</div>
+          <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/65 to-transparent p-3"><span className="rounded bg-black/45 px-2 py-1 text-[11px] text-white/56">Galerie 3D en parallaxe</span>{galleryLoading ? <span className="flex items-center gap-1.5 rounded bg-black/55 px-2 py-1 text-[11px] text-white/62"><Loader2 size={12} className="animate-spin" />Chargement Nexus…</span> : images.length > 0 && <span className="rounded bg-black/45 px-2 py-1 font-mono text-[11px] text-white/56">{imageIndex + 1} / {images.length}</span>}</div>
+          {galleryError && <div className="pointer-events-none absolute bottom-3 left-1/2 max-w-[80%] -translate-x-1/2 rounded-lg border border-amber-200/15 bg-black/75 px-3 py-2 text-center text-[11px] text-amber-50/65">Galerie Nexus indisponible : {galleryError}</div>}
           {images.length > 1 && <><button type="button" onClick={previous} aria-label="Image précédente" className="absolute left-3 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 backdrop-blur hover:bg-black/80"><ChevronLeft size={20} /></button><button type="button" onClick={next} aria-label="Image suivante" className="absolute right-3 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/55 text-white/75 backdrop-blur hover:bg-black/80"><ChevronRight size={20} /></button></>}
         </div>
         {images.length > 1 && <div className="flex gap-2 overflow-x-auto border-t border-white/[0.06] p-2">{images.map((image, index) => <button key={image} type="button" onClick={() => { setImageIndex(index); resetTilt() }} aria-label={`Afficher l’image ${index + 1}`} className={`h-16 w-24 shrink-0 overflow-hidden rounded-lg border ${index === imageIndex ? 'border-gold/70' : 'border-white/[0.08]'}`}><img src={thumbnailSource(image)} onError={event => { if (!event.currentTarget.dataset.fullFallback) { event.currentTarget.dataset.fullFallback = 'true'; event.currentTarget.src = image } else imageFailed(image) }} alt="" loading={Math.abs(index - imageIndex) <= 1 ? 'eager' : 'lazy'} className="h-full w-full object-cover" /></button>)}</div>}

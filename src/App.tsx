@@ -18,6 +18,8 @@ export default function App() {
   const dismissNotification = useStore(s => s.dismissNotification)
   const clearCompletedNotifications = useStore(s => s.clearCompletedNotifications)
   const games = useStore(s => s.games)
+  const isLaunching = useStore(s => s.isLaunching)
+  const isPlaying = useStore(s => s.isPlaying)
   const setSelectedGame = useStore(s => s.setSelectedGame)
   const setSelectedProfile = useStore(s => s.setSelectedProfile)
   const textSize = useStore(s => s.textSize)
@@ -48,7 +50,10 @@ export default function App() {
 
   useEffect(() => {
     const focused = () => setWindowFocused(true)
-    const blurred = () => setWindowFocused(false)
+    const blurred = () => {
+      setWindowFocused(false)
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+    }
     window.addEventListener('focus', focused)
     window.addEventListener('blur', blurred)
     return () => { window.removeEventListener('focus', focused); window.removeEventListener('blur', blurred) }
@@ -87,7 +92,7 @@ export default function App() {
     const configure = async () => {
       await unregisterAll().catch(() => undefined)
       const config = getVisualShortcutConfig()
-      if (!config.enabled || disposed) return
+      if (!config.enabled || disposed || isLaunching || isPlaying) return
       const actions = {
         [config.restore.toLocaleLowerCase()]: 'restore',
         [config.toggle.toLocaleLowerCase()]: 'toggle',
@@ -101,6 +106,7 @@ export default function App() {
         const action = actions[event.shortcut.toLocaleLowerCase() as keyof typeof actions]
         if (action) void native.visualProfiles.shortcutAction(action).catch(() => undefined)
       })
+      if (disposed) await unregisterAll().catch(() => undefined)
     }
     const changed = () => { void configure().catch(() => undefined) }
     window.addEventListener(VISUAL_SHORTCUTS_CHANGED, changed)
@@ -110,7 +116,7 @@ export default function App() {
       window.removeEventListener(VISUAL_SHORTCUTS_CHANGED, changed)
       void unregisterAll().catch(() => undefined)
     }
-  }, [])
+  }, [isLaunching, isPlaying])
 
   useEffect(() => {
     if (!native.isDesktop()) return

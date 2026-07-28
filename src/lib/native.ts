@@ -2,6 +2,14 @@ import { Channel, convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import type { UpdateChannel } from '../types'
 import type { DownloadedModResult, ModImportCandidate, Profile, ProfileArchiveManifest, ProfileIntegrity, SecureImportResult, SensitiveImportAction } from '../types'
+import type {
+  VisualApplyResult,
+  VisualBackendReport,
+  VisualProfile,
+  VisualProfileHistoryItem,
+  VisualRestoreResult,
+  VisualSafetyReport,
+} from '../visual-profiles/domain/types'
 
 export interface ProfilePaths {
   directory: string
@@ -607,6 +615,36 @@ const desktopOnly = <T>(command: string, args?: Record<string, unknown>) => {
 
 export const native = {
   isDesktop: () => isTauri(),
+  visualProfiles: {
+    backendReport: () => desktopOnly<VisualBackendReport>('visual_backend_report'),
+    list: () => desktopOnly<VisualProfile[]>('list_visual_profiles'),
+    save: (profile: VisualProfile) => desktopOnly<string>('save_visual_profile', { profile }),
+    delete: (profileId: string) => desktopOnly<void>('delete_visual_profile', { profileId }),
+    history: (profileId: string) => desktopOnly<VisualProfileHistoryItem[]>('visual_profile_history', { profileId }),
+    restoreVersion: (profileId: string, fileName: string) =>
+      desktopOnly<VisualProfile>('restore_visual_profile_version', { profileId, fileName }),
+    export: (profileId: string, destination: string) =>
+      desktopOnly<string>('export_visual_profile', { profileId, destination }),
+    import: (source: string) => desktopOnly<VisualProfile>('import_visual_profile', { source }),
+    apply: (profileId: string, monitorId?: string) =>
+      desktopOnly<VisualApplyResult>('apply_visual_profile', { profileId, monitorId }),
+    preview: (profile: VisualProfile, monitorId?: string) =>
+      desktopOnly<VisualApplyResult>('preview_visual_profile', { profile, monitorId }),
+    confirm: (confirmationToken: string) =>
+      desktopOnly<void>('confirm_visual_profile', { confirmationToken }),
+    restore: (monitorId?: string) =>
+      desktopOnly<VisualRestoreResult>('restore_visual_state', { monitorId }),
+    setAssociation: (gameId: string, zailonProfileId: string | undefined, visualProfileId: string | undefined) =>
+      desktopOnly<void>('set_visual_profile_association', { gameId, zailonProfileId, visualProfileId }),
+    association: (gameId: string, zailonProfileId?: string) =>
+      desktopOnly<string | null>('visual_profile_association', { gameId, zailonProfileId }),
+    shortcutAction: (action: 'restore' | 'toggle' | 'previous' | 'next') =>
+      desktopOnly<string>('visual_shortcut_action', { action }),
+    safetyReport: (gameId: string, gameName: string, gameRoot: string | undefined, backendId: string) =>
+      desktopOnly<VisualSafetyReport>('visual_safety_report', { gameId, gameName, gameRoot, backendId }),
+    openWindowsSettings: (kind: 'display' | 'hdr' | 'night-light' | 'accessibility' | 'color-management') =>
+      desktopOnly<void>('open_visual_windows_settings', { kind }),
+  },
   scanMods: (modsPath: string) => desktopOnly<NativeMod[]>('scan_mods', { modsPath }),
   listStagedMods: (gameId: string) => desktopOnly<NativeMod[]>('list_staged_mods', { gameId }),
   scanModImport: (paths: string[], gameName: string) => desktopOnly<ModImportCandidate[]>('scan_mod_import', { paths, gameName }),

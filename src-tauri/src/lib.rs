@@ -17,6 +17,8 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State};
 use walkdir::WalkDir;
 
+mod visual_profiles;
+
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
@@ -4993,6 +4995,7 @@ fn test_discord_connection(
 async fn launch_game(
     app: AppHandle,
     state: State<'_, DiscordRuntime>,
+    visual_state: State<'_, visual_profiles::VisualRuntime>,
     exec_path: String,
     game_id: String,
     game_name: String,
@@ -5006,6 +5009,7 @@ async fn launch_game(
     on_event: Channel<DeploymentProgressEvent>,
 ) -> Result<LaunchGameResult, String> {
     let runtime = state.inner().clone();
+    let visual_runtime = visual_state.inner().clone();
     let preparation_app = app.clone();
     let preparation_game_id = game_id.clone();
     let preparation_profile_id = profile_id.clone();
@@ -5061,6 +5065,27 @@ async fn launch_game(
             return Err(error);
         }
     };
+    let associated_visual_applied = match visual_profiles::apply_associated_profile(
+        &app,
+        &visual_runtime,
+        &game_id,
+        &profile_id,
+    ) {
+        Ok(Some(result)) => {
+            prepared.diagnostics.push(format!(
+                "Profil visuel {} appliqué via {}.",
+                result.profile_id, result.backend_id
+            ));
+            result.applied
+        }
+        Ok(None) => false,
+        Err(error) => {
+            prepared
+                .diagnostics
+                .push(format!("Profil visuel non appliqué : {error}"));
+            false
+        }
+    };
     let mut child = match Command::new(&executable)
         .current_dir(executable.parent().unwrap_or_else(|| Path::new(".")))
         .spawn()
@@ -5069,6 +5094,9 @@ async fn launch_game(
         Err(error) => {
             if let Some(session) = prepared.session {
                 let _ = finish_temporary_copy(session, false);
+            }
+            if associated_visual_applied {
+                visual_profiles::restore_for_shutdown(&app, &visual_runtime);
             }
             set_staged_deployment_status(&app, &game_id, &enabled_mod_ids, "failed");
             return Err(to_error(error));
@@ -5082,6 +5110,9 @@ async fn launch_game(
             let _ = child.kill();
             let _ = child.wait();
             let cleanup_error = finish_temporary_copy(session, false).err();
+            if associated_visual_applied {
+                visual_profiles::restore_for_shutdown(&app, &visual_runtime);
+            }
             set_staged_deployment_status(&app, &game_id, &enabled_mod_ids, "failed");
             return Err(match cleanup_error {
                 Some(cleanup) => format!(
@@ -5125,6 +5156,7 @@ async fn launch_game(
     let worker_game_id = game_id.clone();
     let worker_profile_id = profile_id.clone();
     let worker_enabled_mod_ids = enabled_mod_ids.clone();
+    let worker_visual_runtime = visual_runtime.clone();
     let deployment_session = prepared.session;
     std::thread::spawn(move || {
         let exit_code = child.wait().ok().and_then(|status| status.code());
@@ -5141,6 +5173,9 @@ async fn launch_game(
             },
         );
         clear_discord_activity(&worker_runtime);
+        if associated_visual_applied {
+            visual_profiles::restore_for_shutdown(&worker_app_for_cleanup, &worker_visual_runtime);
+        }
         let _ = worker_app.emit(
             "discord-status-changed",
             DiscordConnectionStatus {
@@ -14004,7 +14039,8 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .manage(ProviderConnectionCache(Mutex::new(HashMap::new())))
         .manage(BackgroundTaskRegistry(Arc::new(Mutex::new(HashMap::new()))))
-        .manage(DiscordRuntime(Arc::new(Mutex::new(None))));
+        .manage(DiscordRuntime(Arc::new(Mutex::new(None))))
+        .manage(visual_profiles::VisualRuntime::default());
     #[cfg(desktop)]
     let builder = builder
         .manage(PendingExternalInstalls(Mutex::new(Vec::new())))
@@ -14019,12 +14055,17 @@ pub fn run() {
                     }
                 }
             },
-        ));
+        ))
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build());
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             restore_background_tasks(app.handle(), app.state::<BackgroundTaskRegistry>().inner());
+            visual_profiles::recover_on_startup(
+                app.handle(),
+                app.state::<visual_profiles::VisualRuntime>().inner(),
+            );
             #[cfg(desktop)]
             {
                 app.handle()
@@ -14041,6 +14082,14 @@ pub fn run() {
                 }
             }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                visual_profiles::restore_for_shutdown(
+                    window.app_handle(),
+                    window.state::<visual_profiles::VisualRuntime>().inner(),
+                );
+            }
         })
         .invoke_handler(tauri::generate_handler![
             scan_mods,
@@ -14102,6 +14151,23 @@ pub fn run() {
             prepare_update_backup,
             record_update_event,
             open_update_log,
+            visual_profiles::visual_backend_report,
+            visual_profiles::list_visual_profiles,
+            visual_profiles::save_visual_profile,
+            visual_profiles::delete_visual_profile,
+            visual_profiles::visual_profile_history,
+            visual_profiles::restore_visual_profile_version,
+            visual_profiles::export_visual_profile,
+            visual_profiles::import_visual_profile,
+            visual_profiles::apply_visual_profile,
+            visual_profiles::preview_visual_profile,
+            visual_profiles::confirm_visual_profile,
+            visual_profiles::restore_visual_state,
+            visual_profiles::set_visual_profile_association,
+            visual_profiles::visual_profile_association,
+            visual_profiles::visual_shortcut_action,
+            visual_profiles::visual_safety_report,
+            visual_profiles::open_visual_windows_settings,
             #[cfg(desktop)]
             scan_steam_games,
             #[cfg(desktop)]

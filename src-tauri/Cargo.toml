@@ -1,6 +1,6 @@
 [package]
 name = "zailon"
-version = "1.7.3"
+version = "1.8.0"
 description = "Universal Mod Launcher"
 authors = ["N7T0-OF"]
 license = "MIT"
@@ -27,6 +27,7 @@ tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-global-shortcut = "2"
 dirs = "6"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 walkdir = "2"
@@ -37,3 +38,10 @@ keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Devices_Display",
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_ColorSystem",
+  "Win32_UI_WindowsAndMessaging",
+] }

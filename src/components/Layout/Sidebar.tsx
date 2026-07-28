@@ -1,4 +1,4 @@
-import { Compass, Download, Gamepad2, Heart, Home, Plus, Settings, Wrench } from 'lucide-react'
+import { Compass, Download, Gamepad2, Heart, Home, Monitor, Plus, Settings, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore } from '../../store/useStore'
@@ -11,6 +11,7 @@ const NAV: Array<{ id: ViewType; icon: LucideIcon; label: string }> = [
   { id: 'explore', icon: Compass, label: 'Explorer' },
   { id: 'downloads', icon: Download, label: 'Téléchargements' },
   { id: 'tools', icon: Wrench, label: 'Outils' },
+  { id: 'visuals', icon: Monitor, label: 'Visual Profiles' },
 ]
 
 export function Sidebar() {

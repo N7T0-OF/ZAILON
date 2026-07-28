@@ -1,4 +1,4 @@
-import { FileClock, FolderPlus, Radar, Wrench } from 'lucide-react'
+import { FileClock, FolderPlus, Monitor, Radar, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { useStore } from '../../store/useStore'
 import { native } from '../../lib/native'
@@ -7,6 +7,7 @@ import { SteamDetectionDialog } from '../SteamDetectionDialog'
 export function ToolsView() {
   const addGame = useStore(state => state.addGameFromExecutable)
   const importDetectedGames = useStore(state => state.importDetectedGames)
+  const setView = useStore(state => state.setView)
   const [detecting, setDetecting] = useState(false)
 
   return <div className="h-full overflow-y-auto p-5 sm:p-7">
@@ -15,6 +16,7 @@ export function ToolsView() {
       <Tool icon={Radar} title="Détection locale" text="Interroge Steam, Epic Games et les applications Windows déclarées, sans parcourir tout le disque." action="Rechercher" onClick={() => setDetecting(true)} />
       <Tool icon={FolderPlus} title="Ajout manuel" text="Sélectionne un exécutable quand un fournisseur n’est pas encore pris en charge." action="Choisir un jeu" onClick={() => void addGame()} />
       <Tool icon={FileClock} title="Journal de mise à jour" text="Ouvre le journal local des sauvegardes et opérations de mise à jour." action="Ouvrir le journal" onClick={() => void native.openUpdateLog()} disabled={!native.isDesktop()} />
+      <Tool icon={Monitor} title="Visual Profiles" text="Ajuste l’affichage Windows sans injection, sans overlay et sans modifier les fichiers des jeux." action="Ouvrir" onClick={() => setView('visuals')} />
     </div>
     <section className="mt-4 rounded-xl border border-gold/12 bg-gold/[0.025] p-4"><div className="flex items-center gap-2 text-gold/75"><Wrench size={14} /><h2 className="text-xs font-semibold">Fournisseurs extensibles</h2></div><p className="mt-2 max-w-3xl text-[11px] leading-relaxed text-white/38">Steam, Epic Games et le Registre Windows utilisent déjà le même écran de diagnostic et de sélection. Les prochains connecteurs spécialisés pourront s’ajouter sans changer la bibliothèque.</p></section>
     {detecting && <SteamDetectionDialog onClose={() => setDetecting(false)} onImport={importDetectedGames} />}

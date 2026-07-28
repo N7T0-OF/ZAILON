@@ -6,6 +6,8 @@ import { UpdateProvider } from './components/UpdateProvider'
 import { useStore } from './store/useStore'
 import { native, type BackgroundTaskSnapshot, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { windowEffectsBackend } from './lib/windowEffects'
+import { register, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
+import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-profiles/application/shortcuts'
 
 export default function App() {
   const tick = useStore(s => s.tick)
@@ -77,6 +79,37 @@ export default function App() {
     void native.pendingExternalInstalls().then(setExternalInstalls).catch(() => undefined)
     void listen<NxmRequest>('nxm-opened', event => setExternalInstalls(current => current.some(item => item.requestId === event.payload.requestId) ? current : [...current, event.payload])).then(dispose => { unlisten = dispose })
     return () => unlisten?.()
+  }, [])
+
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    let disposed = false
+    const configure = async () => {
+      await unregisterAll().catch(() => undefined)
+      const config = getVisualShortcutConfig()
+      if (!config.enabled || disposed) return
+      const actions = {
+        [config.restore.toLocaleLowerCase()]: 'restore',
+        [config.toggle.toLocaleLowerCase()]: 'toggle',
+        [config.previous.toLocaleLowerCase()]: 'previous',
+        [config.next.toLocaleLowerCase()]: 'next',
+      } as const
+      const shortcuts = [...new Set([config.restore, config.toggle, config.previous, config.next].filter(Boolean))]
+      if (!shortcuts.length) return
+      await register(shortcuts, event => {
+        if (event.state !== 'Pressed') return
+        const action = actions[event.shortcut.toLocaleLowerCase() as keyof typeof actions]
+        if (action) void native.visualProfiles.shortcutAction(action).catch(() => undefined)
+      })
+    }
+    const changed = () => { void configure().catch(() => undefined) }
+    window.addEventListener(VISUAL_SHORTCUTS_CHANGED, changed)
+    void configure().catch(() => undefined)
+    return () => {
+      disposed = true
+      window.removeEventListener(VISUAL_SHORTCUTS_CHANGED, changed)
+      void unregisterAll().catch(() => undefined)
+    }
   }, [])
 
   useEffect(() => {

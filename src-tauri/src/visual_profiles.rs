@@ -1470,6 +1470,7 @@ pub fn visual_safety_report(
             );
         }
     }
+    let changes_system_display = compatible && backend_id == GAMMA_BACKEND;
     Ok(VisualSafetyReport {
         game_id,
         backend_id,
@@ -1480,7 +1481,7 @@ pub fn visual_safety_report(
         writes_game_memory: false,
         uses_kernel_driver: false,
         uses_overlay: false,
-        changes_system_display: compatible && backend_id == GAMMA_BACKEND,
+        changes_system_display,
         changes_monitor_hardware: false,
         compatible_with_game_policy: compatible && detected_components.is_empty(),
         rust_policy,

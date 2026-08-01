@@ -46,7 +46,7 @@ Cyberpunk bénéficie de la carte virtuelle, des providers de frameworks, du ré
 
 ## 20. Limitations restantes
 
-- Absence locale de l’éditeur de liens MSVC `link.exe` ; compilation native à confirmer par CI.
+- L’éditeur de liens MSVC `link.exe` manque sur la machine locale, mais les compilations natives Windows et Linux sont validées par la CI GitHub.
 - Pas encore de mode Simple/Avancé/Expert.
 - Pas de branches, archivage reconstructible, moteur FOMOD rejouable ou index plein texte.
 - Pas de preuve `Loaded` générique : elle dépend des logs/adaptateurs du jeu.
@@ -60,4 +60,4 @@ Cyberpunk bénéficie de la carte virtuelle, des providers de frameworks, du ré
 - 5 informations par fichier gagnant : chemin, gagnant, remplacés, raison, état ; SHA-256 et chemin physique restent repliés.
 - Rendu plafonné à 500 fichiers par recherche.
 - Trois compteurs post-update : jeux, profils, mods.
-- Tests et résultats finaux à compléter avec l’URL de CI avant publication.
+- CI de validation réussie : frontend, contrat API GameBanana et tests natifs Windows/Linux — [Verify ZAILON #31](https://github.com/N7T0-OF/ZAILON/actions/runs/30695669424).

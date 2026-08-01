@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.9.0 — Profils immuables et diagnostic transparent
+
+- Références exactes `packageId`/`versionId`/`contentHash` par profil.
+- Empreintes SHA-256 complètes : les contenus renommés sont reconnus, les versions différentes restent isolées.
+- Nouvelle vue « Vue ZAILON » des fichiers gagnants, remplacés et visibles au runtime.
+- Diagnostic « Pourquoi ce mod ne fonctionne pas ? » avec preuves et niveau de confiance.
+- Conflits expliqués en langage naturel avec choix explicite du gagnant.
+- Contrôle automatique jeux/profils/mods après une mise à jour ZAILON.
+- Profil stable protégé avec point de restauration avant déverrouillage.
+
 ## 1.7.3 — Lancement fluide et récupération après interruption
 
 - Déplace l’analyse, le hachage, la sauvegarde et la copie des mods sur une tâche

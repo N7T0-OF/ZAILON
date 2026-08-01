@@ -34,6 +34,20 @@ export interface BaseSnapshotResult {
   created: boolean
 }
 
+export interface UpdateStateCounts {
+  games: number
+  profiles: number
+  mods: number
+}
+
+export interface UpdateIntegrityReport {
+  ok: boolean
+  backupPath: string
+  before: UpdateStateCounts
+  current: UpdateStateCounts
+  issues: string[]
+}
+
 export interface Mo2ProfilePreview {
   name: string
   modCount: number
@@ -116,6 +130,11 @@ export interface PackageReferenceStatus {
   normalized: boolean
   deployable: boolean
   fileCount: number
+  versionId?: string
+  contentHash?: string
+  expectedVersionId?: string
+  expectedContentHash?: string
+  identityMatches: boolean
   errors: string[]
 }
 
@@ -133,6 +152,8 @@ export interface VirtualFileMapEntry {
   sourcePhysicalPath: string
   hash: string
   size: number
+  overriddenPackageIds: string[]
+  winnerReason: string
 }
 
 export interface ProfileDeploymentAudit {
@@ -772,6 +793,8 @@ export const native = {
   openExternalUrl: (url: string) => desktopOnly<void>('open_external_url', { url }),
   prepareUpdateBackup: (snapshot: string, currentVersion: string, targetVersion: string) =>
     desktopOnly<string>('prepare_update_backup', { snapshot, currentVersion, targetVersion }),
+  verifyUpdateState: (snapshot: string, currentVersion: string) =>
+    desktopOnly<UpdateIntegrityReport>('verify_update_state', { snapshot, currentVersion }),
   recordUpdateEvent: (event: string, version: string, message?: string) =>
     desktopOnly<void>('record_update_event', { event, version, message }),
   openUpdateLog: () => desktopOnly<void>('open_update_log'),

@@ -5,7 +5,7 @@ import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2Impor
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
 
-const APP_VERSION = '1.7.3'
+const APP_VERSION = '1.9.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 export const DEFAULT_LIQUID_GLASS: LiquidGlassSettings = { opacity: 0.86, blur: 18, darkTint: 0.58, saturation: 1.08, border: 0.12, reflection: 0.08, shadow: 0.5, animations: true, reduceWhenUnfocused: true, preferNative: true }
 
@@ -110,12 +110,36 @@ function scannedMods(nativeMods: NativeMod[], previous: Mod[]) {
   return decorateMods(nativeMods.map((mod, index) => nativeModToMod(mod, byPath.get(normalizedPath(mod.path)) || byName.get(mod.name.toLocaleLowerCase()), index)))
 }
 
+function exactProfileModState(mod: Mod, priority: number, previous?: ProfileModState): ProfileModState {
+  const providerReference = mod.externalReferences?.find(reference => reference.confirmedByUser || reference.confidence === 'exact')
+    || mod.externalReferences?.[0]
+  const contentHash = /^[0-9a-f]{64}$/i.test(mod.fingerprint || '') ? mod.fingerprint : undefined
+  return {
+    enabled: previous?.enabled ?? mod.enabled,
+    priority: previous?.priority ?? mod.priority ?? priority,
+    note: previous?.note ?? mod.note,
+    packageId: previous?.packageId || mod.stageId || mod.id,
+    versionId: previous?.versionId || mod.version || contentHash,
+    providerFileId: previous?.providerFileId || providerReference?.fileId,
+    contentHash: previous?.contentHash || contentHash,
+    sourceProvider: previous?.sourceProvider || providerReference?.provider || mod.source,
+  }
+}
+
 function statesFromMods(mods: Mod[]): Record<string, ProfileModState> {
-  return Object.fromEntries(mods.map((mod, index) => [mod.id, {
-    enabled: mod.enabled,
-    priority: mod.priority ?? index,
-    note: mod.note,
-  }]))
+  return Object.fromEntries(mods.map((mod, index) => [mod.id, exactProfileModState(mod, index)]))
+}
+
+function withExactProfileReferences(profile: Profile, catalog: Mod[]): Profile {
+  const byId = new Map(catalog.map(mod => [mod.id, mod]))
+  const byPackageId = new Map(catalog.flatMap(mod => (mod.stageId ? [[mod.stageId, mod] as const] : [])))
+  return {
+    ...profile,
+    modStates: Object.fromEntries(Object.entries(profile.modStates || {}).map(([stateId, state], index) => {
+      const mod = byId.get(stateId) || (state.packageId ? byPackageId.get(state.packageId) : undefined)
+      return [stateId, mod ? exactProfileModState(mod, index, state) : state]
+    })),
+  }
 }
 
 export function resolveProfileMods(game?: Game, profile?: Profile): Mod[] {
@@ -395,19 +419,19 @@ export function migratePersistedState(persisted: unknown) {
     const profiles = (game.profiles || []).map((rawProfile, index): Profile => {
       const legacyMods = rawProfile.mods || []
       const legacyByName = new Map(legacyMods.map(mod => [mod.name.toLocaleLowerCase(), mod]))
-      const modStates = rawProfile.modStates && Object.keys(rawProfile.modStates).length
+      const legacyStates = rawProfile.modStates && Object.keys(rawProfile.modStates).length
         ? rawProfile.modStates
         : Object.fromEntries(installedMods.map((mod, priority) => {
           const legacy = legacyMods.find(item => item.id === mod.id) || legacyByName.get(mod.name.toLocaleLowerCase())
           return [mod.id, { enabled: legacy?.enabled ?? mod.enabled, priority: legacy?.priority ?? priority, note: legacy?.note }]
         }))
-      return {
+      return withExactProfileReferences({
         ...rawProfile,
         mods: undefined,
-        modStates,
+        modStates: legacyStates,
         createdAt: rawProfile.createdAt || Date.now(),
         isDefault: rawProfile.isDefault ?? index === 0,
-      }
+      }, installedMods)
     })
     return { ...game, installedMods, profiles }
   }) : []
@@ -857,9 +881,6 @@ export const useStore = create<Store>()(persist((set, get) => ({
   completeMo2Import: async (gameId, result) => {
     const game = get().games.find(item => item.id === gameId)
     if (!game) return
-    const importedProfiles = await Promise.all(result.profiles.map(async profile =>
-      native.isDesktop() ? withProfilePaths(profile, await native.syncProfileState(gameId, profile)) : profile,
-    ))
     const [folderMods, stagedMods] = await Promise.all([
       game.modsPath ? native.scanMods(game.modsPath) : Promise.resolve([]),
       native.listStagedMods(gameId),
@@ -869,6 +890,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
       ...folderMods.filter(folderMod => !stagedMods.some(staged => staged.fingerprint === folderMod.fingerprint)),
     ]
     const catalog = scannedMods(nativeMods, game.installedMods)
+    const importedProfilesWithReferences = result.profiles.map(profile => withExactProfileReferences(profile, catalog))
+    const importedProfiles = await Promise.all(importedProfilesWithReferences.map(async profile =>
+      native.isDesktop() ? withProfilePaths(profile, await native.syncProfileState(gameId, profile)) : profile,
+    ))
     const importedIds = new Set(importedProfiles.map(profile => profile.id))
     const executables = new Map((game.managedExecutables || []).map(item => [normalizedPath(item.path), item]))
     result.managedExecutables.forEach(item => executables.set(normalizedPath(item.path), item))
@@ -906,10 +931,11 @@ export const useStore = create<Store>()(persist((set, get) => ({
       const nextStates = Object.fromEntries(catalog.flatMap((mod, index) => {
         const stagedReference = mod.storage === 'staged' && mod.profileIds?.includes(profile.id)
         if (mod.storage === 'staged' && !stagedReference) return []
-        return [[mod.id, previousStates[mod.id] || {
+        const previousState = previousStates[mod.id]
+        return [[mod.id, exactProfileModState(mod, index, previousState || {
           enabled: mod.storage === 'staged' ? mod.deploymentStatus !== 'stored' : mod.enabled,
           priority: index,
-        }]]
+        })]]
       }))
       set(state => ({
         games: state.games.map(item => item.id !== game.id ? item : {
@@ -1463,9 +1489,15 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const { game } = selected(get())
     const profile = game?.profiles.find(item => item.id === profileId)
     if (!game || !profile) return
-    const next = { ...profile, locked: !profile.locked }
-    set(state => ({ games: updateProfile(state.games, game.id, profileId, () => next), notice: `Profil ${next.locked ? 'verrouillé' : 'déverrouillé'} : ${next.name}.` }))
-    if (native.isDesktop()) void native.syncProfileState(game.id, next).catch(error => set({ notice: asError(error) }))
+    if (profile.locked && !window.confirm(`Déverrouiller le profil stable « ${profile.name} » ?\n\nZAILON enregistrera d’abord un point de restauration du manifeste. Les paquets physiques ne seront pas modifiés.`)) return
+    const next = { ...profile, locked: !profile.locked, stableSince: profile.locked ? undefined : Date.now() }
+    set(state => ({ games: updateProfile(state.games, game.id, profileId, () => next), notice: next.locked ? `Profil marqué comme stable : ${next.name}. Les mises à jour et changements sont protégés.` : `Point de restauration créé avant déverrouillage de ${next.name}.` }))
+    if (native.isDesktop()) void (async () => {
+      if (profile.locked) await native.applyProfileTransaction(game.id, createId(), [cloneProfile(profile)], [cloneProfile(profile)])
+      await native.syncProfileState(game.id, next)
+    })().catch(error => {
+      set(state => ({ games: updateProfile(state.games, game.id, profileId, () => profile), notice: `Protection conservée : ${asError(error)}` }))
+    })
   },
   openProfileDirectory: async (profileId, kind = 'root') => {
     const { game } = selected(get())

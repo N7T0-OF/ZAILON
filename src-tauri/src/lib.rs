@@ -94,6 +94,24 @@ struct BaseSnapshotResult {
     created: bool,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateStateCounts {
+    games: u64,
+    profiles: u64,
+    mods: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateIntegrityReport {
+    ok: bool,
+    backup_path: String,
+    before: UpdateStateCounts,
+    current: UpdateStateCounts,
+    issues: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Mo2ProfilePreview {
@@ -203,6 +221,11 @@ struct PackageReferenceStatus {
     normalized: bool,
     deployable: bool,
     file_count: u64,
+    version_id: Option<String>,
+    content_hash: Option<String>,
+    expected_version_id: Option<String>,
+    expected_content_hash: Option<String>,
+    identity_matches: bool,
     errors: Vec<String>,
 }
 
@@ -224,6 +247,8 @@ struct VirtualFileMapEntry {
     source_physical_path: String,
     hash: String,
     size: u64,
+    overridden_package_ids: Vec<String>,
+    winner_reason: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2142,41 +2167,44 @@ fn normalized_name(path: &Path) -> String {
 }
 
 fn fingerprint_path(path: &Path) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    normalized_name(path).to_ascii_lowercase().hash(&mut hasher);
+    let mut hasher = Sha256::new();
     if path.is_file() {
-        path.extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .hash(&mut hasher);
-        fs::metadata(path)
-            .map(|value| value.len())
-            .unwrap_or(0)
-            .hash(&mut hasher);
+        if let Ok(hash) = file_sha256(path) {
+            hasher.update(hash.as_bytes());
+        }
     } else {
-        for entry in WalkDir::new(path)
+        let mut files = WalkDir::new(path)
             .follow_links(false)
             .into_iter()
             .filter_map(Result::ok)
             .filter(|entry| entry.file_type().is_file())
-            .take(50_000)
-        {
-            if let Ok(relative) = entry.path().strip_prefix(path) {
+            .filter_map(|entry| {
+                let relative = entry.path().strip_prefix(path).ok()?.to_path_buf();
+                Some((relative, entry.path().to_path_buf()))
+            })
+            .collect::<Vec<_>>();
+        files.sort_by(|left, right| {
+            left.0
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .cmp(&right.0.to_string_lossy().to_ascii_lowercase())
+        });
+        for (relative, physical) in files {
+            hasher.update(
                 relative
                     .to_string_lossy()
                     .replace('\\', "/")
                     .to_ascii_lowercase()
-                    .hash(&mut hasher);
+                    .as_bytes(),
+            );
+            hasher.update([0]);
+            if let Ok(hash) = file_sha256(&physical) {
+                hasher.update(hash.as_bytes());
             }
-            entry
-                .metadata()
-                .map(|value| value.len())
-                .unwrap_or(0)
-                .hash(&mut hasher);
+            hasher.update([0]);
         }
     }
-    format!("{:016x}", hasher.finish())
+    format!("{:x}", hasher.finalize())
 }
 
 fn metadata_files(path: &Path) -> Vec<PathBuf> {
@@ -2315,19 +2343,20 @@ fn inspect_native_mod(path: &Path) -> NativeMod {
     let files = mod_files(path);
     let (manifests, source_url, version) = mod_metadata(path);
     let framework = detect_framework(path, &files);
+    let fingerprint = fingerprint_path(path);
     let file_name = path
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or_default();
     NativeMod {
-        id: fingerprint_path(path),
+        id: fingerprint.clone(),
         name: normalized_name(path),
         path: path.to_string_lossy().to_string(),
         enabled: !file_name.starts_with("DISABLED_"),
         mod_type: mod_type(path),
         size_bytes: entry_size(path),
         files,
-        fingerprint: fingerprint_path(path),
+        fingerprint,
         framework,
         manifests,
         source_url,
@@ -6619,6 +6648,7 @@ fn package_manifest_entries(
             .to_ascii_lowercase()
             .cmp(&right.game_relative_path.to_ascii_lowercase())
     });
+    let content_hash = package_entries_content_hash(&entries);
     let providers = framework_providers_from_entries(package_id, &entries, true, false);
     if persist {
         let package_manifest_path = stage.join("package-manifest.json");
@@ -6628,6 +6658,7 @@ fn package_manifest_entries(
                 "schemaVersion": 2,
                 "packageId": package_id,
                 "gameId": game_id,
+                "contentHash": content_hash.clone(),
                 "storage": {
                     "type": "InternalStore",
                     "path": stage,
@@ -6646,6 +6677,20 @@ fn package_manifest_entries(
                 .map_err(to_error)?;
         manifest["packageManifestPath"] =
             serde_json::json!(package_manifest_path.to_string_lossy());
+        manifest["contentHash"] = serde_json::json!(content_hash.clone());
+        if manifest.get("sourceFingerprint").is_none() {
+            let source_fingerprint = manifest
+                .get("fingerprint")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            manifest["sourceFingerprint"] = source_fingerprint;
+        }
+        let version_id = manifest
+            .get("version")
+            .filter(|value| value.is_string())
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!(content_hash.clone()));
+        manifest["versionId"] = version_id;
         manifest["normalized"] = serde_json::json!(true);
         manifest["deployableFiles"] =
             serde_json::json!(entries.iter().filter(|entry| entry.deployable).count());
@@ -6661,6 +6706,65 @@ fn package_manifest_entries(
         write_json_atomic(&manifest_path, &manifest)?;
     }
     Ok((entries, providers))
+}
+
+fn package_entries_content_hash(entries: &[PackageFileEntry]) -> String {
+    let mut content_hasher = Sha256::new();
+    for entry in entries.iter().filter(|entry| entry.deployable) {
+        content_hasher.update(entry.game_relative_path.to_ascii_lowercase().as_bytes());
+        content_hasher.update([0]);
+        content_hasher.update(entry.hash.as_bytes());
+        content_hasher.update([0]);
+    }
+    format!("{:x}", content_hasher.finalize())
+}
+
+#[derive(Debug, Clone, Default)]
+struct ProfilePackageIdentity {
+    version_id: Option<String>,
+    content_hash: Option<String>,
+}
+
+fn profile_package_identities(
+    app: &AppHandle,
+    game_id: &str,
+    profile_id: &str,
+) -> HashMap<String, ProfilePackageIdentity> {
+    let Ok(path) = profile_directory(app, game_id, profile_id) else {
+        return HashMap::new();
+    };
+    let Ok(payload) = fs::read(path.join("profile.json")) else {
+        return HashMap::new();
+    };
+    let Ok(profile) = serde_json::from_slice::<serde_json::Value>(&payload) else {
+        return HashMap::new();
+    };
+    profile
+        .get("modStates")
+        .and_then(|value| value.as_object())
+        .into_iter()
+        .flatten()
+        .map(|(state_id, state)| {
+            let package_id = state
+                .get("packageId")
+                .and_then(|value| value.as_str())
+                .unwrap_or(state_id)
+                .to_string();
+            (
+                package_id,
+                ProfilePackageIdentity {
+                    version_id: state
+                        .get("versionId")
+                        .and_then(|value| value.as_str())
+                        .map(ToOwned::to_owned),
+                    content_hash: state
+                        .get("contentHash")
+                        .and_then(|value| value.as_str())
+                        .map(ToOwned::to_owned),
+                },
+            )
+        })
+        .collect()
 }
 
 fn profile_hidden_rules(
@@ -6705,6 +6809,7 @@ fn build_virtual_profile_map(
     safe_game_id(game_id)?;
     safe_game_id(profile_id)?;
     let hidden = profile_hidden_rules(app, game_id, profile_id);
+    let expected_identities = profile_package_identities(app, game_id, profile_id);
     let rules = conflict_rules
         .iter()
         .map(|rule| {
@@ -6719,6 +6824,10 @@ fn build_virtual_profile_map(
     let mut all_providers = Vec::new();
     let mut diagnostics = Vec::new();
     for package_id in enabled_mod_ids {
+        let expected_identity = expected_identities
+            .get(package_id)
+            .cloned()
+            .unwrap_or_default();
         let mut status = PackageReferenceStatus {
             profile_id: profile_id.into(),
             package_id: package_id.clone(),
@@ -6730,6 +6839,11 @@ fn build_virtual_profile_map(
             normalized: false,
             deployable: false,
             file_count: 0,
+            version_id: None,
+            content_hash: None,
+            expected_version_id: expected_identity.version_id,
+            expected_content_hash: expected_identity.content_hash,
+            identity_matches: true,
             errors: Vec::new(),
         };
         let Some(stage) = staged_package_directory(app, game_id, package_id) else {
@@ -6744,6 +6858,19 @@ fn build_virtual_profile_map(
         status.source_still_available = stage.join("content").is_dir();
         status.manifest_exists =
             stage.join("manifest.json").is_file() && stage.join("package-manifest.json").is_file();
+        if let Ok(payload) = fs::read(stage.join("manifest.json")) {
+            if let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&payload) {
+                status.version_id = manifest
+                    .get("versionId")
+                    .or_else(|| manifest.get("version"))
+                    .and_then(|value| value.as_str())
+                    .map(ToOwned::to_owned);
+                status.content_hash = manifest
+                    .get("contentHash")
+                    .and_then(|value| value.as_str())
+                    .map(ToOwned::to_owned);
+            }
+        }
         if persist_manifests {
             let quarantine_root = update_data_root(app)?.join("quarantine");
             let recovered = recover_framework_runtimes_from_quarantine(&stage, &quarantine_root)?;
@@ -6757,6 +6884,24 @@ fn build_virtual_profile_map(
         }
         match package_manifest_entries(&stage, game_id, persist_manifests) {
             Ok((entries, providers)) => {
+                let calculated_content_hash = package_entries_content_hash(&entries);
+                status.content_hash = Some(calculated_content_hash.clone());
+                if status.version_id.is_none() {
+                    status.version_id = Some(calculated_content_hash.clone());
+                }
+                let version_matches = status
+                    .expected_version_id
+                    .as_ref()
+                    .map_or(true, |expected| {
+                        status.version_id.as_ref() == Some(expected)
+                    });
+                let hash_matches = status
+                    .expected_content_hash
+                    .as_ref()
+                    .map_or(true, |expected| {
+                        expected.eq_ignore_ascii_case(&calculated_content_hash)
+                    });
+                status.identity_matches = version_matches && hash_matches;
                 status.files_exist = !entries.is_empty();
                 status.file_count = entries.iter().filter(|entry| entry.deployable).count() as u64;
                 status.normalized = entries.iter().all(|entry| {
@@ -6765,7 +6910,8 @@ fn build_virtual_profile_map(
                         .to_ascii_lowercase()
                         .starts_with("root/")
                 });
-                status.deployable = status.file_count > 0 && status.normalized;
+                status.deployable =
+                    status.file_count > 0 && status.normalized && status.identity_matches;
                 if persist_manifests {
                     status.manifest_exists = true;
                 }
@@ -6778,6 +6924,12 @@ fn build_virtual_profile_map(
                     status
                         .errors
                         .push("Un chemin de jeu conserve un préfixe de stockage.".into());
+                }
+                if !status.identity_matches {
+                    status.errors.push(
+                        "La version physique ne correspond pas à la référence immuable du profil."
+                            .into(),
+                    );
                 }
                 all_providers.extend(providers);
                 for entry in entries.into_iter().filter(|entry| entry.deployable) {
@@ -6801,20 +6953,29 @@ fn build_virtual_profile_map(
         if candidates.len() > 1 {
             conflicts += 1;
         }
-        let winner = rules
-            .get(&path)
-            .and_then(|winner_id| {
-                candidates
-                    .iter()
-                    .find(|candidate| candidate.0 == *winner_id)
-            })
+        let explicit_winner = rules.get(&path).copied();
+        let winner = explicit_winner
+            .and_then(|winner_id| candidates.iter().find(|candidate| candidate.0 == winner_id))
             .unwrap_or_else(|| candidates.last().expect("non-empty virtual candidates"));
+        let overridden_package_ids = candidates
+            .iter()
+            .filter(|candidate| candidate.0 != winner.0)
+            .map(|candidate| candidate.0.clone())
+            .collect::<Vec<_>>();
         entries.push(VirtualFileMapEntry {
             game_relative_path: winner.1.game_relative_path.clone(),
             package_id: winner.0.clone(),
             source_physical_path: winner.1.source_physical_path.clone(),
             hash: winner.1.hash.clone(),
             size: winner.1.size,
+            overridden_package_ids,
+            winner_reason: if explicit_winner.is_some() {
+                "Règle explicite du profil".into()
+            } else if candidates.len() > 1 {
+                "Priorité la plus élevée dans le profil".into()
+            } else {
+                "Seul fournisseur du fichier".into()
+            },
         });
     }
     entries.sort_by(|left, right| {
@@ -6872,7 +7033,17 @@ fn reconcile_staged_profile_reference(
     safe_game_id(profile_id)?;
     let referenced = states
         .as_object()
-        .map(|items| items.keys().map(String::as_str).collect::<HashSet<_>>())
+        .map(|items| {
+            items
+                .iter()
+                .map(|(state_id, state)| {
+                    state
+                        .get("packageId")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or(state_id)
+                })
+                .collect::<HashSet<_>>()
+        })
         .unwrap_or_default();
     for root in staged_storage_roots(app, game_id)? {
         for entry in fs::read_dir(root)
@@ -6929,7 +7100,9 @@ fn staged_package_by_fingerprint(root: &Path, fingerprint: &str) -> Option<PathB
             let manifest = fs::read(&manifest_path)
                 .ok()
                 .and_then(|payload| serde_json::from_slice::<serde_json::Value>(&payload).ok())?;
-            (manifest.get("fingerprint").and_then(|value| value.as_str()) == Some(fingerprint))
+            ["sourceFingerprint", "fingerprint", "contentHash"]
+                .into_iter()
+                .any(|key| manifest.get(key).and_then(|value| value.as_str()) == Some(fingerprint))
                 .then(|| entry.path())
         })
 }
@@ -6972,7 +7145,9 @@ fn staged_native_mod(stage_directory: &Path) -> Result<NativeMod, String> {
         mod_type: inspected.mod_type,
         size_bytes: inspected.size_bytes,
         files: inspected.files,
-        fingerprint: text("fingerprint").unwrap_or(inspected.fingerprint),
+        fingerprint: text("contentHash")
+            .or_else(|| text("fingerprint"))
+            .unwrap_or(inspected.fingerprint),
         framework: text("framework").unwrap_or(inspected.framework),
         manifests: inspected.manifests,
         source_url: text("sourceUrl").or(inspected.source_url),
@@ -7011,7 +7186,23 @@ fn list_staged_mods(app: AppHandle, game_id: String) -> Result<Vec<NativeMod>, S
                 .collect::<Vec<_>>()
         })
         .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| staged_native_mod(&entry.path()).ok())
+        .filter_map(|entry| {
+            let stage = entry.path();
+            let has_content_identity = fs::read(stage.join("manifest.json"))
+                .ok()
+                .and_then(|payload| serde_json::from_slice::<serde_json::Value>(&payload).ok())
+                .and_then(|manifest| {
+                    manifest
+                        .get("contentHash")
+                        .and_then(|value| value.as_str())
+                        .map(|value| !value.is_empty())
+                })
+                .unwrap_or(false);
+            if !has_content_identity && package_manifest_entries(&stage, &game_id, true).is_err() {
+                return None;
+            }
+            staged_native_mod(&stage).ok()
+        })
         .collect::<Vec<_>>();
     mods.sort_by(|left, right| {
         left.name
@@ -9183,6 +9374,7 @@ fn import_mods_with_staging(
             "id": stage_id,
             "name": inspected.name.clone(),
             "fingerprint": inspected.fingerprint.clone(),
+            "sourceFingerprint": inspected.fingerprint.clone(),
             "framework": if explicit_framework == "Unknown" { inspected.framework.clone() } else { explicit_framework },
             "version": inspected.version.clone(),
             "sourceUrl": inspected.source_url.clone(),
@@ -12751,6 +12943,115 @@ fn prepare_update_backup(
     Ok(backup.to_string_lossy().to_string())
 }
 
+fn persisted_state_counts(snapshot: &str) -> Result<UpdateStateCounts, String> {
+    let payload: serde_json::Value = serde_json::from_str(snapshot)
+        .map_err(|_| "La sauvegarde de configuration contient un JSON invalide.".to_string())?;
+    let state = payload.get("state").unwrap_or(&payload);
+    let games = state
+        .get("games")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    Ok(UpdateStateCounts {
+        games: games.len() as u64,
+        profiles: games
+            .iter()
+            .map(|game| {
+                game.get("profiles")
+                    .and_then(|value| value.as_array())
+                    .map(|items| items.len() as u64)
+                    .unwrap_or(0)
+            })
+            .sum(),
+        mods: games
+            .iter()
+            .map(|game| {
+                game.get("installedMods")
+                    .and_then(|value| value.as_array())
+                    .map(|items| items.len() as u64)
+                    .unwrap_or(0)
+            })
+            .sum(),
+    })
+}
+
+#[tauri::command]
+fn verify_update_state(
+    app: AppHandle,
+    snapshot: String,
+    current_version: String,
+) -> Result<UpdateIntegrityReport, String> {
+    const MAX_SNAPSHOT_BYTES: usize = 25 * 1024 * 1024;
+    if snapshot.len() > MAX_SNAPSHOT_BYTES {
+        return Err("La configuration active dépasse la limite de vérification.".into());
+    }
+    let root = update_data_root(&app)?;
+    let backups = root.join("update-backups");
+    let mut candidates = fs::read_dir(&backups)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| {
+            let metadata = fs::read(entry.path().join("metadata.json"))
+                .ok()
+                .and_then(|payload| serde_json::from_slice::<serde_json::Value>(&payload).ok())?;
+            (metadata
+                .get("targetVersion")
+                .and_then(|value| value.as_str())
+                == Some(current_version.as_str()))
+            .then_some(entry.path())
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+    let backup = candidates
+        .into_iter()
+        .next()
+        .ok_or_else(|| "Aucune sauvegarde correspondant à cette mise à jour.".to_string())?;
+    let before_payload = fs::read_to_string(backup.join("zailon-store.json")).map_err(to_error)?;
+    let before = persisted_state_counts(&before_payload)?;
+    let current = persisted_state_counts(&snapshot)?;
+    let mut issues = Vec::new();
+    if current.games != before.games {
+        issues.push(format!(
+            "Jeux : {} avant, {} après.",
+            before.games, current.games
+        ));
+    }
+    if current.profiles != before.profiles {
+        issues.push(format!(
+            "Profils : {} avant, {} après.",
+            before.profiles, current.profiles
+        ));
+    }
+    if current.mods != before.mods {
+        issues.push(format!(
+            "Mods : {} avant, {} après.",
+            before.mods, current.mods
+        ));
+    }
+    let report = UpdateIntegrityReport {
+        ok: issues.is_empty(),
+        backup_path: backup.to_string_lossy().to_string(),
+        before,
+        current,
+        issues,
+    };
+    append_update_log(
+        &root,
+        serde_json::json!({
+            "at": unix_timestamp(),
+            "event": "post-update-integrity-check",
+            "version": current_version,
+            "result": if report.ok { "ok" } else { "mismatch" },
+            "before": report.before.clone(),
+            "current": report.current.clone(),
+            "issues": report.issues.clone(),
+        }),
+    )?;
+    Ok(report)
+}
+
 #[tauri::command]
 fn record_update_event(
     app: AppHandle,
@@ -14050,6 +14351,50 @@ mod tests {
     }
 
     #[test]
+    fn package_fingerprint_is_content_strict_and_ignores_the_root_folder_name() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-package-identity-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let renamed_a = root.join("Friendly Mod Name");
+        let renamed_b = root.join("Renamed Copy");
+        fs::create_dir_all(renamed_a.join("r6/scripts")).expect("first content tree");
+        fs::create_dir_all(renamed_b.join("r6/scripts")).expect("second content tree");
+        fs::write(renamed_a.join("r6/scripts/main.reds"), b"version-one").expect("first content");
+        fs::write(renamed_b.join("r6/scripts/main.reds"), b"version-one")
+            .expect("same renamed content");
+        assert_eq!(fingerprint_path(&renamed_a), fingerprint_path(&renamed_b));
+
+        fs::write(renamed_b.join("r6/scripts/main.reds"), b"version-two")
+            .expect("same-size changed content");
+        assert_ne!(fingerprint_path(&renamed_a), fingerprint_path(&renamed_b));
+        fs::remove_dir_all(root).expect("remove package identity test");
+    }
+
+    #[test]
+    fn post_update_counts_games_profiles_and_packages_without_private_fields() {
+        let snapshot = serde_json::json!({
+            "state": {
+                "games": [
+                    { "profiles": [{ "id": "a" }, { "id": "b" }], "installedMods": [{ "id": "m1" }] },
+                    { "profiles": [{ "id": "c" }], "installedMods": [{ "id": "m2" }, { "id": "m3" }] }
+                ],
+                "nexusApiKey": "must-not-be-read"
+            }
+        })
+        .to_string();
+        assert_eq!(
+            persisted_state_counts(&snapshot).expect("valid persisted state"),
+            UpdateStateCounts {
+                games: 2,
+                profiles: 3,
+                mods: 3,
+            }
+        );
+    }
+
+    #[test]
     fn duplicate_verification_hashes_the_complete_content_tree() {
         let root =
             std::env::temp_dir().join(format!("zailon-dedup-hash-test-{}", unix_timestamp()));
@@ -14289,6 +14634,7 @@ pub fn run() {
             background_tasks,
             cancel_background_task,
             prepare_update_backup,
+            verify_update_state,
             record_update_event,
             open_update_log,
             visual_profiles::visual_backend_report,

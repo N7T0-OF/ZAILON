@@ -28,12 +28,12 @@ export interface LiquidGlassSettings {
   reduceWhenUnfocused: boolean
   preferNative: boolean
 }
-export type GameTab = 'overview' | 'mods' | 'profiles' | 'downloads' | 'conflicts' | 'tools' | 'visuals' | 'backups' | 'appearance' | 'settings'
+export type GameTab = 'overview' | 'mods' | 'profiles' | 'downloads' | 'files' | 'conflicts' | 'tools' | 'visuals' | 'backups' | 'appearance' | 'settings'
 export type LoaderType = 'GIMI' | 'ZZMI' | 'SRMI' | 'WWMI' | 'EFMI' | 'UE5' | 'BepInEx' | 'ASI' | 'CLEO' | 'REF' | 'MelonLoader' | 'DLL' | 'Archive' | 'Folder' | 'Manual'
 
 export type MatchConfidence = 'exact' | 'high' | 'medium' | 'low' | 'unknown'
 export type ModUpdateStatus = 'unknown' | 'checking' | 'up-to-date' | 'available' | 'downloaded' | 'manual' | 'error'
-export type ModDeploymentStatus = 'imported' | 'stored' | 'validated' | 'enabled' | 'deployed' | 'runtime-visible' | 'loaded-by-game' | 'failed' | 'unknown'
+export type ModDeploymentStatus = 'downloaded' | 'imported' | 'stored' | 'validated' | 'enabled' | 'deployment-pending' | 'deployed' | 'runtime-visible' | 'loaded-by-game' | 'warning' | 'failed' | 'unknown'
 
 export interface ExternalModReference {
   provider: Exclude<Platform, 'ayakamods'>
@@ -91,7 +91,13 @@ export interface ProfileModState {
   enabled: boolean
   priority: number
   note?: string
+  /** Immutable package directory selected by this profile. */
+  packageId?: string
+  /** Provider or content-derived version identifier selected by this profile. */
   versionId?: string
+  providerFileId?: string
+  contentHash?: string
+  sourceProvider?: string
 }
 
 export interface ModSeparator {
@@ -128,6 +134,8 @@ export interface Profile {
   description?: string
   color?: string
   locked?: boolean
+  stableSince?: number
+  lastSuccessfulLaunch?: number
   isDefault?: boolean
   launchArgs?: string
   runtime?: string

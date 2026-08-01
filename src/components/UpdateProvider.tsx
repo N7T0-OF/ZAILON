@@ -60,6 +60,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const [update, setUpdate] = useState<UpdateMetadata>()
   const [progress, setProgress] = useState<UpdateProgress>(emptyProgress)
   const [error, setError] = useState<string>()
+  const [integrity, setIntegrity] = useState<Awaited<ReturnType<typeof native.verifyUpdateState>>>()
   const automaticCheckStarted = useRef(false)
   const releaseNotesShown = useRef(false)
 
@@ -142,6 +143,8 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     if (!lastInstalledUpdate || lastInstalledUpdate.version !== appVersion || releaseNotesShown.current) return
     releaseNotesShown.current = true
     void native.recordUpdateEvent('update-confirmed-after-restart', appVersion, 'Updated version launched successfully.')
+    const snapshot = window.localStorage.getItem('zailon-v1') ?? '{}'
+    void native.verifyUpdateState(snapshot, appVersion).then(setIntegrity).catch(() => setIntegrity(undefined))
     setUpdate({ version: lastInstalledUpdate.version, currentVersion: appVersion, date: lastInstalledUpdate.date, notes: lastInstalledUpdate.notes })
     setStatus('available')
   }, [lastInstalledUpdate])
@@ -178,7 +181,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
             </div>
 
             {showingReleaseNotes ? (
-              <div className="mt-4 rounded-lg bg-white/[0.035] p-3 text-xs leading-relaxed text-white/65 whitespace-pre-wrap">{update?.notes || 'No release notes were supplied for this update.'}</div>
+              <div className="mt-4 space-y-3"><div className="rounded-lg bg-white/[0.035] p-3 text-xs leading-relaxed text-white/65 whitespace-pre-wrap">{update?.notes || 'No release notes were supplied for this update.'}</div>{integrity && <div className={`rounded-lg border p-3 text-xs ${integrity.ok ? 'border-emerald-300/15 bg-emerald-300/[0.04] text-emerald-100/70' : 'border-red-300/15 bg-red-300/[0.04] text-red-100/70'}`}><p className="font-semibold">{integrity.ok ? 'Configuration vérifiée après mise à jour' : 'Incohérence détectée après mise à jour'}</p><p className="mt-1">Jeux : {integrity.current.games}/{integrity.before.games} · Profils : {integrity.current.profiles}/{integrity.before.profiles} · Mods : {integrity.current.mods}/{integrity.before.mods}</p>{integrity.issues.length > 0 && <p className="mt-2">{integrity.issues.join(' ')}</p>}</div>}</div>
             ) : status === 'available' ? (
               <p className="mt-4 text-xs leading-relaxed text-white/65">A signed package matching this operating system and architecture is ready. Your games, mod folders, profiles and settings are backed up before installation.</p>
             ) : status === 'error' ? (

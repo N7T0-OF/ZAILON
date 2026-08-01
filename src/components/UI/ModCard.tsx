@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDown, ArrowUp, ExternalLink, FolderOpen, RefreshCw, StickyNote, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowUp, ExternalLink, FolderOpen, HelpCircle, RefreshCw, StickyNote, Trash2 } from 'lucide-react'
 import type { MouseEvent } from 'react'
 import { Mod } from '../../types'
 import { LOADER_COLORS, PLATFORM_COLORS } from '../../utils'
@@ -12,13 +12,14 @@ interface ModCardProps {
   onMoveUp?: () => void
   onMoveDown?: () => void
   onNoteChange?: (note: string) => void
+  onDiagnose?: () => void
   selected?: boolean
   onSelect?: (event: MouseEvent<HTMLInputElement>) => void
 }
 
 const conflictLabel = { overwrites: 'Écrase', overwritten: 'Écrasé', mixed: 'Conflit mixte' } as const
 
-export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteChange, selected, onSelect }: ModCardProps) {
+export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteChange, onDiagnose, selected, onSelect }: ModCardProps) {
   const loaderColor = LOADER_COLORS[mod.loader] || '#8888aa'
   const platformColor = mod.source ? PLATFORM_COLORS[mod.source] : '#8888aa'
   const sensitiveDiagnostic = (mod.diagnostics || []).find(item => item.toLocaleLowerCase().includes('sensible'))
@@ -56,6 +57,7 @@ export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteC
 
       {/* Actions */}
       <div className="flex items-center gap-1.5 flex-shrink-0">
+        {onDiagnose && <button onClick={onDiagnose} title="Pourquoi ce mod ne fonctionne pas ?" className="opacity-0 transition-opacity group-hover:opacity-100"><HelpCircle size={12} className="text-white/35 hover:text-gold" /></button>}
         {mod.autoUpdate && (
           <RefreshCw size={10} className="text-gold/40" />
         )}

@@ -155,15 +155,17 @@ export function HomeView() {
               <p className="mt-2 text-[11px] leading-relaxed text-white/35">La session se termine quand le jeu se ferme ; ZAILON restaure alors automatiquement le déploiement et le remapping.</p>
             </div>
           )}
-          {activeSession && (activeSession.state === 'WaitingForGame' || activeSession.state === 'LauncherStarted') && (
-            <div className="mt-4 max-w-md rounded-xl border border-amber-300/20 bg-amber-300/[0.05] p-3 backdrop-blur-md">
+          {activeSession && (activeSession.state === 'WaitingForGame' || activeSession.state === 'LauncherStarted' || activeSession.state === 'WaitingForElevation') && (
+            <div className={`mt-4 max-w-md rounded-xl border p-3 backdrop-blur-md ${activeSession.state === 'WaitingForElevation' ? 'border-sky-300/20 bg-sky-300/[0.05]' : 'border-amber-300/20 bg-amber-300/[0.05]'}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="font-mono text-[11px] uppercase tracking-widest text-amber-100/90">En attente du jeu</p>
-                  <p className="mt-1 text-[11px] text-white/52">Le launcher a pris le relais (Steam / launcher officiel). Le déploiement et le remapping restent prêts.</p>
+                  <p className={`font-mono text-[11px] uppercase tracking-widest ${activeSession.state === 'WaitingForElevation' ? 'text-sky-200/90' : 'text-amber-100/90'}`}>{activeSession.state === 'WaitingForElevation' ? 'Autorisation Windows requise' : 'En attente du jeu'}</p>
+                  <p className="mt-1 text-[11px] text-white/52">{activeSession.state === 'WaitingForElevation'
+                    ? 'Le launcher demande une élévation. Acceptez la fenêtre UAC pour continuer — ZAILON ne la contourne jamais.'
+                    : 'Le launcher a pris le relais (Steam / launcher officiel). Le déploiement et le remapping restent prêts.'}</p>
                 </div>
                 {activeSession.reattachUntil
-                  ? <span className="flex items-center gap-1.5 rounded-full border border-amber-300/25 bg-amber-300/10 px-2.5 py-1 text-[10px] font-semibold text-amber-100/85"><Clock3 size={10} />{Math.max(0, Math.ceil((activeSession.reattachUntil - Date.now()) / 1000))} s</span>
+                  ? <span className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${activeSession.state === 'WaitingForElevation' ? 'border-sky-300/25 bg-sky-300/10 text-sky-100/85' : 'border-amber-300/25 bg-amber-300/10 text-amber-100/85'}`}><Clock3 size={10} />{Math.max(0, Math.ceil((activeSession.reattachUntil - Date.now()) / 1000))} s</span>
                   : <span className="rounded-full border border-amber-300/25 bg-amber-300/10 px-2.5 py-1 text-[10px] font-semibold text-amber-100/85">Rattachement</span>}
               </div>
             </div>

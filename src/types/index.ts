@@ -314,7 +314,7 @@ export interface GameLaunchAdapter {
   launchChainStages: string[]
 }
 
-export type GameSessionState = 'Preparing' | 'LauncherStarted' | 'WaitingForGame' | 'GameDetected' | 'GameRunning' | 'GameLost' | 'Reattaching' | 'Ending' | 'Ended' | 'Failed'
+export type GameSessionState = 'Preparing' | 'LauncherStarted' | 'WaitingForElevation' | 'WaitingForGame' | 'GameDetected' | 'GameRunning' | 'GameLost' | 'Reattaching' | 'Ending' | 'Ended' | 'Failed'
 
 export type SessionSource = 'zailon' | 'manual' | 'reattached' | 'recovered'
 

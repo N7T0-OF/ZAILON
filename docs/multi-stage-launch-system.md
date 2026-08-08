@@ -108,17 +108,57 @@ Cyberpunk = `DirectProcess`/`SteamLauncher` ; FiveM = `ExternalLauncher`/`MultiS
 
 ## Contrat natif (Phase 6 Rust)
 
-- L'événement `game-process-stopped` ne doit plus suffire : la sortie du PID
-  initial déclenche `WaitingForGame`, pas la fin de session.
-- Nouveau service natif `GamePresenceScanner` (polling adaptatif : 1-3 s hors
-  session, 250-500 ms pendant le rattachement, 1 s ou événements en jeu) qui émet
-  `game-process-detected` avec `{ gameId, processName, processPath, confidence }`.
-- `DetachedProcessReattacher` : corrélation temporelle + chemin sous l'installation
-  + signature + fenêtre (les signatures sont mémorisées par
-  `ProcessSignatureLearning`, jamais uniquement le PID).
-- Voir `docs/input-backends-rust-design.md` pour la boucle de validation (PR →
-  `verify-native.yml` ou machine avec MSVC) : le code natif ne doit pas être posé
-  dans `src-tauri` sans cette validation.
+### Événements (Tauri, canal `event`)
+
+| Événement | Payload | Émis quand | Effet frontend |
+|---|---|---|---|
+| `game-process-stopped` (existant) | `{ pid, gameId, gameName, profileId, exitCode?, cleanupError? }` | le processus **spawné par ZAILON** se termine | `onGameProcessStopped` : launcher-based → `WaitingForGame`/`WaitingForElevation` ; direct → fin de session |
+| `game-process-detected` (nouveau) | `{ gameId, gameName, processName, processPath?, confidence?, profileId? }` | un processus candidat est rattaché avec confiance ≥ seuil | `sessionGameDetected` → `GameRunning` + toast « session reconnectée » |
+| `elevation-requested` (nouveau) | `{ gameId, processName }` | un launcher déclenche une élévation UAC | `WaitingForElevation` (message UAC, jamais contourné) |
+| `game-session-ended` (nouveau) | `{ gameId, processName?, exitCode? }` | aucun processus jeu reconnu + fenêtres fermées + délai de grâce écoulé | `endSession` |
+
+Les types TS correspondants sont déjà déclarés (`GameProcessEvent`,
+`GameProcessDetectedEvent`) ; `GameProcessDetectedEvent` est écouté dans `App.tsx`
+mais n'est pas encore émis par le backend natif.
+
+### Score de correspondance (`ProcessMatchScore`)
+
+Score 0-100, addition des critères pondérés :
+
+- `installationRoot` (chemin du processus sous `installDirectory`) : +40 — condition
+  quasi nécessaire.
+- `executableName` ∈ `gameExecutableCandidates` : +25.
+- `knownLauncherRelation` (processus parent = launcher connu, ou corrélation
+  temporelle après `LauncherExited`) : +15.
+- `windowTitle` / classe de fenêtre correspondant au jeu : +10.
+- `fileSignature` (éditeur/publicateur reconnu, cache) : +5 ; hash SHA-256
+  uniquement en cas de doute, jamais à chaque scan.
+- `startTime` dans la fenêtre de rattachement : +5.
+
+Seuil de rattachement automatique : ≥ 80. Entre 50 et 79 : événement
+`candidate-detected` → UI « Choisir le processus » ; < 50 : ignoré. Ne jamais
+rattacher uniquement parce que le nom contient « NTE ».
+
+### Signatures NTE à mémoriser (`ProcessSignatureLearning`)
+
+- `gameId: nte` · `relativeExecutablePath: Client\WindowsNoEditor\HT\Binaries\Win64\HT-Win64-Shipping.exe`
+- `windowClass` / `windowTitlePattern` de la fenêtre principale (à relever sur la
+  vraie version Steam lors des tests).
+- Launcher : `NTELauncher.exe`. Chaîne : `Steam → NTELauncher → UAC →
+  ElevatedLauncher → HT-Win64-Shipping`.
+
+### Scanner (`GamePresenceScanner`)
+
+Polling adaptatif : 1-3 s hors session (jeux configurés ou récemment lancés
+uniquement), 250-500 ms pendant le rattachement, 1 s ou événements système en
+`GameRunning`. Pipeline : `process name → path → installation match → signature
+cache → hash si nécessaire`.
+
+### Validation
+
+Voir `docs/input-backends-rust-design.md` pour la boucle de validation (PR →
+`verify-native.yml` ou machine avec MSVC) : le code natif ne doit pas être posé
+ dans `src-tauri` sans cette validation.
 
 ## UI
 

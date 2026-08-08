@@ -6,7 +6,7 @@ import { adapterFor, FALLBACK_ADAPTER, isLauncherBased } from '../lib/launchAdap
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
 
-const APP_VERSION = '1.15.0'
+const APP_VERSION = '1.16.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 const asError = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -1304,18 +1304,25 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const adapter = adapterFor(game)
     const now = Date.now()
     const reattachUntil = now + adapter.reattachWindowSeconds * 1000
+    const expectsElevation = adapter.launchChainStages.includes('UAC')
+    const nextState: GameSession['state'] = expectsElevation ? 'WaitingForElevation' : 'WaitingForGame'
     set(current => ({
       gameSessions: current.gameSessions.map(item => item.id === session.id ? {
         ...item,
-        state: 'WaitingForGame',
+        state: nextState,
         reattachUntil,
         deploymentActive: true,
         timeline: [...item.timeline,
           { at: now, stage: 'LauncherExited', detail: processName ? `Processus initial terminé (${processName})` : 'Processus initial terminé' },
-          { at: now, stage: 'WaitingForGame', detail: `Fenêtre de rattachement : ${adapter.reattachWindowSeconds} s — le déploiement reste actif` },
+          ...(expectsElevation
+            ? [{ at: now, stage: 'ElevationRequested', detail: 'Le launcher demande une autorisation Windows — acceptez la fenêtre UAC pour continuer' }]
+            : []),
+          { at: now, stage: nextState, detail: `Fenêtre de rattachement : ${adapter.reattachWindowSeconds} s — le déploiement reste actif` },
         ],
       } : item),
-      notice: `${game.name} : processus initial fermé (launcher). En attente du jeu — le déploiement reste actif pendant ${adapter.reattachWindowSeconds} s.`,
+      notice: expectsElevation
+        ? `${game.name} : le launcher demande une autorisation Windows. Acceptez la fenêtre UAC pour continuer — ZAILON ne la contourne jamais.`
+        : `${game.name} : processus initial fermé (launcher). En attente du jeu — le déploiement reste actif pendant ${adapter.reattachWindowSeconds} s.`,
     }))
   },
   sessionGameDetected: (gameId, processName, confidence) => {
@@ -1459,7 +1466,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   sessionWatchdog: () => {
     const state = get()
     const now = Date.now()
-    const lost = state.gameSessions.filter(item => item.state === 'WaitingForGame' && item.reattachUntil !== undefined && now > item.reattachUntil)
+    const lost = state.gameSessions.filter(item => (item.state === 'WaitingForGame' || item.state === 'WaitingForElevation') && item.reattachUntil !== undefined && now > item.reattachUntil)
     if (!lost.length) return
     set(current => ({
       gameSessions: current.gameSessions.map(item => lost.some(lostItem => lostItem.id === item.id) ? {

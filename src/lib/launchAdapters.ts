@@ -79,6 +79,7 @@ export const LAUNCH_BEHAVIOR_LABELS: Record<GameLaunchAdapter['launchBehavior'],
 export const SESSION_STATE_LABELS: Record<string, string> = {
   Preparing: 'Préparation',
   LauncherStarted: 'Launcher ouvert',
+  WaitingForElevation: 'Autorisation UAC',
   WaitingForGame: 'En attente du jeu',
   GameDetected: 'Jeu détecté',
   GameRunning: 'En cours',

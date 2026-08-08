@@ -2,10 +2,11 @@ import { Activity, AlertTriangle, CheckCircle2, ClipboardList, FileClock, Folder
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { inputDiagnosticRows } from '../../lib/inputBackends'
 import { effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
+import { adapterFor, LAUNCH_BEHAVIOR_LABELS, SESSION_STATE_LABELS } from '../../lib/launchAdapters'
 import { native, type ProfileDeploymentAudit } from '../../lib/native'
 import { useStore } from '../../store/useStore'
 import type { Game, GameTestRun, Mod, Profile } from '../../types'
-import { formatTime, timeAgo } from '../../utils'
+import { formatSeconds, formatTime, timeAgo } from '../../utils'
 
 export interface GameHealth {
   activeMods: number
@@ -66,7 +67,7 @@ function deploymentArguments(game: Game, profile: Profile, profileMods: Mod[]) {
   }
 }
 
-export type SubSection = 'resume' | 'files' | 'mods' | 'frameworks' | 'conflicts' | 'deployment' | 'inputs' | 'performance' | 'logs' | 'test'
+export type SubSection = 'resume' | 'files' | 'mods' | 'frameworks' | 'conflicts' | 'deployment' | 'inputs' | 'performance' | 'logs' | 'test' | 'launch'
 
 export interface ResolvedConflict {
   path: string
@@ -85,6 +86,7 @@ const SUBSECTIONS: Array<{ id: SubSection; label: string }> = [
   { id: 'performance', label: 'Performances' },
   { id: 'logs', label: 'Logs' },
   { id: 'test', label: 'Test' },
+  { id: 'launch', label: 'Lancement' },
 ]
 
 interface Props {
@@ -286,6 +288,7 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
       </div>}
 
       {section === 'test' && <TestEnvironmentPanel game={game} profile={profile} profileMods={profileMods} latestRun={testRun} running={testing} onRun={runTest} onClearHistory={clearTestHistory} onOpenConfiguration={onOpenConfiguration} />}
+      {section === 'launch' && <LaunchSessionPanel game={game} />}
     </div>
   </div>
 }
@@ -334,6 +337,65 @@ function TestEnvironmentPanel({ game, profile, profileMods, latestRun, running, 
       <div className="flex items-center justify-between gap-2"><p className="text-[11px] font-semibold text-white/68">Historique des tests (10 derniers)</p><button type="button" onClick={onClearHistory} className="text-[11px] font-semibold text-red-200/60 hover:text-red-200">Effacer l’historique</button></div>
       <ul className="mt-2 divide-y divide-white/[0.05]">{(game.testRuns || []).slice(1, 10).map(item => <li key={item.id} className="flex flex-wrap items-center gap-2 py-2 text-[11px]"><span className={`h-1.5 w-1.5 rounded-full ${item.deployable ? 'bg-emerald-300/80' : 'bg-red-300/80'}`} /><span className="text-white/55">{item.deployable ? 'Déployable' : 'Non déployable'}</span><span className="text-white/28">Profil {item.profileName}</span><span className="text-white/28">{item.brokenReferences} cassée(s) · {item.conflicts} conflit(s)</span><span className="ml-auto text-white/26">{formatTime(item.at)}</span></li>)}</ul>
       {frameworkTotal > 0 && <p className="mt-2 text-[10px] text-white/26">L’environnement de test n’utilise ni injection ni modification de fichiers : il est sûr même avec Anti-Cheat (ex. NTE / ACE).</p>}
+    </div>}
+  </div>
+}
+
+function LaunchSessionPanel({ game }: { game: Game }) {
+  const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === game.id && session.state !== 'Ended' && session.state !== 'Failed'))
+  const pastSessions = useStore(state => state.gameSessions.filter(session => session.gameId === game.id && (session.state === 'Ended' || session.state === 'Failed')).slice(0, 3))
+  const attachGameSession = useStore(state => state.attachGameSession)
+  const prepareAndWait = useStore(state => state.prepareAndWait)
+  const endSession = useStore(state => state.endSession)
+  const continueWaiting = useStore(state => state.continueWaiting)
+  const selectedProfileId = useStore(state => state.selectedProfileId)
+  const profileId = selectedProfileId || game.profiles[0]?.id || ''
+  const adapter = adapterFor(game)
+  const now = Date.now()
+
+  return <div className="space-y-3">
+    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <Metric label="Méthode" value={LAUNCH_BEHAVIOR_LABELS[adapter.launchBehavior]} />
+      <Metric label="Launcher" value={adapter.launcherExecutable || '—'} />
+      <Metric label="Fenêtre de rattachement" value={`${adapter.reattachWindowSeconds} s`} />
+      <Metric label="Délai de grâce" value={`${adapter.endGraceSeconds} s`} />
+    </div>
+
+    <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+      <p className="text-[11px] font-semibold text-white/68">Session {activeSession ? <span className={`ml-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${activeSession.state === 'GameRunning' ? 'border-emerald-300/25 bg-emerald-300/[0.08] text-emerald-200' : activeSession.state === 'GameLost' ? 'border-red-300/25 bg-red-300/[0.08] text-red-200' : 'border-amber-300/25 bg-amber-300/[0.08] text-amber-100'}`}>{SESSION_STATE_LABELS[activeSession.state]}</span> : '—'}</p>
+      {activeSession
+        ? <div className="mt-3 space-y-2 text-[11px]">
+          <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+            <div className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1"><span className="text-white/34">Profil</span><span className="text-white/58">{game.profiles.find(item => item.id === activeSession.profileId)?.name || activeSession.profileId}</span></div>
+            <div className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1"><span className="text-white/34">Source</span><span className="text-white/58">{activeSession.source === 'zailon' ? 'Lancé par ZAILON' : activeSession.source === 'manual' ? 'Lancé hors ZAILON' : activeSession.source === 'reattached' ? 'Réattaché' : 'Récupéré'}</span></div>
+            <div className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1"><span className="text-white/34">Démarrage</span><span className="text-white/58">{formatTime(activeSession.startedAt)} · {formatSeconds(Math.floor((now - activeSession.startedAt) / 1000))}</span></div>
+            <div className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1"><span className="text-white/34">Processus final</span><span className="text-white/58">{activeSession.finalProcess || '—'}{activeSession.confidence !== undefined ? ` (confiance ${activeSession.confidence} %)` : ''}</span></div>
+            <div className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1"><span className="text-white/34">QWERTY</span><span className={activeSession.inputProfileActive ? 'text-emerald-200/75' : 'text-white/34'}>{activeSession.inputProfileActive ? 'Actif' : 'Inactif'}</span></div>
+            <div className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1"><span className="text-white/34">Mods déployés</span><span className={activeSession.deploymentActive ? 'text-emerald-200/75' : 'text-white/34'}>{activeSession.deploymentActive ? 'Oui' : 'Non'}</span></div>
+          </div>
+          <div className="flex flex-wrap gap-2 pt-1">
+            <button type="button" onClick={() => attachGameSession(game.id, activeSession.profileId)} className="rounded-lg border border-gold/25 px-3 py-1.5 text-[11px] font-semibold text-gold hover:bg-gold/10">Attacher au jeu en cours</button>
+            <button type="button" onClick={() => continueWaiting(game.id)} className="rounded-lg border border-white/[0.12] px-3 py-1.5 text-[11px] text-white/60 hover:bg-white/[0.06]">Continuer à attendre</button>
+            <button type="button" onClick={() => endSession(game.id)} className="rounded-lg border border-red-300/20 px-3 py-1.5 text-[11px] text-red-200/75 hover:bg-red-300/[0.06]">Terminer la session</button>
+          </div>
+          <div className="mt-1 rounded-lg border border-white/[0.05] bg-black/15 p-3">
+            <p className="text-[10px] uppercase tracking-widest text-white/30">Timeline</p>
+            <ul className="mt-2 space-y-1 font-mono text-[10px] text-white/42">{activeSession.timeline.map((step, index) => <li key={`${index}:${step.stage}`}><span className="text-white/24">{formatTime(step.at)}</span> <span className="text-white/58">{step.stage}</span>{step.detail ? <span className="text-white/30"> — {step.detail}</span> : null}</li>)}</ul>
+          </div>
+        </div>
+        : <div className="mt-3">
+          <p className="text-[11px] leading-relaxed text-white/38">Aucune session active. Chaîne attendue : <span className="text-white/62">{adapter.launchChainStages.join(' → ')}</span>.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" onClick={() => prepareAndWait(game.id, profileId)} className="flex items-center gap-1.5 rounded-lg border border-gold/25 px-3 py-2 text-[11px] font-semibold text-gold hover:bg-gold/10"><Rocket size={12} />Préparer et attendre le jeu</button>
+            <button type="button" onClick={() => attachGameSession(game.id, profileId)} className="rounded-lg border border-white/[0.12] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.06]">Attacher au jeu en cours</button>
+          </div>
+          <p className="mt-2 text-[10px] text-white/26">La détection automatique du processus final (launcher → jeu) est fournie par le backend natif Phase 6 ; en attendant, l'attachement manuel fonctionne dès maintenant.</p>
+        </div>}
+    </div>
+
+    {pastSessions.length > 0 && <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+      <p className="text-[11px] font-semibold text-white/68">Sessions récentes</p>
+      <ul className="mt-2 divide-y divide-white/[0.05]">{pastSessions.map(item => <li key={item.id} className="flex flex-wrap items-center gap-2 py-2 text-[11px]"><span className={`h-1.5 w-1.5 rounded-full ${item.state === 'Ended' ? 'bg-white/30' : 'bg-red-300/80'}`} /><span className="text-white/55">{SESSION_STATE_LABELS[item.state]}</span><span className="text-white/28">Profil {game.profiles.find(profile => profile.id === item.profileId)?.name || item.profileId}</span><span className="ml-auto text-white/26">{formatTime(item.startedAt)}</span></li>)}</ul>
     </div>}
   </div>
 }

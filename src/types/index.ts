@@ -299,6 +299,52 @@ export interface Game {
   keyboardProfiles?: GameInputProfile[]
   /** Derniers tests de déploiement (environnement de test par jeu). */
   testRuns?: GameTestRun[]
+  /** Comportement de lancement (launcher intermédiaire, chaîne multi-étapes). */
+  launchAdapter?: GameLaunchAdapter
+}
+
+export type LaunchBehavior = 'DirectProcess' | 'LauncherChild' | 'LauncherDetached' | 'SteamLauncher' | 'ExternalLauncher' | 'MultiStage'
+
+export interface GameLaunchAdapter {
+  launchBehavior: LaunchBehavior
+  launcherExecutable?: string
+  gameExecutableCandidates: string[]
+  reattachWindowSeconds: number
+  endGraceSeconds: number
+  launchChainStages: string[]
+}
+
+export type GameSessionState = 'Preparing' | 'LauncherStarted' | 'WaitingForGame' | 'GameDetected' | 'GameRunning' | 'GameLost' | 'Reattaching' | 'Ending' | 'Ended' | 'Failed'
+
+export type SessionSource = 'zailon' | 'manual' | 'reattached' | 'recovered'
+
+export interface GameLaunchChainStep {
+  at: number
+  stage: string
+  detail?: string
+}
+
+export interface GameSession {
+  id: string
+  gameId: string
+  profileId: string
+  launchStrategy: LaunchBehavior
+  launcherProcessIds: number[]
+  gameProcessIds: number[]
+  startedAt: number
+  gameDetectedAt?: number
+  endedAt?: number
+  state: GameSessionState
+  runtimeToolsActive: boolean
+  deploymentActive: boolean
+  inputProfileActive: boolean
+  visualProfileActive: boolean
+  source: SessionSource
+  reattachUntil?: number
+  graceUntil?: number
+  timeline: GameLaunchChainStep[]
+  confidence?: number
+  finalProcess?: string
 }
 
 export interface GameTestRun {

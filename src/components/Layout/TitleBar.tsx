@@ -8,7 +8,8 @@ import { appVersion, useStore } from '../../store/useStore'
 type WindowAction = 'Réduire' | 'Agrandir' | 'Déplacer' | 'Fermer'
 
 export function TitleBar() {
-  const stopPlaying = useStore(state => state.stopPlaying)
+  const endSession = useStore(state => state.endSession)
+  const selectedGameId = useStore(state => state.selectedGameId)
   const [maximized, setMaximized] = useState(false)
   const [windowError, setWindowError] = useState<string>()
   const desktop = isTauri()
@@ -45,7 +46,8 @@ export function TitleBar() {
   }
 
   const closeWindow = () => run('Fermer', async () => {
-    stopPlaying()
+    if (selectedGameId) endSession(selectedGameId)
+    else useStore.getState().stopPlaying()
     // La sauvegarde de géométrie ne doit jamais pouvoir bloquer la fermeture.
     try { await saveWindowState() } catch { /* fermeture prioritaire */ }
     await getCurrentWindow().close()

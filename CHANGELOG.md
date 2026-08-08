@@ -278,6 +278,18 @@
   module `input_backends` prêt à poser (registre, plan, sonde NTE) avec tests
   unitaires, et boucle de validation documentée (PR → `verify-native.yml` ou
   machine avec VS Build Tools).
+- Système de lancement multi-étapes (`GameSession`) : ZAILON possède une session,
+  plus un PID. La fermeture du processus initial (launcher officiel, UAC,
+  redirection) ne termine plus la session : elle passe en « En attente du jeu »
+  pendant la fenêtre de rattachement, le déploiement reste actif, et le jeu peut
+  être rattaché (manuel ou événement natif `game-process-detected`). Adaptateurs
+  de lancement par jeu (NTE = Steam + launcher, Cyberpunk = direct, FiveM =
+  externe) avec launcher, candidats, fenêtre de rattachement et délai de grâce.
+- Accueil : états de session (Launcher ouvert / En attente du jeu avec compte à
+  rebours / Jeu non détecté avec « Continuer à attendre » et « Terminer la
+  session ») ; Diagnostic > Lancement : méthode, session active, processus final,
+  confiance, QWERTY/mods, timeline et sessions récentes ; actions « Attacher au
+  jeu en cours » et « Préparer et attendre le jeu ».
 
 ### Changed
 

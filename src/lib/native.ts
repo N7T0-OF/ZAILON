@@ -628,6 +628,15 @@ export interface GameProcessEvent {
   cleanupError?: string
 }
 
+export interface GameProcessDetectedEvent {
+  gameId: string
+  gameName: string
+  processName: string
+  processPath?: string
+  confidence?: number
+  profileId?: string
+}
+
 export type UpdateDownloadEvent =
   | { event: 'Started'; data: { contentLength?: number } }
   | { event: 'Progress'; data: { chunkLength: number } }

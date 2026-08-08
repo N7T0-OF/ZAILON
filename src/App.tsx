@@ -5,7 +5,7 @@ import { AppWindow } from './components/Layout/AppWindow'
 import { CommandPalette } from './components/CommandPalette'
 import { UpdateProvider } from './components/UpdateProvider'
 import { useStore } from './store/useStore'
-import { native, type BackgroundTaskSnapshot, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
+import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { register, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
 import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-profiles/application/shortcuts'
 
@@ -29,7 +29,10 @@ export default function App() {
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
 
   useEffect(() => {
-    const id = setInterval(tick, 1000)
+    const id = setInterval(() => {
+      tick()
+      useStore.getState().sessionWatchdog()
+    }, 1000)
     return () => clearInterval(id)
   }, [tick])
 
@@ -113,7 +116,15 @@ export default function App() {
   useEffect(() => {
     if (!native.isDesktop()) return
     let unlisten: UnlistenFn | undefined
-    void listen<GameProcessEvent>('game-process-stopped', event => useStore.getState().stopPlaying(event.payload.gameId, event.payload.profileId, event.payload.cleanupError)).then(dispose => { unlisten = dispose })
+    void listen<GameProcessEvent>('game-process-stopped', event => useStore.getState().onGameProcessStopped({ gameId: event.payload.gameId, profileId: event.payload.profileId, cleanupError: event.payload.cleanupError, processName: event.payload.gameName })).then(dispose => { unlisten = dispose })
+    return () => unlisten?.()
+  }, [])
+
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    let unlisten: UnlistenFn | undefined
+    // Émis par la Phase 6 native (GamePresenceScanner / DetachedProcessReattacher).
+    void listen<GameProcessDetectedEvent>('game-process-detected', event => useStore.getState().sessionGameDetected(event.payload.gameId, event.payload.processName, event.payload.confidence)).then(dispose => { unlisten = dispose })
     return () => unlisten?.()
   }, [])
 

@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, Game, GameInputProfile, GameKeyboardLayout, GamePreset, GameResources, GameRuntimePath, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
+import { BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, Game, GameInputProfile, GameKeyboardLayout, GamePreset, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, SessionSource, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
 import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
+import { adapterFor, FALLBACK_ADAPTER, isLauncherBased } from '../lib/launchAdapters'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
 
@@ -381,6 +382,16 @@ export interface Store {
   launchSelectedGame: () => Promise<void>
   stopPlaying: (gameId?: string, profileId?: string, cleanupError?: string) => void
   tick: () => void
+  gameSessions: GameSession[]
+  beginSession: (gameId: string, profileId: string, source?: SessionSource) => void
+  onGameProcessStopped: (payload: { gameId: string; profileId?: string; cleanupError?: string; processName?: string }) => void
+  sessionLauncherExited: (gameId: string, processName?: string) => void
+  sessionGameDetected: (gameId: string, processName: string, confidence?: number) => void
+  attachGameSession: (gameId: string, profileId: string, processName?: string) => void
+  prepareAndWait: (gameId: string, profileId: string) => void
+  continueWaiting: (gameId: string) => void
+  endSession: (gameId: string, reason?: string) => void
+  sessionWatchdog: () => void
   setExplorePlatform: (platform: Platform) => void
   setExploreGame: (gameId: number) => void
   setExploreGameQuery: (query: string) => void
@@ -495,6 +506,7 @@ export function migratePersistedState(persisted: unknown) {
     isPlaying: false,
     playStartTime: undefined,
     sessionTime: 0,
+    gameSessions: [],
   }
 }
 
@@ -527,6 +539,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   isLaunching: false,
   isPlaying: false,
   sessionTime: 0,
+  gameSessions: [],
   explorePlatform: 'gamebanana',
   exploreGameId: GAMEBANANA_GAMES[0].id,
   exploreGames: [...GAMEBANANA_GAMES],
@@ -1212,6 +1225,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
         games: current.games.map(item => item.id !== game.id ? item : { ...item, installedMods: item.installedMods.map(mod => enabledMods.some(enabled => enabled.id === mod.id) && mod.storage === 'staged' ? { ...mod, deploymentStatus: 'runtime-visible' } : mod) }),
         notice: `${game.name} lancé (PID ${result.pid}) après vérification de ${result.deployedFiles} fichier(s) via ${result.deploymentBackend}. ${result.discordMessage}`,
       }))
+      get().beginSession(game.id, profile.id)
     } catch (error) {
       set({ isLaunching: false, launchProgress: undefined, notice: asError(error) })
     }
@@ -1238,6 +1252,222 @@ export const useStore = create<Store>()(persist((set, get) => ({
   tick: () => {
     const { isPlaying, playStartTime } = get()
     if (isPlaying && playStartTime) set({ sessionTime: Math.floor((Date.now() - playStartTime) / 1_000) })
+  },
+  beginSession: (gameId, profileId, source = 'zailon') => {
+    const state = get()
+    const game = state.games.find(item => item.id === gameId)
+    if (!game) return
+    const adapter = adapterFor(game)
+    const now = Date.now()
+    const session: GameSession = {
+      id: createId(),
+      gameId,
+      profileId,
+      launchStrategy: adapter.launchBehavior,
+      launcherProcessIds: [],
+      gameProcessIds: [],
+      startedAt: now,
+      state: 'LauncherStarted',
+      runtimeToolsActive: false,
+      deploymentActive: true,
+      inputProfileActive: false,
+      visualProfileActive: false,
+      source,
+      timeline: [{ at: now, stage: 'GameLaunchRequested', detail: adapter.launchBehavior }],
+    }
+    set(current => ({
+      gameSessions: [session, ...current.gameSessions.filter(item => item.gameId !== gameId || item.state === 'Ended' || item.state === 'Failed')],
+      isPlaying: true,
+      playStartTime: now,
+      sessionTime: 0,
+    }))
+  },
+  onGameProcessStopped: ({ gameId, cleanupError, processName }) => {
+    const state = get()
+    const game = state.games.find(item => item.id === gameId)
+    const adapter = game ? adapterFor(game) : FALLBACK_ADAPTER
+    if (isLauncherBased(adapter)) {
+      state.sessionLauncherExited(gameId, processName)
+    } else {
+      state.endSession(gameId, cleanupError)
+    }
+  },
+  sessionLauncherExited: (gameId, processName) => {
+    const state = get()
+    const game = state.games.find(item => item.id === gameId)
+    const session = state.gameSessions.find(item => item.gameId === gameId && item.state !== 'Ended' && item.state !== 'Failed')
+    if (!game || !session) return
+    const adapter = adapterFor(game)
+    const now = Date.now()
+    const reattachUntil = now + adapter.reattachWindowSeconds * 1000
+    set(current => ({
+      gameSessions: current.gameSessions.map(item => item.id === session.id ? {
+        ...item,
+        state: 'WaitingForGame',
+        reattachUntil,
+        deploymentActive: true,
+        timeline: [...item.timeline,
+          { at: now, stage: 'LauncherExited', detail: processName ? `Processus initial terminé (${processName})` : 'Processus initial terminé' },
+          { at: now, stage: 'WaitingForGame', detail: `Fenêtre de rattachement : ${adapter.reattachWindowSeconds} s — le déploiement reste actif` },
+        ],
+      } : item),
+      notice: `${game.name} : processus initial fermé (launcher). En attente du jeu — le déploiement reste actif pendant ${adapter.reattachWindowSeconds} s.`,
+    }))
+  },
+  sessionGameDetected: (gameId, processName, confidence) => {
+    const state = get()
+    const game = state.games.find(item => item.id === gameId)
+    const session = state.gameSessions.find(item => item.gameId === gameId && item.state !== 'Ended' && item.state !== 'Failed')
+    if (!game || !session) return
+    const now = Date.now()
+    const firstDetected = !session.gameDetectedAt
+    set(current => ({
+      gameSessions: current.gameSessions.map(item => item.id === session.id ? {
+        ...item,
+        state: 'GameRunning',
+        gameDetectedAt: item.gameDetectedAt || now,
+        finalProcess: processName,
+        confidence,
+        runtimeToolsActive: true,
+        inputProfileActive: true,
+        visualProfileActive: true,
+        reattachUntil: undefined,
+        timeline: [...item.timeline, { at: now, stage: 'GameAttached', detail: processName ? `${processName} (confiance ${confidence ?? '—'}%)` : 'Jeu détecté — session reconnectée' }],
+      } : item),
+    }))
+    if (firstDetected) get().recordNotice(`${game.name} détecté — session ZAILON reconnectée.`)
+  },
+  attachGameSession: (gameId, profileId, processName) => {
+    const state = get()
+    const game = state.games.find(item => item.id === gameId)
+    if (!game) return
+    const adapter = adapterFor(game)
+    const now = Date.now()
+    const existing = state.gameSessions.find(item => item.gameId === gameId && item.state !== 'Ended' && item.state !== 'Failed')
+    if (existing) {
+      set(current => ({
+        gameSessions: current.gameSessions.map(item => item.id === existing.id ? {
+          ...item,
+          state: 'GameRunning',
+          source: item.source === 'zailon' ? 'reattached' : item.source,
+          gameDetectedAt: item.gameDetectedAt || now,
+          finalProcess: processName,
+          runtimeToolsActive: true,
+          inputProfileActive: true,
+          visualProfileActive: true,
+          reattachUntil: undefined,
+          timeline: [...item.timeline, { at: now, stage: 'GameAttached', detail: processName ? `${processName} (rattachement manuel)` : 'Rattachement manuel' }],
+        } : item),
+        isPlaying: true,
+      }))
+    } else {
+      const session: GameSession = {
+        id: createId(),
+        gameId,
+        profileId,
+        launchStrategy: adapter.launchBehavior,
+        launcherProcessIds: [],
+        gameProcessIds: [],
+        startedAt: now,
+        gameDetectedAt: now,
+        state: 'GameRunning',
+        runtimeToolsActive: true,
+        deploymentActive: true,
+        inputProfileActive: true,
+        visualProfileActive: true,
+        source: 'manual',
+        finalProcess: processName,
+        timeline: [{ at: now, stage: 'GameAttached', detail: processName ? `${processName} (lancé hors ZAILON)` : 'Jeu détecté hors ZAILON' }],
+      }
+      set(current => ({
+        gameSessions: [session, ...current.gameSessions.filter(item => item.gameId !== gameId || item.state === 'Ended' || item.state === 'Failed')],
+        isPlaying: true,
+        playStartTime: now,
+        sessionTime: 0,
+      }))
+    }
+    get().recordNotice(`${game.name} — session attachée à ZAILON.`)
+  },
+  prepareAndWait: (gameId, profileId) => {
+    const state = get()
+    const game = state.games.find(item => item.id === gameId)
+    if (!game) return
+    const adapter = adapterFor(game)
+    const now = Date.now()
+    const session: GameSession = {
+      id: createId(),
+      gameId,
+      profileId,
+      launchStrategy: adapter.launchBehavior,
+      launcherProcessIds: [],
+      gameProcessIds: [],
+      startedAt: now,
+      state: 'WaitingForGame',
+      runtimeToolsActive: false,
+      deploymentActive: true,
+      inputProfileActive: false,
+      visualProfileActive: false,
+      source: 'manual',
+      reattachUntil: now + adapter.reattachWindowSeconds * 1000,
+      timeline: [{ at: now, stage: 'WaitingForGame', detail: 'Préparer et attendre le jeu — lancez-le depuis son launcher officiel' }],
+    }
+    set(current => ({
+      gameSessions: [session, ...current.gameSessions.filter(item => item.gameId !== gameId || item.state === 'Ended' || item.state === 'Failed')],
+      isPlaying: true,
+      playStartTime: now,
+      sessionTime: 0,
+      notice: `${game.name} : mods préparés, watcher actif. Lancez le jeu normalement (launcher officiel) — ZAILON l'attachera automatiquement.`,
+    }))
+  },
+  continueWaiting: (gameId) => {
+    const state = get()
+    const game = state.games.find(item => item.id === gameId)
+    const session = state.gameSessions.find(item => item.gameId === gameId && (item.state === 'GameLost' || item.state === 'WaitingForGame'))
+    if (!game || !session) return
+    const adapter = adapterFor(game)
+    set(current => ({
+      gameSessions: current.gameSessions.map(item => item.id === session.id ? {
+        ...item,
+        state: 'WaitingForGame',
+        reattachUntil: Date.now() + adapter.reattachWindowSeconds * 1000,
+        timeline: [...item.timeline, { at: Date.now(), stage: 'WaitingForGame', detail: 'Attente prolongée' }],
+      } : item),
+    }))
+  },
+  endSession: (gameId, reason) => {
+    const state = get()
+    const session = state.gameSessions.find(item => item.gameId === gameId && item.state !== 'Ended' && item.state !== 'Failed')
+    if (!session) { state.stopPlaying(gameId, undefined, reason); return }
+    state.stopPlaying(gameId, session.profileId, undefined)
+    set(current => ({
+      gameSessions: current.gameSessions.map(item => item.id === session.id ? {
+        ...item,
+        state: 'Ended',
+        endedAt: Date.now(),
+        runtimeToolsActive: false,
+        deploymentActive: false,
+        inputProfileActive: false,
+        visualProfileActive: false,
+        timeline: [...item.timeline, { at: Date.now(), stage: 'GameExited', detail: reason || 'Session terminée' }],
+      } : item),
+    }))
+  },
+  sessionWatchdog: () => {
+    const state = get()
+    const now = Date.now()
+    const lost = state.gameSessions.filter(item => item.state === 'WaitingForGame' && item.reattachUntil !== undefined && now > item.reattachUntil)
+    if (!lost.length) return
+    set(current => ({
+      gameSessions: current.gameSessions.map(item => lost.some(lostItem => lostItem.id === item.id) ? {
+        ...item,
+        state: 'GameLost',
+        timeline: [...item.timeline, { at: now, stage: 'GameLost', detail: 'Aucun processus final détecté pendant la fenêtre de rattachement' }],
+      } : item),
+    }))
+    lost.forEach(session => {
+      const game = state.games.find(item => item.id === session.gameId)
+      get().recordNotice(`${game?.name || session.gameId} : le launcher a été ouvert mais le jeu n'a pas été détecté.`)
+    })
   },
   setExplorePlatform: explorePlatform => set({ explorePlatform, exploreMods: [], explorePage: 1, exploreError: undefined }),
   setExploreGame: exploreGameId => set(state => {

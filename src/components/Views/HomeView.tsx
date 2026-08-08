@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { Game } from '../../types'
 import { resourceUrl, native } from '../../lib/native'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
+import { SESSION_STATE_LABELS } from '../../lib/launchAdapters'
 import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
 import { formatSeconds, formatTime, timeAgo } from '../../utils'
@@ -24,6 +25,9 @@ export function HomeView() {
   const launchProgress = useStore(state => state.launchProgress)
   const isPlaying = useStore(state => state.isPlaying)
   const sessionTime = useStore(state => state.sessionTime)
+  const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
+  const continueWaiting = useStore(state => state.continueWaiting)
+  const endSession = useStore(state => state.endSession)
   const setView = useStore(state => state.setView)
   const setActiveGameTab = useStore(state => state.setActiveGameTab)
   const [discoveryOpen, setDiscoveryOpen] = useState(false)
@@ -112,8 +116,8 @@ export function HomeView() {
 
           <div className="flex items-center gap-2">
             <div className="mr-1 hidden text-right sm:block">
-              <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-white/74">{isLaunching ? 'Préparation' : isPlaying ? 'En jeu' : 'Prêt à jouer'}</p>
-              <p className="mt-0.5 max-w-72 truncate text-[11px] text-white/36">{isLaunching ? launchProgress?.message || 'Analyse des mods…' : isPlaying ? formatSeconds(sessionTime) : selectedGame.lastPlayed ? timeAgo(selectedGame.lastPlayed) : 'Jamais lancé'}</p>
+              <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-white/74">{isLaunching ? 'Préparation' : activeSession ? SESSION_STATE_LABELS[activeSession.state] || 'En jeu' : isPlaying ? 'En jeu' : 'Prêt à jouer'}</p>
+              <p className="mt-0.5 max-w-72 truncate text-[11px] text-white/36">{isLaunching ? launchProgress?.message || 'Analyse des mods…' : activeSession?.state === 'WaitingForGame' && activeSession.reattachUntil ? `Rattachement dans ${Math.max(0, Math.ceil((activeSession.reattachUntil - Date.now()) / 1000))} s…` : activeSession?.state === 'GameLost' ? 'Jeu non détecté' : isPlaying ? formatSeconds(sessionTime) : selectedGame.lastPlayed ? timeAgo(selectedGame.lastPlayed) : 'Jamais lancé'}</p>
             </div>
             <CircleAction label="Détecter" onClick={() => setDiscoveryOpen(true)}><Radar size={11} /></CircleAction>
             <CircleAction label="Modifier l’apparence" onClick={() => setResourcesGameId(selectedGame.id)}><Palette size={11} /></CircleAction>
@@ -137,7 +141,7 @@ export function HomeView() {
             {selectedGame.bypassPath && <HomeBadge label="Bypass / Loader" />}
             {(selectedGame.runtimePaths || []).length > 0 && <HomeBadge label={`${selectedGame.runtimePaths!.length} chemin(s) runtime`} />}
           </div>}
-          {isPlaying && (
+          {activeSession && activeSession.state === 'GameRunning' && (
             <div className="mt-4 max-w-md rounded-xl border border-emerald-300/20 bg-emerald-300/[0.05] p-3 backdrop-blur-md">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -147,6 +151,29 @@ export function HomeView() {
                 <span className="flex items-center gap-1.5 rounded-full border border-emerald-300/25 bg-emerald-300/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-100/85"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-300" />En jeu</span>
               </div>
               <p className="mt-2 text-[11px] leading-relaxed text-white/35">La session se termine quand le jeu se ferme ; ZAILON restaure alors automatiquement le déploiement et le remapping.</p>
+            </div>
+          )}
+          {activeSession && (activeSession.state === 'WaitingForGame' || activeSession.state === 'LauncherStarted') && (
+            <div className="mt-4 max-w-md rounded-xl border border-amber-300/20 bg-amber-300/[0.05] p-3 backdrop-blur-md">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-mono text-[11px] uppercase tracking-widest text-amber-100/90">En attente du jeu</p>
+                  <p className="mt-1 text-[11px] text-white/52">Le launcher a pris le relais (Steam / launcher officiel). Le déploiement et le remapping restent prêts.</p>
+                </div>
+                {activeSession.reattachUntil
+                  ? <span className="flex items-center gap-1.5 rounded-full border border-amber-300/25 bg-amber-300/10 px-2.5 py-1 text-[10px] font-semibold text-amber-100/85"><Clock3 size={10} />{Math.max(0, Math.ceil((activeSession.reattachUntil - Date.now()) / 1000))} s</span>
+                  : <span className="rounded-full border border-amber-300/25 bg-amber-300/10 px-2.5 py-1 text-[10px] font-semibold text-amber-100/85">Rattachement</span>}
+              </div>
+            </div>
+          )}
+          {activeSession && activeSession.state === 'GameLost' && (
+            <div className="mt-4 max-w-md rounded-xl border border-red-300/20 bg-red-300/[0.05] p-3 backdrop-blur-md">
+              <p className="font-mono text-[11px] uppercase tracking-widest text-red-200/90">Jeu non détecté</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-white/52">Le launcher a été ouvert mais le jeu n'a pas été détecté pendant la fenêtre de rattachement. Le déploiement reste actif.</p>
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                <button type="button" onClick={() => continueWaiting(activeSession.gameId)} className="rounded-lg border border-gold/25 px-3 py-1.5 text-[11px] font-semibold text-gold hover:bg-gold/10">Continuer à attendre</button>
+                <button type="button" onClick={() => endSession(activeSession.gameId)} className="rounded-lg border border-white/[0.12] px-3 py-1.5 text-[11px] text-white/60 hover:bg-white/[0.06]">Terminer la session</button>
+              </div>
             </div>
           )}
           <div className="mt-5 flex items-center gap-2">

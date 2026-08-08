@@ -18,6 +18,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use walkdir::WalkDir;
 
 mod input_backends;
+mod process_scanner;
 mod visual_profiles;
 
 #[cfg(unix)]
@@ -3993,6 +3994,11 @@ fn delete_mod(mod_path: String, mods_root: String) -> Result<(), String> {
 #[tauri::command]
 fn ensure_dir(path: String) -> Result<(), String> {
     fs::create_dir_all(path).map_err(to_error)
+}
+
+#[tauri::command]
+fn scan_game_presence(requests: Vec<process_scanner::GamePresenceRequest>) -> Vec<process_scanner::GamePresence> {
+    process_scanner::scan_requests(&requests)
 }
 
 #[tauri::command]
@@ -14599,6 +14605,7 @@ pub fn run() {
             trash_profile_state,
             initialize_fivem_base,
             ensure_dir,
+            scan_game_presence,
             launch_game,
             test_discord_connection,
             guess_mods_path,

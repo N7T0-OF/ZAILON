@@ -6,6 +6,7 @@ import { CommandPalette } from './components/CommandPalette'
 import { UpdateProvider } from './components/UpdateProvider'
 import { useStore } from './store/useStore'
 import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
+import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
 import { register, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
 import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-profiles/application/shortcuts'
 
@@ -29,9 +30,37 @@ export default function App() {
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
 
   useEffect(() => {
+    let scanning = false
+    let lastScan = 0
     const id = setInterval(() => {
       tick()
       useStore.getState().sessionWatchdog()
+      const now = Date.now()
+      if (scanning || now - lastScan < 3000 || !native.isDesktop()) return
+      const state = useStore.getState()
+      const waiters = state.gameSessions.filter(session => session.state === 'WaitingForGame' || session.state === 'GameLost' || session.state === 'WaitingForElevation')
+      if (!waiters.length) return
+      scanning = true
+      lastScan = now
+      const requests = waiters.map(session => {
+        const game = state.games.find(item => item.id === session.gameId)
+        const adapter = game ? adapterFor(game) : FALLBACK_ADAPTER
+        return {
+          gameId: session.gameId,
+          installRoot: game?.installDirectory,
+          launcherExecutable: adapter.launcherExecutable,
+          gameExecutableCandidates: adapter.gameExecutableCandidates,
+          reattachContext: true,
+        }
+      })
+      void native.scanGamePresence(requests)
+        .then(results => {
+          for (const result of results) {
+            if (result.score >= 80) useStore.getState().sessionGameDetected(result.gameId, result.processName, result.score)
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => { scanning = false })
     }, 1000)
     return () => clearInterval(id)
   }, [tick])

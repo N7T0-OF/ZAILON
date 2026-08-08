@@ -346,6 +346,11 @@
 - Tests unitaires frontend `npm run test:input-backends` (8 tests, `node:test`
   sans dépendance) : ordre de priorité, registre, plan NTE/ACE, diagnostic,
   adaptateurs de lancement et repli.
+- GamePresenceScanner natif (`process_scanner`) : détection du processus final
+  pendant la fenêtre de rattachement — score de correspondance (installation
+  +40, candidat +25, launcher +15, contexte +20, seuil auto ≥ 80) avec 6 tests
+  unitaires, énumération Windows (Toolhelp + chemin complet) via `windows-sys`,
+  commande `scan_game_presence` appelée par l'Accueil pendant l'attente du jeu.
 
 > Pendant le développement, chaque changement visible par l'utilisateur est ajouté
 > ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,

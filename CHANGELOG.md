@@ -554,6 +554,9 @@
 
 ### Added
 
+- Détection du plein écran exclusif (`exclusive_fullscreen_active`) : au raccourci du panneau rapide, ZAILON affiche « Le panneau rapide n'est pas disponible en plein écran exclusif » avec [Utiliser Borderless] [Fermer] au lieu d'ouvrir une fenêtre qui ne pourrait pas s'afficher (aucune injection).
+- Section « Mode jeu » dans les réglages : réduire l'activité ZAILON pendant le jeu (watcher ralenti, animations décoratives suspendues), réduire ZAILON lorsque le jeu démarre, restaurer ZAILON après le jeu — actives par défaut.
+
 ### Changed
 
 ### Fixed

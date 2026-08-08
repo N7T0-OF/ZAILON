@@ -308,6 +308,9 @@ export interface Store {
   remapKillSwitchShortcut: string
   quickPanelEnabled: boolean
   quickPanelShortcut: string
+  reduceActivityDuringGame: boolean
+  autoMinimizeOnGameStart: boolean
+  restoreAfterGame: boolean
   reduceExplanations: boolean
   advancedMode: boolean
   showSupportButton: boolean
@@ -423,6 +426,9 @@ export interface Store {
   setRemapKillSwitchShortcut: (shortcut: string) => void
   setQuickPanelEnabled: (enabled: boolean) => void
   setQuickPanelShortcut: (shortcut: string) => void
+  setReduceActivityDuringGame: (enabled: boolean) => void
+  setAutoMinimizeOnGameStart: (enabled: boolean) => void
+  setRestoreAfterGame: (enabled: boolean) => void
   setSessionInputActive: (gameId: string, active: boolean) => void
   setReduceExplanations: (enabled: boolean) => void
   setAdvancedMode: (enabled: boolean) => void
@@ -507,6 +513,9 @@ export function migratePersistedState(persisted: unknown) {
     downloadRetention: state.downloadRetention || 'startup',
     remapSuspendShortcut: state.remapSuspendShortcut || 'Ctrl+Alt+K',
     remapKillSwitchShortcut: state.remapKillSwitchShortcut || 'Ctrl+Alt+Backspace',
+    reduceActivityDuringGame: state.reduceActivityDuringGame ?? true,
+    autoMinimizeOnGameStart: state.autoMinimizeOnGameStart ?? true,
+    restoreAfterGame: state.restoreAfterGame ?? true,
     reduceExplanations: state.reduceExplanations ?? false,
     advancedMode: state.advancedMode ?? false,
     showSupportButton: state.showSupportButton ?? true,
@@ -578,6 +587,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
   remapKillSwitchShortcut: 'Ctrl+Alt+Backspace',
   quickPanelEnabled: false,
   quickPanelShortcut: 'Ctrl+Alt+Z',
+  reduceActivityDuringGame: true,
+  autoMinimizeOnGameStart: true,
+  restoreAfterGame: true,
   reduceExplanations: false,
   advancedMode: false,
   showSupportButton: true,
@@ -1674,6 +1686,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setRemapKillSwitchShortcut: remapKillSwitchShortcut => set({ remapKillSwitchShortcut }),
   setQuickPanelEnabled: quickPanelEnabled => set({ quickPanelEnabled }),
   setQuickPanelShortcut: quickPanelShortcut => set({ quickPanelShortcut }),
+  setReduceActivityDuringGame: reduceActivityDuringGame => set({ reduceActivityDuringGame }),
+  setAutoMinimizeOnGameStart: autoMinimizeOnGameStart => set({ autoMinimizeOnGameStart }),
+  setRestoreAfterGame: restoreAfterGame => set({ restoreAfterGame }),
   setSessionInputActive: (gameId, active) => {
     const session = get().gameSessions.find(item => item.gameId === gameId && item.state !== 'Ended' && item.state !== 'Failed')
     if (!session) return
@@ -2096,6 +2111,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
     downloadRetention: state.downloadRetention,
     remapSuspendShortcut: state.remapSuspendShortcut,
     remapKillSwitchShortcut: state.remapKillSwitchShortcut,
+    reduceActivityDuringGame: state.reduceActivityDuringGame,
+    autoMinimizeOnGameStart: state.autoMinimizeOnGameStart,
+    restoreAfterGame: state.restoreAfterGame,
     reduceExplanations: state.reduceExplanations,
     advancedMode: state.advancedMode,
     showSupportButton: state.showSupportButton,

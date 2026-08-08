@@ -764,6 +764,11 @@ export const native = {
    * présence indépendante de l'arbre des processus (survit aux launchers,
    * UAC et relances). */
   scanGameWindows: (requests: GameWindowRequest[]) => desktopOnly<GameWindowMatch[]>('scan_game_windows', { requests }),
+  /** Plein écran exclusif : vrai si la fenêtre au premier plan a commuté le
+   * mode d'affichage (le Quick Panel ne peut pas s'afficher au-dessus).
+   * Heuristique documentée — un exclusif à la résolution du bureau n'est pas
+   * détectable par cette seule preuve. */
+  exclusiveFullscreenActive: () => desktopOnly<boolean>('exclusive_fullscreen_active', {}),
   /** Quick Game Panel : fenêtre native ZAILON pendant le jeu (jamais une
    * injection). Ouverte au raccourci, fermée à la perte de focus. */
   quickPanel: {

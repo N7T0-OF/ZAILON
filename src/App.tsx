@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Bell, CheckCircle2, Download, ExternalLink, Info, X } from 'lucide-react'
+import { AlertTriangle, Bell, CheckCircle2, Download, ExternalLink, Info, MonitorX, X } from 'lucide-react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { AppWindow } from './components/Layout/AppWindow'
 import { CommandPalette } from './components/CommandPalette'
@@ -32,7 +32,11 @@ export default function App() {
   const quickPanelEnabled = useStore(s => s.quickPanelEnabled)
   const quickPanelShortcut = useStore(s => s.quickPanelShortcut)
   const gameSessions = useStore(s => s.gameSessions)
+  const reduceActivityDuringGame = useStore(s => s.reduceActivityDuringGame)
+  const autoMinimizeOnGameStart = useStore(s => s.autoMinimizeOnGameStart)
+  const restoreAfterGame = useStore(s => s.restoreAfterGame)
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
+  const [exclusiveNoticeOpen, setExclusiveNoticeOpen] = useState(false)
 
   // GamePresenceEngine : un seul watcher léger suit (a) les sessions en attente
   // de leur processus final, (b) les jeux configurés lancés hors ZAILON, et
@@ -49,6 +53,9 @@ export default function App() {
       tick()
       if (!native.isDesktop()) return
       const now = Date.now()
+      // Mode jeu (spec #50-51) : quand un jeu tourne, le watcher ralentit
+      // (6 s au lieu de 3 s) — la présence reste suivie sans activité lourde.
+      const gameModeActive = state.reduceActivityDuringGame && state.gameSessions.some(session => session.state === 'GameRunning')
       const installed = state.games.filter(game => game.installDirectory)
       const appIds = [...new Set(installed.map(game => adapterFor(game).steamAppId).filter((id): id is number => id !== undefined))]
       if (appIds.length > 0 && now - lastSteamCheck >= 3000) {
@@ -58,7 +65,7 @@ export default function App() {
           .catch(() => undefined)
       }
       state.sessionWatchdog(steamAppIdsRef.current)
-      if (scanning || now - lastScan < 3000) return
+      if (scanning || now - lastScan < (gameModeActive ? 6000 : 3000)) return
       const waiters = state.gameSessions.filter(session => session.state === 'WaitingForGame' || session.state === 'GameLost' || session.state === 'WaitingForElevation')
       const activeIds = state.gameSessions.filter(session => session.state !== 'Ended' && session.state !== 'Failed').map(session => session.gameId)
       const external = installed.filter(game => shouldScanExternalGame(game, steamAppIdsRef.current, state.autoAttachGames ?? [], activeIds))
@@ -141,7 +148,19 @@ export default function App() {
     let disposed = false
     void register(shortcut, event => {
       if (event.state !== 'Pressed') return
-      void native.quickPanel.toggle().catch(() => undefined)
+      // Spec #41 : en plein écran exclusif, une fenêtre externe ne peut pas
+      // s'afficher au-dessus du jeu — on montre le message « Utiliser
+      // Borderless » au lieu d'ouvrir le panneau (aucune injection).
+      void native.exclusiveFullscreenActive()
+        .then(exclusive => {
+          if (disposed) return
+          if (exclusive) {
+            setExclusiveNoticeOpen(true)
+            return
+          }
+          void native.quickPanel.toggle().catch(() => undefined)
+        })
+        .catch(() => void native.quickPanel.toggle().catch(() => undefined))
     }).catch(() => undefined)
     return () => {
       disposed = true
@@ -177,6 +196,26 @@ export default function App() {
     const running = gameSessions.some(session => session.state === 'GameRunning')
     if (!running) void native.quickPanel.close().catch(() => undefined)
   }, [gameSessions])
+
+  // Mode jeu ZAILON (spec #49-51) : quand un jeu passe en cours, on réduit
+  // l'activité (attribut data-game-mode → animations décoratives suspendues,
+  // watcher ralenti) et on peut minimiser ZAILON ; à la fin de session on
+  // restaure la fenêtre si l'option est active.
+  const runningGameCount = gameSessions.filter(session => session.state === 'GameRunning').length
+  const wasRunningRef = useRef(false)
+  useEffect(() => {
+    const running = runningGameCount > 0
+    document.documentElement.dataset.gameMode = running && reduceActivityDuringGame ? 'true' : ''
+    if (running === wasRunningRef.current) return
+    wasRunningRef.current = running
+    if (!native.isDesktop()) return
+    const mainWindow = getCurrentWindow()
+    if (running && autoMinimizeOnGameStart) {
+      void mainWindow.minimize().catch(() => undefined)
+    } else if (!running && restoreAfterGame) {
+      void mainWindow.unminimize().catch(() => undefined)
+    }
+  }, [runningGameCount, reduceActivityDuringGame, autoMinimizeOnGameStart, restoreAfterGame])
 
   useEffect(() => {
     if (!native.isDesktop()) return
@@ -275,8 +314,16 @@ export default function App() {
       <CommandPalette />
       <NotificationCenter history={notificationHistory} onDismiss={dismissNotification} onClear={clearCompletedNotifications} onClearAll={clearNotificationHistory} />
       {externalInstalls[0] && <ExternalInstallDialog request={externalInstalls[0]} games={games} onCancel={() => void native.consumeExternalInstall(externalInstalls[0].requestId).finally(() => setExternalInstalls(current => current.slice(1)))} onContinue={(gameId, profileId) => void resolveExternalInstall(externalInstalls[0], gameId, profileId)} />}
+      {exclusiveNoticeOpen && <QuickPanelExclusiveNotice onClose={() => setExclusiveNoticeOpen(false)} />}
     </div>
   )
+}
+
+// Spec #41 — plein écran exclusif : le panneau rapide (fenêtre externe) ne
+// peut pas s'afficher au-dessus du jeu. Message honnête + actions, aucune
+// injection pour contourner la limite.
+function QuickPanelExclusiveNotice({ onClose }: { onClose: () => void }) {
+  return <div className="fixed inset-0 z-[270] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}><section role="dialog" aria-modal="true" aria-labelledby="exclusive-notice-title" className="w-full max-w-sm rounded-2xl border border-white/[0.11] bg-[#111414] p-5 shadow-2xl" onClick={event => event.stopPropagation()}><div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-300/10 text-amber-200"><MonitorX size={18} /></span><div className="min-w-0 flex-1"><h2 id="exclusive-notice-title" className="font-display text-base font-bold text-white">Plein écran exclusif détecté</h2><p className="mt-1 text-xs leading-relaxed text-white/45">Le panneau rapide n'est pas disponible en plein écran exclusif : une fenêtre ZAILON ne peut pas s'afficher au-dessus du jeu dans ce mode. Aucune injection n'est utilisée pour contourner cette limite.</p></div><button type="button" onClick={onClose} aria-label="Fermer" className="rounded-lg p-2 text-white/36 hover:bg-white/[0.06]"><X size={15} /></button></div><div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/70 hover:bg-white/[0.05]">Utiliser Borderless</button><button type="button" onClick={onClose} className="rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-ink-400">Fermer</button></div></section></div>
 }
 
 function NotificationCenter({ history, onDismiss, onClear, onClearAll }: {

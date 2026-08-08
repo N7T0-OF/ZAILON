@@ -146,3 +146,10 @@ select {
 .thin-scroll::-webkit-scrollbar-thumb:hover {
     background: rgba(219, 232, 229, 0.34);
 }
+
+/* Mode jeu ZAILON (spec #50-51) : quand un jeu tourne, les animations
+ * décoratives sont suspendues — la fenêtre principale est minimisée de toute
+ * façon, inutile de faire tourner des keyframes en arrière-plan. */
+[data-game-mode="true"] * {
+  animation-play-state: paused !important;
+}

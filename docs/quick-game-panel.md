@@ -2,9 +2,10 @@
 
 ## Statut
 
-**Implémenté (1.20.0), validé en compilation par la PR #1** (Windows + Linux).
-Comportement réel à confirmer sur machine avec jeu : ouverture de la fenêtre,
-position, fermeture à la perte de focus, plein écran exclusif.
+**Implémenté (1.20.0) + détection plein écran exclusif (1.21.0), validé en
+compilation par la PR #1** (Windows + Linux). Comportement réel à confirmer
+sur machine avec jeu : ouverture de la fenêtre, position, fermeture à la
+perte de focus, détection du plein écran exclusif.
 
 ## Objectif
 
@@ -74,10 +75,16 @@ sombre, X discret. **Ne pas réintroduire Liquid Glass.**
 ## Plein écran
 
 - fenêtré / borderless : fenêtre externe affichable au-dessus ;
-- plein écran exclusif : Windows peut empêcher la présentation — la détection
-  du mode et le message « Panneau non disponible en plein écran exclusif »
-  restent à implémenter (étape à valider sur machine réelle). **Pas d'overlay
-  injecté** pour contourner.
+- plein écran exclusif : **détecté** (1.21.0) — `exclusive_fullscreen_active`
+  compare la résolution active de l'écran (EnumDisplaySettings / ENUM_CURRENT)
+  à la résolution du bureau (GetMonitorInfo) ; en exclusif la première diffère
+  de la seconde. Si le mode est détecté au raccourci, ZAILON affiche le message
+  « Le panneau rapide n'est pas disponible en plein écran exclusif » avec
+  [Utiliser Borderless] [Fermer] au lieu d'ouvrir le panneau ; si le jeu passe
+  en exclusif pendant que le panneau est ouvert, il se ferme (sondage 2 s).
+  **Limite honnête** : un exclusif lancé à la résolution exacte du bureau n'est
+  pas distinguable par cette seule preuve. **Pas d'overlay injecté** pour
+  contourner.
 
 ## Écrans multiples
 

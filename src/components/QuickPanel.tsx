@@ -1,7 +1,7 @@
 import { emit } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Check, Keyboard, MonitorDown, Palette, RefreshCw, X } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { native } from '../lib/native'
 
 /**
@@ -43,6 +43,24 @@ export function QuickPanel() {
   const close = () => {
     void getCurrentWindow().close()
   }
+
+  // Spec #41 : si le jeu passe en plein écran exclusif pendant que le panneau
+  // est ouvert, la fenêtre externe n'est plus affichée au-dessus — on la ferme
+  // proprement (sondage léger toutes les 2 s, pas de rendu à 144 FPS).
+  useEffect(() => {
+    let disposed = false
+    const id = window.setInterval(() => {
+      void native.exclusiveFullscreenActive()
+        .then(exclusive => {
+          if (exclusive && !disposed) close()
+        })
+        .catch(() => undefined)
+    }, 2000)
+    return () => {
+      disposed = true
+      window.clearInterval(id)
+    }
+  }, [])
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#0d1111]/95 text-white shadow-2xl backdrop-blur-md">

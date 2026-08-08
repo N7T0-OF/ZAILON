@@ -37,8 +37,12 @@
 > - Phase 6 🔄 Quick Game Panel (1.20.0) : fenêtre native Tauri `quick-panel`
 >   (jamais une injection) — visuel + clavier, raccourci Ctrl+Alt+Z configurable,
 >   fermée à la perte de focus, créée à la demande par `quick_panel.rs`.
->   Reste : détection du plein écran exclusif, puis tests réels NTE Steam
->   (protocole `docs/nte-keyboard-remap-test.md`).
+> - Phase 6 ✅ Mode jeu + plein écran exclusif (1.21.0) : `exclusive_fullscreen_active`
+>   (résolution active vs bureau, spec #41) → message « Utiliser Borderless » au
+>   raccourci et fermeture du panneau si le jeu passe en exclusif ; Mode jeu
+>   ZAILON (#50-51 : watcher ralenti, animations suspendues) ; auto-minimisation
+>   et restauration de la fenêtre (#49). Reste : tests réels NTE Steam (protocole
+>   `docs/nte-keyboard-remap-test.md`).
 >
 > **Progression** :
 > - Phase 1 · Clavier par jeu — fondation implémentée (données, presets, éditeur,

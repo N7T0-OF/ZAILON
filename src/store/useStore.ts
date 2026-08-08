@@ -325,6 +325,10 @@ export interface Store {
   taskToastsEnabled: boolean
   taskAutoReduceImports: boolean
   libraryViewMode: 'grid' | 'illustrated' | 'compact'
+  /** Mode de la Bibliothèque (refonte « vitrine Steam ») : `true` = grille de
+   * couvertures plein écran, `false` = page du jeu (hero + onglets). État de
+   * session, non persisté — la grille garde recherche/filtre/scroll au retour. */
+  gamesBrowsing: boolean
   activityMaxEvents: number
   downloadRetention: DownloadRetention
   remapSuspendShortcut: string
@@ -476,6 +480,7 @@ export interface Store {
   setTaskToastsEnabled: (enabled: boolean) => void
   setTaskAutoReduceImports: (enabled: boolean) => void
   setLibraryViewMode: (mode: Store['libraryViewMode']) => void
+  setGamesBrowsing: (browsing: boolean) => void
   setActivityMaxEvents: (count: number) => void
   setDownloadRetention: (retention: DownloadRetention) => void
   setRemapSuspendShortcut: (shortcut: string) => void
@@ -637,6 +642,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   taskToastsEnabled: true,
   taskAutoReduceImports: true,
   libraryViewMode: 'grid',
+  gamesBrowsing: true,
   activityMaxEvents: 250,
   downloadRetention: 'startup',
   remapSuspendShortcut: 'Ctrl+Alt+K',
@@ -1797,6 +1803,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setTaskToastsEnabled: taskToastsEnabled => set({ taskToastsEnabled }),
   setTaskAutoReduceImports: taskAutoReduceImports => set({ taskAutoReduceImports }),
   setLibraryViewMode: libraryViewMode => set({ libraryViewMode }),
+  setGamesBrowsing: gamesBrowsing => set({ gamesBrowsing }),
   setActivityMaxEvents: activityMaxEvents => set({ activityMaxEvents }),
   setDownloadRetention: downloadRetention => set({ downloadRetention }),
   setRemapSuspendShortcut: remapSuspendShortcut => set({ remapSuspendShortcut }),

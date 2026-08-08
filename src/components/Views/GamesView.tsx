@@ -1,14 +1,15 @@
-import { AlertTriangle, Archive, Boxes, Check, CheckSquare2, ChevronDown, Copy, Download, ExternalLink, FolderInput, FolderOpen, FolderPlus, Lock, Pause, Play, Plus, Radar, RefreshCw, RotateCcw, Search, ShieldAlert, Tag, Trash2, Unlock, Wrench, X } from 'lucide-react'
+import { AlertTriangle, Archive, Boxes, Check, CheckSquare2, ChevronDown, ChevronLeft, Copy, Download, ExternalLink, FolderInput, FolderOpen, FolderPlus, Gamepad2, Image as ImageIcon, Loader2, Lock, Monitor, Pause, Play, Plus, Radar, RefreshCw, RotateCcw, Search, ShieldAlert, Star, Tag, Trash2, Unlock, Wrench, X } from 'lucide-react'
 import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { appVersion, getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
 import { BackgroundTaskSnapshot, CollectionInstallPlan, Mo2ImportOptions, Mo2ImportPreview, Mo2ImportResult, ProfileDeploymentAudit, native, pickExecutable, pickFolder, pickFolders, pickProfileArchive, resourceUrl, saveProfileArchive } from '../../lib/native'
 import { ModCard } from '../UI/ModCard'
+import { pickPrioritySession } from '../../lib/sessionPriority'
 import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { formatTime, timeAgo } from '../../utils'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
-import type { Game, GameTab, Mod, ModImportCandidate, Profile, ProfileArchiveManifest, SensitiveFileAssessment, SensitiveImportAction } from '../../types'
+import type { Game, GameSession, GameTab, Mod, ModImportCandidate, Profile, ProfileArchiveManifest, SensitiveFileAssessment, SensitiveImportAction } from '../../types'
 import { VisualGamePanel } from '../../visual-profiles/ui/VisualGamePanel'
 import { GameConfigurationPanel } from './GameConfigurationPanel'
 import { GameDiagnosticPanel, GameHealthBar, type SubSection } from './GameDiagnosticPanel'
@@ -51,8 +52,14 @@ export function GamesView() {
   const setSelectedGame = useStore(state => state.setSelectedGame)
   const setSelectedProfile = useStore(state => state.setSelectedProfile)
   const setView = useStore(state => state.setView)
+  const gamesBrowsing = useStore(state => state.gamesBrowsing)
+  const setGamesBrowsing = useStore(state => state.setGamesBrowsing)
   const backgroundTasks = useStore(state => state.backgroundTasks)
   const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
+  const launchSelectedGame = useStore(state => state.launchSelectedGame)
+  const isLaunching = useStore(state => state.isLaunching)
+  const launchProgress = useStore(state => state.launchProgress)
+  const endSession = useStore(state => state.endSession)
   const addGameFromExecutable = useStore(state => state.addGameFromExecutable)
   const importDetectedGames = useStore(state => state.importDetectedGames)
   const removeGame = useStore(state => state.removeGame)
@@ -89,7 +96,8 @@ export function GamesView() {
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const [librarySearch, setLibrarySearch] = useState('')
   const [onlyWithoutCover, setOnlyWithoutCover] = useState(false)
-  const [libraryFilter, setLibraryFilter] = useState<'all' | 'favorites' | 'recent'>('all')
+  const [libraryFilter, setLibraryFilter] = useState<'all' | 'games' | 'apps' | 'favorites' | 'recent'>('all')
+  const libraryScrollRef = useRef<HTMLDivElement>(null)
   const [profileName, setProfileName] = useState('')
   const [steamDialogOpen, setSteamDialogOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
@@ -106,6 +114,13 @@ export function GamesView() {
   const modsListRef = useRef<HTMLDivElement>(null)
   const selectAllRef = useRef<HTMLInputElement>(null)
 
+  const sessionRunning = activeSession?.state === 'GameRunning'
+  const sessionWaiting = Boolean(activeSession && (activeSession.state === 'WaitingForGame' || activeSession.state === 'WaitingForElevation' || activeSession.state === 'LauncherStarted'))
+  const sessionFailed = activeSession?.state === 'GameLost'
+  const playBusy = isLaunching || sessionWaiting
+  const launchPercent = launchProgress?.total
+    ? Math.min(100, Math.round((launchProgress.current / launchProgress.total) * 100))
+    : undefined
   const summaries = useWorkspaceCache()
   const profileMods = useMemo(() => resolveProfileMods(selectedGame, selectedProfile), [selectedGame, selectedProfile])
   const filteredMods = profileMods.filter(mod => mod.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()) && (!tagFilter || mod.categoryTags?.some(tag => tag.id === tagFilter)))
@@ -129,7 +144,10 @@ export function GamesView() {
     .filter(game => {
       const cover = game.resources?.coverPath || game.resources?.bannerPath || game.resources?.backgroundPath || game.backgroundArt
       const matchesQuery = game.name.toLocaleLowerCase().includes(librarySearch.trim().toLocaleLowerCase())
+      const isApp = game.itemKind === 'software'
       const matchesFilter = libraryFilter === 'all'
+        || (libraryFilter === 'games' && !isApp)
+        || (libraryFilter === 'apps' && isApp)
         || (libraryFilter === 'favorites' && game.favorite)
         || (libraryFilter === 'recent' && game.lastPlayed !== undefined)
       return (!onlyWithoutCover || !cover) && matchesQuery && matchesFilter
@@ -420,30 +438,38 @@ export function GamesView() {
     }
   }
 
-  return <div className="flex h-full">
-    <aside className="flex w-72 flex-col border-r border-white/[0.05] bg-black/10">
-      <div className="flex items-center justify-between px-3 pb-2 pt-3"><span className="text-xs font-mono uppercase tracking-widest text-white/38">Bibliothèque</span><button onClick={() => void addGameFromExecutable()} title="Ajouter un jeu" className="text-white/40 hover:text-gold"><Plus size={15} /></button></div>
-      <div className="px-2"><label className="flex items-center gap-2 rounded-lg border border-white/[0.07] bg-black/20 px-2.5"><Search size={12} className="text-white/30" /><input value={librarySearch} onChange={event => setLibrarySearch(event.target.value)} placeholder="Chercher un jeu…" className="min-w-0 flex-1 bg-transparent py-2 text-xs text-white/68 outline-none" /></label><div className="mt-2 flex gap-1">{[['all', 'Tous'], ['favorites', 'Favoris'], ['recent', 'Récents']].map(([id, label]) => <button key={id} onClick={() => setLibraryFilter(id as typeof libraryFilter)} className={`flex-1 rounded py-1 text-[11px] ${libraryFilter === id ? 'bg-gold text-ink-400' : 'bg-white/[0.03] text-white/42'}`}>{label}</button>)}</div><div className="mt-2 flex gap-1"><button onClick={() => setLibraryViewMode('grid')} className={`flex-1 rounded py-1 text-[11px] ${libraryViewMode === 'grid' ? 'bg-gold text-ink-400' : 'bg-white/[0.03] text-white/42'}`}>Grille</button><button onClick={() => setLibraryViewMode('illustrated')} className={`flex-1 rounded py-1 text-[11px] ${libraryViewMode === 'illustrated' ? 'bg-gold text-ink-400' : 'bg-white/[0.03] text-white/42'}`}>Liste</button><button onClick={() => setLibraryViewMode('compact')} className={`flex-1 rounded py-1 text-[11px] ${libraryViewMode === 'compact' ? 'bg-gold text-ink-400' : 'bg-white/[0.03] text-white/42'}`}>Compact</button></div><label className="mt-2 flex items-center gap-2 text-[11px] text-white/38"><input type="checkbox" checked={onlyWithoutCover} onChange={event => setOnlyWithoutCover(event.target.checked)} className="accent-gold" />Sans couverture</label></div>
-      <div className={`${libraryViewMode === 'grid' ? 'grid grid-cols-2 content-start gap-2' : 'space-y-1'} mt-2 flex-1 overflow-y-auto px-2`} role="listbox" aria-label="Jeux de la bibliothèque">
-        {visibleGames.map(game => {
-          const cover = resourceUrl(game.resources?.coverPath || game.resources?.bannerPath || game.resources?.backgroundPath || game.backgroundArt)
-          const summary = summaries[game.id]
-          const firstProfileId = game.profiles[0]?.id
-          const active = firstProfileId ? summary?.profileCounts[firstProfileId]?.active : undefined
-          const health = summary?.health
-          const healthTone = health ? (health.verdict === 'ok' ? 'bg-emerald-300/85' : health.verdict === 'vigilance' ? 'bg-amber-300/85' : 'bg-red-300/85') : 'bg-white/20'
-          return <button key={game.id} role="option" aria-selected={game.id === selectedGame.id} onClick={() => setSelectedGame(game.id)} className={`overflow-hidden rounded-lg text-left ${game.id === selectedGame.id ? 'border border-gold/35 bg-gold/10 text-gold' : 'border border-white/[0.055] text-white/58 hover:bg-white/[0.04]'} ${libraryViewMode === 'compact' ? 'w-full px-2.5 py-2' : libraryViewMode === 'illustrated' ? 'flex w-full items-center gap-2 p-1.5' : ''}`}>
-            {libraryViewMode !== 'compact' && <span className={`relative block shrink-0 overflow-hidden bg-white/[0.035] ${libraryViewMode === 'grid' ? 'aspect-[3/4] w-full' : 'h-12 w-9 rounded'}`}>{cover ? <img src={cover} alt="" className="h-full w-full object-cover" /> : <span className="flex h-full items-center justify-center text-lg font-bold text-white/18">{game.name[0]}</span>}</span>}
-            <span className={libraryViewMode === 'grid' ? 'block p-2' : 'min-w-0'}><span className="flex items-center gap-1.5 truncate text-xs font-semibold"><span className={`h-1.5 w-1.5 shrink-0 rounded-full ${healthTone}`} title={health ? `Santé : ${health.verdict}` : 'Santé non calculée'} />{game.name}</span>{libraryViewMode !== 'compact' && <span className="mt-0.5 block truncate font-mono text-[11px] text-white/30">{active !== undefined ? `${active} actif(s)` : `${game.installedMods.length} mods`}</span>}</span>
-          </button>
-        })}
-      </div>
-      <button onClick={() => setSteamDialogOpen(true)} className="m-2 flex items-center justify-center gap-1.5 rounded-lg border border-white/[0.08] py-2 text-[11px] text-white/45 hover:text-white/75"><Radar size={12} /> Détecter</button>
-    </aside>
+  // Refonte « vitrine Steam » : la Bibliothèque est une grille plein écran.
+  // Clic sur un jeu → page du jeu (hero + onglets) avec « ← Bibliothèque ».
+  if (gamesBrowsing) {
+    return <LibraryShowcase
+      games={games}
+      visibleGames={visibleGames}
+      summaries={summaries}
+      search={librarySearch}
+      onSearch={setLibrarySearch}
+      filter={libraryFilter}
+      onFilter={setLibraryFilter}
+      viewMode={libraryViewMode}
+      onViewMode={setLibraryViewMode}
+      onlyWithoutCover={onlyWithoutCover}
+      onOnlyWithoutCover={setOnlyWithoutCover}
+      scrollRef={libraryScrollRef}
+      onOpen={gameId => { setSelectedGame(gameId); setGamesBrowsing(false) }}
+      onAddGame={() => void addGameFromExecutable()}
+      onDetect={() => setSteamDialogOpen(true)}
+    />
+  }
 
+  const heroImage = resourceUrl(selectedGame.resources?.heroPath || selectedGame.resources?.bannerPath || selectedGame.resources?.backgroundPath || selectedGame.resources?.coverPath || selectedGame.backgroundArt)
+
+  return <div className="flex h-full">
     <section className="flex min-w-0 flex-1 flex-col">
-      <header className="border-b border-white/[0.05] px-4 pb-3 pt-3">
-        <div className="flex items-start justify-between gap-3">
+      <header className="relative overflow-hidden border-b border-white/[0.05]">
+        {heroImage && <img src={heroImage} alt="" className="absolute inset-0 h-full w-full object-cover object-top opacity-45" />}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/35 to-[#0a0c0c]" />
+        <div className="relative px-4 pb-3 pt-3">
+          <button type="button" onClick={() => { setGamesBrowsing(true); if (libraryScrollRef.current) libraryScrollRef.current.scrollTop = 0 }} className="mb-2 flex items-center gap-1.5 rounded-lg border border-white/[0.1] bg-black/30 px-2.5 py-1.5 text-[11px] font-semibold text-white/60 backdrop-blur hover:bg-white/[0.06] hover:text-white"><ChevronLeft size={13} />Bibliothèque</button>
+          <div className="flex items-start justify-between gap-3">
           <div><h1 className="font-display text-lg font-bold text-white">{selectedGame.name}</h1>{selectedGame.lastPlayed && <p className="text-[11px] text-white/30">Joué {timeAgo(selectedGame.lastPlayed)}</p>}</div>
           <div className="flex gap-1.5"><button onClick={() => void scanMods(selectedGame.id)} title="Analyser le dossier Mods" className="rounded-lg border border-white/[0.07] p-2 text-white/40 hover:bg-white/[0.06] hover:text-gold"><RefreshCw size={13} /></button><button onClick={() => void browseModsFolder()} title="Choisir le dossier Mods" className="rounded-lg border border-white/[0.07] p-2 text-white/40 hover:bg-white/[0.06] hover:text-gold"><FolderOpen size={13} /></button><button onClick={() => { if (window.confirm(`Retirer ${selectedGame.name} de ZAILON ?`)) removeGame(selectedGame.id) }} title="Retirer de la bibliothèque" className="rounded-lg border border-white/[0.07] p-2 text-white/40 hover:bg-red-400/10 hover:text-red-300"><Trash2 size={13} /></button></div>
         </div>
@@ -474,6 +500,7 @@ export function GamesView() {
           <span className="rounded-full border border-white/[0.07] px-2.5 py-1 text-[10px] text-white/45">{profileMods.filter(mod => mod.enabled).length} mods actifs</span>
           {profileMods.some(mod => mod.updateStatus === 'available') && <span className="rounded-full border border-amber-300/15 bg-amber-300/[0.04] px-2.5 py-1 text-[10px] text-amber-100/80">{profileMods.filter(mod => mod.updateStatus === 'available').length} mise(s) à jour</span>}
           <button type="button" onClick={() => setTab('profiles')} className="rounded-full border border-white/[0.07] px-2.5 py-1 text-[10px] text-white/38 hover:border-gold/25 hover:text-gold">{selectedGame.profiles.length} profil(s)</button>
+          <button type="button" disabled={playBusy} title={sessionRunning ? 'Le jeu est en cours. Cliquez pour l’arrêter.' : playBusy ? 'En attente du jeu…' : 'Préparer les mods et lancer le jeu'} onClick={sessionRunning ? () => { if (window.confirm(`Arrêter la session de ${selectedGame.name} ?`)) endSession(selectedGame.id) } : () => void launchSelectedGame()} className={`ml-auto flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full px-5 py-2 font-display text-[10px] font-bold uppercase tracking-[0.11em] transition-all min-w-[140px] ${playBusy ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : sessionRunning ? 'bg-emerald-300/90 text-[#0c1212] hover:-translate-y-0.5 hover:bg-emerald-200' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>{playBusy ? <Loader2 size={12} className="animate-spin" /> : sessionRunning ? <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-900/60" /> : <Play size={10} fill="currentColor" />}{isLaunching ? `Préparation${launchPercent === undefined ? '…' : ` ${launchPercent}%`}` : sessionRunning ? 'En cours' : sessionWaiting ? (activeSession?.state === 'WaitingForElevation' ? 'Autorisation requise…' : activeSession?.state === 'LauncherStarted' ? 'Lancement…' : 'Recherche du jeu…') : sessionFailed ? 'Réessayer' : 'Jouer'}</button>
         </div>
         <GameHealthBar game={selectedGame} profile={selectedProfile} profileMods={profileMods} onVerify={() => setTab('diagnostic')} />
         {activeSession && activeSession.state !== 'GameRunning' && (
@@ -482,6 +509,7 @@ export function GamesView() {
             <span className="min-w-0 flex-1 text-white/38">{activeSession.state === 'GameLost' ? 'Le jeu n’a pas été détecté. ZAILON continue de chercher automatiquement — le déploiement reste actif.' : activeSession.state === 'WaitingForElevation' ? 'Le launcher demande une élévation. Acceptez la fenêtre UAC pour continuer — ZAILON ne la contourne jamais.' : 'Le launcher officiel a pris le relais. Le rattachement est automatique : QWERTY, le profil visuel et le compteur s’activent dès que le jeu est détecté.'}</span>
           </div>
         )}
+        </div>
       </header>
 
       <nav className="flex min-h-10 items-center overflow-x-auto border-b border-white/[0.05] px-3 thin-scroll"><div className="flex min-w-max gap-1">{TABS.map(item => <button key={item.id} onClick={() => setTab(item.id)} className={`border-b-2 px-2.5 py-2.5 text-[11px] ${tab === item.id ? 'border-gold text-gold' : 'border-transparent text-white/38 hover:text-white/70'}`}>{item.id === 'visuals' && selectedGame.name.toLocaleLowerCase().includes('rust') ? 'Visuels système' : item.label}</button>)}</div></nav>
@@ -528,6 +556,136 @@ export function GamesView() {
       clearBulkSelection(); setBulkDialog(undefined)
     }} />}
     {modDiagnostic && <ModDiagnosticDialog diagnostic={modDiagnostic} onClose={() => setModDiagnostic(undefined)} onOpenFiles={() => { setModDiagnostic(undefined); setDiagSection('files'); setTab('diagnostic') }} />}
+  </div>
+}
+
+function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, filter, onFilter, viewMode, onViewMode, onlyWithoutCover, onOnlyWithoutCover, scrollRef, onOpen, onAddGame, onDetect }: {
+  games: Game[]
+  visibleGames: Game[]
+  summaries: ReturnType<typeof useWorkspaceCache>
+  search: string
+  onSearch: (value: string) => void
+  filter: 'all' | 'games' | 'apps' | 'favorites' | 'recent'
+  onFilter: (value: typeof filter) => void
+  viewMode: 'grid' | 'illustrated' | 'compact'
+  onViewMode: (mode: typeof viewMode) => void
+  onlyWithoutCover: boolean
+  onOnlyWithoutCover: (value: boolean) => void
+  scrollRef: React.RefObject<HTMLDivElement>
+  onOpen: (gameId: string) => void
+  onAddGame: () => void
+  onDetect: () => void
+}) {
+  const sessions = useStore(state => state.gameSessions)
+  const pinnedPriorityGameId = useStore(state => state.pinnedPriorityGameId)
+  const foregroundGameId = useStore(state => state.foregroundGameId)
+  const setGameFavorite = useStore(state => state.setGameFavorite)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const [context, setContext] = useState<{ gameId: string; x: number; y: number }>()
+
+  const activeByGame = useMemo(() => {
+    const map = new Map<string, GameSession>()
+    sessions.forEach(session => {
+      if (session.state !== 'Ended' && session.state !== 'Failed' && session.state !== 'GameLost' && !map.has(session.gameId)) {
+        map.set(session.gameId, session)
+      }
+    })
+    return map
+  }, [sessions])
+  const priorityGameId = useMemo(() => pickPrioritySession(sessions, pinnedPriorityGameId, foregroundGameId), [sessions, pinnedPriorityGameId, foregroundGameId])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === 'l') {
+        event.preventDefault()
+        searchRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const filters: Array<{ id: typeof filter; label: string }> = [
+    { id: 'all', label: 'Tous' },
+    { id: 'games', label: 'Jeux' },
+    { id: 'apps', label: 'Applications' },
+    { id: 'favorites', label: 'Favoris' },
+    { id: 'recent', label: 'Installés récemment' },
+  ]
+  const densities: Array<{ id: typeof viewMode; label: string }> = [
+    { id: 'compact', label: 'Petit' },
+    { id: 'grid', label: 'Normal' },
+    { id: 'illustrated', label: 'Grand' },
+  ]
+  const counts = {
+    all: games.length,
+    games: games.filter(game => game.itemKind !== 'software').length,
+    apps: games.filter(game => game.itemKind === 'software').length,
+    favorites: games.filter(game => game.favorite).length,
+    recent: games.filter(game => game.lastPlayed !== undefined).length,
+  }
+  const columns = viewMode === 'compact'
+    ? 'grid-cols-[repeat(auto-fill,minmax(106px,1fr))]'
+    : viewMode === 'illustrated'
+      ? 'grid-cols-[repeat(auto-fill,minmax(196px,1fr))]'
+      : 'grid-cols-[repeat(auto-fill,minmax(148px,1fr))]'
+
+  return <div className="flex h-full flex-col">
+    <header className="flex flex-wrap items-center gap-3 border-b border-white/[0.05] px-4 py-3">
+      <div className="min-w-0"><h1 className="font-display text-lg font-bold text-white">Bibliothèque</h1><p className="mt-0.5 text-[11px] text-white/34">{counts.all} élément(s) · {counts.games} jeu(x) · {counts.apps} application(s)</p></div>
+      <div className="relative ml-auto w-full max-w-md"><Search size={13} className="absolute left-3 top-2.5 text-white/30" /><input ref={searchRef} value={search} onChange={event => onSearch(event.target.value)} placeholder="Rechercher un jeu ou une application" className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] py-2 pl-8 pr-2 text-[11px] text-white/70 outline-none focus:border-gold/30" /></div>
+      <div className="flex items-center gap-1.5">
+        <button type="button" onClick={onDetect} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]"><Radar size={12} />Détecter</button>
+        <button type="button" onClick={onAddGame} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-ink-400"><Plus size={12} />Ajouter un jeu</button>
+      </div>
+    </header>
+    <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.05] px-4 py-2">
+      <div className="flex gap-1">{filters.map(item => <button key={item.id} type="button" onClick={() => onFilter(item.id)} className={`rounded-full px-3 py-1.5 text-[11px] ${filter === item.id ? 'bg-gold text-ink-400' : 'text-white/42 hover:bg-white/[0.04] hover:text-white/70'}`}>{item.label} <span className={filter === item.id ? 'text-ink-400/55' : 'text-white/22'}>{counts[item.id]}</span></button>)}</div>
+      <div className="ml-auto flex items-center gap-2">
+        <label className="flex items-center gap-1.5 text-[11px] text-white/38"><input type="checkbox" checked={onlyWithoutCover} onChange={event => onOnlyWithoutCover(event.target.checked)} className="accent-gold" />Sans couverture</label>
+        <div className="flex gap-1 rounded-lg border border-white/[0.07] p-0.5">{densities.map(item => <button key={item.id} type="button" onClick={() => onViewMode(item.id)} className={`rounded-md px-2.5 py-1 text-[11px] ${viewMode === item.id ? 'bg-white/[0.09] text-white/80' : 'text-white/35 hover:text-white/60'}`}>{item.label}</button>)}</div>
+      </div>
+    </div>
+    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-4">
+      {visibleGames.length ? <div className={`grid gap-3 ${columns}`}>{visibleGames.map(game => <LibraryCard key={game.id} game={game} active={Boolean(activeByGame.get(game.id))} priority={priorityGameId === game.id} activeMods={game.profiles[0]?.id !== undefined ? summaries[game.id]?.profileCounts[game.profiles[0].id]?.active : undefined} onOpen={() => onOpen(game.id)} onFavorite={() => setGameFavorite(game.id)} onContextMenu={(x, y) => setContext({ gameId: game.id, x, y })} />)}</div> : <div className="flex h-48 flex-col items-center justify-center gap-2 text-[11px] text-white/35"><Search size={20} /><span>{search.trim() ? 'Aucun résultat pour cette recherche.' : 'Aucun élément dans ce filtre.'}</span><button type="button" onClick={onAddGame} className="mt-1 rounded-lg border border-white/[0.1] px-3 py-1.5 text-white/55 hover:bg-white/[0.05]">Ajouter un jeu</button></div>}
+    </div>
+    {context && <div className="fixed z-[300]" style={{ left: Math.min(context.x, window.innerWidth - 220), top: Math.min(context.y, window.innerHeight - 160) }}>
+      <div className="fixed inset-0 z-[-1]" onClick={() => setContext(undefined)} onContextMenu={event => { event.preventDefault(); setContext(undefined) }} />
+      <div className="w-52 rounded-xl border border-white/[0.1] bg-[#111414]/98 p-1.5 shadow-2xl backdrop-blur-xl">
+        {(() => { const game = games.find(item => item.id === context.gameId); if (!game) return null; return <>
+          <button type="button" onClick={() => { setGameFavorite(game.id); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/68 hover:bg-white/[0.05]"><Star size={12} className={game.favorite ? 'fill-gold text-gold' : 'text-white/35'} />{game.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}</button>
+          <button type="button" onClick={() => { onOpen(game.id); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/68 hover:bg-white/[0.05]"><Play size={12} className="text-white/35" />Ouvrir</button>
+          <button type="button" disabled title="Arrive avec le moteur d’illustrations unifié (prochaine étape)" className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/30 disabled:cursor-not-allowed"><ImageIcon size={12} />Changer l’apparence…</button>
+        </> })()}
+      </div>
+    </div>}
+  </div>
+}
+
+function LibraryCard({ game, active, priority, activeMods, onOpen, onFavorite, onContextMenu }: {
+  game: Game
+  active: boolean
+  priority: boolean
+  activeMods?: number
+  onOpen: () => void
+  onFavorite: () => void
+  onContextMenu: (x: number, y: number) => void
+}) {
+  const cover = resourceUrl(game.resources?.coverPath || game.resources?.bannerPath || game.resources?.backgroundPath || game.backgroundArt)
+  return <div onContextMenu={event => { event.preventDefault(); onContextMenu(event.clientX, event.clientY) }} className="group relative overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.02] transition-colors hover:border-gold/25 hover:bg-white/[0.04]">
+    <button type="button" onClick={onOpen} className="block w-full text-left">
+      <span className="relative block aspect-[3/4] w-full overflow-hidden bg-black/30">
+        {cover ? <img src={cover} alt="" loading="lazy" className="h-full w-full object-cover" /> : <span className="flex h-full items-center justify-center text-3xl font-bold text-white/15">{game.name[0]}</span>}
+        <span className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100"><span className="mb-3 flex items-center gap-1.5 rounded-full bg-gold px-3 py-1.5 text-[11px] font-semibold text-ink-400"><Play size={11} />Ouvrir</span></span>
+        {active && <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-emerald-400/95 px-2 py-0.5 text-[9px] font-bold text-emerald-950"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-950" />En cours</span>}
+        {priority && <span className="absolute left-2 top-8 flex items-center gap-1 rounded-full bg-gold/95 px-2 py-0.5 text-[9px] font-bold text-ink-400"><Star size={8} className="fill-ink-400" />Prioritaire</span>}
+      </span>
+      <span className="block p-2.5">
+        <span className="flex items-center gap-1.5 text-[11px] font-semibold text-white/75">{game.itemKind === 'software' ? <Monitor size={11} className="shrink-0 text-white/30" /> : <Gamepad2 size={11} className="shrink-0 text-white/30" />}<span className="truncate">{game.name}</span></span>
+        <span className="mt-1 block text-[10px] text-white/34">{activeMods !== undefined ? `${activeMods} mod(s) actif(s)` : game.installedMods.length ? `${game.installedMods.length} mods` : game.itemKind === 'software' ? 'Application locale' : 'Jeu'}</span>
+      </span>
+    </button>
+    <button type="button" onClick={event => { event.stopPropagation(); onFavorite() }} title={game.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'} className={`absolute right-2 top-2 rounded-full border p-1.5 backdrop-blur transition-colors ${game.favorite ? 'border-gold/40 bg-gold/15 text-gold' : 'border-white/[0.14] bg-black/35 text-white/40 opacity-0 hover:text-gold group-hover:opacity-100'}`}><Star size={11} className={game.favorite ? 'fill-gold text-gold' : ''} /></button>
   </div>
 }
 

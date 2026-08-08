@@ -17,6 +17,7 @@ const NAV: Array<{ id: ViewType; icon: LucideIcon; label: string }> = [
 export function Sidebar() {
   const currentView = useStore(state => state.currentView)
   const setView = useStore(state => state.setView)
+  const setGamesBrowsing = useStore(state => state.setGamesBrowsing)
   const addGameFromExecutable = useStore(state => state.addGameFromExecutable)
   const showSupportButton = useStore(state => state.showSupportButton)
   const language = useStore(state => state.language)
@@ -28,7 +29,11 @@ export function Sidebar() {
     </button>
 
     <nav className="flex w-full flex-col items-center gap-2" aria-label="Navigation principale">
-      {NAV.map(item => <NavButton key={item.id} item={item} active={currentView === item.id} onClick={() => setView(item.id)} />)}
+      {NAV.map(item => <NavButton key={item.id} item={item} active={currentView === item.id} onClick={() => {
+        // Clic « Bibliothèque » → toujours la vitrine (grille plein écran).
+        if (item.id === 'games') setGamesBrowsing(true)
+        setView(item.id)
+      }} />)}
     </nav>
 
     <div className="flex-1" />

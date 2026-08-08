@@ -109,7 +109,21 @@ d'exactement quoi activer/restaurer manuellement. Le déploiement effectif dans 
 dossier du jeu reste lié au lancement (TemporaryCopy, session-based depuis
 1.22.0).
 
-## 7. Limites restantes
+## 7. État RED4ext détaillé (spec §21)
+
+État & Diagnostic > Frameworks affiche désormais cinq lignes explicites :
+
+| Ligne | Source | Statut possible |
+|---|---|---|
+| **Installé** | mod actif fournissant `red4ext/red4ext.dll` | ✓ / ✗ |
+| **Manifest** | entrées `red4ext/` déclarées dans la carte virtuelle | ✓ / ✗ |
+| **Déployé** | le core est exposé par la VirtualFileMap (audit) | ✓ / ✗ |
+| **Runtime visible** | fournisseur RED4ext de l’audit (`enabled && runtimeVisible`) | ✓ / ✗ / Non vérifié |
+| **Chargé** | log runtime du jeu | **toujours « Non vérifié »** — jamais ✓ |
+
+Règle stricte : « Chargé » ne devient jamais ✓ sans preuve du log du jeu.
+
+## 8. Limites restantes
 
 - La confirmation réelle « RED4ext chargé » (log runtime) se fait sur machine
   avec le jeu — non exécutable dans cet environnement.

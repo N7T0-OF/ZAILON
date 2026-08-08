@@ -258,7 +258,7 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
           ))}</div>
         </div>}
         <FrameworkLastKnownGood gameId={game.id} profile={profile} profileMods={profileMods} />
-        <Red4extRepairCard summary={repair} busy={repairing} onRepair={() => void repairRed4ext()} onOpenTools={onOpenTools} />
+        <Red4extRepairCard summary={repair} audit={audit} busy={repairing} onRepair={() => void repairRed4ext()} onOpenTools={onOpenTools} />
       </div>}
 
       {section === 'conflicts' && (conflicts.length
@@ -478,7 +478,17 @@ const RED4EXT_VERDICT_TONE: Record<Red4extRepairSummary['verdict'], string> = {
 
 /** Bouton « Réparer RED4ext » (spec §9) : diagnostic complet + actions — jamais
  * de téléchargement automatique (le bouton Outils ouvre la réparation MO2). */
-function Red4extRepairCard({ summary, busy, onRepair, onOpenTools }: { summary: Red4extRepairSummary | undefined; busy: boolean; onRepair: () => void; onOpenTools: () => void }) {
+function Red4extRepairCard({ summary, audit, busy, onRepair, onOpenTools }: { summary: Red4extRepairSummary | undefined; audit: ProfileDeploymentAudit | undefined; busy: boolean; onRepair: () => void; onOpenTools: () => void }) {
+  const provider = audit?.providers.find(item => item.frameworkId.toLocaleLowerCase().includes('red4ext'))
+  const stateRows: Array<{ label: string; value: 'ok' | 'missing' | 'unknown'; hint?: string }> = summary
+    ? [
+        { label: 'Installé', value: summary.packageFound && summary.coreInDeployment ? 'ok' : 'missing', hint: 'Le loader red4ext/red4ext.dll est fourni par un mod actif du profil.' },
+        { label: 'Manifest', value: summary.red4extEntryCount > 0 ? 'ok' : 'missing', hint: `${summary.red4extEntryCount} entrée(s) red4ext/ déclarée(s) dans la carte.` },
+        { label: 'Déployé', value: summary.coreInVirtualMap ? 'ok' : 'missing', hint: 'Le core est exposé par la table virtuelle (audit de déploiement).' },
+        { label: 'Runtime visible', value: provider ? (provider.enabled && provider.runtimeVisible ? 'ok' : 'missing') : 'unknown', hint: provider ? (provider.enabled && provider.runtimeVisible ? 'La copie est visible par le jeu.' : 'Le fournisseur est présent mais la visibilité runtime n’est pas confirmée.') : 'Non vérifié tant que l’audit n’a pas tourné.' },
+        { label: 'Chargé', value: 'unknown', hint: 'Non vérifié — ZAILON n’affiche jamais « chargé » sans le log du jeu.' },
+      ]
+    : []
   return <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="text-[11px] font-semibold text-white/68">Réparer RED4ext</p>
@@ -488,6 +498,13 @@ function Red4extRepairCard({ summary, busy, onRepair, onOpenTools }: { summary: 
     {summary && <div className={`mt-3 rounded-xl border p-3 ${RED4EXT_VERDICT_TONE[summary.verdict]}`}>
       <p className="flex items-center gap-2 text-xs font-semibold">{summary.verdict === 'ok' ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}{RED4EXT_VERDICT_LABEL[summary.verdict]}</p>
       <p className="mt-1 text-[11px] opacity-70">Core dans le profil : {summary.coreInDeployment ? '✓' : '✗'} · Core dans la table virtuelle : {summary.coreInVirtualMap ? '✓' : '✗'} · {summary.pluginCount} plugin(s) · {summary.red4extEntryCount} entrée(s) red4ext/ · {summary.brokenReferences} référence(s) cassée(s).</p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">{stateRows.map(row => (
+        <div key={row.label} title={row.hint} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-[11px] ${row.value === 'ok' ? 'border-emerald-300/15 bg-emerald-300/[0.03]' : row.value === 'missing' ? 'border-red-300/12 bg-red-300/[0.02]' : 'border-amber-300/14 bg-amber-300/[0.02]'}`}>
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${row.value === 'ok' ? 'bg-emerald-300' : row.value === 'missing' ? 'bg-red-300' : 'bg-amber-300'}`} />
+          <span className="text-white/62">{row.label}</span>
+          <span className={`ml-auto font-semibold ${row.value === 'ok' ? 'text-emerald-200/85' : row.value === 'missing' ? 'text-red-200/70' : 'text-amber-100/75'}`}>{row.value === 'ok' ? '✓' : row.value === 'missing' ? '✗' : 'Non vérifié'}</span>
+        </div>
+      ))}</div>
       <ul className="mt-2 space-y-1 text-[11px] opacity-80">{summary.actions.map((action, index) => <li key={index}>• {action}</li>)}</ul>
       {summary.verdict === 'deployment-broken' && <button type="button" onClick={onOpenTools} className="mt-2 rounded-lg border border-white/[0.12] px-2.5 py-1.5 text-[11px] font-semibold text-white/70 hover:bg-white/[0.05]">Ouvrir les outils de réparation</button>}
     </div>}

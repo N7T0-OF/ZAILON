@@ -19,6 +19,7 @@ export function HomeView() {
   const selectedGame = useStore(getSelectedGame)
   const selectedProfile = useStore(getSelectedProfile)
   const setSelectedGame = useStore(state => state.setSelectedGame)
+  const setGamesBrowsing = useStore(state => state.setGamesBrowsing)
   const addGameFromExecutable = useStore(state => state.addGameFromExecutable)
   const importDetectedGames = useStore(state => state.importDetectedGames)
   const setGameResources = useStore(state => state.setGameResources)
@@ -140,7 +141,7 @@ export function HomeView() {
             <CircleAction label="Détecter" onClick={() => setDiscoveryOpen(true)}><Radar size={11} /></CircleAction>
             <CircleAction label="Modifier l’apparence" onClick={() => setResourcesGameId(selectedGame.id)}><Palette size={11} /></CircleAction>
             <CircleAction label="Actions du jeu" onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); openMenu({ x: rect.right - 252, y: rect.bottom + 5 }) }}><MoreHorizontal size={12} /></CircleAction>
-            <button type="button" onClick={() => setView('games')} title="Ouvrir les paramètres du jeu" className="ml-1 flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/[0.14] bg-[#111515] shadow-[0_8px_24px_rgba(0,0,0,0.35)] hover:border-white/30">
+            <button type="button" onClick={() => { setGamesBrowsing(false); setView('games') }} title="Ouvrir les paramètres du jeu" className="ml-1 flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/[0.14] bg-[#111515] shadow-[0_8px_24px_rgba(0,0,0,0.35)] hover:border-white/30">
               {gameIcon ? <img src={gameIcon} alt="" className="h-full w-full object-cover" /> : <span className="font-display text-sm font-black text-[#dbe8e5]">{selectedGame.name.charAt(0).toUpperCase()}</span>}
             </button>
           </div>
@@ -206,7 +207,7 @@ export function HomeView() {
           )}
           <div className="mt-5 flex items-center gap-2">
             <div className="relative flex items-center">
-              <button type="button" disabled={playBusy} title={sessionRunning ? 'Le jeu est en cours. Cliquez pour le quitter.' : playBusy ? 'En attente du jeu…' : 'Préparer les mods et lancer le jeu'} onClick={sessionRunning ? () => { setQuitConfirm(false); setQuitOpen(true) } : () => void launchSelectedGame()} className={`flex items-center gap-2 rounded-full py-2.5 pl-5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all ${playBusy ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : sessionRunning ? 'bg-emerald-300/90 text-[#0c1212] hover:-translate-y-0.5 hover:bg-emerald-200' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
+              <button type="button" disabled={playBusy} title={sessionRunning ? 'Le jeu est en cours. Cliquez pour le quitter.' : playBusy ? 'En attente du jeu…' : 'Préparer les mods et lancer le jeu'} onClick={sessionRunning ? () => { setQuitConfirm(false); setQuitOpen(true) } : () => void launchSelectedGame()} className={`flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full px-5 py-2.5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all min-w-[168px] ${playBusy ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : sessionRunning ? 'bg-emerald-300/90 text-[#0c1212] hover:-translate-y-0.5 hover:bg-emerald-200' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
                 {playBusy ? <Loader2 size={12} className="animate-spin" /> : sessionRunning ? <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-900/60" /> : <Play size={10} fill="currentColor" />}
                 {isLaunching ? `Préparation${launchPercent === undefined ? '…' : ` ${launchPercent}%`}` : sessionRunning ? 'En cours' : sessionWaiting ? (activeSession?.state === 'WaitingForElevation' ? 'Autorisation requise…' : activeSession?.state === 'LauncherStarted' ? 'Lancement…' : 'Recherche du jeu…') : sessionFailed ? 'Réessayer' : 'Jouer'}
               </button>
@@ -222,7 +223,7 @@ export function HomeView() {
         </div>
 
         <div className="mt-auto grid gap-2 pt-8 min-[800px]:grid-cols-[1.08fr_0.92fr_1.14fr]">
-          <DashboardPanel eyebrow="Activité des profils" footer="Voir les profils" onFooter={() => setView('games')}>
+          <DashboardPanel eyebrow="Activité des profils" footer="Voir les profils" onFooter={() => { setGamesBrowsing(false); setView('games') }}>
             <div className="flex h-[72px] items-end gap-3">
               <div className="flex h-10 w-10 flex-none items-center justify-center overflow-hidden rounded-full border border-white/[0.10] bg-white/[0.035]">
                 {gameIcon ? <img src={gameIcon} alt="" className="h-full w-full object-cover" /> : <Gamepad2 size={13} className="text-white/40" />}
@@ -245,14 +246,14 @@ export function HomeView() {
             <p className="mt-1 truncate text-[11px] text-white/26">{selectedGame.lastPlayed ? `Dernière session ${timeAgo(selectedGame.lastPlayed)}` : 'Prêt pour une première session'}</p>
           </DashboardPanel>
 
-          <DashboardPanel eyebrow="Favoris" footer="Toute la bibliothèque" onFooter={() => setView('games')}>
+          <DashboardPanel eyebrow="Favoris" footer="Toute la bibliothèque" onFooter={() => { setGamesBrowsing(true); setView('games') }}>
             {favoriteGames.length > 0
               ? <div className={`grid grid-cols-3 gap-2 ${favoriteGames.length > 3 ? 'h-[156px]' : 'h-[72px]'}`}>
                   {favoriteGames.map(game => <QuickGame key={game.id} game={game} summary={summaries[game.id]} active={game.id === selectedGame.id} onSelect={() => setSelectedGame(game.id)} favorite />)}
                 </div>
               : <div className="flex h-[72px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-white/[0.06] bg-black/10 px-3 text-center">
                   <p className="text-[11px] leading-relaxed text-white/34">Ajoutez vos jeux et applications préférés depuis la Bibliothèque.</p>
-                  <button type="button" onClick={() => setView('games')} className="rounded-lg border border-white/[0.1] px-3 py-1.5 text-[10px] font-semibold text-white/60 hover:bg-white/[0.06] hover:text-white/85">Ouvrir la Bibliothèque</button>
+                  <button type="button" onClick={() => { setGamesBrowsing(true); setView('games') }} className="rounded-lg border border-white/[0.1] px-3 py-1.5 text-[10px] font-semibold text-white/60 hover:bg-white/[0.06] hover:text-white/85">Ouvrir la Bibliothèque</button>
                 </div>}
             <p className="mt-1 truncate text-[11px] text-white/26">{favoriteGames.length > 0 ? `${favoriteGames.length} favori${favoriteGames.length !== 1 ? 's' : ''} · clic droit sur un jeu pour en ajouter` : `${visibleGames.length} élément${visibleGames.length !== 1 ? 's' : ''} dans ZAILON`}</p>
           </DashboardPanel>

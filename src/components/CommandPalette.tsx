@@ -53,6 +53,7 @@ export function CommandPalette() {
     const orderedGames = [...state.games].sort((left, right) => Number(Boolean(right.favorite)) - Number(Boolean(left.favorite)))
     for (const game of orderedGames) {
       result.push({ id: `game:${game.id}`, group: 'Jeux', label: game.favorite ? `${game.name} ★` : game.name, detail: `${game.profiles.length} profil(s) · ${game.installedMods.length} mod(s)`, icon: Gamepad2, run: () => {
+        state.setGamesBrowsing(false)
         state.setView('games')
         state.setSelectedGame(game.id)
         state.setActiveGameTab('overview')
@@ -61,6 +62,7 @@ export function CommandPalette() {
     for (const game of state.games) {
       for (const profile of game.profiles) {
         result.push({ id: `profile:${game.id}:${profile.id}`, group: 'Profils', label: profile.name, detail: `${game.name} · ${Object.keys(profile.modStates).length} référence(s)`, icon: Gamepad2, run: () => {
+          state.setGamesBrowsing(false)
           state.setView('games')
           state.setSelectedGame(game.id)
           void state.setSelectedProfile(profile.id)
@@ -72,6 +74,7 @@ export function CommandPalette() {
     if (selectedGame) {
       for (const mod of selectedGame.installedMods.slice(0, 200)) {
         result.push({ id: `mod:${selectedGame.id}:${mod.id}`, group: 'Mods', label: mod.name, detail: `${selectedGame.name}${mod.enabled ? '' : ' · inactif'}`, icon: Gamepad2, run: () => {
+          state.setGamesBrowsing(false)
           state.setView('games')
           state.setSelectedGame(selectedGame.id)
           state.setActiveGameTab('mods')

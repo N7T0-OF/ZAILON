@@ -262,6 +262,7 @@ export interface GameResources {
   iconPath?: string
   backgroundPath?: string
   bannerPath?: string
+  heroPath?: string
   videoPath?: string
   coverPositionX?: number
   coverPositionY?: number

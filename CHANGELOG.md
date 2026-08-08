@@ -930,7 +930,13 @@
 
 ### Added
 
+- **Bibliothèque façon vitrine Steam** : la sidebar gauche est supprimée ; la Bibliothèque est une grille plein écran avec recherche instantanée (Ctrl+L), filtres (Tous / Jeux / Applications / Favoris / Installés récemment), densité (Petit / Normal / Grand), filtre « Sans couverture », étoile de favori sur chaque carte, badge « En cours » + « ★ Prioritaire » (une seule session prioritaire), et menu contextuel (favori, ouvrir).
+- **Page du jeu** : cliquer une carte ouvre la page du jeu avec hero background (bannière/illustration en fond, dégradé léger), bouton « ← Bibliothèque » qui revient à la grille en conservant recherche, filtre et scroll, et bouton **Jouer** dans le hero (même machine d’états que l’Accueil : Jouer → Préparation → Recherche du jeu… → En cours).
+- **État RED4ext détaillé** (État & Diagnostic > Frameworks) : cinq lignes Installé / Manifest / Déployé / Runtime visible / **Chargé** — « Chargé » affiche toujours « Non vérifié » (jamais ✓ sans le log du jeu) ; les autres lignes tirent leur statut du profil, de la table virtuelle et de l’audit.
+
 ### Changed
+
+- Le bouton Jouer de l’Accueil n’est plus coupé : `min-width` stable (168 px), `padding-inline`, `white-space: nowrap`, `flex-shrink: 0` — la largeur ne bouge plus entre « Jouer », « Lancement… », « Recherche du jeu… » et « En cours » (FR/EN/DE/PT/ES).
 
 ### Fixed
 
@@ -943,6 +949,8 @@
 ### Experimental
 
 ### Removed
+
+- Suppression de la colonne latérale « Bibliothèque » (liste des jeux) dans GamesView — remplacée par la vitrine plein écran.
 
 ### Known Issues
 

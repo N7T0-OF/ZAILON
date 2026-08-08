@@ -9,6 +9,21 @@ export interface GameRuntimePath {
   path: string
   type: ModRuntimePathType
 }
+
+export interface GamePreset {
+  id: string
+  name: string
+  /** Profil de mods référencé par ce preset. */
+  profileId: string
+  /** Profil d'entrée (clavier) à associer, si défini. */
+  keyboardProfileId?: string
+  /** Profil visuel associé (association au lancement), si défini. */
+  visualProfileId?: string
+  /** Arguments de lancement complémentaires (réglage, application en Phase 6). */
+  launchArgs?: string
+  createdAt: number
+  updatedAt: number
+}
 export type TextSize = 'small' | 'normal' | 'large' | 'very-large'
 export type UiDensity = 'compact' | 'comfortable'
 export type ExploreColumns = '2' | '3'
@@ -253,6 +268,7 @@ export interface Game {
   modsPath?: string
   bypassPath?: string
   runtimePaths?: GameRuntimePath[]
+  presets?: GamePreset[]
   installedMods: Mod[]
   profiles: Profile[]
   totalPlaytime: number

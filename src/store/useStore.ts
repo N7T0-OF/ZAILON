@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, Game, GameInputProfile, GameKeyboardLayout, GameResources, GameRuntimePath, GameTab, GamebananaGame, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
+import { BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, Game, GameInputProfile, GameKeyboardLayout, GamePreset, GameResources, GameRuntimePath, GameTab, GamebananaGame, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
 import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
@@ -324,6 +324,9 @@ export interface Store {
   addGameRuntimePath: (gameId: string, path: GameRuntimePath) => void
   updateGameRuntimePath: (gameId: string, index: number, path: Partial<GameRuntimePath>) => void
   removeGameRuntimePath: (gameId: string, index: number) => void
+  saveGamePreset: (gameId: string, preset: GamePreset) => void
+  deleteGamePreset: (gameId: string, presetId: string) => void
+  applyGamePreset: (gameId: string, presetId: string) => Promise<void>
   setGameResources: (gameId: string, resources: Partial<GameResources>) => void
   setGameFavorite: (gameId: string, favorite?: boolean) => void
   setGameHidden: (gameId: string, hidden?: boolean) => void
@@ -681,6 +684,23 @@ export const useStore = create<Store>()(persist((set, get) => ({
   addGameRuntimePath: (gameId, path) => set(state => ({ games: state.games.map(game => game.id === gameId ? { ...game, runtimePaths: [...(game.runtimePaths || []), path] } : game) })),
   updateGameRuntimePath: (gameId, index, path) => set(state => ({ games: state.games.map(game => game.id === gameId ? { ...game, runtimePaths: (game.runtimePaths || []).map((item, itemIndex) => itemIndex === index ? { ...item, ...path } : item) } : game) })),
   removeGameRuntimePath: (gameId, index) => set(state => ({ games: state.games.map(game => game.id === gameId ? { ...game, runtimePaths: (game.runtimePaths || []).filter((_, itemIndex) => itemIndex !== index) } : game) })),
+  saveGamePreset: (gameId, preset) => set(state => ({
+    games: state.games.map(game => game.id === gameId ? { ...game, presets: [...(game.presets || []).filter(item => item.id !== preset.id), preset] } : game),
+  })),
+  deleteGamePreset: (gameId, presetId) => set(state => ({
+    games: state.games.map(game => game.id === gameId ? { ...game, presets: (game.presets || []).filter(item => item.id !== presetId) } : game),
+  })),
+  applyGamePreset: async (gameId, presetId) => {
+    const state = get()
+    const game = state.games.find(item => item.id === gameId)
+    const preset = game?.presets?.find(item => item.id === presetId)
+    if (!game || !preset) return
+    await state.setSelectedProfile(preset.profileId)
+    if (preset.visualProfileId && native.isDesktop()) {
+      try { await native.visualProfiles.setAssociation(gameId, preset.profileId, preset.visualProfileId) } catch { /* association non critique */ }
+    }
+    set({ notice: `Preset « ${preset.name} » appliqué (profil ${game.profiles.find(item => item.id === preset.profileId)?.name || ''}).` })
+  },
   setGameResources: (gameId, resources) => set(state => ({
     games: state.games.map(game => game.id === gameId ? { ...game, resources: { ...game.resources, ...resources } } : game),
   })),

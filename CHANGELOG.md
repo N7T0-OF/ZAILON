@@ -253,6 +253,9 @@
 - Recherche de réglages dans Paramètres : index des réglages globaux et par jeu
   (ex. « clavier » → Bibliothèque > Jeu > Configuration > Commandes), avec liens
   directs et défilement vers la section concernée.
+- Presets de jeu (Configuration > Presets) : un preset regroupe profil de mods +
+  disposition clavier + profil visuel. Créer depuis l’état actuel, appliquer en un
+  clic, dupliquer ou supprimer — sans dupliquer les fichiers.
 
 ### Changed
 

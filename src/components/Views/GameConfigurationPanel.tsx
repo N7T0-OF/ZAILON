@@ -1,10 +1,12 @@
-import { Archive, ChevronDown, FileArchive, Gamepad2, History, Keyboard, Layers3, MonitorDown, Palette, Plus, Rocket, Settings2, ShieldCheck, Trash2, Upload, Wrench } from 'lucide-react'
+import { Archive, Bookmark, ChevronDown, Copy, FileArchive, Gamepad2, History, Keyboard, Layers3, MonitorDown, Palette, Plus, Rocket, Settings2, ShieldCheck, Trash2, Upload, Wrench } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
+import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
 import { native, pickFolder } from '../../lib/native'
 import { resolveProfileMods, useStore } from '../../store/useStore'
-import type { Game, GameResources, ModRuntimePathType, Profile } from '../../types'
+import type { Game, GamePreset, GameResources, ModRuntimePathType, Profile } from '../../types'
+
+const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 import { formatTime } from '../../utils'
 import { GameAppearanceEditor } from '../GameResourcesDialog'
 import { GameKeyboardPanel } from './GameKeyboardPanel'
@@ -45,6 +47,9 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
   const addGameRuntimePath = useStore(state => state.addGameRuntimePath)
   const updateGameRuntimePath = useStore(state => state.updateGameRuntimePath)
   const removeGameRuntimePath = useStore(state => state.removeGameRuntimePath)
+  const saveGamePreset = useStore(state => state.saveGamePreset)
+  const deleteGamePreset = useStore(state => state.deleteGamePreset)
+  const applyGamePreset = useStore(state => state.applyGamePreset)
   const restorePoints = useStore(state => state.restorePoints)
   const autoRestorePoints = useStore(state => state.autoRestorePoints)
   const setAutoRestorePoints = useStore(state => state.setAutoRestorePoints)
@@ -59,6 +64,8 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
     } catch { return DEFAULT_OPEN }
   })
   const [visualName, setVisualName] = useState<string | null>(null)
+  const [currentVisualId, setCurrentVisualId] = useState<string | undefined>()
+  const [visualProfiles, setVisualProfiles] = useState<Array<{ id: string; name: string }>>([])
   const [advancedOpen, setAdvancedOpen] = useState(false)
 
   useEffect(() => {
@@ -71,6 +78,8 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
     Promise.all([native.visualProfiles.association(game.id, profile.id), native.visualProfiles.list()])
       .then(([associationId, profiles]) => {
         if (cancelled) return
+        setVisualProfiles(profiles.map(item => ({ id: item.id, name: item.name })))
+        setCurrentVisualId(associationId || undefined)
         const matched = associationId
           ? profiles.find(item => item.id === associationId)
           : profiles.find(item => item.gameAssociations.some(assoc => assoc.gameId === game.id && (!assoc.profileId || assoc.profileId === profile.id)))
@@ -180,6 +189,46 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
 
       <ConfigCard id="commandes" title="Commandes" icon={Keyboard} badge={`${LAYOUT_LABELS[effectiveLayout(game, profile.id)]}`} open={open.includes('commandes')} onToggle={() => toggle('commandes')}>
         <GameKeyboardPanel game={game} profile={profile} embedded />
+      </ConfigCard>
+
+      <ConfigCard id="presets" title="Presets" icon={Bookmark} badge={`${(game.presets || []).length} preset(s)`} open={open.includes('presets')} onToggle={() => toggle('presets')}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="max-w-2xl text-[11px] leading-relaxed text-white/38">Un preset regroupe un profil de mods, une disposition clavier et un profil visuel : appliquez toute la configuration d’un clic, sans dupliquer les fichiers.</p>
+          <button type="button" onClick={() => {
+            const now = Date.now()
+            const inputProfile = effectiveInputProfile(game, profile.id)
+            const preset: GamePreset = {
+              id: createId(),
+              name: `Preset · ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
+              profileId: profile.id,
+              keyboardProfileId: inputProfile?.id,
+              visualProfileId: currentVisualId,
+              createdAt: now,
+              updatedAt: now,
+            }
+            saveGamePreset(game.id, preset)
+          }} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313]"><Plus size={12} />Créer depuis l’état actuel</button>
+        </div>
+        {(game.presets || []).length === 0
+          ? <p className="mt-3 text-[11px] text-white/34">Aucun preset. Créez-en un depuis la configuration actuelle (profil « {profile.name} », clavier et visuel associés).</p>
+          : <ul className="mt-3 space-y-2">{(game.presets || []).map(preset => {
+            const inputProfile = game.keyboardProfiles?.find(item => item.id === preset.keyboardProfileId)
+            const visualProfile = visualProfiles.find(item => item.id === preset.visualProfileId)
+            return <li key={preset.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-white/[0.06] bg-black/15 px-3 py-2.5">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium text-white/78">{preset.name}</span>
+                <span className="mt-0.5 flex flex-wrap gap-1.5">
+                  <span className="rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/45">{game.profiles.find(item => item.id === preset.profileId)?.name || 'Profil supprimé'}</span>
+                  {inputProfile && <span className="rounded-full bg-white/[0.035] px-2 py-0.5 font-mono text-[10px] text-white/45">{inputProfile.layout.toUpperCase()}</span>}
+                  {visualProfile && <span className="rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/45">Visuel · {visualProfile.name}</span>}
+                  {!inputProfile && !visualProfile && <span className="rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/32">Sans clavier ni visuel</span>}
+                </span>
+              </span>
+              <button type="button" onClick={() => void applyGamePreset(game.id, preset.id)} className="rounded-lg border border-gold/25 px-2.5 py-1.5 text-[11px] font-semibold text-gold hover:bg-gold/10">Appliquer</button>
+              <button type="button" onClick={() => { const now = Date.now(); saveGamePreset(game.id, { ...preset, id: createId(), name: `${preset.name} (copie)`, createdAt: now, updatedAt: now }) }} title="Dupliquer ce preset" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><Copy size={13} /></button>
+              <button type="button" onClick={() => deleteGamePreset(game.id, preset.id)} title="Supprimer ce preset" className="rounded-lg p-2 text-white/30 hover:bg-red-400/10 hover:text-red-300"><Trash2 size={13} /></button>
+            </li>
+          })}</ul>}
       </ConfigCard>
 
       <ConfigCard id="sauvegardes" title="Sauvegardes" icon={FileArchive} badge={`${points.length} point(s) de restauration`} open={open.includes('sauvegardes')} onToggle={() => toggle('sauvegardes')}>

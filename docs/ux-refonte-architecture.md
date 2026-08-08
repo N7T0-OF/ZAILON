@@ -41,8 +41,9 @@
 >   `docs/settings-density-audit.md`, `docs/nte-keyboard-remap-test.md`.
 > - Phase 5 · Modes Simple/Avancé — en cours : préférence « Mode avancé », réglages
 >   techniques repliés dans « Avancé » (dossier Bypass/Loader, chemins additionnels),
->   recherche de réglages dans Paramètres (index global + navigation vers le jeu).
->   Presets de jeu, environnement de test, outils par jeu : restent à faire.
+>   recherche de réglages dans Paramètres (index global + navigation vers le jeu),
+>   presets de jeu (profil + clavier + visuel, appliquer/dupliquer/supprimer).
+>   Environnement de test, outils par jeu : restent à faire.
 > - Phase 3 · GameWorkspaceCache — fondation implémentée (compteurs de profils +
 >   santé par jeu en cache local, rafraîchi en arrière-plan, rendu instantané du
 >   sélecteur de profils). Lazy loading des sections lourdes, modes Simple/Avancé,

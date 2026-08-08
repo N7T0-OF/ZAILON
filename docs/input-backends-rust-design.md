@@ -7,7 +7,15 @@
 > `lib.rs`) — mais il ne doit y être intégré **que lorsqu'une validation locale
 > est possible** (voir « Boucle de validation » plus bas).
 
-## Pourquoi ce module n'est pas encore dans `src-tauri`
+## Statut : module posé et validé (2026-08-08)
+
+Le module `src-tauri/src/input_backends.rs` est maintenant **dans l'arbre** et
+**validé** : le workflow `verify-native.yml` (déclenché par la PR #1,
+`feat/ux-refonte-phase1-2 → main`) compile et exécute les 5 tests unitaires avec
+**succès sur Windows et Linux**. La boucle de validation décrite ci-dessous a été
+utilisée (PR existante) — aucune compilation locale nécessaire.
+
+## Contexte : pourquoi la compilation locale est impossible
 
 Le code Rust ne peut pas être compilé sur la machine de développement actuelle :
 le lien MSVC casse. Le diagnostic historique (« l'espace dans le chemin du
@@ -16,11 +24,6 @@ de compilation vers un chemin sans espace ne change rien. La vraie cause est
 l'**absence du linker MSVC** (`link.exe` résout vers le `link.exe` GNU de
 Git Bash, `/usr/bin/link` ; Visual Studio / Build Tools ne sont pas installés,
 ni gcc/mingw, ni le target `x86_64-pc-windows-gnu`).
-
-Conséquence : tout code Rust ajouté à `src-tauri` serait compilé uniquement par
-le pipeline GitHub (workflow `release.yml` sur les tags, `verify-native.yml` sur
-`main` et les PR). Publier du Rust non validé risquerait de casser silencieusement
-la prochaine release (draft jamais publiée, sans alerte visible pour l'utilisateur).
 
 ## Boucle de validation (à utiliser avant d'intégrer)
 

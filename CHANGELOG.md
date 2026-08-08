@@ -338,6 +338,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Module Rust `input_backends` dans `src-tauri` (registre, plan par jeu, sonde
+  NTE, 5 tests unitaires) — validé par le workflow `verify-native.yml` sur la
+  PR #1 (Windows + Linux).
+- Tests unitaires frontend `npm run test:input-backends` (8 tests, `node:test`
+  sans dépendance) : ordre de priorité, registre, plan NTE/ACE, diagnostic,
+  adaptateurs de lancement et repli.
+
 > Pendant le développement, chaque changement visible par l'utilisateur est ajouté
 > ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
 > cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section

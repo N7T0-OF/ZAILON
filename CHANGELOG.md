@@ -217,6 +217,9 @@
 - Les cartes de la Bibliothèque et les jeux récents de l’Accueil affichent
   directement l’état (pastille santé et mods actifs) depuis le cache, sans
   calcul au rendu.
+- L’onglet Mods charge la liste par tranches (120 mods, puis chargement au
+  défilement) : l’ouverture reste instantanée même avec plusieurs centaines de
+  mods, et la sélection multiple en shift conserve les indices réels.
 
 ### Security
 

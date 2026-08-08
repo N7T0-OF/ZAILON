@@ -1,11 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { BulkOperation, ExplodMod, ExploreColumns, ExploreSort, Game, GameResources, GameTab, GamebananaGame, LiquidGlassMode, LiquidGlassSettings, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType, WindowEffectsDiagnostic } from '../types'
+import { BulkOperation, ExplodMod, ExploreColumns, ExploreSort, Game, GameInputProfile, GameKeyboardLayout, GameResources, GameTab, GamebananaGame, LiquidGlassMode, LiquidGlassSettings, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType, WindowEffectsDiagnostic } from '../types'
 import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
 
-const APP_VERSION = '1.9.0'
+const APP_VERSION = '1.10.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 export const DEFAULT_LIQUID_GLASS: LiquidGlassSettings = { opacity: 0.86, blur: 18, darkTint: 0.58, saturation: 1.08, border: 0.12, reflection: 0.08, shadow: 0.5, animations: true, reduceWhenUnfocused: true, preferNative: true }
 
@@ -324,6 +324,15 @@ export interface Store {
   setGameFavorite: (gameId: string, favorite?: boolean) => void
   setGameHidden: (gameId: string, hidden?: boolean) => void
   setGameCategories: (gameId: string, categories: string[]) => void
+  setGameKeyboardLayout: (gameId: string, layout: GameKeyboardLayout) => void
+  saveGameInputProfile: (profile: GameInputProfile) => void
+  deleteGameInputProfile: (gameId: string, profileId: string) => void
+  restorePoints: RestorePoint[]
+  autoRestorePoints: boolean
+  createRestorePoint: (label: string, source?: 'manual' | 'auto') => void
+  restoreRestorePoint: (gameId: string, pointId: string) => void
+  deleteRestorePoint: (gameId: string, pointId: string) => void
+  setAutoRestorePoints: (value: boolean) => void
   addProfile: (name: string) => void
   prepareCollectionProfile: (collection: NexusCollectionDetail, name: string, includeAdult: boolean) => Promise<string | undefined>
   installCollectionDownloads: (gameId: string, installId: string, gameName: string) => Promise<boolean>
@@ -475,6 +484,8 @@ export function migratePersistedState(persisted: unknown) {
 export const useStore = create<Store>()(persist((set, get) => ({
   currentView: 'home',
   activeGameTab: 'mods',
+  restorePoints: [],
+  autoRestorePoints: true,
   games: [],
   selectedGameId: undefined,
   selectedProfileId: undefined,
@@ -663,6 +674,63 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setGameCategories: (gameId, categories) => set(state => ({
     games: state.games.map(game => game.id === gameId ? { ...game, categories } : game),
   })),
+  setGameKeyboardLayout: (gameId, layout) => set(state => ({
+    games: state.games.map(game => game.id === gameId ? { ...game, keyboardLayout: layout } : game),
+  })),
+  saveGameInputProfile: profile => set(state => ({
+    games: state.games.map(game => game.id === profile.gameId ? {
+      ...game,
+      keyboardProfiles: [
+        ...(game.keyboardProfiles || []).filter(item => item.id !== profile.id),
+        profile,
+      ],
+    } : game),
+  })),
+  deleteGameInputProfile: (gameId, profileId) => set(state => ({
+    games: state.games.map(game => game.id === gameId ? {
+      ...game,
+      keyboardProfiles: (game.keyboardProfiles || []).filter(item => item.id !== profileId),
+    } : game),
+  })),
+  createRestorePoint: (label, source = 'manual') => {
+    const { game, profile } = selected(get())
+    if (!game) return
+    const strip = (item: Profile): RestorePoint['profiles'][number] => {
+      const { directory: _directory, manifestPath: _manifestPath, loadOrderPath: _loadOrderPath, settingsPath: _settingsPath, overwritePath: _overwritePath, generatedPath: _generatedPath, deploymentPath: _deploymentPath, mods: _mods, ...rest } = item
+      return rest
+    }
+    const point: RestorePoint = {
+      id: createId(),
+      gameId: game.id,
+      label,
+      source,
+      createdAt: Date.now(),
+      profiles: game.profiles.map(strip),
+      keyboardProfiles: game.keyboardProfiles?.map(item => JSON.parse(JSON.stringify(item)) as GameInputProfile),
+      keyboardLayout: game.keyboardLayout,
+      selectedProfileId: profile?.id,
+    }
+    set(state => ({ restorePoints: [...state.restorePoints, point].slice(-30) }))
+    if (source === 'manual') set({ notice: `Point de restauration « ${label} » créé.` })
+  },
+  restoreRestorePoint: (gameId, pointId) => {
+    const point = get().restorePoints.find(item => item.id === pointId && item.gameId === gameId)
+    if (!point) return
+    set(state => ({
+      games: state.games.map(game => game.id === gameId ? {
+        ...game,
+        profiles: point.profiles as Profile[],
+        keyboardProfiles: point.keyboardProfiles,
+        keyboardLayout: point.keyboardLayout,
+      } : game),
+      selectedProfileId: point.selectedProfileId || state.selectedProfileId,
+      notice: `Point de restauration « ${point.label} » appliqué : profils, touches et apparence restaurés.`,
+    }))
+  },
+  deleteRestorePoint: (gameId, pointId) => set(state => ({
+    restorePoints: state.restorePoints.filter(item => !(item.id === pointId && item.gameId === gameId)),
+  })),
+  setAutoRestorePoints: value => set({ autoRestorePoints: value }),
   addProfile: name => {
     const { game } = selected(get())
     if (!game || !name.trim()) return
@@ -1062,6 +1130,11 @@ export const useStore = create<Store>()(persist((set, get) => ({
     if (!game?.execPath) { set({ notice: 'Select a game executable before launching.' }); return }
     if (!profile) { set({ notice: 'Select a profile before launching.' }); return }
     try {
+      if (get().autoRestorePoints) {
+        const now = new Date()
+        const stamp = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+        get().createRestorePoint(`Avant lancement · ${stamp}`, 'auto')
+      }
       const enabledMods = resolveProfileMods(game, profile).filter(mod => mod.enabled)
       const executableParent = game.execPath.replace(/[\\/][^\\/]+$/, '')
       const knownRoot = game.name.toLocaleLowerCase().includes('cyberpunk') && /[\\/]bin[\\/]x64(?:[\\/]|$)/i.test(game.execPath)
@@ -1607,6 +1680,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
     liquidGlassSettings: state.liquidGlassSettings,
     energySaver: state.energySaver,
     showSupportButton: state.showSupportButton,
+    restorePoints: state.restorePoints,
+    autoRestorePoints: state.autoRestorePoints,
   }),
   version: 3,
   migrate: persisted => migratePersistedState(persisted) as never,

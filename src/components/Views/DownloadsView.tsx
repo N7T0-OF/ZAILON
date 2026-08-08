@@ -3,7 +3,15 @@ import { useMemo, useState } from 'react'
 import { native, type BackgroundTaskSnapshot } from '../../lib/native'
 import { useStore } from '../../store/useStore'
 
-type StatusFilter = 'all' | BackgroundTaskSnapshot['status']
+type StatusFilter = 'all' | 'running' | 'awaiting_user_decision' | 'completed' | 'failed'
+
+const STATUS_TABS: Array<{ id: StatusFilter; label: string; match: (task: BackgroundTaskSnapshot) => boolean }> = [
+  { id: 'all', label: 'Tous', match: () => true },
+  { id: 'running', label: 'En cours', match: task => task.status === 'running' },
+  { id: 'awaiting_user_decision', label: 'En attente', match: task => task.status === 'awaiting_user_decision' },
+  { id: 'completed', label: 'Terminés', match: task => task.status === 'completed' || task.status === 'completed_with_warnings' },
+  { id: 'failed', label: 'Erreurs', match: task => task.status === 'failed' || task.status === 'cancelled' || task.status === 'interrupted' },
+]
 
 export function DownloadsView() {
   const tasks = useStore(state => state.backgroundTasks)
@@ -12,19 +20,27 @@ export function DownloadsView() {
   const [query, setQuery] = useState('')
   const kinds = [...new Set(tasks.map(task => task.kind))]
   const visible = useMemo(() => tasks.filter(task => {
+    const tab = STATUS_TABS.find(item => item.id === status) || STATUS_TABS[0]
     const normalized = query.trim().toLocaleLowerCase()
-    return (status === 'all' || task.status === status)
+    return tab.match(task)
       && (kind === 'all' || task.kind === kind)
       && (!normalized || `${task.title} ${task.message} ${task.error || ''}`.toLocaleLowerCase().includes(normalized))
   }), [kind, query, status, tasks])
+  const running = tasks.filter(task => task.status === 'running').length
 
   return <div className="h-full overflow-y-auto p-5 sm:p-7">
-    <header><p className="font-mono text-[11px] uppercase tracking-[0.24em] text-gold/58">Activité persistante</p><h1 className="mt-1 font-display text-2xl font-bold text-white">Téléchargements et tâches</h1><p className="mt-1 max-w-2xl text-xs text-white/42">Les transferts, analyses, imports et déploiements réellement lancés par ZAILON restent consultables ici après leur fin.</p></header>
-    <section className="mt-5 flex flex-wrap gap-2 rounded-xl border border-white/[0.07] bg-black/10 p-3">
+    <header><p className="font-mono text-[11px] uppercase tracking-[0.24em] text-gold/58">Centre des tâches et de l’activité</p><h1 className="mt-1 font-display text-2xl font-bold text-white">Téléchargements et activité</h1><p className="mt-1 max-w-2xl text-xs text-white/42">Les transferts, analyses, imports, installations et déploiements réellement lancés par ZAILON restent consultables ici après leur fin.</p></header>
+    <section className="mt-5 flex flex-wrap items-center gap-2 rounded-xl border border-white/[0.07] bg-black/10 p-3">
       <label className="flex min-w-56 flex-1 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3"><Search size={14} className="text-white/30" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Rechercher dans l’historique…" className="min-w-0 flex-1 bg-transparent py-2 text-xs text-white/72 outline-none" /></label>
-      <select value={status} onChange={event => setStatus(event.target.value as StatusFilter)} className="rounded-lg border border-white/[0.08] bg-[#101313] px-3 py-2 text-xs text-white/68"><option value="all">Tous les états</option><option value="running">En cours</option><option value="awaiting_user_decision">En attente de décision</option><option value="completed">Terminées</option><option value="completed_with_warnings">Terminées avec avertissements</option><option value="failed">Échouées</option><option value="cancelled">Annulées</option><option value="interrupted">Interrompues</option></select>
       <select value={kind} onChange={event => setKind(event.target.value)} className="rounded-lg border border-white/[0.08] bg-[#101313] px-3 py-2 text-xs text-white/68"><option value="all">Tous les types</option>{kinds.map(value => <option key={value} value={value}>{value}</option>)}</select>
+      {running > 0 && <span className="flex items-center gap-1.5 rounded-full border border-gold/20 bg-gold/[0.05] px-3 py-1.5 text-[11px] font-semibold text-gold"><Loader2 size={11} className="animate-spin" />{running} en cours</span>}
     </section>
+    <nav className="mt-3 flex flex-wrap gap-1 border-b border-white/[0.05] pb-2" aria-label="Filtrer par état">
+      {STATUS_TABS.map(tab => {
+        const count = tasks.filter(tab.match).length
+        return <button key={tab.id} type="button" onClick={() => setStatus(tab.id)} className={`rounded-lg px-3 py-1.5 text-[11px] ${status === tab.id ? 'bg-gold/15 font-semibold text-gold' : 'text-white/42 hover:bg-white/[0.05] hover:text-white/70'}`}>{tab.label}<span className={`ml-1.5 ${status === tab.id ? 'text-gold/70' : 'text-white/28'}`}>{count}</span></button>
+      })}
+    </nav>
     <div className="mt-3 flex items-center justify-between text-[11px] text-white/34"><span>{visible.length} tâche(s) affichée(s)</span><span>{tasks.filter(task => task.status === 'running').length} en cours</span></div>
     {visible.length ? <section className="mt-3 space-y-2">{visible.map(task => <HistoryTask key={task.id} task={task} />)}</section> : <section className="mt-4 flex min-h-56 flex-col items-center justify-center rounded-2xl border border-white/[0.07] bg-white/[0.018] text-center"><div className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.025] text-white/28"><Download size={19} /></div><h2 className="mt-3 text-sm font-semibold text-white/66">Aucune tâche correspondante</h2><p className="mt-1 max-w-sm text-xs leading-relaxed text-white/36">Modifiez les filtres ou lancez une analyse, un import ou un téléchargement réel.</p></section>}
   </div>

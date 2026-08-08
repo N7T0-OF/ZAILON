@@ -1,5 +1,90 @@
 # Changelog
 
+## [1.10.0] - 2026-08-08
+
+> Release du lot Refonte UX Phase 1 + Phase 2 partielle : clavier par jeu, fusion
+> Configuration, centre de santé + diagnostic, barre de profil, palette Ctrl+K,
+> points de restauration, centre Tâches et Activité, et système de Release Notes.
+
+### Added
+
+- Palette de commandes globale Ctrl+K : recherche de jeux, profils, mods et actions
+  avec navigation clavier (flèches, Entrée, Échap).
+- Points de restauration par jeu : chronologie avec Créer / Comparer / Restaurer /
+  Supprimer, création automatique avant lancement (activée par défaut) et
+  sauvegarde des profils, touches et apparence sans dupliquer les paquets.
+- Timeline « Activité récente » dans l’Aperçu de chaque jeu (5 derniers événements).
+- Barre « Santé » en tête de chaque jeu (verdict, frameworks, mods actifs, erreurs,
+  avertissements, dernier lancement) avec accès direct à la vérification.
+- Nouvel onglet « Diagnostic » par jeu : Résumé, Mods, Frameworks, Déploiement
+  (audit réel intégré), Entrées, Performances et Logs réunis en un seul endroit.
+- Nouvel onglet « Commandes » par jeu : disposition virtuelle du clavier (QWERTY /
+  AZERTY / QWERTZ / Personnalisée) sans ajouter ni modifier aucune langue Windows.
+- Profils d'entrée par jeu ou par profil de mods avec presets AZERTY ↔ QWERTY,
+  éditeur visuel de traductions de touches, import / export / duplication.
+- Feuille de route durable de la refonte UX : `docs/ux-refonte-architecture.md`.
+
+### Changed
+
+- « Téléchargements » devient le centre Tâches et Activité : onglets Tous / En
+  cours / En attente / Terminés / Erreurs avec compteurs, filtre par type et
+  recherche conservés.
+- En-tête de jeu : le profil actif est toujours visible avec ses badges (Stable,
+  mods actifs, mises à jour) et un sélecteur rapide en popover (changer, créer un
+  profil vide, gérer) sans quitter la page.
+- Fusion des onglets par jeu : Apparence, Sauvegardes, Commandes et Paramètres sont
+  regroupés dans un nouvel onglet « Configuration » avec cartes pliables
+  (Lancement / Apparence / Commandes / Sauvegardes / Compatibilité / Performances),
+  état des sections mémorisé et résumé des valeurs effectives en tête.
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
+## [Unreleased]
+
+> Pendant le développement, chaque changement visible par l'utilisateur est ajouté
+> ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
+> cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
+> `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
+> Release Notes à partir de cette section et refuse de publier si elle est vide.
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
 ## 1.9.0 — Profils immuables et diagnostic transparent
 
 - Références exactes `packageId`/`versionId`/`contentHash` par profil.

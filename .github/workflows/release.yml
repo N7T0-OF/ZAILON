@@ -9,8 +9,29 @@ permissions:
   contents: write
 
 jobs:
+  release-notes:
+    name: Generate release notes
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Generate structured release notes from CHANGELOG
+        run: |
+          VERSION="v$(node -p "require('./package.json').version")"
+          node .github/scripts/generate-release-notes.mjs --version "$VERSION" --strict --out release-notes-body.md
+      - name: Upload release notes artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes-body.md
+          if-no-files-found: error
+
   release:
     name: ${{ matrix.name }} installer
+    needs: release-notes
     strategy:
       fail-fast: false
       matrix:
@@ -49,7 +70,18 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
-      - name: Create GitHub release and upload signed installers
+      - name: Download generated release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .
+
+      - name: Load release notes into output
+        id: notes
+        run: |
+          { echo "body<<RELEASE_NOTES_BODY_EOF"; cat release-notes-body.md; echo "RELEASE_NOTES_BODY_EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release (draft) and upload signed installers
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -57,12 +89,10 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: ZAILON v__VERSION__
-          releaseBody: >-
-            Native ZAILON release with signed in-app update packages.
-            Windows: NSIS/MSI. Linux: AppImage, DEB or RPM. macOS: DMG.
-          releaseDraft: false
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: true
+          generateReleaseNotes: false
           prerelease: ${{ contains(github.ref_name, '-') }}
-          generateReleaseNotes: true
           retryAttempts: 3
           updaterJsonPreferNsis: true
           uploadUpdaterJson: true
@@ -87,3 +117,61 @@ jobs:
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'ZAILON-*' --dir release-assets
           find release-assets -type f ! -name '*.sig' -print0 | sort -z | xargs -0 sha256sum > checksums-sha256.txt
           gh release upload "$TAG" checksums-sha256.txt --repo "$GITHUB_REPOSITORY" --clobber
+
+  finalize:
+    name: Verify assets and publish release
+    needs: checksums
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Verify release assets before publishing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v$(node -p "require('./package.json').version")"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' > asset-names.txt
+          if ! grep -q 'checksums-sha256.txt' asset-names.txt; then
+            echo "::error::checksums-sha256.txt manquant — release non publiée"
+            exit 1
+          fi
+          if ! grep -qE '\.(exe|msi|AppImage|deb|dmg)$' asset-names.txt; then
+            echo "::error::Aucun installateur présent — release non publiée"
+            exit 1
+          fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+          echo "Release $TAG publiée."
+      - name: Generate and upload developer release report
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG="v$VERSION"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          mkdir -p release-report
+          {
+            echo "# Rapport de release ZAILON $VERSION"
+            echo ""
+            echo "- **Version** : $VERSION"
+            echo "- **Tag** : $TAG"
+            echo "- **Commit** : ${{ github.sha }}"
+            echo "- **Date** : $DATE"
+            echo "- **Plateformes** : Windows x64, Linux x64, macOS Intel, macOS Apple Silicon"
+            echo "- **Tests** : workflows verify.yml / verify-native.yml (build frontend, tests Rust, contrôles)"
+            echo "- **Migrations** : voir CHANGELOG.md — section $VERSION"
+            echo ""
+            echo "## Assets publiés"
+            echo ""
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[] | "- " + .name + " (" + (.size|tostring) + " octets)"'
+            echo ""
+            echo "## Release Notes"
+            echo ""
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq '.body'
+          } > "release-report/release-report-$VERSION.md"
+          gh release upload "$TAG" "release-report/release-report-$VERSION.md" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "Rapport release-report-$VERSION.md téléversé."

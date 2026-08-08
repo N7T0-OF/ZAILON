@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, Bell, CheckCircle2, Download, ExternalLink, Info, X } from 'lucide-react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { AppWindow } from './components/Layout/AppWindow'
+import { CommandPalette } from './components/CommandPalette'
 import { UpdateProvider } from './components/UpdateProvider'
 import { useStore } from './store/useStore'
 import { native, type BackgroundTaskSnapshot, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
@@ -169,6 +170,7 @@ export default function App() {
       <UpdateProvider>
         <AppWindow />
       </UpdateProvider>
+      <CommandPalette />
       <NotificationCenter history={notificationHistory} onDismiss={dismissNotification} onClear={clearCompletedNotifications} />
       {externalInstalls[0] && <ExternalInstallDialog request={externalInstalls[0]} games={games} onCancel={() => void native.consumeExternalInstall(externalInstalls[0].requestId).finally(() => setExternalInstalls(current => current.slice(1)))} onContinue={(gameId, profileId) => void resolveExternalInstall(externalInstalls[0], gameId, profileId)} />}
     </div>

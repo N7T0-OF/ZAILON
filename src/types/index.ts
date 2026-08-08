@@ -28,7 +28,32 @@ export interface LiquidGlassSettings {
   reduceWhenUnfocused: boolean
   preferNative: boolean
 }
-export type GameTab = 'overview' | 'mods' | 'profiles' | 'downloads' | 'files' | 'conflicts' | 'tools' | 'visuals' | 'backups' | 'appearance' | 'settings'
+export type GameTab = 'overview' | 'mods' | 'profiles' | 'downloads' | 'files' | 'conflicts' | 'tools' | 'visuals' | 'backups' | 'appearance' | 'settings' | 'commands' | 'configuration' | 'diagnostic'
+export type GameKeyboardLayout = 'qwerty' | 'azerty' | 'qwertz' | 'custom'
+export type GameInputActivation = 'while-playing' | 'on-launch'
+
+export interface GameKeyMapping {
+  /** Touche physique pressée (ex. 'Z'). */
+  physical: string
+  /** Touche envoyée au jeu (ex. 'W'). */
+  gameKey: string
+}
+
+export interface GameInputProfile {
+  id: string
+  gameId: string
+  /** Profil de mods cible ; absent = jeu entier. Priorité : profil mods > jeu > défaut. */
+  profileId?: string
+  name: string
+  layout: GameKeyboardLayout
+  mapping: GameKeyMapping[]
+  enabled: boolean
+  activationMode: GameInputActivation
+  /** Restaurer les touches du bureau à la fermeture du jeu. */
+  restoreOnExit: boolean
+  createdAt: number
+  updatedAt: number
+}
 export type LoaderType = 'GIMI' | 'ZZMI' | 'SRMI' | 'WWMI' | 'EFMI' | 'UE5' | 'BepInEx' | 'ASI' | 'CLEO' | 'REF' | 'MelonLoader' | 'DLL' | 'Archive' | 'Folder' | 'Manual'
 
 export type MatchConfidence = 'exact' | 'high' | 'medium' | 'low' | 'unknown'
@@ -262,6 +287,10 @@ export interface Game {
   hidden?: boolean
   categories?: string[]
   managedExecutables?: ManagedExecutable[]
+  /** Disposition virtuelle du jeu (clavier), jamais appliquée à Windows. */
+  keyboardLayout?: GameKeyboardLayout
+  /** Profils d'entrée par jeu / profil de mods. */
+  keyboardProfiles?: GameInputProfile[]
 }
 
 export interface ExplodMod {
@@ -362,6 +391,18 @@ export interface DownloadedModResult {
   warnings: string[]
   sensitiveFiles: SensitiveFileAssessment[]
   quarantinePath?: string
+}
+
+export interface RestorePoint {
+  id: string
+  gameId: string
+  label: string
+  source: 'manual' | 'auto'
+  createdAt: number
+  profiles: Array<Pick<Profile, 'id' | 'gameId' | 'name' | 'modStates' | 'playtime' | 'lastPlayed' | 'bypass' | 'createdAt' | 'lastUsed' | 'description' | 'color' | 'locked' | 'stableSince' | 'lastSuccessfulLaunch' | 'isDefault' | 'launchArgs' | 'runtime' | 'conflictRules' | 'installOptions' | 'modSeparators' | 'hiddenFileRules' | 'clonedFromProfileId' | 'templateId' | 'temporary' | 'collectionState' | 'collectionMetadata'>>
+  keyboardProfiles?: GameInputProfile[]
+  keyboardLayout?: GameKeyboardLayout
+  selectedProfileId?: string
 }
 
 export interface ProfileArchiveManifest {

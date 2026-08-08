@@ -1,13 +1,14 @@
 {
   "name": "zailon",
   "private": true,
-  "version": "1.9.0",
+  "version": "1.10.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "test:gamebanana-api": "node .github/scripts/check-gamebanana-api.mjs",
     "test:visual-safety": "node .github/scripts/check-visual-safety.mjs",
+    "release:notes": "node .github/scripts/generate-release-notes.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",

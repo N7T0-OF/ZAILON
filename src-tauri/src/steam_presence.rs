@@ -51,8 +51,16 @@ fn read_dword(hkey: windows_sys::Win32::System::Registry::HKEY, name: &str) -> O
     let mut buf = [0u8; 4];
     let mut size = buf.len() as u32;
     // Safety : buf est valide pour 4 octets, size est mis à jour par l'API.
-    let rc =
-        unsafe { RegQueryValueExW(hkey, wide.as_ptr(), None, None, buf.as_mut_ptr(), &mut size) };
+    let rc = unsafe {
+        RegQueryValueExW(
+            hkey,
+            wide.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            buf.as_mut_ptr(),
+            &mut size,
+        )
+    };
     if rc == 0 {
         dword_from_bytes(&buf)
     } else {
@@ -62,6 +70,7 @@ fn read_dword(hkey: windows_sys::Win32::System::Registry::HKEY, name: &str) -> O
 
 #[cfg(target_os = "windows")]
 fn steam_running_state_impl(app_ids: &[u32]) -> SteamRunningState {
+    use windows_sys::core::w;
     use windows_sys::Win32::System::Registry::*;
     let mut steam_key: HKEY = std::ptr::null_mut();
     // Safety : clé ouverte en lecture seule (KEY_QUERY_VALUE), fermée après usage.

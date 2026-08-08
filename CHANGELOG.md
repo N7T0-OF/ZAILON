@@ -336,7 +336,12 @@
   de correspondance (chemin, installation, signature, fenêtre) et signatures
   NTE à mémoriser.
 
-## [Unreleased]
+## [1.17.0] - 2026-08-08
+
+> Release du scanner natif de présence : module Rust des backends d'entrée
+> (`input_backends`) et détection du processus final pendant la fenêtre de
+> rattachement (score de correspondance, énumération Windows), validés par la
+> PR #1 sur Windows + Linux.
 
 ### Added
 
@@ -351,6 +356,30 @@
   +40, candidat +25, launcher +15, contexte +20, seuil auto ≥ 80) avec 6 tests
   unitaires, énumération Windows (Toolhelp + chemin complet) via `windows-sys`,
   commande `scan_game_presence` appelée par l'Accueil pendant l'attente du jeu.
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
 
 > Pendant le développement, chaque changement visible par l'utilisateur est ajouté
 > ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,

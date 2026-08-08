@@ -311,9 +311,12 @@ mod tests {
         );
         let score = score_process(&process, &nte_request(true));
         // 40 (installation) + 15 (launcher candidat) + 20 (contexte) = 75 < 80 :
-        // stage valide, pas d'auto-attachement comme « jeu ».
+        // stage valide — candidat (>= 50), jamais auto-attaché comme « jeu »
+        // (le seuil d'auto-attachement 80 est appliqué côté frontend).
         assert_eq!(score, 75);
-        assert!(detect_games(&[process], &[nte_request(true)]).is_empty());
+        let results = detect_games(&[process], &[nte_request(true)]);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].score, 75);
     }
 
     #[test]

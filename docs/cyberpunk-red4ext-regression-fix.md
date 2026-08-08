@@ -90,9 +90,26 @@ Implémenté dans `src/lib/lastKnownGood.ts` (module pur, 5 tests) :
 - **UI** : État & Diagnostic > Frameworks → carte Last Known Good (différences,
   versions, « Enregistrer comme référence », verrou par profil).
 
-## 6. Limites restantes
+## 6. Bouton « Réparer RED4ext » (spec §9-10)
+
+Implémenté dans État & Diagnostic > Frameworks (`evaluateRed4extRepair`,
+fonction pure testée) :
+
+1. **snapshot** — point de restauration « Avant réparation RED4ext » ;
+2. **paquet** — un mod actif fournit-il des fichiers `red4ext/` ? ;
+3. **core** — `red4ext/red4ext.dll` dans le profil ? ;
+4. **plugins** — fichiers sous `red4ext/plugins/` ;
+5. **table virtuelle** — l'audit natif reconstruit la VirtualFileMap ;
+6. **exposition** — le core est-il réellement exposé par la map ? ;
+7. **références** — `brokenReferences` (renvoi vers la réparation MO2) ;
+8. **verdict** structuré + actions humaines.
+
+**Jamais de téléchargement automatique** : si le core manque, ZAILON indique
+d'exactement quoi activer/restaurer manuellement. Le déploiement effectif dans le
+dossier du jeu reste lié au lancement (TemporaryCopy, session-based depuis
+1.22.0).
+
+## 7. Limites restantes
 
 - La confirmation réelle « RED4ext chargé » (log runtime) se fait sur machine
   avec le jeu — non exécutable dans cet environnement.
-- Le bouton « Réparer RED4ext » (reconstruction manifeste/VirtualFileMap) reste
-  à implémenter (dépend des vérifications réelles sur la machine).

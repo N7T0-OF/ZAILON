@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { inputDiagnosticRows } from '../../lib/inputBackends'
 import { effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
 import { compareFrameworkSets, fingerprintFrameworkSet } from '../../lib/lastKnownGood'
+import { evaluateRed4extRepair, type Red4extRepairSummary } from '../../lib/frameworkValidator'
 import { adapterFor, LAUNCH_BEHAVIOR_LABELS, SESSION_STATE_LABELS } from '../../lib/launchAdapters'
 import { native, type ProfileDeploymentAudit } from '../../lib/native'
 import { useStore } from '../../store/useStore'
@@ -110,7 +111,31 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
   const [testing, setTesting] = useState(false)
   const recordGameTestRun = useStore(state => state.recordGameTestRun)
   const clearGameTestRuns = useStore(state => state.clearGameTestRuns)
+  const createRestorePoint = useStore(state => state.createRestorePoint)
+  const recordNotice = useStore(state => state.recordNotice)
   const health = computeGameHealth(game, profile, profileMods)
+  const [repair, setRepair] = useState<Red4extRepairSummary | undefined>()
+  const [repairing, setRepairing] = useState(false)
+
+  /** Bouton « Réparer RED4ext » (spec §9-10) : snapshot → retrouver le paquet →
+   * vérifier le core/les plugins → reconstruire la table virtuelle (audit) →
+   * évaluer. JAMAIS de téléchargement automatique. */
+  const repairRed4ext = async () => {
+    setRepairing(true)
+    try {
+      createRestorePoint('Avant réparation RED4ext', 'auto')
+      const input = deploymentArguments(game, profile, profileMods)
+      const auditResult = await native.auditProfileDeployment(game.id, profile.id, input.enabledModIds, input.conflictRules, input.gameRoot)
+      setAudit(auditResult)
+      const summary = evaluateRed4extRepair({ activeMods: profileMods, virtualFiles: auditResult.virtualFiles, brokenReferences: auditResult.brokenReferences, deployable: auditResult.deployable })
+      setRepair(summary)
+      recordNotice(summary.actions[0] ?? 'Diagnostic RED4ext terminé.')
+    } catch (error) {
+      window.alert(`Réparation RED4ext impossible : ${String(error)}`)
+    } finally {
+      setRepairing(false)
+    }
+  }
 
   const runAudit = async () => {
     setBusy(true)
@@ -233,6 +258,7 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
           ))}</div>
         </div>}
         <FrameworkLastKnownGood gameId={game.id} profile={profile} profileMods={profileMods} />
+        <Red4extRepairCard summary={repair} busy={repairing} onRepair={() => void repairRed4ext()} onOpenTools={onOpenTools} />
       </div>}
 
       {section === 'conflicts' && (conflicts.length
@@ -431,6 +457,40 @@ function FrameworkLastKnownGood({ gameId, profile, profileMods }: { gameId: stri
       <button type="button" onClick={() => recordLastKnownGoodFrameworks(gameId)} className="rounded-lg border border-white/[0.09] px-2.5 py-1.5 text-[11px] font-semibold text-white/60 hover:bg-white/[0.05] hover:text-white">Enregistrer comme référence</button>
       <label className="flex items-center gap-2 text-[11px] text-white/55"><Toggle checked={Boolean(profile.lockFrameworks)} onChange={() => setLockFrameworks(gameId, profile.id, !profile.lockFrameworks)} />Verrouiller les frameworks</label>
     </div>
+  </div>
+}
+
+const RED4EXT_VERDICT_LABEL: Record<Red4extRepairSummary['verdict'], string> = {
+  ok: 'RED4ext opérationnel',
+  'package-missing': 'Aucun mod RED4ext actif',
+  'core-missing': 'Loader RED4ext manquant',
+  'core-not-exposed': 'Core non exposé par la table virtuelle',
+  'deployment-broken': 'Déploiement à réparer',
+}
+
+const RED4EXT_VERDICT_TONE: Record<Red4extRepairSummary['verdict'], string> = {
+  ok: 'border-emerald-300/20 bg-emerald-300/[0.04] text-emerald-200',
+  'package-missing': 'border-amber-300/20 bg-amber-300/[0.04] text-amber-100',
+  'core-missing': 'border-red-300/20 bg-red-300/[0.05] text-red-200',
+  'core-not-exposed': 'border-amber-300/20 bg-amber-300/[0.04] text-amber-100',
+  'deployment-broken': 'border-red-300/20 bg-red-300/[0.05] text-red-200',
+}
+
+/** Bouton « Réparer RED4ext » (spec §9) : diagnostic complet + actions — jamais
+ * de téléchargement automatique (le bouton Outils ouvre la réparation MO2). */
+function Red4extRepairCard({ summary, busy, onRepair, onOpenTools }: { summary: Red4extRepairSummary | undefined; busy: boolean; onRepair: () => void; onOpenTools: () => void }) {
+  return <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="text-[11px] font-semibold text-white/68">Réparer RED4ext</p>
+      <button type="button" onClick={onRepair} disabled={busy} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313] disabled:opacity-40">{busy ? <Loader2 size={13} className="animate-spin" /> : <Wrench size={13} />}{busy ? 'Diagnostic en cours…' : 'Réparer'}</button>
+    </div>
+    <p className="mt-1.5 text-[11px] leading-relaxed text-white/40">Snapshot + retrouver le paquet + vérifier le core et les plugins + reconstruire la table virtuelle (audit). ZAILON ne télécharge jamais une autre version sans confirmation.</p>
+    {summary && <div className={`mt-3 rounded-xl border p-3 ${RED4EXT_VERDICT_TONE[summary.verdict]}`}>
+      <p className="flex items-center gap-2 text-xs font-semibold">{summary.verdict === 'ok' ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}{RED4EXT_VERDICT_LABEL[summary.verdict]}</p>
+      <p className="mt-1 text-[11px] opacity-70">Core dans le profil : {summary.coreInDeployment ? '✓' : '✗'} · Core dans la table virtuelle : {summary.coreInVirtualMap ? '✓' : '✗'} · {summary.pluginCount} plugin(s) · {summary.red4extEntryCount} entrée(s) red4ext/ · {summary.brokenReferences} référence(s) cassée(s).</p>
+      <ul className="mt-2 space-y-1 text-[11px] opacity-80">{summary.actions.map((action, index) => <li key={index}>• {action}</li>)}</ul>
+      {summary.verdict === 'deployment-broken' && <button type="button" onClick={onOpenTools} className="mt-2 rounded-lg border border-white/[0.12] px-2.5 py-1.5 text-[11px] font-semibold text-white/70 hover:bg-white/[0.05]">Ouvrir les outils de réparation</button>}
+    </div>}
   </div>
 }
 

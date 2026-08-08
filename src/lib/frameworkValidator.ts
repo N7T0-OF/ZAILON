@@ -105,3 +105,80 @@ export function isRed4extActive(mods: FrameworkCheckInput[]): boolean {
     || (mod.files ?? []).some(file => normalizeFile(file).startsWith(normalized))
   ))
 }
+
+/** Contexte du bouton « Réparer RED4ext » (spec Cyberpunk §9-10). */
+export interface Red4extRepairContext {
+  /** Mods actifs du profil (fichiers relatifs). */
+  activeMods: FrameworkCheckInput[]
+  /** Table virtuelle produite par l'audit de déploiement. */
+  virtualFiles: Array<{ gameRelativePath: string }>
+  brokenReferences: number
+  deployable: boolean
+}
+
+export interface Red4extRepairSummary {
+  /** Un mod actif fournit des fichiers sous `red4ext/`. */
+  packageFound: boolean
+  /** `red4ext/red4ext.dll` est fourni par un mod actif du profil. */
+  coreInDeployment: boolean
+  /** `red4ext/red4ext.dll` est exposé par la table virtuelle (audit). */
+  coreInVirtualMap: boolean
+  /** Fichiers sous `red4ext/plugins/`. */
+  pluginCount: number
+  /** Entrées `red4ext/` dans la table virtuelle. */
+  red4extEntryCount: number
+  brokenReferences: number
+  verdict: 'ok' | 'package-missing' | 'core-missing' | 'core-not-exposed' | 'deployment-broken'
+  /** Actions humaines — JAMAIS de téléchargement automatique (spec §9). */
+  actions: string[]
+}
+
+/** Évalue l'état réel du framework RED4ext pour décider de la réparation.
+ * Vérifie à chaque couche : profil (mods actifs), table virtuelle (audit),
+ * références — le diagnostic ne prétend jamais « réparé » sans preuve. */
+export function evaluateRed4extRepair(context: Red4extRepairContext): Red4extRepairSummary {
+  const enabled = context.activeMods.filter(mod => mod.enabled)
+  const red4extFiles = enabled
+    .flatMap(mod => (mod.files ?? []).map(normalizeFile))
+    .filter(file => file.startsWith('red4ext/'))
+  const coreInDeployment = red4extFiles.includes('red4ext/red4ext.dll')
+  const pluginCount = red4extFiles.filter(file => file.startsWith('red4ext/plugins/')).length
+  const virtualRed4ext = context.virtualFiles
+    .map(entry => normalizeFile(entry.gameRelativePath))
+    .filter(path => path.startsWith('red4ext/'))
+  const coreInVirtualMap = virtualRed4ext.includes('red4ext/red4ext.dll')
+
+  const actions: string[] = []
+  let verdict: Red4extRepairSummary['verdict'] = 'ok'
+
+  if (red4extFiles.length === 0) {
+    verdict = 'package-missing'
+    actions.push('Aucun mod actif ne fournit de fichiers sous red4ext/. Activez le mod du framework RED4ext dans le profil.')
+  } else if (!coreInDeployment) {
+    verdict = 'core-missing'
+    actions.push('Des fichiers red4ext/ sont présents mais pas le loader red4ext/red4ext.dll. Activez le mod qui contient le core (ou restaurez-le manuellement — ZAILON ne télécharge jamais une version sans confirmation).')
+  } else if (!coreInVirtualMap) {
+    verdict = 'core-not-exposed'
+    actions.push('Le core est dans le profil mais absent de la table virtuelle : le manifeste ou la VirtualFileMap est cassé. Relancez l’audit puis réappliquez le déploiement au prochain lancement.')
+  } else if (context.brokenReferences > 0) {
+    verdict = 'deployment-broken'
+    actions.push(`${context.brokenReferences} référence(s) de paquet cassée(s). Utilisez « Réparer l’import MO2 et le déploiement » (Outils de réparation).`)
+  } else {
+    actions.push('RED4ext opérationnel : core exposé dans la table virtuelle, plugins détectés. Le chargement réel se confirme au runtime.')
+  }
+  if (!context.deployable) {
+    verdict = 'deployment-broken'
+    actions.unshift('Le profil n’est pas déployable : réparez les références avant de lancer.')
+  }
+
+  return {
+    packageFound: red4extFiles.length > 0,
+    coreInDeployment,
+    coreInVirtualMap,
+    pluginCount,
+    red4extEntryCount: virtualRed4ext.length,
+    brokenReferences: context.brokenReferences,
+    verdict,
+    actions,
+  }
+}

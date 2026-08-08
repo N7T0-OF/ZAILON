@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { isRed4extActive, validateCyberpunkFrameworkDeps } from '../../src/lib/frameworkValidator.ts'
+import { evaluateRed4extRepair, isRed4extActive, validateCyberpunkFrameworkDeps } from '../../src/lib/frameworkValidator.ts'
 import { mergeModCatalogs, reconcileModStates } from '../../src/lib/profileState.ts'
 
 const mod = (name: string, files: string[], enabled = true) => ({ name, enabled, files })
@@ -66,6 +66,45 @@ test('isRed4extActive : loader actif via fichiers red4ext/ ou framework déclar�
   assert.equal(isRed4extActive([disabled]), false) // désactivé → pas actif
   assert.equal(isRed4extActive([unrelated]), false) // aucun lien RED4ext
   assert.equal(isRed4extActive([{ name: 'M', enabled: true, framework: 'RED4ext' }]), true) // déclaration seule
+})
+
+test('evaluateRed4extRepair : package manquant → core manquant → core non exposé → ok', () => {
+  const core = { name: 'RED4ext', enabled: true, files: ['red4ext/red4ext.dll'], version: '1.25.0' }
+  const plugin = { name: 'Plugin', enabled: true, files: ['red4ext/plugins/Plugin/init.lua'] }
+  const none = { name: 'Mod', enabled: true, files: ['archive/pc/mod.archive'] }
+
+  // Aucun mod red4ext actif → package-missing.
+  const missing = evaluateRed4extRepair({ activeMods: [none], virtualFiles: [], brokenReferences: 0, deployable: true })
+  assert.equal(missing.verdict, 'package-missing')
+  assert.equal(missing.packageFound, false)
+
+  // Plugins sans core → core-missing (cause racine « RED4ext could not be loaded »).
+  const noCore = evaluateRed4extRepair({ activeMods: [plugin], virtualFiles: [{ gameRelativePath: 'red4ext/plugins/Plugin/init.lua' }], brokenReferences: 0, deployable: true })
+  assert.equal(noCore.verdict, 'core-missing')
+  assert.equal(noCore.coreInDeployment, false)
+
+  // Core dans le profil mais absent de la table virtuelle → core-not-exposed.
+  const notExposed = evaluateRed4extRepair({ activeMods: [core, plugin], virtualFiles: [], brokenReferences: 0, deployable: true })
+  assert.equal(notExposed.verdict, 'core-not-exposed')
+  assert.equal(notExposed.coreInDeployment, true)
+  assert.equal(notExposed.coreInVirtualMap, false)
+  assert.equal(notExposed.pluginCount, 1)
+
+  // Core exposé + références cassées → deployment-broken.
+  const broken = evaluateRed4extRepair({ activeMods: [core, plugin], virtualFiles: [{ gameRelativePath: 'red4ext/red4ext.dll' }], brokenReferences: 2, deployable: true })
+  assert.equal(broken.verdict, 'deployment-broken')
+
+  // Tout en place → ok, actions positives, jamais de téléchargement.
+  const ok = evaluateRed4extRepair({ activeMods: [core, plugin], virtualFiles: [{ gameRelativePath: 'red4ext/red4ext.dll' }, { gameRelativePath: 'red4ext/plugins/Plugin/init.lua' }], brokenReferences: 0, deployable: true })
+  assert.equal(ok.verdict, 'ok')
+  assert.equal(ok.coreInVirtualMap, true)
+  assert.equal(ok.red4extEntryCount, 2)
+  assert.ok(ok.actions.join(' ').includes('confirme'))
+  assert.ok(!ok.actions.join(' ').toLocaleLowerCase().includes('télécharg'))
+
+  // Non déployable → deployment-broken même si tout est en place.
+  const undeployable = evaluateRed4extRepair({ activeMods: [core], virtualFiles: [{ gameRelativePath: 'red4ext/red4ext.dll' }], brokenReferences: 0, deployable: false })
+  assert.equal(undeployable.verdict, 'deployment-broken')
 })
 
 test('mergeModCatalogs : union par id, catalogue installé gagne', () => {

@@ -592,9 +592,16 @@
 
 ### Added
 
+- `ntegloballauncher.exe` reconnu comme stage launcher valide de la chaîne NTE (jamais le processus final) : +15 au score natif, et la chaîne ne bloque plus un exécutable inconnu situé dans l'installation.
+
 ### Changed
 
+- Bouton Jouer simplifié : suppression du menu déroulant secondaire « Préparer et attendre » / « Lancer sans mods » de la page principale — un seul bouton qui gère toute la chaîne en arrière-plan (outils avancés dans Configuration > Lancement et Diagnostic).
+- Message « Jeu non détecté » remplacé par « Le jeu n'a pas démarré » avec accès au diagnostic, affiché seulement après épuisement des preuves.
+
 ### Fixed
+
+- Bug bloquant de durée : `formatTime` recevait des timestamps epoch (ms) au lieu de minutes → « 29770249211h 15m ». Nouveaux formateurs typés `formatClock` (heure) et `formatElapsedDuration` (durée) avec garde-fous (NaN/Infinity/négatif/absurde → rien d'affiché), 4 tests dédiés.
 
 ### Performance
 

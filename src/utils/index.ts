@@ -1,8 +1,45 @@
+/** Durée en MINUTES → « 2h 14m ». Ne reçoit jamais un timestamp absolu :
+ * un timestamp (epoch ms) passé ici produit des milliards d'heures (bug
+ * « 29770249211h ») — utiliser `formatClock` ou `formatElapsedDuration`. */
 export function formatTime(minutes: number): string {
-  if (minutes < 60) return `${minutes}m`
+  if (!Number.isFinite(minutes) || minutes < 0 || minutes > 525_600) return ''
+  if (minutes < 60) return `${Math.round(minutes)}m`
   const h = Math.floor(minutes / 60)
   const m = minutes % 60
   return m > 0 ? `${h}h ${m}m` : `${h}h`
+}
+
+/** Timestamp epoch en MILLISECONDES → heure d'horloge « HH:MM ». C'est la
+ * fonction à utiliser pour afficher une date/heure (jamais `formatTime`). */
+export function formatClock(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '—'
+  const date = new Date(ms)
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+/** Durée écoulée entre deux instants (ms) → « 2h 14m », « 1j 3h ». Unités
+ * typées : les deux arguments sont des horodatages, JAMAIS un timestamp
+ * absolu dans un formateur de durée. Valeur invalide (négative, NaN,
+ * Infinity, > 1 an) → chaîne vide : rien n'est affiché à l'UI, l'erreur ne
+ * va que dans le diagnostic développeur. */
+export function formatElapsedDuration(startMs: number, nowMs: number): string {
+  const elapsed = nowMs - startMs
+  if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > 31_536_000_000) {
+    if (typeof console !== 'undefined') console.error('[ZAILON] durée invalide', { startMs, nowMs, elapsed })
+    return ''
+  }
+  const seconds = Math.floor(elapsed / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}min`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) {
+    const rest = minutes % 60
+    return rest > 0 ? `${hours}h ${rest}min` : `${hours}h`
+  }
+  const days = Math.floor(hours / 24)
+  const restHours = hours % 24
+  return restHours > 0 ? `${days}j ${restHours}h` : `${days}j`
 }
 
 export function formatSeconds(seconds: number): string {

@@ -1,4 +1,4 @@
-import { Boxes, Check, ChevronDown, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2 } from 'lucide-react'
+import { Boxes, Check, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Game } from '../../types'
 import { resourceUrl, native } from '../../lib/native'
@@ -27,13 +27,11 @@ export function HomeView() {
   const sessionTime = useStore(state => state.sessionTime)
   const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
   const endSession = useStore(state => state.endSession)
-  const prepareAndWait = useStore(state => state.prepareAndWait)
   const setView = useStore(state => state.setView)
   const setActiveGameTab = useStore(state => state.setActiveGameTab)
   const [discoveryOpen, setDiscoveryOpen] = useState(false)
   const [visualName, setVisualName] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ game: Game; position: { x: number; y: number } }>()
-  const [playMenuOpen, setPlayMenuOpen] = useState(false)
   const [quitOpen, setQuitOpen] = useState(false)
   const [quitConfirm, setQuitConfirm] = useState(false)
   const [resourcesGameId, setResourcesGameId] = useState<string>()
@@ -180,8 +178,8 @@ export function HomeView() {
           )}
           {activeSession && activeSession.state === 'GameLost' && (
             <div className="mt-4 max-w-md rounded-xl border border-red-300/20 bg-red-300/[0.05] p-3 backdrop-blur-md">
-              <p className="font-mono text-[11px] uppercase tracking-widest text-red-200/90">Jeu non détecté</p>
-              <p className="mt-1 text-[11px] leading-relaxed text-white/52">Le launcher a été ouvert mais le jeu n'a pas été détecté. ZAILON continue de chercher automatiquement — le déploiement reste actif. Cliquez sur « Jouer » pour relancer si besoin.</p>
+              <p className="font-mono text-[11px] uppercase tracking-widest text-red-200/90">Le jeu n'a pas démarré</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-white/52">ZAILON a suivi automatiquement Steam, le launcher et l'élévation, puis a cherché le processus final jusqu'à l'épuisement des preuves. Le déploiement reste en place. Réessayez, ou ouvrez le diagnostic pour voir la chaîne complète.</p>
             </div>
           )}
           <div className="mt-5 flex items-center gap-2">
@@ -190,17 +188,6 @@ export function HomeView() {
                 {playBusy ? <Loader2 size={12} className="animate-spin" /> : sessionRunning ? <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-900/60" /> : <Play size={10} fill="currentColor" />}
                 {isLaunching ? `Préparation${launchPercent === undefined ? '…' : ` ${launchPercent}%`}` : sessionRunning ? 'En cours' : sessionWaiting ? (activeSession?.state === 'WaitingForElevation' ? 'Autorisation requise…' : activeSession?.state === 'LauncherStarted' ? 'Lancement…' : 'Recherche du jeu…') : sessionFailed ? 'Réessayer' : 'Jouer'}
               </button>
-              <button type="button" disabled={playBusy || sessionRunning} onClick={() => setPlayMenuOpen(open => !open)} title="Options de lancement" aria-label="Options de lancement" aria-expanded={playMenuOpen} className={`flex h-full items-center rounded-r-full border-l border-black/15 px-2 transition-colors ${playBusy || sessionRunning ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/60' : 'bg-[#dbe8e5] text-[#0d1111] hover:bg-white'}`}><ChevronDown size={12} className={`transition-transform ${playMenuOpen ? 'rotate-180' : ''}`} /></button>
-              {playMenuOpen && !playBusy && !sessionRunning && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setPlayMenuOpen(false)} />
-                  <div className="absolute left-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-xl border border-white/[0.09] bg-[#141818] shadow-[0_18px_50px_rgba(0,0,0,0.55)]">
-                    <button type="button" onClick={() => { setPlayMenuOpen(false); void launchSelectedGame() }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[11px] text-white/70 hover:bg-white/[0.05]"><Play size={11} className="text-gold/80" /><span><span className="block font-semibold text-white/80">Jouer</span><span className="block text-[10px] text-white/30">Prépare les mods puis lance le jeu (ou son launcher).</span></span></button>
-                    <button type="button" onClick={() => { setPlayMenuOpen(false); prepareAndWait(selectedGame.id, selectedProfile.id) }} className="flex w-full items-center gap-2.5 border-t border-white/[0.05] px-3.5 py-2.5 text-left text-[11px] text-white/70 hover:bg-white/[0.05]"><Clock3 size={11} className="text-gold/80" /><span><span className="block font-semibold text-white/80">Préparer et attendre le jeu</span><span className="block text-[10px] text-white/30">Lancez le jeu vous-même (launcher officiel) — ZAILON l'attache ensuite.</span></span></button>
-                    <button type="button" onClick={() => { setPlayMenuOpen(false); void launchSelectedGame({ withoutMods: true }) }} className="flex w-full items-center gap-2.5 border-t border-white/[0.05] px-3.5 py-2.5 text-left text-[11px] text-white/70 hover:bg-white/[0.05]"><Boxes size={11} className="text-gold/80" /><span><span className="block font-semibold text-white/80">Lancer sans mods</span><span className="block text-[10px] text-white/30">Démarre le jeu avec le profil vide — utile pour diagnostiquer.</span></span></button>
-                  </div>
-                </>
-              )}
             </div>
             <button type="button" onClick={() => setActiveGameTab('mods')} aria-label="Gérer les mods" title="Gérer les mods" className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.12] bg-black/25 text-white/50 backdrop-blur hover:bg-white/[0.08] hover:text-white"><Settings2 size={12} /></button>
           </div>

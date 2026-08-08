@@ -8,7 +8,7 @@ import { resolveProfileMods, useStore } from '../../store/useStore'
 import type { Game, GamePreset, GameResources, ModRuntimePathType, Profile } from '../../types'
 
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
-import { formatTime } from '../../utils'
+import { formatClock, formatTime } from '../../utils'
 import { GameAppearanceEditor } from '../GameResourcesDialog'
 import { GameKeyboardPanel } from './GameKeyboardPanel'
 import { Toggle } from '../UI/Toggle'
@@ -295,15 +295,24 @@ function LaunchChainTest({ game }: { game: Game }) {
   const launcherBased = isLauncherBased(adapter)
   const [testedAt, setTestedAt] = useState<number>()
   const execName = game.execPath?.split(/[\\/]/).pop()?.toLocaleLowerCase()
+  const knownCandidates = [
+    ...(adapter.launcherExecutable ? [adapter.launcherExecutable] : []),
+    ...(adapter.launcherExecutableCandidates || []),
+    ...adapter.gameExecutableCandidates,
+  ]
   const matchesKnown = execName
-    ? [adapter.launcherExecutable, ...adapter.gameExecutableCandidates].filter(Boolean).some(candidate => execName === candidate?.toLocaleLowerCase())
+    ? knownCandidates.some(candidate => execName === candidate?.toLocaleLowerCase())
     : false
+  // Un exécutable inconnu mais situé DANS l'installation reste un stage
+  // candidat valide (spec #28) : la corrélation par chemin suffit pour
+  // continuer la chaîne — un nom d'exe nouveau ne bloque jamais la session.
+  const insideInstall = Boolean(game.execPath && game.installDirectory && game.execPath.toLocaleLowerCase().startsWith(game.installDirectory.toLocaleLowerCase()))
   const checks = [
     { label: 'Exécutable du jeu configuré', ok: Boolean(game.execPath), detail: game.execPath || 'Choisissez l’exécutable (launcher ou jeu final).' },
     { label: 'Dossier du jeu configuré', ok: Boolean(game.installDirectory), detail: game.installDirectory || 'Indiquez le dossier d’installation pour rattacher les processus par chemin.' },
     { label: 'Dossier Mods configuré', ok: Boolean(game.modsPath), detail: game.modsPath || 'Requis pour préparer les mods avant le launcher.' },
     { label: 'Candidats du jeu final connus', ok: !launcherBased || adapter.gameExecutableCandidates.length > 0, detail: launcherBased ? (adapter.gameExecutableCandidates.join(', ') || 'Aucun candidat — le rattachement automatique sera impossible.') : 'Processus direct : le jeu final est l’exécutable configuré.' },
-    { label: launcherBased ? 'Exécutable cohérent avec la chaîne' : 'Exécutable reconnu', ok: matchesKnown, detail: matchesKnown ? (execName || '') : launcherBased ? `${execName || '—'} ne correspond ni au launcher ni aux candidats connus — le rattachement pourra nécessiter un attachement manuel.` : 'Aucune signature connue — l’attachement manuel reste disponible.' },
+    { label: launcherBased ? 'Exécutable cohérent avec la chaîne' : 'Exécutable reconnu', ok: launcherBased ? (matchesKnown || insideInstall) : matchesKnown, detail: matchesKnown ? (execName || '') : launcherBased && insideInstall ? `${execName || '—'} est un exécutable inconnu mais situé dans l'installation — la chaîne continue automatiquement (détection par chemin et corrélation temporelle).` : launcherBased ? `${execName || '—'} est hors de l'installation — vérifiez le chemin de l'exécutable.` : 'Aucune signature connue — la détection automatique par chemin reste active.' },
   ]
   const required = checks.filter(item => item.label !== 'Exécutable reconnu')
   const ok = required.every(item => item.ok)
@@ -318,8 +327,8 @@ function LaunchChainTest({ game }: { game: Game }) {
       <button type="button" onClick={() => setTestedAt(Date.now())} className="flex items-center gap-1.5 rounded-lg border border-gold/25 px-3 py-2 text-[11px] font-semibold text-gold hover:bg-gold/10"><ShieldCheck size={12} />Tester la chaîne</button>
     </div>
     <ul className="mt-3 space-y-1.5">{checks.map(item => <li key={item.label} className="flex items-start gap-2 text-[11px]"><span className={`mt-0.5 shrink-0 ${item.ok ? 'text-emerald-300/80' : 'text-amber-300/80'}`}>{item.ok ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}</span><span className="min-w-0"><span className={`block ${item.ok ? 'text-white/60' : 'text-amber-100/80'}`}>{item.label}</span><span className="block truncate text-[10px] text-white/28">{item.detail}</span></span></li>)}</ul>
-    {testedAt && <p className={`mt-3 rounded-lg border px-3 py-2 text-[11px] ${ok ? 'border-emerald-300/15 bg-emerald-300/[0.04] text-emerald-100/70' : 'border-amber-300/15 bg-amber-300/[0.04] text-amber-100/75'}`}>{ok ? `Chaîne compatible — vérifié à ${formatTime(testedAt)}. Le test est en lecture seule : aucun fichier n’est modifié, aucun processus lancé.` : `Chaîne incomplète — vérifié à ${formatTime(testedAt)}. Corrigez les points ci-dessus avant de lancer.`}</p>}
-    <p className="mt-2 text-[10px] leading-relaxed text-white/26">Le test vérifie uniquement la configuration (aucun lancement). La détection réelle du processus final (launcher → jeu) sera fournie par le backend natif Phase 6.</p>
+    {testedAt && <p className={`mt-3 rounded-lg border px-3 py-2 text-[11px] ${ok ? 'border-emerald-300/15 bg-emerald-300/[0.04] text-emerald-100/70' : 'border-amber-300/15 bg-amber-300/[0.04] text-amber-100/75'}`}>{ok ? `Chaîne compatible — vérifié à ${formatClock(testedAt)}. Le test est en lecture seule : aucun fichier n’est modifié, aucun processus lancé.` : `Chaîne incomplète — vérifié à ${formatClock(testedAt)}. Corrigez les points ci-dessus avant de lancer.`}</p>}
+    <p className="mt-2 text-[10px] leading-relaxed text-white/26">Le test vérifie uniquement la configuration (aucun lancement). La détection réelle du processus final (launcher → jeu) est fournie par le backend natif : processus, fenêtres et preuve Steam — sans attachement manuel.</p>
   </div>
 }
 

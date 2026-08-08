@@ -641,6 +641,9 @@ export interface GamePresenceRequest {
   gameId: string
   installRoot?: string
   launcherExecutable?: string
+  /** Launchers intermédiaires connus (ex. `ntegloballauncher.exe` pour NTE) :
+   * stage valide (+15) mais jamais le processus final. */
+  launcherExecutableCandidates?: string[]
   gameExecutableCandidates: string[]
   reattachContext: boolean
 }

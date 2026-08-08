@@ -16,15 +16,21 @@ export const DEFAULT_END_GRACE_SECONDS = 10
 export const FALLBACK_ADAPTER: GameLaunchAdapter = {
   launchBehavior: 'DirectProcess',
   launcherExecutable: undefined,
+  launcherExecutableCandidates: [],
   gameExecutableCandidates: [],
   reattachWindowSeconds: DEFAULT_REATTACH_WINDOW_SECONDS,
   endGraceSeconds: DEFAULT_END_GRACE_SECONDS,
   launchChainStages: ['Game'],
 }
 
+// NTE : la chaîne réelle peut passer par ntegloballauncher.exe (stage
+// intermédiaire VALIDE, jamais le processus final) avant le vrai jeu sous
+// Client\WindowsNoEditor\HT\Binaries\Win64\. Un launcher intermédiaire ne doit
+// jamais déclencher « Chaîne incomplète » ni demander un attachement manuel.
 const NTE_ADAPTER: GameLaunchAdapter = {
   launchBehavior: 'SteamLauncher',
   launcherExecutable: 'NTELauncher.exe',
+  launcherExecutableCandidates: ['NTELauncher.exe', 'ntegloballauncher.exe'],
   gameExecutableCandidates: ['HT-Win64-Shipping.exe', 'NTE-Win64-Shipping.exe', 'NevernessToEverness.exe'],
   reattachWindowSeconds: 90,
   endGraceSeconds: 10,

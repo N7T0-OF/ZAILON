@@ -7,7 +7,7 @@ import { native, type ProfileDeploymentAudit } from '../../lib/native'
 import { useStore } from '../../store/useStore'
 import type { Game, GameTestRun, Mod, Profile } from '../../types'
 import { Toggle } from '../UI/Toggle'
-import { formatSeconds, formatTime, timeAgo } from '../../utils'
+import { formatClock, formatSeconds, formatTime, timeAgo } from '../../utils'
 
 export interface GameHealth {
   activeMods: number
@@ -324,7 +324,7 @@ function TestEnvironmentPanel({ game, profile, profileMods, latestRun, running, 
       <div className="flex flex-wrap items-center gap-2">
         <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${run.deployable ? 'border-emerald-300/20 bg-emerald-300/[0.05] text-emerald-200' : 'border-red-300/20 bg-red-300/[0.05] text-red-200'}`}>{run.deployable ? 'Déployable' : 'Non déployable'}</span>
         <span className={`rounded-full border px-2.5 py-1 text-[11px] ${run.integrityOk ? 'border-white/[0.08] text-white/45' : 'border-amber-300/20 bg-amber-300/[0.05] text-amber-100'}`}>Intégrité {run.integrityOk ? 'OK' : 'à vérifier'}</span>
-        <span className="ml-auto text-[11px] text-white/30">Profil {run.profileName} · {formatTime(run.at)}</span>
+        <span className="ml-auto text-[11px] text-white/30">Profil {run.profileName} · {formatClock(run.at)}</span>
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Paquets référencés" value={String(run.referencedPackages)} /><Metric label="Fichiers gagnants" value={String(run.virtualFileCount)} /><Metric label="Conflits résolus" value={String(run.conflicts)} /><Metric label="Références cassées" value={String(run.brokenReferences)} tone={run.brokenReferences > 0 ? 'red' : undefined} /></div>
       <div className="mt-2 grid gap-2 sm:grid-cols-2"><Metric label="Frameworks" value={`${run.frameworkOk} / ${run.frameworkTotal}`} /><Metric label="Diagnostics" value={String(run.diagnostics.length)} /></div>
@@ -336,7 +336,7 @@ function TestEnvironmentPanel({ game, profile, profileMods, latestRun, running, 
 
     {(game.testRuns?.length || 0) > 1 && <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
       <div className="flex items-center justify-between gap-2"><p className="text-[11px] font-semibold text-white/68">Historique des tests (10 derniers)</p><button type="button" onClick={onClearHistory} className="text-[11px] font-semibold text-red-200/60 hover:text-red-200">Effacer l’historique</button></div>
-      <ul className="mt-2 divide-y divide-white/[0.05]">{(game.testRuns || []).slice(1, 10).map(item => <li key={item.id} className="flex flex-wrap items-center gap-2 py-2 text-[11px]"><span className={`h-1.5 w-1.5 rounded-full ${item.deployable ? 'bg-emerald-300/80' : 'bg-red-300/80'}`} /><span className="text-white/55">{item.deployable ? 'Déployable' : 'Non déployable'}</span><span className="text-white/28">Profil {item.profileName}</span><span className="text-white/28">{item.brokenReferences} cassée(s) · {item.conflicts} conflit(s)</span><span className="ml-auto text-white/26">{formatTime(item.at)}</span></li>)}</ul>
+      <ul className="mt-2 divide-y divide-white/[0.05]">{(game.testRuns || []).slice(1, 10).map(item => <li key={item.id} className="flex flex-wrap items-center gap-2 py-2 text-[11px]"><span className={`h-1.5 w-1.5 rounded-full ${item.deployable ? 'bg-emerald-300/80' : 'bg-red-300/80'}`} /><span className="text-white/55">{item.deployable ? 'Déployable' : 'Non déployable'}</span><span className="text-white/28">Profil {item.profileName}</span><span className="text-white/28">{item.brokenReferences} cassée(s) · {item.conflicts} conflit(s)</span><span className="ml-auto text-white/26">{formatClock(item.at)}</span></li>)}</ul>
       {frameworkTotal > 0 && <p className="mt-2 text-[10px] text-white/26">L’environnement de test n’utilise ni injection ni modification de fichiers : il est sûr même avec Anti-Cheat (ex. NTE / ACE).</p>}
     </div>}
   </div>
@@ -374,7 +374,7 @@ function LaunchSessionPanel({ game }: { game: Game }) {
           <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
             <div className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1"><span className="text-white/34">Profil</span><span className="text-white/58">{game.profiles.find(item => item.id === activeSession.profileId)?.name || activeSession.profileId}</span></div>
             <div className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1"><span className="text-white/34">Source</span><span className="text-white/58">{activeSession.source === 'zailon' ? 'Lancé par ZAILON' : activeSession.source === 'manual' ? 'Lancé hors ZAILON' : activeSession.source === 'reattached' ? 'Réattaché' : 'Récupéré'}</span></div>
-            <div className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1"><span className="text-white/34">Démarrage</span><span className="text-white/58">{formatTime(activeSession.startedAt)} · {formatSeconds(Math.floor((now - activeSession.startedAt) / 1000))}</span></div>
+            <div className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1"><span className="text-white/34">Démarrage</span><span className="text-white/58">{formatClock(activeSession.startedAt)} · {formatSeconds(Math.floor((now - activeSession.startedAt) / 1000))}</span></div>
             <div className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1"><span className="text-white/34">Processus final</span><span className="text-white/58">{activeSession.finalProcess || '—'}{activeSession.confidence !== undefined ? ` (confiance ${activeSession.confidence} %)` : ''}</span></div>
             <div className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1"><span className="text-white/34">QWERTY</span><span className={activeSession.inputProfileActive ? 'text-emerald-200/75' : 'text-white/34'}>{activeSession.inputProfileActive ? 'Actif' : 'Inactif'}</span></div>
             <div className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1"><span className="text-white/34">Mods déployés</span><span className={activeSession.deploymentActive ? 'text-emerald-200/75' : 'text-white/34'}>{activeSession.deploymentActive ? 'Oui' : 'Non'}</span></div>
@@ -386,7 +386,7 @@ function LaunchSessionPanel({ game }: { game: Game }) {
           </div>
           <div className="mt-1 rounded-lg border border-white/[0.05] bg-black/15 p-3">
             <p className="text-[10px] uppercase tracking-widest text-white/30">Timeline</p>
-            <ul className="mt-2 space-y-1 font-mono text-[10px] text-white/42">{activeSession.timeline.map((step, index) => <li key={`${index}:${step.stage}`}><span className="text-white/24">{formatTime(step.at)}</span> <span className="text-white/58">{step.stage}</span>{step.detail ? <span className="text-white/30"> — {step.detail}</span> : null}</li>)}</ul>
+            <ul className="mt-2 space-y-1 font-mono text-[10px] text-white/42">{activeSession.timeline.map((step, index) => <li key={`${index}:${step.stage}`}><span className="text-white/24">{formatClock(step.at)}</span> <span className="text-white/58">{step.stage}</span>{step.detail ? <span className="text-white/30"> — {step.detail}</span> : null}</li>)}</ul>
           </div>
         </div>
         : <div className="mt-3">
@@ -401,7 +401,7 @@ function LaunchSessionPanel({ game }: { game: Game }) {
 
     {pastSessions.length > 0 && <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
       <p className="text-[11px] font-semibold text-white/68">Sessions récentes</p>
-      <ul className="mt-2 divide-y divide-white/[0.05]">{pastSessions.map(item => <li key={item.id} className="flex flex-wrap items-center gap-2 py-2 text-[11px]"><span className={`h-1.5 w-1.5 rounded-full ${item.state === 'Ended' ? 'bg-white/30' : 'bg-red-300/80'}`} /><span className="text-white/55">{SESSION_STATE_LABELS[item.state]}</span><span className="text-white/28">Profil {game.profiles.find(profile => profile.id === item.profileId)?.name || item.profileId}</span><span className="ml-auto text-white/26">{formatTime(item.startedAt)}</span></li>)}</ul>
+      <ul className="mt-2 divide-y divide-white/[0.05]">{pastSessions.map(item => <li key={item.id} className="flex flex-wrap items-center gap-2 py-2 text-[11px]"><span className={`h-1.5 w-1.5 rounded-full ${item.state === 'Ended' ? 'bg-white/30' : 'bg-red-300/80'}`} /><span className="text-white/55">{SESSION_STATE_LABELS[item.state]}</span><span className="text-white/28">Profil {game.profiles.find(profile => profile.id === item.profileId)?.name || item.profileId}</span><span className="ml-auto text-white/26">{formatClock(item.startedAt)}</span></li>)}</ul>
     </div>}
   </div>
 }

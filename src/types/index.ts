@@ -308,6 +308,10 @@ export type LaunchBehavior = 'DirectProcess' | 'LauncherChild' | 'LauncherDetach
 export interface GameLaunchAdapter {
   launchBehavior: LaunchBehavior
   launcherExecutable?: string
+  /** Launchers intermédiaires connus (ex. `ntegloballauncher.exe` pour NTE) :
+   * un stage launcher valide ne doit jamais bloquer la chaîne ni déclencher
+   * « Chaîne incomplète ». Le launcher n'est PAS le processus final. */
+  launcherExecutableCandidates?: string[]
   gameExecutableCandidates: string[]
   reattachWindowSeconds: number
   endGraceSeconds: number

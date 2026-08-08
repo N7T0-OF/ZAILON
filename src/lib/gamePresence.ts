@@ -38,6 +38,7 @@ export function presenceRequestFor(game: Game, reattachContext: boolean): GamePr
     gameId: game.id,
     installRoot: game.installDirectory,
     launcherExecutable: adapter.launcherExecutable,
+    launcherExecutableCandidates: adapter.launcherExecutableCandidates ?? [],
     gameExecutableCandidates: adapter.gameExecutableCandidates,
     reattachContext,
   }

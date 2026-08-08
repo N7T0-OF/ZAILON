@@ -848,11 +848,35 @@
 
 ### Technical
 
-## [Unreleased]
+## [1.29.0] - 2026-08-08
 
 ### Added
 
 - Visual Profiles multi-apps (spec §9) : UN seul profil visuel au premier plan — appliqué pour la session prioritaire en cours (association jeu/profil), restauré quand elle change sans association ou quand plus aucune session n'est active ; indicateurs `visualProfileActive` recalculés par l'arbitrage (plus jamais deux profils contradictoires).
+
+### Changed
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
+## [Unreleased]
+
+### Added
 
 ### Changed
 

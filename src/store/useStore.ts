@@ -10,7 +10,7 @@ import { mergeModCatalogs, reconcileModStates } from '../lib/profileState'
 import { arbitrateInputProfiles, pickPrioritySession, recoveryKind } from '../lib/sessionPriority'
 import { compareFrameworkSets, fingerprintFrameworkSet, hasFrameworkChanges, type FrameworkSnapshot } from '../lib/lastKnownGood'
 
-const APP_VERSION = '1.28.0'
+const APP_VERSION = '1.29.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 /** Instant du démarrage du store : sert à distinguer « Jeu détecté par ZAILON »

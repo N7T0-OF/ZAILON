@@ -65,7 +65,17 @@
 
 ### Added
 
+- « Installer dans… » dans Explorer : choix explicite du jeu et du profil de mods
+  cibles avant l’installation d’un mod, indépendamment du jeu sélectionné.
+- Historique d’installations par profil : chaque installation depuis Explorer est
+  enregistrée et visible dans l’onglet Profils (nom, date, action).
+- Filtres Favoris / Récents / Tous dans la Bibliothèque : les favoris passent en
+  premier, les récents sont triés par dernière session.
+
 ### Changed
+
+- Barre d’état : le nom du jeu actif est affiché à gauche avec le profil et le
+  nombre de mods actifs, tâches en cours à droite.
 
 ### Fixed
 

@@ -75,10 +75,10 @@ export function StatusBar() {
       <button type="button" onClick={() => { setView('downloads'); setTasksOpen(false) }} className="mt-3 w-full rounded-lg border border-white/[0.09] px-3 py-2 text-xs font-semibold text-white/60 hover:bg-white/[0.05]">Ouvrir l’historique complet</button>
     </section>}
     <footer className="z-40 flex h-8 flex-shrink-0 items-center gap-1 border-t border-white/[0.04] bg-[#090b0b]/98 px-2 text-[11px] text-white/28">
-      <StatusItem icon={Gamepad2} label={`${games.length} jeu${games.length !== 1 ? 'x' : ''}`} />
+      <StatusItem icon={Gamepad2} label={selectedGame ? selectedGame.name : `${games.length} jeu${games.length !== 1 ? 'x' : ''}`} />
       <StatusItem icon={ShieldCheck} label={`${activeMods} mod${activeMods !== 1 ? 's' : ''} actif${activeMods !== 1 ? 's' : ''}`} />
       <StatusItem icon={Radio} label={selectedProfile ? `Profil ${selectedProfile.name}` : 'Aucun profil'} />
-      <StatusItem icon={Radio} label={selectedGame?.provider || 'Bibliothèque locale'} />
+      <StatusItem icon={Radio} label={selectedGame?.provider || 'Bibliothèque locale'} muted />
       <span className="flex-1" />
       <button type="button" onClick={() => setTasksOpen(value => !value)} className={`flex items-center gap-1 rounded px-1.5 py-1 ${runningTasks.length ? 'text-gold/76' : 'text-white/32'}`}><Activity size={11} /><span className="hidden sm:inline">{runningTasks.length ? `${runningTasks.length} tâche(s)` : 'Tâches'}</span></button>
       <StatusItem icon={Radio} label={discordConnection?.connected ? 'Discord connecté' : `Discord ${discord ? 'prêt' : 'désactivé'}`} muted={!discordConnection?.connected} warning={Boolean(discord && discordConnection && !discordConnection.connected)} />

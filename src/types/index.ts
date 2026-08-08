@@ -178,6 +178,7 @@ export interface Profile {
   overwritePath?: string
   generatedPath?: string
   deploymentPath?: string
+  installHistory?: Array<{ name: string; action: 'added' | 'updated'; at: number }>
   collectionState?: 'Preparing' | 'Downloading' | 'Installing' | 'NeedsAttention' | 'Ready' | 'Incomplete' | 'Failed' | 'Cancelled' | 'Paused'
   collectionMetadata?: {
     installId: string

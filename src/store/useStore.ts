@@ -383,7 +383,7 @@ export interface Store {
   setExploreGrid: (grid: boolean) => void
   setExploreColumns: (columns: ExploreColumns) => void
   refreshExplore: () => Promise<void>
-  installMod: (mod: ExplodMod) => Promise<void>
+  installMod: (mod: ExplodMod, target?: { gameId: string; profileId: string }) => Promise<void>
   replaceBackgroundTasks: (tasks: BackgroundTaskSnapshot[]) => void
   upsertBackgroundTask: (task: BackgroundTaskSnapshot) => void
   setTaskToastsEnabled: (enabled: boolean) => void
@@ -1240,8 +1240,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
       if ((error as Error)?.name !== 'AbortError' && request === exploreCatalogRequest) set({ exploreLoading: false, exploreError: asError(error) })
     }
   },
-  installMod: async mod => {
-    const { game, profile } = selected(get())
+  installMod: async (mod, target) => {
+    const fallback = selected(get())
+    const game = target ? get().games.find(item => item.id === target.gameId) : fallback.game
+    const profile = target ? game?.profiles.find(item => item.id === target.profileId) : fallback.profile
     if (!game || !profile) { set({ notice: 'Sélectionnez un jeu et un profil avant l’import.' }); return }
     try {
       let downloadUrl = mod.downloadUrl
@@ -1270,6 +1272,15 @@ export const useStore = create<Store>()(persist((set, get) => ({
       const imported = await native.importModCandidatesBackground(taskId, game.id, [profile.id], [download.path], game.name, game.modsPath || game.installDirectory || '', true, 'quarantine', task => get().upsertBackgroundTask(task))
       await get().registerImportedStages(game.id, profile.id, imported.installedPaths, true)
       await get().scanMods(game.id)
+      set(state => ({
+        games: state.games.map(item => item.id === game.id ? {
+          ...item,
+          profiles: item.profiles.map(profileItem => profileItem.id === profile.id ? {
+            ...profileItem,
+            installHistory: [{ name: mod.name, action: 'added' as const, at: Date.now() }, ...(profileItem.installHistory || [])].slice(0, 50),
+          } : profileItem),
+        } : item),
+      }))
       set({ notice: imported.status === 'CompletedWithWarnings' || download.status === 'CompletedWithWarnings' ? `${mod.name} a été importé avec avertissement : ${(download.sensitiveFiles.length + imported.sensitiveFiles.length)} fichier(s) sensible(s) isolé(s). Aucun n’a été exécuté.` : `${mod.name} a été téléchargé, validé et stocké. Il sera rendu visible dans ${game.name} au prochain lancement après vérification.` })
     } catch (error) {
       set({ notice: asError(error) })

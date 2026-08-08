@@ -23,6 +23,8 @@ export interface FrameworkCheckInput {
   name: string
   enabled: boolean
   files?: string[]
+  /** Nom du framework déclaré (ex. `red4ext`), indépendant des fichiers. */
+  framework?: string
 }
 
 export interface FrameworkValidation {
@@ -90,4 +92,16 @@ export function validateCyberpunkFrameworkDeps(
   }
 
   return { valid: blockers.length === 0, blockers, warnings }
+}
+
+/** Vrai si le loader RED4ext est actif dans le déploiement (mod actif fournissant
+ * `red4ext/red4ext.dll` ou un mod marqué `framework: red4ext`). C'est le badge
+ * « RED4ext ⚠ » de l'Accueil et du Quick Panel : ⚠ = présent mais chargement
+ * non confirmé — jamais « ✓ » sans confirmation runtime post-lancement. */
+export function isRed4extActive(mods: FrameworkCheckInput[]): boolean {
+  const normalized = normalizeFile('red4ext/')
+  return mods.some(mod => mod.enabled && (
+    (mod.framework ?? '').toLocaleLowerCase().includes('red4ext')
+    || (mod.files ?? []).some(file => normalizeFile(file).startsWith(normalized))
+  ))
 }

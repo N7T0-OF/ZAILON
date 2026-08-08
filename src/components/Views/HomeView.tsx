@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { Game } from '../../types'
 import { resourceUrl, native } from '../../lib/native'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
+import { isRed4extActive } from '../../lib/frameworkValidator'
 import { SESSION_STATE_LABELS } from '../../lib/launchAdapters'
 import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
@@ -91,10 +92,7 @@ export function HomeView() {
   // Badge framework honnête (spec #38-39) : RED4ext ⚠ quand le loader est actif
   // dans le profil mais le chargement réel n'est PAS confirmé — jamais ✓ sans
   // confirmation runtime post-lancement.
-  const red4extActive = profileMods.some(mod => mod.enabled && (
-    (mod.framework ?? '').toLowerCase().includes('red4ext')
-    || (mod.files ?? []).some(file => file.toLowerCase().replace(/\\/g, '/').startsWith('red4ext/'))
-  ))
+  const red4extActive = isRed4extActive(profileMods)
   const heroResource = selectedGame.resources?.backgroundPath || selectedGame.resources?.bannerPath || selectedGame.resources?.coverPath
   const background = resourceUrl(heroResource) || selectedGame.backgroundArt
   const heroTransform = selectedGame.resources?.backgroundPath

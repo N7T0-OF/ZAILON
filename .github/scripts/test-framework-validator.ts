@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { validateCyberpunkFrameworkDeps } from '../../src/lib/frameworkValidator.ts'
+import { isRed4extActive, validateCyberpunkFrameworkDeps } from '../../src/lib/frameworkValidator.ts'
 import { mergeModCatalogs, reconcileModStates } from '../../src/lib/profileState.ts'
 
 const mod = (name: string, files: string[], enabled = true) => ({ name, enabled, files })
@@ -55,6 +55,18 @@ test('mods désactivés ne comptent pas comme fournisseurs', () => {
 })
 
 // --- Réconciliation du compteur (resolveProfileMods) ---
+
+test('isRed4extActive : loader actif via fichiers red4ext/ ou framework déclaré', () => {
+  const core = { name: 'RED4ext', enabled: true, files: ['red4ext/red4ext.dll'], framework: 'red4ext' }
+  const disabled = { name: 'RED4ext (désactivé)', enabled: false, files: ['red4ext/red4ext.dll'] }
+  const plugin = { name: 'Plugin', enabled: true, files: ['red4ext/plugins/Plugin/init.lua'] }
+  const unrelated = { name: 'Mod', enabled: true, files: ['archive/pc/mod.archive'] }
+  assert.equal(isRed4extActive([core]), true) // core explicite
+  assert.equal(isRed4extActive([plugin]), true) // fichiers sous red4ext/
+  assert.equal(isRed4extActive([disabled]), false) // désactivé → pas actif
+  assert.equal(isRed4extActive([unrelated]), false) // aucun lien RED4ext
+  assert.equal(isRed4extActive([{ name: 'M', enabled: true, framework: 'RED4ext' }]), true) // déclaration seule
+})
 
 test('mergeModCatalogs : union par id, catalogue installé gagne', () => {
   const installed = [{ id: 'a', name: 'A installé', files: ['x'] }]

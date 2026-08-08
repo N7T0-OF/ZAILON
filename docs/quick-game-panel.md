@@ -60,6 +60,13 @@ Pas de bibliothèque, Nexus, galeries, téléchargements ni navigation complète
 Largeur ~300–380 px, hauteur adaptative, angles arrondis, ombre légère, fond
 sombre, X discret. **Ne pas réintroduire Liquid Glass.**
 
+**Panneau adaptatif selon le jeu** (spec « Quick Overlay » §24-25) : à
+l'ouverture, la fenêtre du panneau émet `quick-panel-ready` ; ZAILON répond
+avec `quick-panel-state` — le résumé de la session PRIORITAIRE : jeu, profil,
+mods actifs, disposition clavier, bypass, RED4ext ⚠ (jamais ✓ sans confirmation
+runtime). Aucune option incompatible n'est affichée (le contenu est identique
+pour tous les jeux, seules les infos varient).
+
 ## Comportement
 
 - fermeture : X, Échap, raccourci, ou perte de focus (option « Fermer lorsque

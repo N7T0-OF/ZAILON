@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Bell, CheckCircle2, Download, ExternalLink, Info, MonitorX, X } from 'lucide-react'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { AppWindow } from './components/Layout/AppWindow'
 import { CommandPalette } from './components/CommandPalette'
 import { UpdateProvider } from './components/UpdateProvider'
-import { useStore } from './store/useStore'
+import { resolveProfileMods, useStore } from './store/useStore'
 import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
 import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, windowRequestFor } from './lib/gamePresence'
 import { pickPrioritySession } from './lib/sessionPriority'
+import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from './lib/keyboardPresets'
+import { isRed4extActive } from './lib/frameworkValidator'
 import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-profiles/application/shortcuts'
@@ -206,6 +208,34 @@ export default function App() {
         void window.unminimize().catch(() => undefined)
         void window.setFocus().catch(() => undefined)
       }
+    }).then(dispose => { unlisten = dispose })
+    return () => unlisten?.()
+  }, [])
+
+  // Quick Panel adaptatif (spec « Quick Overlay » §24-25) : quand la fenêtre du
+  // panneau s'ouvre, elle demande l'état de la session prioritaire — ZAILON
+  // répond avec le résumé compact (jeu, profil, mods, clavier, bypass, RED4ext).
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    let unlisten: UnlistenFn | undefined
+    void listen('quick-panel-ready', () => {
+      const store = useStore.getState()
+      const priorityGameId = pickPrioritySession(store.gameSessions, store.pinnedPriorityGameId)
+      const session = store.gameSessions.find(item => item.gameId === priorityGameId && item.state === 'GameRunning')
+      if (!session) return
+      const game = store.games.find(item => item.id === session.gameId)
+      if (!game) return
+      const profile = game.profiles.find(item => item.id === session.profileId)
+      const profileMods = profile ? resolveProfileMods(game, profile) : []
+      const activeMods = profileMods.filter(mod => mod.enabled).length
+      void emit('quick-panel-state', {
+        gameName: game.name,
+        profileName: profile?.name ?? 'Défaut',
+        activeMods,
+        layoutLabel: effectiveInputProfile(game, profile?.id) ? LAYOUT_LABELS[effectiveLayout(game, profile?.id)] : undefined,
+        bypassActive: Boolean(game.bypassPath),
+        red4extActive: isRed4extActive(profileMods),
+      }).catch(() => undefined)
     }).then(dispose => { unlisten = dispose })
     return () => unlisten?.()
   }, [])

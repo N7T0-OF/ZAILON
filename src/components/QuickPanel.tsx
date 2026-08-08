@@ -1,8 +1,19 @@
-import { emit } from '@tauri-apps/api/event'
+import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { Check, Keyboard, MonitorDown, Palette, RefreshCw, X } from 'lucide-react'
+import { Check, Gamepad2, Keyboard, MonitorDown, Palette, RefreshCw, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { native } from '../lib/native'
+
+/** Résumé de session reçu de la fenêtre principale (spec « Quick Overlay »
+ * §24-25) : contenu adaptatif selon le jeu en cours (prioritaire). */
+interface QuickPanelSessionState {
+  gameName?: string
+  profileName?: string
+  activeMods?: number
+  layoutLabel?: string
+  bypassActive?: boolean
+  red4extActive?: boolean
+}
 
 /**
  * Quick Game Panel — fenêtre native ZAILON affichée pendant le jeu (spec Phase 6,
@@ -14,6 +25,16 @@ import { native } from '../lib/native'
 export function QuickPanel() {
   const [status, setStatus] = useState<string>('')
   const [keyboardOn, setKeyboardOn] = useState(true)
+  const [session, setSession] = useState<QuickPanelSessionState | null>(null)
+
+  // À l'ouverture : demander l'état de la session prioritaire à la fenêtre
+  // principale (le panneau est une WebView séparée, sans accès au store).
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined
+    void listen<QuickPanelSessionState>('quick-panel-state', event => setSession(event.payload)).then(dispose => { unlisten = dispose })
+    void emit('quick-panel-ready')
+    return () => unlisten?.()
+  }, [])
 
   const flash = (message: string) => {
     setStatus(message)
@@ -71,6 +92,20 @@ export function QuickPanel() {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-3">
+        {/* Session en cours (adaptatif selon le jeu, spec §24-25) */}
+        {session && (
+          <section className="rounded-xl border border-emerald-300/15 bg-emerald-300/[0.045] p-2.5">
+            <p className="mb-1.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-emerald-200/70"><Gamepad2 size={10} />{session.gameName ?? 'Session'}</p>
+            <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-white/55">
+              <span className="rounded-md bg-white/[0.05] px-1.5 py-0.5">Profil {session.profileName}</span>
+              {session.activeMods !== undefined && <span className="rounded-md bg-white/[0.05] px-1.5 py-0.5">{session.activeMods} mods actifs</span>}
+              {session.layoutLabel && <span className="rounded-md bg-white/[0.05] px-1.5 py-0.5">{session.layoutLabel}</span>}
+              {session.bypassActive && <span className="rounded-md bg-white/[0.05] px-1.5 py-0.5">Bypass</span>}
+              {session.red4extActive && <span className="rounded-md bg-amber-300/10 px-1.5 py-0.5 text-amber-100/80" title="Loader actif — chargement à confirmer après lancement">RED4ext ⚠</span>}
+            </div>
+          </section>
+        )}
+
         {/* Visuel */}
         <section className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-2.5">
           <p className="mb-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-white/35"><Palette size={10} />Visuel</p>

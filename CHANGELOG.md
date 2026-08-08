@@ -158,6 +158,16 @@
 
 - Préférence « Réduire les explications » (Paramètres > Préférences et lisibilité) :
   masque les descriptions secondaires, le détail passe dans les bulles ⓘ.
+- Centre « Stockage » dans Paramètres : tailles réelles (paquets de mods, tâches
+  conservées, points de restauration), nettoyage de l’historique des tâches avec
+  confirmation — jamais un fichier utilisé par un profil, un rollback ou une Collection.
+- Écran « Session en cours » sur l’Accueil quand un jeu tourne : profil, disposition
+  clavier effective, temps écoulé, état En jeu, et rappel que la restauration est
+  automatique à la fermeture du jeu.
+- Badges runtime sur l’Accueil : « Bypass / Loader » et « N chemins runtime »
+  affichés uniquement quand ils sont réellement configurés.
+- « Tout supprimer » dans le centre de notifications (efface l’historique de la
+  session, jamais les mods, profils ni points de restauration).
 
 ### Changed
 
@@ -184,6 +194,8 @@
 - Rapports du lot consignés : `docs/ui-cleanup-and-input-remap-report.md`,
   `docs/nte-keyboard-remap-test.md` (protocole de validation NTE, Phase 2),
   `docs/history-retention-policy.md`.
+- Action store `clearNotificationHistory` pour l’effacement complet de la session de
+  notifications.
 
 ## 1.9.0 — Profils immuables et diagnostic transparent
 

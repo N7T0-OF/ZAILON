@@ -128,11 +128,25 @@ export function HomeView() {
             ? <img src={logo} alt={selectedGame.name} className="mt-4 max-h-28 max-w-[min(430px,72vw)] object-contain object-left" />
             : <h1 className="mt-3 max-w-3xl font-display text-[clamp(3.2rem,6.7vw,7rem)] font-black uppercase leading-[0.78] tracking-[-0.025em] text-white">{selectedGame.shortName || selectedGame.name}</h1>}
           <p className="mt-5 text-[11px] text-white/38">Profil <span className="font-semibold text-white/70">{selectedProfile.name}</span><span className="mx-2 text-white/18">•</span>{activeMods} mod{activeMods !== 1 ? 's' : ''} actif{activeMods !== 1 ? 's' : ''}</p>
-          {(activeMods > 0 || effectiveInputProfile(selectedGame, selectedProfile.id) || visualName) && <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          {(activeMods > 0 || effectiveInputProfile(selectedGame, selectedProfile.id) || visualName || selectedGame.bypassPath || (selectedGame.runtimePaths || []).length > 0) && <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
             {activeMods > 0 && <HomeBadge label={`${activeMods} mods`} />}
             {effectiveInputProfile(selectedGame, selectedProfile.id) && <HomeBadge label={LAYOUT_LABELS[effectiveLayout(selectedGame, selectedProfile.id)]} />}
             {visualName && <HomeBadge label={`Visuel · ${visualName}`} />}
+            {selectedGame.bypassPath && <HomeBadge label="Bypass / Loader" />}
+            {(selectedGame.runtimePaths || []).length > 0 && <HomeBadge label={`${selectedGame.runtimePaths!.length} chemin(s) runtime`} />}
           </div>}
+          {isPlaying && (
+            <div className="mt-4 max-w-md rounded-xl border border-emerald-300/20 bg-emerald-300/[0.05] p-3 backdrop-blur-md">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-mono text-[11px] uppercase tracking-widest text-emerald-200/90">Session en cours</p>
+                  <p className="mt-1 text-[11px] text-white/52">Profil <span className="font-semibold text-white/75">{selectedProfile.name}</span> · <span className="text-emerald-200/85">{formatSeconds(sessionTime)}</span>{effectiveInputProfile(selectedGame, selectedProfile.id) ? <span> · <span className="text-emerald-200/70">{LAYOUT_LABELS[effectiveLayout(selectedGame, selectedProfile.id)]}</span></span> : null}</p>
+                </div>
+                <span className="flex items-center gap-1.5 rounded-full border border-emerald-300/25 bg-emerald-300/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-100/85"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-300" />En jeu</span>
+              </div>
+              <p className="mt-2 text-[11px] leading-relaxed text-white/35">La session se termine quand le jeu se ferme ; ZAILON restaure alors automatiquement le déploiement et le remapping.</p>
+            </div>
+          )}
           <div className="mt-5 flex items-center gap-2">
             <button type="button" disabled={isPlaying || isLaunching} title={isLaunching ? launchProgress?.message || 'Préparation des mods en arrière-plan' : isPlaying ? 'Le déploiement sera restauré automatiquement à la fermeture du jeu.' : 'Préparer les mods et lancer le jeu'} onClick={() => void launchSelectedGame()} className={`flex min-w-36 items-center justify-center gap-2 rounded-full px-5 py-2.5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all ${isPlaying || isLaunching ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
               {isLaunching ? <Loader2 size={12} className="animate-spin" /> : <Play size={10} fill="currentColor" />}

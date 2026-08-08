@@ -17,6 +17,7 @@ export default function App() {
   const notificationHistory = useStore(s => s.notificationHistory)
   const dismissNotification = useStore(s => s.dismissNotification)
   const clearCompletedNotifications = useStore(s => s.clearCompletedNotifications)
+  const clearNotificationHistory = useStore(s => s.clearNotificationHistory)
   const games = useStore(s => s.games)
   const isLaunching = useStore(s => s.isLaunching)
   const isPlaying = useStore(s => s.isPlaying)
@@ -153,16 +154,17 @@ export default function App() {
         <AppWindow />
       </UpdateProvider>
       <CommandPalette />
-      <NotificationCenter history={notificationHistory} onDismiss={dismissNotification} onClear={clearCompletedNotifications} />
+      <NotificationCenter history={notificationHistory} onDismiss={dismissNotification} onClear={clearCompletedNotifications} onClearAll={clearNotificationHistory} />
       {externalInstalls[0] && <ExternalInstallDialog request={externalInstalls[0]} games={games} onCancel={() => void native.consumeExternalInstall(externalInstalls[0].requestId).finally(() => setExternalInstalls(current => current.slice(1)))} onContinue={(gameId, profileId) => void resolveExternalInstall(externalInstalls[0], gameId, profileId)} />}
     </div>
   )
 }
 
-function NotificationCenter({ history, onDismiss, onClear }: {
+function NotificationCenter({ history, onDismiss, onClear, onClearAll }: {
   history: ReturnType<typeof useStore.getState>['notificationHistory']
   onDismiss: (id: string) => void
   onClear: () => void
+  onClearAll: () => void
 }) {
   const [paused, setPaused] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
@@ -176,7 +178,7 @@ function NotificationCenter({ history, onDismiss, onClear }: {
   const tone = active?.kind === 'error' ? 'border-red-300/25 text-red-100' : active?.kind === 'warning' || active?.kind === 'action' ? 'border-amber-200/25 text-amber-50' : active?.kind === 'success' ? 'border-emerald-200/20 text-emerald-50' : 'border-gold/25 text-white'
   return <div className="fixed bottom-4 right-4 z-[220] flex max-w-[min(420px,calc(100vw-2rem))] flex-col items-end gap-2">
     {showHistory && <section className="max-h-[55vh] w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-white/[0.1] bg-[#101313]/95 shadow-2xl backdrop-blur-xl">
-      <header className="flex items-center justify-between border-b border-white/[0.07] px-3 py-2"><div><p className="text-xs font-semibold text-white/78">Historique des notifications</p><p className="text-[11px] text-white/35">{history.length} événement(s), doublons regroupés</p></div><button type="button" onClick={onClear} className="rounded-lg px-2 py-1 text-[11px] text-white/42 hover:bg-white/[0.05]">Masquer les terminées</button></header>
+      <header className="flex items-center justify-between gap-2 border-b border-white/[0.07] px-3 py-2"><div><p className="text-xs font-semibold text-white/78">Historique des notifications</p><p className="text-[11px] text-white/35">{history.length} événement(s), doublons regroupés</p></div><div className="flex gap-1"><button type="button" onClick={onClear} className="rounded-lg px-2 py-1 text-[11px] text-white/42 hover:bg-white/[0.05]">Masquer les terminées</button><button type="button" onClick={() => { if (window.confirm('Effacer tout l’historique de notifications ? Aucun mod, profil ou point de restauration n’est supprimé.')) onClearAll() }} className="rounded-lg px-2 py-1 text-[11px] font-semibold text-red-200/60 hover:bg-red-400/10">Tout supprimer</button></div></header>
       <div className="max-h-[45vh] space-y-1 overflow-y-auto p-2">{[...history].reverse().map(item => <button key={item.id} type="button" onClick={() => onDismiss(item.id)} className="flex w-full items-start gap-2 rounded-lg border border-white/[0.05] bg-white/[0.018] p-2 text-left hover:bg-white/[0.04]"><span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${item.kind === 'error' ? 'bg-red-400' : item.kind === 'warning' ? 'bg-amber-300' : item.kind === 'success' ? 'bg-emerald-300' : 'bg-gold'}`} /><span className="min-w-0"><span className="block text-xs leading-relaxed text-white/64">{item.message}</span><span className="mt-1 block text-[11px] text-white/28">{new Date(item.createdAt).toLocaleTimeString()}</span></span></button>)}</div>
     </section>}
     {active && !showHistory && <article onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} className={`flex w-full items-start gap-3 rounded-xl border bg-[#101313]/95 p-3 shadow-2xl backdrop-blur-xl ${tone}`}>

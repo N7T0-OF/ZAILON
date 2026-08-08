@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Database, ExternalLink, EyeOff, FileText, Heart, Info, KeyRound, Link2, Palette, Radio, RefreshCw, Settings2, ShieldAlert } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Database, ExternalLink, EyeOff, FileText, HardDrive, Heart, Info, KeyRound, Link2, Palette, Radio, RefreshCw, Settings2, ShieldAlert, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { appVersion, useStore } from '../../store/useStore'
@@ -16,6 +16,9 @@ function formatDate(value?: number | string) {
 
 export function SettingsView() {
   const games = useStore(state => state.games)
+  const backgroundTasks = useStore(state => state.backgroundTasks)
+  const restorePoints = useStore(state => state.restorePoints)
+  const clearBackgroundTasks = useStore(state => state.clearBackgroundTasks)
   const language = useStore(state => state.language)
   const textSize = useStore(state => state.textSize)
   const uiDensity = useStore(state => state.uiDensity)
@@ -215,6 +218,8 @@ export function SettingsView() {
       </section>
 
       <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3"><div className="mb-3 flex items-center gap-2 text-gold/70"><Database size={13} /><h2 className="text-[11px] font-mono uppercase tracking-widest">Library statistics</h2></div><div className="grid grid-cols-3 gap-2 text-center"><Stat label="Games" value={String(games.length)} /><Stat label="Mods" value={String(games.reduce((sum, game) => sum + game.installedMods.length, 0))} /><Stat label="Playtime" value={formatTime(totalPlaytime)} /></div></section>
+      <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3"><div className="mb-3 flex items-center gap-2 text-gold/70"><HardDrive size={13} /><h2 className="text-[11px] font-mono uppercase tracking-widest">Stockage</h2></div><div className="grid grid-cols-2 gap-2 xl:grid-cols-4"><Stat label="Mods (paquets ZAILON)" value={formatBytes(games.reduce((sum, game) => sum + game.installedMods.reduce((total, mod) => total + (mod.sizeBytes || 0), 0), 0))} /><Stat label="Tâches conservées" value={String(backgroundTasks.length)} /><Stat label="Points de restauration" value={String(restorePoints.length)} /><Stat label="Cache / temporaire" value="Non mesuré" /></div><div className="mt-3 flex flex-wrap items-center gap-2"><button type="button" onClick={() => { if (window.confirm('Nettoyer l’historique des tâches terminées et en erreur ? Les mods installés et les tâches en cours ne sont pas touchés.')) clearBackgroundTasks() }} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/64 hover:bg-white/[0.05]"><Trash2 size={12} />Nettoyer l’historique des tâches</button></div>{!reduceExplanations && <p className="mt-3 text-[11px] leading-relaxed text-white/32">Tailles réelles calculées depuis les paquets locaux. Cache, miniatures et fichiers temporaires : mesurables en Phase 3 — rien n’est supprimé sans confirmation, et jamais un fichier utilisé par un profil, un rollback ou une Collection.</p>}</section>
+
       <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3"><div className="mb-2 flex items-center gap-2 text-gold/70"><Info size={13} /><h2 className="text-[11px] font-mono uppercase tracking-widest">ZAILON · À propos</h2></div><p className="text-xs text-white/55">Universal Mod Launcher · v{appVersion}</p><p className="mt-1 text-[11px] text-white/30">Runtime: {native.isDesktop() ? 'Application native Tauri' : 'aperçu web (opérations natives désactivées)'}</p><label className="mt-3 flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/55"><span className="flex items-center gap-2"><Heart size={14} className="text-rose-200/70" />Afficher « Me soutenir » dans la barre latérale</span><input type="checkbox" checked={showSupportButton} onChange={event => setShowSupportButton(event.target.checked)} className="accent-gold" /></label><div className="mt-3 flex flex-wrap gap-2">{CREATOR_LINKS.map(link => <button key={link.id} type="button" onClick={() => void native.openExternalUrl(link.url)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05]"><ExternalLink size={12} />{link.label}</button>)}</div><p className="mt-3 text-[11px] text-white/28">Les liens ouvrent des sites HTTPS autorisés. ZAILON ne collecte aucune donnée de paiement ni télémétrie associée.</p></section>
     </div>
   </div>
@@ -222,6 +227,13 @@ export function SettingsView() {
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg bg-white/[0.03] px-3 py-2"><p className="text-[11px] font-mono text-white/30">{label}</p><p className="mt-0.5 truncate text-[11px] font-medium text-white/80" title={value}>{value}</p></div>
+}
+
+function formatBytes(size: number) {
+  if (size <= 0) return '0 o'
+  const units = ['o', 'Ko', 'Mo', 'Go', 'To']
+  const index = Math.min(units.length - 1, Math.floor(Math.log(size) / Math.log(1024)))
+  return `${(size / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

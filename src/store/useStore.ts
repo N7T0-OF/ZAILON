@@ -415,6 +415,7 @@ export interface Store {
   recordNotice: (message: string) => void
   dismissNotification: (id: string) => void
   clearCompletedNotifications: () => void
+  clearNotificationHistory: () => void
   clearNotice: () => void
 }
 
@@ -1676,6 +1677,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   }),
   dismissNotification: id => set(state => ({ notificationHistory: state.notificationHistory.map(item => item.id === id ? { ...item, dismissed: true } : item) })),
   clearCompletedNotifications: () => set(state => ({ notificationHistory: state.notificationHistory.filter(item => !item.completed) })),
+  clearNotificationHistory: () => set({ notificationHistory: [] }),
   clearNotice: () => set({ notice: undefined }),
 }), {
   name: 'zailon-v1',

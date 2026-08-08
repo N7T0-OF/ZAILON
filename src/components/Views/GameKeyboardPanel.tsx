@@ -1,5 +1,6 @@
 import { Check, Copy, Download, Keyboard, Play, Plus, RefreshCw, ShieldAlert, Trash2, Upload, X } from 'lucide-react'
 import { useRef, useState } from 'react'
+import { INPUT_BACKENDS, planInputBackend } from '../../lib/inputBackends'
 import { AZERTY_TO_QWERTY, effectiveInputProfile, effectiveLayout, KEY_OPTIONS, LAYOUT_LABELS, presetForLayout, PRESET_GROUPS, QWERTZ_TO_QWERTY, QWERTY_TO_AZERTY } from '../../lib/keyboardPresets'
 import { useStore } from '../../store/useStore'
 import type { Game, GameInputProfile, GameKeyboardLayout, GameKeyMapping } from '../../types'
@@ -23,6 +24,7 @@ export function GameKeyboardPanel({ game, profile, embedded = false }: { game: G
   const editing = profiles.find(item => item.id === editingId) || profiles[0]
   const effective = effectiveInputProfile(game, profile?.id)
   const effectiveLayoutValue = effectiveLayout(game, profile?.id)
+  const inputPlan = planInputBackend(game, effectiveLayoutValue)
   const isNte = game.name.toLocaleLowerCase().includes('neverness')
 
   const updateProfile = (patch: Partial<GameInputProfile>) => {
@@ -131,8 +133,12 @@ export function GameKeyboardPanel({ game, profile, embedded = false }: { game: G
       </div>
       <div className="mt-3 grid gap-2 lg:grid-cols-2">
         <div className="rounded-lg border border-white/[0.06] bg-black/15 px-3 py-2">
-          <p className="text-[11px] font-semibold text-white/58">Méthode d’application</p>
-          <p className="mt-1 text-[11px] leading-relaxed text-white/36">Ordre de préférence : bindings natifs du jeu → layout reconnu par le jeu → remapping temporaire ZAILON limité à la fenêtre du jeu → Steam Input si réellement compatible → aucune. L’interception (Phase 2) ne touche jamais au bureau, à Discord ni à ZAILON, et n’ajoute aucune langue Windows.</p>
+          <p className="text-[11px] font-semibold text-white/58">Méthode d’application (backends)</p>
+          <ul className="mt-1.5 space-y-1">{inputPlan.chain.map(item => {
+            const chosen = item.backend.id === inputPlan.chosen
+            return <li key={item.backend.id} className="flex items-start gap-1.5 text-[11px]"><span className={`mt-0.5 shrink-0 ${item.available ? (chosen ? 'text-gold' : 'text-emerald-300/70') : 'text-white/22'}`}>{chosen ? <Check size={11} /> : item.available ? <span className="block h-[3px] w-[3px] rounded-full bg-current" /> : <X size={11} />}</span><span className="min-w-0"><span className={`${item.available ? (chosen ? 'font-semibold text-gold' : 'text-white/62') : 'text-white/28 line-through'}`}>{item.backend.label}</span><span className="mt-0.5 block leading-relaxed text-[10px] text-white/30">{item.reason}</span></span></li>
+          })}</ul>
+          {inputPlan.constraints.length > 0 && <ul className="mt-2 space-y-1 rounded-lg border border-white/[0.05] bg-black/20 px-2.5 py-2 text-[10px] leading-relaxed text-white/36">{inputPlan.constraints.map((item, index) => <li key={`${index}:${item}`}>• {item}</li>)}</ul>}
         </div>
         <div className="rounded-lg border border-white/[0.06] bg-black/15 px-3 py-2">
           <p className="text-[11px] font-semibold text-white/58">Raccourcis (backends Phase 2)</p>

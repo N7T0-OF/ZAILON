@@ -266,6 +266,15 @@
 > `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
 > Release Notes à partir de cette section et refuse de publier si elle est vide.
 
+### Added
+
+- Architecture GameInputBackend (Phase 6, fondation TS) : registre des backends
+  (bindings natifs → layout Windows → remapping limité à la fenêtre → Steam Input →
+  aucune), plan par jeu avec disponibilité et raisons, sonde Anti-Cheat en lecture
+  seule. La chaîne de méthode est affichée dans Configuration > Commandes et le
+  diagnostic d’entrée complet (ACE, injection, driver, langue Windows) dans
+  Diagnostic > Entrées.
+
 ### Changed
 
 ### Fixed

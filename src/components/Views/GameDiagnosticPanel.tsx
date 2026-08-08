@@ -1,5 +1,6 @@
 import { Activity, AlertTriangle, CheckCircle2, ClipboardList, FileClock, FolderCheck, Gauge, Keyboard, Layers3, Loader2, RefreshCw, Rocket, Search, ShieldAlert, Wrench } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { inputDiagnosticRows } from '../../lib/inputBackends'
 import { effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
 import { native, type ProfileDeploymentAudit } from '../../lib/native'
 import { useStore } from '../../store/useStore'
@@ -249,15 +250,21 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
         {!audit && !busy && <p className="mt-4 text-[11px] text-white/34">L’audit reconstruit la carte virtuelle en mémoire et contrôle les fournisseurs redscript, RED4ext et CET sans modifier aucun fichier.</p>}
       </div>}
 
-      {section === 'inputs' && <div className="grid gap-2 sm:grid-cols-2">
-        <div className="flex flex-col justify-between rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
-          <p className="text-[11px] uppercase tracking-widest text-white/30">Disposition virtuelle</p>
-          <p className="mt-2 text-sm font-semibold text-white/75">{LAYOUT_LABELS[effectiveLayout(game, profile.id)]}</p>
-          <button type="button" onClick={onOpenConfiguration} className="mt-3 flex items-center gap-1.5 self-start rounded-lg border border-gold/25 px-3 py-2 text-[11px] font-semibold text-gold"><Keyboard size={12} />Configurer les commandes</button>
+      {section === 'inputs' && <div className="space-y-2">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="flex flex-col justify-between rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+            <p className="text-[11px] uppercase tracking-widest text-white/30">Disposition virtuelle</p>
+            <p className="mt-2 text-sm font-semibold text-white/75">{LAYOUT_LABELS[effectiveLayout(game, profile.id)]}</p>
+            <button type="button" onClick={onOpenConfiguration} className="mt-3 flex items-center gap-1.5 self-start rounded-lg border border-gold/25 px-3 py-2 text-[11px] font-semibold text-gold"><Keyboard size={12} />Configurer les commandes</button>
+          </div>
+          <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+            <p className="text-[11px] uppercase tracking-widest text-white/30">Aucune langue Windows</p>
+            <p className="mt-2 text-[11px] leading-relaxed text-white/42">La traduction de touches reste locale au jeu, jamais active sur le bureau, Discord ou ZAILON.</p>
+          </div>
         </div>
         <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
-          <p className="text-[11px] uppercase tracking-widest text-white/30">Aucune langue Windows</p>
-          <p className="mt-2 text-[11px] leading-relaxed text-white/42">La traduction de touches reste locale au jeu, jamais active sur le bureau, Discord ou ZAILON.</p>
+          <p className="text-[11px] font-semibold text-white/68">Backend d’application</p>
+          <dl className="mt-2 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">{inputDiagnosticRows(game, effectiveLayout(game, profile.id)).map(row => <div key={row.label} className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1 text-[11px]"><dt className="text-white/34">{row.label}</dt><dd className={`text-right ${row.tone === 'warn' ? 'font-semibold text-amber-100/75' : row.tone === 'ok' ? 'text-emerald-200/70' : 'text-white/58'}`}>{row.value}</dd></div>)}</dl>
         </div>
       </div>}
 

@@ -5117,6 +5117,61 @@ fn test_discord_connection(
     Ok(status)
 }
 
+/// Recalcule la Rich Presence Discord vers la session PRIORITAIRE (spec
+/// multi-sessions §14) : appelé par le frontend quand la priorité change
+/// (Alt+Tab, épinglage, fermeture d'une session) — sans relancer le jeu.
+#[tauri::command]
+fn set_discord_activity_for(
+    app: AppHandle,
+    state: State<'_, DiscordRuntime>,
+    game_name: String,
+    profile_name: String,
+    active_mods: usize,
+    config: Option<DiscordPresenceConfig>,
+) -> Result<DiscordConnectionStatus, String> {
+    let runtime = state.inner().clone();
+    match config.as_ref().filter(|config| config.enabled) {
+        Some(config) => {
+            match set_discord_activity(&runtime, config, &game_name, &profile_name, active_mods) {
+                Ok(()) => {
+                    let status = DiscordConnectionStatus {
+                        connected: true,
+                        message: "Discord Rich Presence actif (session prioritaire).".into(),
+                    };
+                    let _ = app.emit("discord-status-changed", status.clone());
+                    Ok(status)
+                }
+                Err(error) => Err(error),
+            }
+        }
+        None => {
+            clear_discord_activity(&runtime);
+            let status = DiscordConnectionStatus {
+                connected: false,
+                message: "Discord Rich Presence désactivé (aucune session prioritaire).".into(),
+            };
+            let _ = app.emit("discord-status-changed", status.clone());
+            Ok(status)
+        }
+    }
+}
+
+/// Arrête la Rich Presence (plus aucune session active).
+#[tauri::command]
+fn clear_discord_activity_for(
+    app: AppHandle,
+    state: State<'_, DiscordRuntime>,
+) -> Result<DiscordConnectionStatus, String> {
+    let runtime = state.inner().clone();
+    clear_discord_activity(&runtime);
+    let status = DiscordConnectionStatus {
+        connected: false,
+        message: "Discord Rich Presence arrêtée.".into(),
+    };
+    let _ = app.emit("discord-status-changed", status.clone());
+    Ok(status)
+}
+
 #[tauri::command]
 async fn launch_game(
     app: AppHandle,
@@ -14714,6 +14769,8 @@ pub fn run() {
             launch_game,
             restore_deployment_session,
             test_discord_connection,
+            set_discord_activity_for,
+            clear_discord_activity_for,
             guess_mods_path,
             install_mod,
             import_mod_candidates,

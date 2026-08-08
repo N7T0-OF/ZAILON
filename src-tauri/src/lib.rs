@@ -4604,6 +4604,61 @@ fn recover_interrupted_preparations(
     Ok(recovered)
 }
 
+/// Restaure TOUT déploiement temporaire restant d'un jeu (fin de session
+/// explicite, appelé par le frontend quand une session se termine). Pour un jeu
+/// lancé via un launcher intermédiaire, le déploiement reste en place après la
+/// fermeture du launcher (`launch_game` avec `launcher_based`) — c'est ici
+/// qu'il est restauré, jamais au moment où le launcher quitte. Les sessions
+/// encore « active » avec un processus vivant sont laissées intactes (le jeu
+/// tourne). Retourne le nombre de sessions restaurées.
+#[tauri::command]
+fn restore_deployment_session(
+    app: AppHandle,
+    game_id: String,
+    game_root: String,
+) -> Result<usize, String> {
+    let game_id = safe_game_id(&game_id)?.to_string();
+    let game_root = fs::canonicalize(PathBuf::from(&game_root))
+        .map_err(|_| "Le dossier d’installation du jeu est introuvable.".to_string())?;
+    let deployments = update_data_root(&app)?
+        .join("games")
+        .join(&game_id)
+        .join("deployments");
+    let mut restored = 0usize;
+    for entry in fs::read_dir(&deployments)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_dir())
+    {
+        let session_root = entry.path();
+        let state_path = session_root.join("session.json");
+        let Ok(payload) = fs::read(&state_path) else {
+            continue;
+        };
+        let Ok(state) = serde_json::from_slice::<serde_json::Value>(&payload) else {
+            continue;
+        };
+        let status = state
+            .get("status")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        if status == "active" {
+            let process_id = state
+                .get("processId")
+                .and_then(|value| value.as_u64())
+                .and_then(|value| u32::try_from(value).ok());
+            if process_id.is_some_and(process_is_running) {
+                continue;
+            }
+        }
+        if recover_deployment_session(&session_root, &game_root).is_ok() {
+            restored += 1;
+        }
+    }
+    Ok(restored)
+}
+
 fn finish_temporary_copy(
     session: DeploymentSession,
     capture_overwrite: bool,
@@ -5077,6 +5132,7 @@ async fn launch_game(
     enabled_mod_ids: Vec<String>,
     conflict_rules: Vec<LaunchConflictRule>,
     discord: Option<DiscordPresenceConfig>,
+    launcher_based: bool,
     on_event: Channel<DeploymentProgressEvent>,
 ) -> Result<LaunchGameResult, String> {
     let runtime = state.inner().clone();
@@ -5229,15 +5285,31 @@ async fn launch_game(
     let worker_enabled_mod_ids = enabled_mod_ids.clone();
     let worker_visual_runtime = visual_runtime.clone();
     let deployment_session = prepared.session;
+    let worker_launcher_based = launcher_based;
     std::thread::spawn(move || {
         let exit_code = child.wait().ok().and_then(|status| status.code());
-        let cleanup_error =
-            deployment_session.and_then(|session| finish_temporary_copy(session, true).err());
+        // Jeu lancé via un launcher intermédiaire (NTE, Steam…) : le processus
+        // enfant EST le launcher — sa fermeture ne doit JAMAIS démonter le
+        // déploiement (le vrai jeu démarre encore). La session passe en
+        // « prepared » (récupérable) et le déploiement est restauré à la fin
+        // réelle de la session par `restore_deployment_session` (ou par la
+        // récupération du lancement suivant). C'est la correction racine du
+        // « déploiement démonté quand le launcher intermédiaire ferme ».
+        let cleanup_error = if worker_launcher_based {
+            if let Some(session) = deployment_session.as_ref() {
+                let _ = update_deployment_session_state(session, "prepared", None);
+            }
+            None
+        } else {
+            deployment_session.and_then(|session| finish_temporary_copy(session, true).err())
+        };
         set_staged_deployment_status(
             &worker_app_for_cleanup,
             &worker_game_id,
             &worker_enabled_mod_ids,
-            if cleanup_error.is_some() {
+            if worker_launcher_based {
+                "runtime-visible"
+            } else if cleanup_error.is_some() {
                 "failed"
             } else {
                 "enabled"
@@ -14640,6 +14712,7 @@ pub fn run() {
             quick_panel::close_quick_panel,
             quick_panel::toggle_quick_panel,
             launch_game,
+            restore_deployment_session,
             test_discord_connection,
             guess_mods_path,
             install_mod,

@@ -796,6 +796,17 @@ export const native = {
   restoreDeploymentSession: (gameId: string, gameRoot: string) =>
     desktopOnly<number>('restore_deployment_session', { gameId, gameRoot }),
   testDiscordConnection: (clientId: string) => desktopOnly<DiscordConnectionStatus>('test_discord_connection', { clientId }),
+  /** Recalcule la Rich Presence vers la session prioritaire (multi-sessions) :
+   * publiée si une session est prioritaire et la présence activée, arrêtée
+   * sinon. Config absente = arrêter. */
+  setDiscordActivityFor: (activity: { gameName: string; profileName: string; activeMods: number; config?: DiscordPresenceConfig }) =>
+    desktopOnly<DiscordConnectionStatus>('set_discord_activity_for', {
+      gameName: activity.gameName,
+      profileName: activity.profileName,
+      activeMods: activity.activeMods,
+      config: activity.config ?? null,
+    }),
+  clearDiscordActivity: () => desktopOnly<DiscordConnectionStatus>('clear_discord_activity_for', {}),
   guessModsPath: (execPath: string) => desktopOnly<string>('guess_mods_path', { execPath }),
   scanSteamGames: (steamPath: string | undefined, onEvent: (event: SteamScanEvent) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Steam detection is only available in the ZAILON desktop app.'))

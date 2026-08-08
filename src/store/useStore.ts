@@ -431,6 +431,10 @@ export interface Store {
   recordLastKnownGoodFrameworks: (gameId: string) => void
   /** Verrouille/déverrouille les frameworks d'un profil (spec §42). */
   setLockFrameworks: (gameId: string, profileId: string, locked: boolean) => void
+  /** Recalcule la Rich Presence vers la session prioritaire (spec
+   * multi-sessions §14) : une seule activité publiée, celle de la session
+   * prioritaire — appelé à chaque changement de priorité. */
+  syncDiscordPresence: () => void
   cancelSession: (gameId: string) => void
   applyInputArbiter: () => void
   beginSession: (gameId: string, profileId: string, source?: SessionSource) => void
@@ -1237,7 +1241,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setTextSize: textSize => set({ textSize }),
   setUiDensity: uiDensity => set({ uiDensity }),
   setAutoArtwork: autoArtwork => set({ autoArtwork }),
-  toggleDiscord: () => set(state => ({ discordPresence: !state.discordPresence })),
+  toggleDiscord: () => {
+    set(state => ({ discordPresence: !state.discordPresence }))
+    get().syncDiscordPresence()
+  },
   setDiscordClientId: discordClientId => set({ discordClientId }),
   setDiscordLargeImageKey: discordLargeImageKey => set({ discordLargeImageKey }),
   setDiscordShowProfile: discordShowProfile => set({ discordShowProfile }),
@@ -1828,6 +1835,35 @@ export const useStore = create<Store>()(persist((set, get) => ({
       profiles: game.profiles.map(profile => profile.id !== profileId ? profile : { ...profile, lockFrameworks: locked }),
     }),
   })),
+  /** Rich Presence prioritaire (§14) : publiée pour la session prioritaire en
+   * cours quand la présence est activée, arrêtée sinon. Appelée par
+   * `applyInputArbiter` (donc à chaque transition de session / changement de
+   * priorité) et par `toggleDiscord`. */
+  syncDiscordPresence: () => {
+    const state = get()
+    const stop = () => void native.clearDiscordActivity().catch(() => undefined)
+    if (!state.discordPresence) { stop(); return }
+    const priorityGameId = pickPrioritySession(state.gameSessions, state.pinnedPriorityGameId, state.foregroundGameId)
+    const session = state.gameSessions.find(item => item.gameId === priorityGameId && item.state === 'GameRunning')
+    if (!session) { stop(); return }
+    const game = state.games.find(item => item.id === session.gameId)
+    const profile = game?.profiles.find(item => item.id === session.profileId)
+    if (!game || !profile) { stop(); return }
+    const activeMods = resolveProfileMods(game, profile).filter(mod => mod.enabled).length
+    void native.setDiscordActivityFor({
+      gameName: game.name,
+      profileName: profile.name,
+      activeMods,
+      config: {
+        enabled: true,
+        clientId: state.discordClientId,
+        largeImageKey: state.discordLargeImageKey || undefined,
+        showProfile: state.discordShowProfile,
+        showModCount: state.discordShowModCount,
+        showElapsed: state.discordShowElapsed,
+      },
+    }).catch(() => undefined)
+  },
   /** Annule une session encore en recherche (launcher ouvert, jeu pas encore
    * identifié) : arrête le suivi ZAILON et restaure le déploiement SANS toucher
    * au launcher externe (Steam / launcher officiel peuvent rester ouverts). */
@@ -1870,6 +1906,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
           : item.timeline,
       }),
     }))
+    // §14 : la Rich Presence suit la session prioritaire (une seule activité).
+    get().syncDiscordPresence()
   },
   setReduceExplanations: reduceExplanations => set({ reduceExplanations }),
   setAdvancedMode: advancedMode => set({ advancedMode }),

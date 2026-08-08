@@ -47,12 +47,19 @@ QWERTY/mapping).
 `Ctrl+Alt+Z` actionne le clavier de la session prioritaire (plus « la première
 session trouvée »).
 
+### 6. Rich Presence Discord prioritaire (§14)
+
+`syncDiscordPresence()` (store) publie une SEULE activité — celle de la session
+prioritaire (épinglée → premier plan → Running la plus récente) — via les
+commandes natives `set_discord_activity_for` / `clear_discord_activity_for`
+(ajoutées dans `lib.rs`). Appelé par `applyInputArbiter` (chaque transition de
+session, épinglage, Alt+Tab) et par `toggleDiscord`. Quand la session prioritaire
+ferme, la priorité est recalculée et la RPC bascule automatiquement.
+
 ## Ce qui reste (dépend de la machine réelle / du backend fenêtres)
 
 - **Visual Profiles multi-apps** : un seul profil au premier plan (règle déjà
   respectée côté session — à confirmer sur machine).
-- **Rich Presence Discord** : utilise la session lancée (native) — le recalcul
-  vers la session prioritaire à la fermeture est documenté, pas encore câblé.
 - **Indicateur dans la barre de statut** : le header porte l'indicateur
   « N en cours » (spec) ; la barre de statut peut l'afficher aussi en option.
 

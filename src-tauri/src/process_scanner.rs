@@ -68,7 +68,6 @@ fn path_under(root: &str, candidate: &str) -> bool {
 pub fn score_process(candidate: &ProcessCandidate, request: &GamePresenceRequest) -> u8 {
     let mut score: u32 = 0;
     let name = candidate.executable_name.to_lowercase();
-    let mut matched: Option<String> = None;
 
     // +40 : le chemin appartient à l'installation configurée.
     if let Some(root) = &request.install_root {
@@ -84,7 +83,6 @@ pub fn score_process(candidate: &ProcessCandidate, request: &GamePresenceRequest
         .any(|candidate_name| name == candidate_name.to_lowercase())
     {
         score += 25;
-        matched = Some(candidate.executable_name.clone());
     }
 
     // +15 : le nom correspond au launcher officiel (présent, mais pas le jeu final).
@@ -149,7 +147,6 @@ pub fn detect_games(
 /// Ailleurs : liste vide (aucune détection native).
 #[cfg(target_os = "windows")]
 pub fn enumerate_processes() -> Vec<ProcessCandidate> {
-    use windows_sys::core::PWSTR;
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
@@ -177,13 +174,12 @@ pub fn enumerate_processes() -> Vec<ProcessCandidate> {
         let mut path = String::new();
         // Chemin complet : accès limité, échoue proprement pour les processus élevés.
         // SAFETY : OpenProcess/QueryFullProcessImageNameW avec un buffer de taille bornée.
-        unsafe {
-            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-            if handle != 0 {
+        unsafe {            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if !handle.is_null() {
                 let mut size: u32 = 32_768;
                 let mut buffer = vec![0u16; size as usize];
-                let ok =
-                    QueryFullProcessImageNameW(handle, 0, PWSTR(buffer.as_mut_ptr()), &mut size);
+                // PWSTR est un alias de `*mut u16` dans windows-sys 0.61.
+                let ok = QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut size);
                 if ok != 0 {
                     path = String::from_utf16_lossy(&buffer[..size as usize]);
                 }

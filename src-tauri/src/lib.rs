@@ -17,6 +17,7 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State};
 use walkdir::WalkDir;
 
+mod input_backends;
 mod visual_profiles;
 
 #[cfg(unix)]

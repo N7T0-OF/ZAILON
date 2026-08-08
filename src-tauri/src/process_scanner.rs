@@ -174,7 +174,8 @@ pub fn enumerate_processes() -> Vec<ProcessCandidate> {
         let mut path = String::new();
         // Chemin complet : accès limité, échoue proprement pour les processus élevés.
         // SAFETY : OpenProcess/QueryFullProcessImageNameW avec un buffer de taille bornée.
-        unsafe {            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
             if !handle.is_null() {
                 let mut size: u32 = 32_768;
                 let mut buffer = vec![0u16; size as usize];

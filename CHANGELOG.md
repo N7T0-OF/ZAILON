@@ -712,6 +712,8 @@
 
 ### Added
 
+- Priorité de session par premier plan (Alt+Tab réel) : la session dont la fenêtre a le focus devient prioritaire automatiquement, alimentée par le watcher de fenêtres natif (`foreground` dans `GameWindowMatch`).
+
 ### Changed
 
 ### Fixed

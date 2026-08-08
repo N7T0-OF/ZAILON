@@ -70,16 +70,24 @@ export default function App() {
       const waiters = state.gameSessions.filter(session => session.state === 'WaitingForGame' || session.state === 'GameLost' || session.state === 'WaitingForElevation')
       const activeIds = state.gameSessions.filter(session => session.state !== 'Ended' && session.state !== 'Failed').map(session => session.gameId)
       const external = installed.filter(game => shouldScanExternalGame(game, steamAppIdsRef.current, state.autoAttachGames ?? [], activeIds))
-      if (!waiters.length && !external.length) return
-      scanning = true
-      lastScan = now
-      const targets = [
+      // Sessions en cours : leur fenêtre est scannée pour la PRIORITÉ par
+      // premier plan (Alt+Tab réel) — jamais passées par `attach` (déjà Running).
+      const runningSessions = state.gameSessions.filter(session => session.state === 'GameRunning')
+      const attachTargets = [
         ...waiters.flatMap(session => {
           const game = state.games.find(item => item.id === session.gameId)
           return game ? [{ game, reattachContext: true }] : []
         }),
         ...external.map(game => ({ game, reattachContext: false })),
       ]
+      const foregroundTargets = runningSessions.flatMap(session => {
+        const game = state.games.find(item => item.id === session.gameId)
+        return game ? [{ game, reattachContext: false }] : []
+      })
+      if (!attachTargets.length && !foregroundTargets.length) return
+      scanning = true
+      lastScan = now
+      const targets = [...attachTargets, ...foregroundTargets]
       const attach = (results: Array<{ gameId: string; score: number; processName?: string; evidence: string[] }>) => {
         const storeNow = useStore.getState()
         for (const result of results) {
@@ -95,10 +103,19 @@ export default function App() {
       // exécutable) et fenêtre principale (visible / premier plan) — la fenêtre
       // survit aux launchers, UAC et relances internes.
       void Promise.all([
-        native.scanGamePresence(targets.map(({ game, reattachContext }) => presenceRequestFor(game, reattachContext)))
+        native.scanGamePresence(attachTargets.map(({ game, reattachContext }) => presenceRequestFor(game, reattachContext)))
           .then(results => attach(results.map(result => ({ gameId: result.gameId, score: result.score, processName: result.processName, evidence: ['processus', 'installation'] })))),
         native.scanGameWindows(targets.map(({ game, reattachContext }) => windowRequestFor(game, reattachContext)))
-          .then(results => attach(results.map(result => ({ gameId: result.gameId, score: result.score, evidence: ['fenêtre', 'processus'] })))),
+          .then(results => {
+            attach(results.map(result => ({ gameId: result.gameId, score: result.score, evidence: ['fenêtre', 'processus'] })))
+            // Priorité par premier plan : si la fenêtre d'une session EN COURS
+            // est au premier plan, cette session devient prioritaire (Alt+Tab).
+            const foreground = results.find(result => {
+              const session = useStore.getState().gameSessions.find(item => item.gameId === result.gameId && item.state === 'GameRunning')
+              return result.foreground && Boolean(session)
+            })
+            if (foreground) useStore.getState().setForegroundGame(foreground.gameId)
+          }),
       ])
         .catch(() => undefined)
         .finally(() => { scanning = false })

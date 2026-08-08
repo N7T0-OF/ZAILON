@@ -42,6 +42,23 @@ test('pickPrioritySession : épinglée active → prioritaire, sinon Running, si
   assert.equal(pickPrioritySession(searching), 'nte') // active même en recherche
 })
 
+test('pickPrioritySession : le premier plan (Alt+Tab) gagne sur Running récent', () => {
+  const sessions = [
+    session('cyberpunk', 'GameRunning', 200, 250),
+    session('nte', 'GameRunning', 100, 150),
+  ]
+  // NTE au premier plan → prioritaire, même si Cyberpunk est plus récent.
+  assert.equal(pickPrioritySession(sessions, undefined, 'nte'), 'nte')
+  // Épinglée toujours gagnante sur le premier plan.
+  assert.equal(pickPrioritySession(sessions, 'cyberpunk', 'nte'), 'cyberpunk')
+  // Premier plan d'une session terminale → ignoré, retour au Running récent.
+  const ended = [
+    session('cyberpunk', 'GameRunning', 200, 250),
+    session('nte', 'Ended', 100, 150),
+  ]
+  assert.equal(pickPrioritySession(ended, undefined, 'nte'), 'cyberpunk')
+})
+
 test('arbitrateInputProfiles : un seul mapping actif à la fois', () => {
   const sessions = [
     session('cyberpunk', 'GameRunning', 200),

@@ -676,6 +676,8 @@ export interface GameWindowMatch {
   title: string
   className: string
   score: number
+  /** Vrai si la fenêtre du jeu est au premier plan (priorité multi-sessions). */
+  foreground: boolean
   matchedTitlePattern?: string
 }
 

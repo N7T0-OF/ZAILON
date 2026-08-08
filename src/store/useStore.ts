@@ -409,6 +409,9 @@ export interface Store {
   /** Session prioritaire épinglée (spec multi-sessions) : `undefined` = automatique. */
   pinnedPriorityGameId?: string
   setPinnedPriority: (gameId?: string) => void
+  /** Session dont la fenêtre est au premier plan (watcher de fenêtres natif). */
+  foregroundGameId?: string
+  setForegroundGame: (gameId?: string) => void
   cancelSession: (gameId: string) => void
   applyInputArbiter: () => void
   beginSession: (gameId: string, profileId: string, source?: SessionSource) => void
@@ -1749,6 +1752,12 @@ export const useStore = create<Store>()(persist((set, get) => ({
     set({ pinnedPriorityGameId })
     get().applyInputArbiter()
   },
+  setForegroundGame: foregroundGameId => {
+    const state = get()
+    if (state.foregroundGameId === foregroundGameId) return
+    set({ foregroundGameId })
+    state.applyInputArbiter()
+  },
   /** Annule une session encore en recherche (launcher ouvert, jeu pas encore
    * identifié) : arrête le suivi ZAILON et restaure le déploiement SANS toucher
    * au launcher externe (Steam / launcher officiel peuvent rester ouverts). */
@@ -1780,7 +1789,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
    * active. Appelé après chaque transition de session et changement de priorité. */
   applyInputArbiter: () => {
     const state = get()
-    const priority = pickPrioritySession(state.gameSessions, state.pinnedPriorityGameId)
+    const priority = pickPrioritySession(state.gameSessions, state.pinnedPriorityGameId, state.foregroundGameId)
     const active = arbitrateInputProfiles(state.gameSessions, priority)
     set(current => ({
       gameSessions: current.gameSessions.map(item => item.inputProfileActive === active[item.gameId] ? item : {

@@ -49,9 +49,6 @@ session trouvée »).
 
 ## Ce qui reste (dépend de la machine réelle / du backend fenêtres)
 
-- **Priorité automatique par premier plan** : aujourd'hui automatique = la plus
-  récente ; le passage automatique à la fenêtre au premier plan utilisera le
-  watcher de fenêtres natif (champ `foreground` déjà scanné).
 - **Visual Profiles multi-apps** : un seul profil au premier plan (règle déjà
   respectée côté session — à confirmer sur machine).
 - **Rich Presence Discord** : utilise la session lancée (native) — le recalcul
@@ -61,6 +58,8 @@ session trouvée »).
 
 ## Tests
 
-`test-session-priority.ts` (6 tests) : aucune session, Running la plus récente,
+`test-session-priority.ts` (7 tests) : aucune session, Running la plus récente,
+premier plan (Alt+Tab) gagnant sur Running récent, épinglée gagnante sur premier
+plan, premier plan d'une session terminale ignoré,
 épinglée vs automatique, arbitrage un-seul-mapping, recherche vs jeu détecté,
 exclusion des états terminaux.

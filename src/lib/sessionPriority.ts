@@ -23,17 +23,21 @@ export interface PriorityCandidate {
 
 /** Session prioritaire effective :
  * 1. la session épinglée si elle est encore active (priorité manuelle) ;
- * 2. sinon la session GameRunning la plus récente ;
- * 3. sinon la session active (non terminale) la plus récente ;
- * 4. sinon aucune.
+ * 2. sinon la session dont la fenêtre est au premier plan (Alt+Tab réel,
+ *    alimenté par le watcher de fenêtres natif) ;
+ * 3. sinon la session GameRunning la plus récente ;
+ * 4. sinon la session active (non terminale) la plus récente ;
+ * 5. sinon aucune.
  * Retourne le gameId (jamais un PID — la session appartient au jeu). */
 export function pickPrioritySession(
   sessions: PriorityCandidate[],
   pinnedGameId?: string,
+  foregroundGameId?: string,
 ): string | undefined {
   const active = sessions.filter(session => !SESSION_TERMINAL_STATES.includes(session.state as never))
   if (!active.length) return undefined
   if (pinnedGameId && active.some(session => session.gameId === pinnedGameId)) return pinnedGameId
+  if (foregroundGameId && active.some(session => session.gameId === foregroundGameId)) return foregroundGameId
   const running = active.filter(session => session.state === 'GameRunning')
   const pool = running.length ? running : active
   return [...pool].sort((left, right) => (right.lastSeenAt ?? right.startedAt) - (left.lastSeenAt ?? left.startedAt))[0].gameId

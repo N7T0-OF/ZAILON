@@ -629,7 +629,11 @@
 > `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
 > Release Notes à partir de cette section et refuse de publier si elle est vide.
 
-## [Unreleased]
+## [1.22.0] - 2026-08-08
+
+> Release du bloc Cyberpunk RED4ext : déploiement lié à la session (plus au
+> PID du launcher), verrou pré-lancement des frameworks, et compteur de mods
+> fiable (source de vérité unique) — validée par la PR #1 sur Windows + Linux.
 
 ### Added
 
@@ -639,6 +643,36 @@
 ### Changed
 
 - Déploiement lié à la session, plus au PID : pour un jeu lancé via un launcher intermédiaire, la fermeture du launcher ne démonte plus jamais les mods — restauration à la fin réelle de la session (`restore_deployment_session`) et au GameLost.
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
+> Pendant le développement, chaque changement visible par l'utilisateur est ajouté
+> ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
+> cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
+> `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
+> Release Notes à partir de cette section et refuse de publier si elle est vide.
+
+## [Unreleased]
+
+### Added
+
+### Changed
 
 ### Fixed
 

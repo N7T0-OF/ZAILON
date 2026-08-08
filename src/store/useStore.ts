@@ -8,7 +8,7 @@ import { createUserTag, withInferredTags } from '../lib/modCategories'
 import { validateCyberpunkFrameworkDeps } from '../lib/frameworkValidator'
 import { mergeModCatalogs, reconcileModStates } from '../lib/profileState'
 
-const APP_VERSION = '1.21.1'
+const APP_VERSION = '1.22.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 const asError = (error: unknown) => error instanceof Error ? error.message : String(error)

@@ -708,7 +708,7 @@
 > `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
 > Release Notes à partir de cette section et refuse de publier si elle est vide.
 
-## [Unreleased]
+## [1.24.0] - 2026-08-08
 
 ### Added
 
@@ -739,6 +739,30 @@
 > cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
 > `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
 > Release Notes à partir de cette section et refuse de publier si elle est vide.
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
 
 ## 1.9.0 — Profils immuables et diagnostic transparent
 

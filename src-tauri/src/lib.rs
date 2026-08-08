@@ -21,6 +21,7 @@ mod input_backends;
 mod process_scanner;
 mod steam_presence;
 mod visual_profiles;
+mod window_watcher;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -4007,6 +4008,13 @@ fn scan_game_presence(
 #[tauri::command]
 fn steam_running_state(app_ids: Vec<u32>) -> steam_presence::SteamRunningState {
     steam_presence::steam_running_state(&app_ids)
+}
+
+#[tauri::command]
+fn scan_game_windows(
+    requests: Vec<window_watcher::GameWindowRequest>,
+) -> Vec<window_watcher::GameWindowMatch> {
+    window_watcher::scan_requests(&requests)
 }
 
 #[tauri::command]
@@ -14614,6 +14622,7 @@ pub fn run() {
             initialize_fivem_base,
             ensure_dir,
             scan_game_presence,
+            scan_game_windows,
             steam_running_state,
             launch_game,
             test_discord_connection,

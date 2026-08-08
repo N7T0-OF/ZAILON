@@ -59,7 +59,22 @@ Après : un seul `[Jouer]` → `[Préparation…]` → `[Lancement…]` →
 **Configuration > Lancement** et **Diagnostic** (Préparer et attendre, lancer
 sans mods) — jamais à côté de Jouer.
 
-## 6. Limites restantes
+## 6. Notification « jeu en cours » (spec §21-24)
+
+Quand le PROCESSUS FINAL est détecté (jamais au lancement d'un launcher
+intermédiaire), un toast apparaît en haut à droite pendant 2,5 s :
+
+- **En cours via ZAILON** — la session a été lancée par ZAILON (transition
+  `WaitingForGame` → `GameRunning`) ;
+- **Jeu détecté par ZAILON** — jeu tournant hors ZAILON récupéré en cours
+  d'utilisation (`attachDetectedGame`) ;
+- **Session récupérée** — jeu déjà lancé quand ZAILON redémarre (fenêtre de
+  grâce de 20 s après le boot du store).
+
+La décision `recovered` vs `detected` est une fonction pure (`recoveryKind`,
+`sessionPriority.ts`, testée) ; le toast est auto-fermé, fermable au clic.
+
+## 7. Limites restantes
 
 - La vraie chaîne NTE (nom exact du processus final, fenêtres) reste à confirmer
   sur la machine avec le jeu (protocole `docs/nte-keyboard-remap-test.md`).

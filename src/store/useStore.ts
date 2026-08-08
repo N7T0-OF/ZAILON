@@ -7,11 +7,16 @@ import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchG
 import { createUserTag, withInferredTags } from '../lib/modCategories'
 import { validateCyberpunkFrameworkDeps } from '../lib/frameworkValidator'
 import { mergeModCatalogs, reconcileModStates } from '../lib/profileState'
-import { arbitrateInputProfiles, pickPrioritySession } from '../lib/sessionPriority'
+import { arbitrateInputProfiles, pickPrioritySession, recoveryKind } from '../lib/sessionPriority'
 
 const APP_VERSION = '1.25.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
+/** Instant du démarrage du store : sert à distinguer « Jeu détecté par ZAILON »
+ * (récupération en cours d'utilisation) de « Session récupérée » (jeu déjà
+ * lancé quand ZAILON redémarre, spec §24) — fenêtre de 20 s. */
+const STORE_BOOTED_AT = Date.now()
+const RECOVERY_GRACE_MS = 20_000
 const asError = (error: unknown) => error instanceof Error ? error.message : String(error)
 const gameNameFromPath = (path: string) => path.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || 'New game'
 const normalizedPath = (path?: string) => (path || '').trim().replace(/\//g, '\\').toLocaleLowerCase()
@@ -412,6 +417,12 @@ export interface Store {
   /** Session dont la fenêtre est au premier plan (watcher de fenêtres natif). */
   foregroundGameId?: string
   setForegroundGame: (gameId?: string) => void
+  /** Toast « jeu en cours » (spec « Correctif NTE » §21-24) : affiché quand le
+   * processus final est détecté — jamais au lancement du launcher intermédiaire.
+   * `started` = lancé par ZAILON · `detected` = récupéré hors ZAILON ·
+   * `recovered` = session reprise après redémarrage de ZAILON. */
+  sessionToast?: { kind: 'started' | 'detected' | 'recovered'; gameName: string; at: number }
+  setSessionToast: (toast?: { kind: 'started' | 'detected' | 'recovered'; gameName: string; at: number }) => void
   cancelSession: (gameId: string) => void
   applyInputArbiter: () => void
   beginSession: (gameId: string, profileId: string, source?: SessionSource) => void
@@ -1405,7 +1416,12 @@ export const useStore = create<Store>()(persist((set, get) => ({
         timeline: [...item.timeline, { at: now, stage: 'GameAttached', detail: processName ? `${processName} (confiance ${confidence ?? '—'}%)` : 'Jeu détecté — session reconnectée' }],
       } : item),
     }))
-    if (firstDetected) get().recordNotice(`${game.name} détecté — session ZAILON reconnectée.`)
+    if (firstDetected) {
+      get().recordNotice(`${game.name} détecté — session ZAILON reconnectée.`)
+      // Spec #21-22 : la session a été lancée par ZAILON, le processus final est
+      // détecté → « En cours via ZAILON » (jamais au lancement du launcher).
+      get().setSessionToast({ kind: 'started', gameName: game.name, at: now })
+    }
     get().applyInputArbiter()
   },
   /** GamePresenceEngine : un jeu configuré tourne hors ZAILON (Steam, launcher
@@ -1449,6 +1465,13 @@ export const useStore = create<Store>()(persist((set, get) => ({
       sessionTime: 0,
     }))
     get().recordNotice(`${game.name} détecté — session ZAILON récupérée automatiquement.`)
+    // Spec #21-24 : détecté hors ZAILON → « Jeu détecté par ZAILON » ; si ZAILON
+    // vient de redémarrer, le jeu tournait déjà → « Session récupérée ».
+    get().setSessionToast({
+      kind: recoveryKind(STORE_BOOTED_AT, now, RECOVERY_GRACE_MS),
+      gameName: game.name,
+      at: now,
+    })
     get().applyInputArbiter()
   },
   attachGameSession: (gameId, profileId, processName) => {
@@ -1758,6 +1781,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     set({ foregroundGameId })
     state.applyInputArbiter()
   },
+  setSessionToast: toast => set({ sessionToast: toast }),
   /** Annule une session encore en recherche (launcher ouvert, jeu pas encore
    * identifié) : arrête le suivi ZAILON et restaure le déploiement SANS toucher
    * au launcher externe (Steam / launcher officiel peuvent rester ouverts). */

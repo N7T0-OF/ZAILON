@@ -66,3 +66,15 @@ export function activeSessions(sessions: PriorityCandidate[]): PriorityCandidate
 export function isSearchingSession(state: string): boolean {
   return state === 'WaitingForGame' || state === 'WaitingForElevation' || state === 'LauncherStarted' || state === 'Preparing'
 }
+
+/** Toast de session (spec « Correctif NTE » §21-24) : un jeu détecté hors ZAILON
+ * est « récupéré » (recovered) si ZAILON vient de redémarrer (fenêtre de grâce),
+ * sinon simplement « détecté ». `started` reste réservé aux sessions lancées par
+ * ZAILON. Fonction pure : le boot de l'app est le moment où le store est créé. */
+export function recoveryKind(
+  bootedAt: number,
+  now: number,
+  graceMs = 20_000,
+): 'recovered' | 'detected' {
+  return now - bootedAt < graceMs ? 'recovered' : 'detected'
+}

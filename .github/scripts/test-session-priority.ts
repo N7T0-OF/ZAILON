@@ -8,6 +8,7 @@ import {
   arbitrateInputProfiles,
   isSearchingSession,
   pickPrioritySession,
+  recoveryKind,
 } from '../../src/lib/sessionPriority.ts'
 
 const session = (gameId: string, state: string, startedAt: number, lastSeenAt?: number) => ({
@@ -78,6 +79,15 @@ test('isSearchingSession : recherche vs jeu détecté', () => {
   assert.equal(isSearchingSession('LauncherStarted'), true)
   assert.equal(isSearchingSession('GameRunning'), false)
   assert.equal(isSearchingSession('Ended'), false)
+})
+
+test('recoveryKind : dans la fenêtre de grâce = récupéré, sinon détecté', () => {
+  const bootedAt = 1_000_000
+  assert.equal(recoveryKind(bootedAt, bootedAt + 5_000), 'recovered')
+  assert.equal(recoveryKind(bootedAt, bootedAt + 19_999), 'recovered')
+  assert.equal(recoveryKind(bootedAt, bootedAt + 20_000), 'detected') // limite incluse → détecté
+  assert.equal(recoveryKind(bootedAt, bootedAt + 3_600_000), 'detected')
+  assert.equal(recoveryKind(bootedAt, bootedAt + 5_000, 60_000), 'recovered') // grâce personnalisée
 })
 
 test('activeSessions : exclut Ended/Failed/GameLost', () => {

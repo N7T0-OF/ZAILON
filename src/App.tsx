@@ -21,6 +21,8 @@ export default function App() {
   const clearNotice = useStore(s => s.clearNotice)
   const recordNotice = useStore(s => s.recordNotice)
   const notificationHistory = useStore(s => s.notificationHistory)
+  const sessionToast = useStore(s => s.sessionToast)
+  const setSessionToast = useStore(s => s.setSessionToast)
   const dismissNotification = useStore(s => s.dismissNotification)
   const clearCompletedNotifications = useStore(s => s.clearCompletedNotifications)
   const clearNotificationHistory = useStore(s => s.clearNotificationHistory)
@@ -362,11 +364,39 @@ export default function App() {
         <AppWindow />
       </UpdateProvider>
       <CommandPalette />
+      <SessionToast toast={sessionToast} onDismiss={() => setSessionToast(undefined)} />
       <NotificationCenter history={notificationHistory} onDismiss={dismissNotification} onClear={clearCompletedNotifications} onClearAll={clearNotificationHistory} />
       {externalInstalls[0] && <ExternalInstallDialog request={externalInstalls[0]} games={games} onCancel={() => void native.consumeExternalInstall(externalInstalls[0].requestId).finally(() => setExternalInstalls(current => current.slice(1)))} onContinue={(gameId, profileId) => void resolveExternalInstall(externalInstalls[0], gameId, profileId)} />}
       {exclusiveNoticeOpen && <QuickPanelExclusiveNotice onClose={() => setExclusiveNoticeOpen(false)} />}
     </div>
   )
+}
+
+// Spec « Correctif NTE » §21-24 — notification « jeu en cours » : affichée en
+// haut à droite (2,5 s) uniquement quand le PROCESSUS FINAL est détecté, jamais
+// au lancement d'un launcher intermédiaire. Trois états : lancé par ZAILON,
+// détecté hors ZAILON, session récupérée après redémarrage.
+const SESSION_TOAST_TITLES = {
+  started: 'En cours via ZAILON',
+  detected: 'Jeu détecté par ZAILON',
+  recovered: 'Session récupérée',
+} as const
+
+function SessionToast({ toast, onDismiss }: { toast: ReturnType<typeof useStore.getState>['sessionToast']; onDismiss: () => void }) {
+  useEffect(() => {
+    if (!toast) return
+    const timeout = window.setTimeout(onDismiss, 2500)
+    return () => window.clearTimeout(timeout)
+  }, [toast, onDismiss])
+  if (!toast) return null
+  return <div className="fixed right-4 top-4 z-[240] flex w-[min(340px,calc(100vw-2rem))] items-start gap-3 rounded-xl border border-emerald-300/25 bg-[#0e1212]/95 p-3 shadow-2xl backdrop-blur-xl">
+    <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-300/15 text-emerald-200"><CheckCircle2 size={14} /></span>
+    <div className="min-w-0 flex-1">
+      <p className="font-mono text-[10px] uppercase tracking-widest text-emerald-200/85">{SESSION_TOAST_TITLES[toast.kind]}</p>
+      <p className="mt-0.5 truncate text-xs font-semibold text-white/85">{toast.gameName}</p>
+    </div>
+    <button type="button" onClick={onDismiss} aria-label="Fermer" className="rounded p-1 text-white/40 hover:bg-white/10 hover:text-white"><X size={13} /></button>
+  </div>
 }
 
 // Spec #41 — plein écran exclusif : le panneau rapide (fenêtre externe) ne

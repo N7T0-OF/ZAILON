@@ -8,7 +8,8 @@ import { useStore } from './store/useStore'
 import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
 import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, windowRequestFor } from './lib/gamePresence'
-import { register, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
+import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-profiles/application/shortcuts'
 
 export default function App() {
@@ -28,6 +29,9 @@ export default function App() {
   const textSize = useStore(s => s.textSize)
   const uiDensity = useStore(s => s.uiDensity)
   const accentColor = useStore(s => s.accentColor)
+  const quickPanelEnabled = useStore(s => s.quickPanelEnabled)
+  const quickPanelShortcut = useStore(s => s.quickPanelShortcut)
+  const gameSessions = useStore(s => s.gameSessions)
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
 
   // GamePresenceEngine : un seul watcher léger suit (a) les sessions en attente
@@ -127,6 +131,52 @@ export default function App() {
     void listen<NxmRequest>('nxm-opened', event => setExternalInstalls(current => current.some(item => item.requestId === event.payload.requestId) ? current : [...current, event.payload])).then(dispose => { unlisten = dispose })
     return () => unlisten?.()
   }, [])
+
+  // Quick Game Panel : raccourci global (Ctrl+Alt+Z par défaut) qui ouvre la
+  // fenêtre native du panneau — il doit rester actif PENDANT le jeu.
+  useEffect(() => {
+    if (!native.isDesktop() || !quickPanelEnabled) return
+    const shortcut = quickPanelShortcut.trim()
+    if (!shortcut) return
+    let disposed = false
+    void register(shortcut, event => {
+      if (event.state !== 'Pressed') return
+      void native.quickPanel.toggle().catch(() => undefined)
+    }).catch(() => undefined)
+    return () => {
+      disposed = true
+      void unregister(shortcut).catch(() => undefined)
+    }
+    // Re-enregistré après chaque transition de jeu (l'effet des raccourcis
+    // visuels repasse par unregisterAll à ces moments-là).
+  }, [quickPanelEnabled, quickPanelShortcut, isLaunching, isPlaying])
+
+  // Actions émises par le panneau rapide (fenêtre séparée) vers la fenêtre
+  // principale : bascule du clavier, retour à ZAILON.
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    let unlisten: UnlistenFn | undefined
+    void listen<{ action: 'toggle-keyboard' | 'focus-main' }>('quick-panel-action', event => {
+      const store = useStore.getState()
+      if (event.payload.action === 'toggle-keyboard') {
+        const session = store.gameSessions.find(item => item.state !== 'Ended' && item.state !== 'Failed')
+        if (session) store.setSessionInputActive(session.gameId, !session.inputProfileActive)
+      } else if (event.payload.action === 'focus-main') {
+        store.setView('home')
+        const window = getCurrentWindow()
+        void window.unminimize().catch(() => undefined)
+        void window.setFocus().catch(() => undefined)
+      }
+    }).then(dispose => { unlisten = dispose })
+    return () => unlisten?.()
+  }, [])
+
+  // Fermeture automatique du panneau quand plus aucune session n'est en cours.
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    const running = gameSessions.some(session => session.state === 'GameRunning')
+    if (!running) void native.quickPanel.close().catch(() => undefined)
+  }, [gameSessions])
 
   useEffect(() => {
     if (!native.isDesktop()) return

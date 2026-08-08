@@ -33,9 +33,12 @@
 >   principale du jeu est une preuve de présence indépendante de l'arbre des
 >   processus (EnumWindows, titre/classe, visibilité, premier plan), scannée en
 >   parallèle des processus par le RunningGamesWatcher — motifs de titre jamais
->   devinés (`windowTitlePatterns` appris lors des tests réels). Reste : Quick
->   Game Panel (fenêtre native), puis tests réels NTE Steam (protocole
->   `docs/nte-keyboard-remap-test.md`).
+>   devinés (`windowTitlePatterns` appris lors des tests réels).
+> - Phase 6 🔄 Quick Game Panel (1.20.0) : fenêtre native Tauri `quick-panel`
+>   (jamais une injection) — visuel + clavier, raccourci Ctrl+Alt+Z configurable,
+>   fermée à la perte de focus, créée à la demande par `quick_panel.rs`.
+>   Reste : détection du plein écran exclusif, puis tests réels NTE Steam
+>   (protocole `docs/nte-keyboard-remap-test.md`).
 >
 > **Progression** :
 > - Phase 1 · Clavier par jeu — fondation implémentée (données, presets, éditeur,

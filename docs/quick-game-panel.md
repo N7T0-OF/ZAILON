@@ -2,9 +2,9 @@
 
 ## Statut
 
-**Conception validée, implémentation non commencée** (nécessite une deuxième
-fenêtre Tauri + raccourci global — travail natif à valider via la PR #1 puis
-sur machine réelle).
+**Implémenté (1.20.0), validé en compilation par la PR #1** (Windows + Linux).
+Comportement réel à confirmer sur machine avec jeu : ouverture de la fenêtre,
+position, fermeture à la perte de focus, plein écran exclusif.
 
 ## Objectif
 
@@ -14,10 +14,29 @@ dans le jeu : c'est une fenêtre native indépendante (API Windows standard).
 
 ## Activation
 
-- Configuration > Jeu > Interface en jeu : « Afficher le panneau rapide »,
+- Réglages > Panneau rapide en jeu : « Afficher le panneau rapide ZAILON »,
   défaut **désactivé** ;
 - raccourci configurable, défaut **Ctrl + Alt + Z** (pas Alt+Z : conflit
   possible avec NVIDIA).
+
+## Implémentation
+
+- `src-tauri/src/quick_panel.rs` : fenêtre Tauri `quick-panel` créée au moment
+  de l'ouverture (jamais au démarrage) — 340×460, sans barre de titre,
+  transparente, toujours au-dessus, hors barre des tâches, positionnée en bas
+  à droite de l'écran du jeu. **Fermeture automatique à la perte de focus**
+  (gardée par « a déjà reçu le focus » pour éviter une fermeture immédiate à
+  l'ouverture).
+- `src/main.tsx` : la fenêtre `quick-panel` rend uniquement
+  `components/QuickPanel.tsx` (visuel : activer/désactiver, profils préc./suiv.,
+  restaurer ; clavier : disposition ZAILON on/off ; ouvrir ZAILON ; fermer).
+- Communication : le panneau pilote le visuel par les commandes natives
+  existantes (`visual_shortcut_action`) et envoie `quick-panel-action`
+  (`toggle-keyboard` / `focus-main`) à la fenêtre principale, qui bascule
+  `setSessionInputActive` ou se ramène au premier plan.
+- Raccourci global enregistré seulement quand l'option est activée, ré-ajouté
+  après chaque transition de jeu (l'effet des raccourcis visuels repasse par
+  `unregisterAll`).
 
 ## Contenu (compact)
 
@@ -55,9 +74,10 @@ sombre, X discret. **Ne pas réintroduire Liquid Glass.**
 ## Plein écran
 
 - fenêtré / borderless : fenêtre externe affichable au-dessus ;
-- plein écran exclusif : Windows peut empêcher la présentation — détecter le
-  mode et afficher « Panneau non disponible en plein écran exclusif
-  [Utiliser Borderless] [Fermer] ». **Pas d'overlay injecté** pour contourner.
+- plein écran exclusif : Windows peut empêcher la présentation — la détection
+  du mode et le message « Panneau non disponible en plein écran exclusif »
+  restent à implémenter (étape à valider sur machine réelle). **Pas d'overlay
+  injecté** pour contourner.
 
 ## Écrans multiples
 

@@ -470,6 +470,16 @@
 
 ### Added
 
+- **Quick Game Panel** (fenêtre native ZAILON, jamais une injection) :
+  `quick_panel.rs` crée à la demande une fenêtre `quick-panel` compacte
+  (visuel : activer/désactiver, profils préc./suiv., restaurer ; clavier :
+  disposition ZAILON on/off ; ouvrir ZAILON ; fermer), toujours au-dessus,
+  sans barre de titre, fermée automatiquement à la perte de focus. Raccourci
+  Ctrl+Alt+Z configurable (Réglages > Panneau rapide en jeu, désactivé par
+  défaut) ; actions relayées à la fenêtre principale par événements
+  (`toggle-keyboard` / `focus-main`). Plein écran exclusif : non pris en
+  charge (message à implémenter) — jamais d'overlay injecté.
+
 ### Changed
 
 ### Fixed

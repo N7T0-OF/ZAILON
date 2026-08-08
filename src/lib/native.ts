@@ -764,6 +764,14 @@ export const native = {
    * présence indépendante de l'arbre des processus (survit aux launchers,
    * UAC et relances). */
   scanGameWindows: (requests: GameWindowRequest[]) => desktopOnly<GameWindowMatch[]>('scan_game_windows', { requests }),
+  /** Quick Game Panel : fenêtre native ZAILON pendant le jeu (jamais une
+   * injection). Ouverte au raccourci, fermée à la perte de focus. */
+  quickPanel: {
+    open: () => desktopOnly<void>('open_quick_panel', {}),
+    close: () => desktopOnly<void>('close_quick_panel', {}),
+    toggle: () => desktopOnly<boolean>('toggle_quick_panel', {}),
+  },
+
   launchGame: (execPath: string, gameId: string, gameName: string, gameRoot: string, profileId: string, profileName: string, activeMods: number, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, discord: DiscordPresenceConfig | undefined, onProgress: (event: DeploymentProgressEvent) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Le lancement est uniquement disponible dans l’application ZAILON.'))
     const channel = new Channel<DeploymentProgressEvent>()

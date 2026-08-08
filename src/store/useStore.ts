@@ -304,6 +304,8 @@ export interface Store {
   downloadRetention: DownloadRetention
   remapSuspendShortcut: string
   remapKillSwitchShortcut: string
+  quickPanelEnabled: boolean
+  quickPanelShortcut: string
   reduceExplanations: boolean
   advancedMode: boolean
   showSupportButton: boolean
@@ -415,6 +417,9 @@ export interface Store {
   setDownloadRetention: (retention: DownloadRetention) => void
   setRemapSuspendShortcut: (shortcut: string) => void
   setRemapKillSwitchShortcut: (shortcut: string) => void
+  setQuickPanelEnabled: (enabled: boolean) => void
+  setQuickPanelShortcut: (shortcut: string) => void
+  setSessionInputActive: (gameId: string, active: boolean) => void
   setReduceExplanations: (enabled: boolean) => void
   setAdvancedMode: (enabled: boolean) => void
   cleanupBackgroundTasks: () => void
@@ -567,6 +572,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
   downloadRetention: 'startup',
   remapSuspendShortcut: 'Ctrl+Alt+K',
   remapKillSwitchShortcut: 'Ctrl+Alt+Backspace',
+  quickPanelEnabled: false,
+  quickPanelShortcut: 'Ctrl+Alt+Z',
   reduceExplanations: false,
   advancedMode: false,
   showSupportButton: true,
@@ -1658,6 +1665,19 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setDownloadRetention: downloadRetention => set({ downloadRetention }),
   setRemapSuspendShortcut: remapSuspendShortcut => set({ remapSuspendShortcut }),
   setRemapKillSwitchShortcut: remapKillSwitchShortcut => set({ remapKillSwitchShortcut }),
+  setQuickPanelEnabled: quickPanelEnabled => set({ quickPanelEnabled }),
+  setQuickPanelShortcut: quickPanelShortcut => set({ quickPanelShortcut }),
+  setSessionInputActive: (gameId, active) => {
+    const session = get().gameSessions.find(item => item.gameId === gameId && item.state !== 'Ended' && item.state !== 'Failed')
+    if (!session) return
+    set(current => ({
+      gameSessions: current.gameSessions.map(item => item.id === session.id ? {
+        ...item,
+        inputProfileActive: active,
+        timeline: [...item.timeline, { at: Date.now(), stage: active ? 'InputProfileEnabled' : 'InputProfileDisabled', detail: 'Panneau rapide' }],
+      } : item),
+    }))
+  },
   setReduceExplanations: reduceExplanations => set({ reduceExplanations }),
   setAdvancedMode: advancedMode => set({ advancedMode }),
   cleanupBackgroundTasks: () => set(state => {

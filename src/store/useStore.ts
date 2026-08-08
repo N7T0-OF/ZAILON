@@ -1,11 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, Game, GameInputProfile, GameKeyboardLayout, GamePreset, GameResources, GameRuntimePath, GameTab, GamebananaGame, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
+import { BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, Game, GameInputProfile, GameKeyboardLayout, GamePreset, GameResources, GameRuntimePath, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
 import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
 
-const APP_VERSION = '1.13.0'
+const APP_VERSION = '1.14.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 const asError = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -326,6 +326,8 @@ export interface Store {
   removeGameRuntimePath: (gameId: string, index: number) => void
   saveGamePreset: (gameId: string, preset: GamePreset) => void
   deleteGamePreset: (gameId: string, presetId: string) => void
+  recordGameTestRun: (gameId: string, run: GameTestRun) => void
+  clearGameTestRuns: (gameId: string) => void
   applyGamePreset: (gameId: string, presetId: string) => Promise<void>
   setGameResources: (gameId: string, resources: Partial<GameResources>) => void
   setGameFavorite: (gameId: string, favorite?: boolean) => void
@@ -689,6 +691,12 @@ export const useStore = create<Store>()(persist((set, get) => ({
   })),
   deleteGamePreset: (gameId, presetId) => set(state => ({
     games: state.games.map(game => game.id === gameId ? { ...game, presets: (game.presets || []).filter(item => item.id !== presetId) } : game),
+  })),
+  recordGameTestRun: (gameId, run) => set(state => ({
+    games: state.games.map(game => game.id === gameId ? { ...game, testRuns: [run, ...(game.testRuns || [])].slice(0, 10) } : game),
+  })),
+  clearGameTestRuns: (gameId) => set(state => ({
+    games: state.games.map(game => game.id === gameId ? { ...game, testRuns: undefined } : game),
   })),
   applyGamePreset: async (gameId, presetId) => {
     const state = get()

@@ -297,6 +297,25 @@ export interface Game {
   keyboardLayout?: GameKeyboardLayout
   /** Profils d'entrée par jeu / profil de mods. */
   keyboardProfiles?: GameInputProfile[]
+  /** Derniers tests de déploiement (environnement de test par jeu). */
+  testRuns?: GameTestRun[]
+}
+
+export interface GameTestRun {
+  id: string
+  at: number
+  profileId: string
+  profileName: string
+  deployable: boolean
+  brokenReferences: number
+  conflicts: number
+  referencedPackages: number
+  virtualFileCount: number
+  frameworkOk: number
+  frameworkTotal: number
+  integrityOk: boolean
+  integrityIssues: string[]
+  diagnostics: string[]
 }
 
 export interface ExplodMod {

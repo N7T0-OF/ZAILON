@@ -1,8 +1,9 @@
-import { Activity, AlertTriangle, CheckCircle2, ClipboardList, FileClock, Gauge, Keyboard, Layers3, Loader2, RefreshCw, Rocket, Search, ShieldAlert, Wrench } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, ClipboardList, FileClock, FolderCheck, Gauge, Keyboard, Layers3, Loader2, RefreshCw, Rocket, Search, ShieldAlert, Wrench } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
 import { native, type ProfileDeploymentAudit } from '../../lib/native'
-import type { Game, Mod, Profile } from '../../types'
+import { useStore } from '../../store/useStore'
+import type { Game, GameTestRun, Mod, Profile } from '../../types'
 import { formatTime, timeAgo } from '../../utils'
 
 export interface GameHealth {
@@ -64,7 +65,7 @@ function deploymentArguments(game: Game, profile: Profile, profileMods: Mod[]) {
   }
 }
 
-export type SubSection = 'resume' | 'files' | 'mods' | 'frameworks' | 'conflicts' | 'deployment' | 'inputs' | 'performance' | 'logs'
+export type SubSection = 'resume' | 'files' | 'mods' | 'frameworks' | 'conflicts' | 'deployment' | 'inputs' | 'performance' | 'logs' | 'test'
 
 export interface ResolvedConflict {
   path: string
@@ -82,6 +83,7 @@ const SUBSECTIONS: Array<{ id: SubSection; label: string }> = [
   { id: 'inputs', label: 'Entrées' },
   { id: 'performance', label: 'Performances' },
   { id: 'logs', label: 'Logs' },
+  { id: 'test', label: 'Test' },
 ]
 
 interface Props {
@@ -99,6 +101,10 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
   const [section, setSection] = useState<SubSection>(initialSection || 'resume')
   const [audit, setAudit] = useState<ProfileDeploymentAudit | undefined>()
   const [busy, setBusy] = useState(false)
+  const [testRun, setTestRun] = useState<GameTestRun | undefined>()
+  const [testing, setTesting] = useState(false)
+  const recordGameTestRun = useStore(state => state.recordGameTestRun)
+  const clearGameTestRuns = useStore(state => state.clearGameTestRuns)
   const health = computeGameHealth(game, profile, profileMods)
 
   const runAudit = async () => {
@@ -111,6 +117,44 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
       window.alert(`Audit du déploiement impossible : ${String(error)}`)
     } finally {
       setBusy(false)
+    }
+  }
+
+  const clearTestHistory = () => {
+    clearGameTestRuns(game.id)
+    setTestRun(undefined)
+  }
+
+  const runTest = async () => {
+    setTesting(true)
+    try {
+      const input = deploymentArguments(game, profile, profileMods)
+      const [auditResult, integrity] = await Promise.all([
+        native.auditProfileDeployment(game.id, profile.id, input.enabledModIds, input.conflictRules, input.gameRoot),
+        native.isDesktop() ? native.profileIntegrity(game.id, profile.id) : undefined,
+      ])
+      const run: GameTestRun = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        at: Date.now(),
+        profileId: profile.id,
+        profileName: profile.name,
+        deployable: auditResult.deployable,
+        brokenReferences: auditResult.brokenReferences,
+        conflicts: auditResult.conflicts,
+        referencedPackages: auditResult.referencedPackages,
+        virtualFileCount: auditResult.virtualFileCount,
+        frameworkOk: auditResult.providers.filter(provider => provider.enabled && provider.runtimeVisible).length,
+        frameworkTotal: auditResult.providers.length,
+        integrityOk: integrity?.ok ?? true,
+        integrityIssues: integrity?.issues ?? [],
+        diagnostics: auditResult.diagnostics,
+      }
+      setTestRun(run)
+      recordGameTestRun(game.id, run)
+    } catch (error) {
+      window.alert(`Test du déploiement impossible : ${String(error)}`)
+    } finally {
+      setTesting(false)
     }
   }
 
@@ -233,7 +277,57 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
           <p className="mt-1 text-[11px] leading-relaxed text-white/34">La timeline par jeu (lancements, snapshots, installations) fait partie de la fusion « Activité » prévue en Phase 2.</p>
         </div>
       </div>}
+
+      {section === 'test' && <TestEnvironmentPanel game={game} profile={profile} profileMods={profileMods} latestRun={testRun} running={testing} onRun={runTest} onClearHistory={clearTestHistory} onOpenConfiguration={onOpenConfiguration} />}
     </div>
+  </div>
+}
+
+function TestEnvironmentPanel({ game, profile, profileMods, latestRun, running, onRun, onClearHistory, onOpenConfiguration }: { game: Game; profile: Profile; profileMods: Mod[]; latestRun?: GameTestRun; running: boolean; onRun: () => Promise<void>; onClearHistory: () => void; onOpenConfiguration: () => void }) {
+  const run = latestRun || game.testRuns?.[0]
+  const prerequisites = [
+    { label: 'Dossier du jeu', value: game.installDirectory, ok: Boolean(game.installDirectory) },
+    { label: 'Exécutable', value: game.execPath, ok: Boolean(game.execPath) },
+    { label: 'Dossier Mods', value: game.modsPath, ok: Boolean(game.modsPath) },
+    { label: 'Dossier Bypass / Loader', value: game.bypassPath, ok: Boolean(game.bypassPath) },
+    { label: 'Chemins runtime additionnels', value: (game.runtimePaths || []).length ? `${(game.runtimePaths || []).length} chemin(s) configuré(s)` : undefined, ok: (game.runtimePaths || []).length > 0 },
+  ]
+  const frameworkTotal = game.testRuns?.[0]?.frameworkTotal ?? run?.frameworkTotal ?? 0
+  return <div className="space-y-3">
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+      <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-gold/20 bg-gold/[0.06] text-gold"><FolderCheck size={15} /></div>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-semibold text-white/78">Environnement de test — {game.name}</p>
+        <p className="mt-0.5 max-w-2xl text-[11px] leading-relaxed text-white/38">Vérifie le déploiement sans lancer le jeu : audit en lecture seule (aucun fichier modifié, rien à restaurer) + intégrité de l’état sur disque. Le résultat est enregistré dans l’historique du jeu.</p>
+      </div>
+      <button type="button" onClick={() => void onRun()} disabled={running} className="flex items-center gap-1.5 rounded-lg border border-gold/25 px-3 py-2 text-[11px] font-semibold text-gold hover:bg-gold/10 disabled:opacity-40">{running ? <Loader2 size={13} className="animate-spin" /> : <Gauge size={13} />}{running ? 'Test en cours…' : 'Tester le déploiement'}</button>
+    </div>
+
+    <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+      <p className="text-[11px] font-semibold text-white/68">Prérequis configurés</p>
+      <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">{prerequisites.map(item => <li key={item.label} className="flex items-start gap-2 text-[11px]"><span className={`mt-0.5 ${item.ok ? 'text-emerald-300/80' : 'text-red-300/70'}`}>{item.ok ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}</span><span className="min-w-0"><span className="block text-white/55">{item.label}</span><span className="block truncate text-[10px] text-white/30">{item.value || 'Non configuré'}</span></span></li>)}</ul>
+      <button type="button" onClick={onOpenConfiguration} className="mt-3 text-[11px] font-semibold text-gold/80 hover:text-gold">Compléter la configuration →</button>
+    </div>
+
+    {run && <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${run.deployable ? 'border-emerald-300/20 bg-emerald-300/[0.05] text-emerald-200' : 'border-red-300/20 bg-red-300/[0.05] text-red-200'}`}>{run.deployable ? 'Déployable' : 'Non déployable'}</span>
+        <span className={`rounded-full border px-2.5 py-1 text-[11px] ${run.integrityOk ? 'border-white/[0.08] text-white/45' : 'border-amber-300/20 bg-amber-300/[0.05] text-amber-100'}`}>Intégrité {run.integrityOk ? 'OK' : 'à vérifier'}</span>
+        <span className="ml-auto text-[11px] text-white/30">Profil {run.profileName} · {formatTime(run.at)}</span>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Paquets référencés" value={String(run.referencedPackages)} /><Metric label="Fichiers gagnants" value={String(run.virtualFileCount)} /><Metric label="Conflits résolus" value={String(run.conflicts)} /><Metric label="Références cassées" value={String(run.brokenReferences)} tone={run.brokenReferences > 0 ? 'red' : undefined} /></div>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2"><Metric label="Frameworks" value={`${run.frameworkOk} / ${run.frameworkTotal}`} /><Metric label="Diagnostics" value={String(run.diagnostics.length)} /></div>
+      {run.integrityIssues.length > 0 && <ul className="mt-3 space-y-1 rounded-lg border border-amber-300/12 bg-amber-300/[0.03] p-3 text-[11px] text-amber-100/70">{run.integrityIssues.map((issue, index) => <li key={`${index}:${issue}`}>• {issue}</li>)}</ul>}
+      {run.diagnostics.length > 0 && <ul className="mt-2 space-y-1 text-[11px] text-white/42">{run.diagnostics.map((item, index) => <li key={`${index}:${item}`}>• {item}</li>)}</ul>}
+    </div>}
+
+    {!run && <div className="rounded-xl border border-dashed border-white/[0.09] p-4 text-center text-[11px] text-white/34">Aucun test enregistré pour ce jeu. Lancez un premier test : l’audit ne modifie aucun fichier.</div>}
+
+    {(game.testRuns?.length || 0) > 1 && <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+      <div className="flex items-center justify-between gap-2"><p className="text-[11px] font-semibold text-white/68">Historique des tests (10 derniers)</p><button type="button" onClick={onClearHistory} className="text-[11px] font-semibold text-red-200/60 hover:text-red-200">Effacer l’historique</button></div>
+      <ul className="mt-2 divide-y divide-white/[0.05]">{(game.testRuns || []).slice(1, 10).map(item => <li key={item.id} className="flex flex-wrap items-center gap-2 py-2 text-[11px]"><span className={`h-1.5 w-1.5 rounded-full ${item.deployable ? 'bg-emerald-300/80' : 'bg-red-300/80'}`} /><span className="text-white/55">{item.deployable ? 'Déployable' : 'Non déployable'}</span><span className="text-white/28">Profil {item.profileName}</span><span className="text-white/28">{item.brokenReferences} cassée(s) · {item.conflicts} conflit(s)</span><span className="ml-auto text-white/26">{formatTime(item.at)}</span></li>)}</ul>
+      {frameworkTotal > 0 && <p className="mt-2 text-[10px] text-white/26">L’environnement de test n’utilise ni injection ni modification de fichiers : il est sûr même avec Anti-Cheat (ex. NTE / ACE).</p>}
+    </div>}
   </div>
 }
 

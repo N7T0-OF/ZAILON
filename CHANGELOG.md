@@ -769,11 +769,35 @@
 
 ### Technical
 
-## [Unreleased]
+## [1.26.0] - 2026-08-08
 
 ### Added
 
 - Notification « jeu en cours » (haut à droite, 2,5 s) quand le PROCESSUS FINAL est détecté — jamais au lancement d'un launcher intermédiaire. Trois états : « En cours via ZAILON » (lancé par ZAILON), « Jeu détecté par ZAILON » (récupéré hors ZAILON), « Session récupérée » (jeu déjà lancé quand ZAILON redémarre, fenêtre de 20 s).
+
+### Changed
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
+## [Unreleased]
+
+### Added
 
 ### Changed
 

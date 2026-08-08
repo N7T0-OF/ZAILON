@@ -822,11 +822,35 @@
 
 ### Technical
 
-## [Unreleased]
+## [1.28.0] - 2026-08-08
 
 ### Added
 
 - Rich Presence Discord recalculée vers la session prioritaire (multi-sessions §14) : une seule activité publiée à la fois, qui suit l'épinglage, l'Alt+Tab et la fermeture de session — nouvelles commandes natives `set_discord_activity_for` / `clear_discord_activity_for`.
+
+### Changed
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
+## [Unreleased]
+
+### Added
 
 ### Changed
 

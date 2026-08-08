@@ -52,7 +52,10 @@ pub struct GamePresence {
 
 /// Normalise un chemin pour la comparaison (minuscules, séparateurs uniformes).
 fn normalize(path: &str) -> String {
-    path.replace('\\', "/").to_lowercase().trim_end_matches('/').to_string()
+    path.replace('\\', "/")
+        .to_lowercase()
+        .trim_end_matches('/')
+        .to_string()
 }
 
 fn path_under(root: &str, candidate: &str) -> bool {
@@ -75,7 +78,11 @@ pub fn score_process(candidate: &ProcessCandidate, request: &GamePresenceRequest
     }
 
     // +25 : le nom correspond à un exécutable final connu.
-    if request.game_executable_candidates.iter().any(|candidate_name| name == candidate_name.to_lowercase()) {
+    if request
+        .game_executable_candidates
+        .iter()
+        .any(|candidate_name| name == candidate_name.to_lowercase())
+    {
         score += 25;
         matched = Some(candidate.executable_name.clone());
     }
@@ -97,7 +104,10 @@ pub fn score_process(candidate: &ProcessCandidate, request: &GamePresenceRequest
 }
 
 /// Détecte les jeux parmi les candidats. Un score ≥ 80 → détection automatique.
-pub fn detect_games(candidates: &[ProcessCandidate], requests: &[GamePresenceRequest]) -> Vec<GamePresence> {
+pub fn detect_games(
+    candidates: &[ProcessCandidate],
+    requests: &[GamePresenceRequest],
+) -> Vec<GamePresence> {
     let mut results = Vec::new();
     for request in requests {
         let mut best: Option<(u8, &ProcessCandidate, Option<String>)> = None;
@@ -109,7 +119,15 @@ pub fn detect_games(candidates: &[ProcessCandidate], requests: &[GamePresenceReq
                     Some((current_score, _, _)) => score > current_score,
                 };
                 if better {
-                    best = Some((score, candidate, if score >= 25 { Some(candidate.executable_name.clone()) } else { None }));
+                    best = Some((
+                        score,
+                        candidate,
+                        if score >= 25 {
+                            Some(candidate.executable_name.clone())
+                        } else {
+                            None
+                        },
+                    ));
                 }
             }
         }
@@ -134,9 +152,12 @@ pub fn enumerate_processes() -> Vec<ProcessCandidate> {
     use windows_sys::core::PWSTR;
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
     };
-    use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
 
     let mut candidates = Vec::new();
     // SAFETY : appel Win32 standard ; le snapshot est fermé quoi qu'il arrive.
@@ -150,7 +171,9 @@ pub fn enumerate_processes() -> Vec<ProcessCandidate> {
     let mut has_next = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
     while has_next {
         let pid = entry.th32ProcessID;
-        let exe_name = String::from_utf16_lossy(&entry.szExeFile).trim_end_matches('\0').to_string();
+        let exe_name = String::from_utf16_lossy(&entry.szExeFile)
+            .trim_end_matches('\0')
+            .to_string();
         let mut path = String::new();
         // Chemin complet : accès limité, échoue proprement pour les processus élevés.
         // SAFETY : OpenProcess/QueryFullProcessImageNameW avec un buffer de taille bornée.
@@ -159,14 +182,19 @@ pub fn enumerate_processes() -> Vec<ProcessCandidate> {
             if handle != 0 {
                 let mut size: u32 = 32_768;
                 let mut buffer = vec![0u16; size as usize];
-                let ok = QueryFullProcessImageNameW(handle, 0, PWSTR(buffer.as_mut_ptr()), &mut size);
+                let ok =
+                    QueryFullProcessImageNameW(handle, 0, PWSTR(buffer.as_mut_ptr()), &mut size);
                 if ok != 0 {
                     path = String::from_utf16_lossy(&buffer[..size as usize]);
                 }
                 CloseHandle(handle);
             }
         }
-        candidates.push(ProcessCandidate { pid, executable_name: exe_name, executable_path: path });
+        candidates.push(ProcessCandidate {
+            pid,
+            executable_name: exe_name,
+            executable_path: path,
+        });
         has_next = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
     }
     // SAFETY : fermeture du snapshot.
@@ -197,7 +225,11 @@ mod tests {
     use super::*;
 
     fn candidate(name: &str, path: &str) -> ProcessCandidate {
-        ProcessCandidate { pid: 42, executable_name: name.to_string(), executable_path: path.to_string() }
+        ProcessCandidate {
+            pid: 42,
+            executable_name: name.to_string(),
+            executable_path: path.to_string(),
+        }
     }
 
     fn nte_request(reattach_context: bool) -> GamePresenceRequest {
@@ -205,7 +237,10 @@ mod tests {
             game_id: "nte".to_string(),
             install_root: Some("X:\\Games\\Neverness To Everness\\".to_string()),
             launcher_executable: Some("NTELauncher.exe".to_string()),
-            game_executable_candidates: vec!["HT-Win64-Shipping.exe".to_string(), "NTE-Win64-Shipping.exe".to_string()],
+            game_executable_candidates: vec![
+                "HT-Win64-Shipping.exe".to_string(),
+                "NTE-Win64-Shipping.exe".to_string(),
+            ],
             reattach_context,
         }
     }
@@ -222,12 +257,18 @@ mod tests {
         let results = detect_games(&[process], &[nte_request(true)]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].score, 85);
-        assert_eq!(results[0].matched_executable.as_deref(), Some("HT-Win64-Shipping.exe"));
+        assert_eq!(
+            results[0].matched_executable.as_deref(),
+            Some("HT-Win64-Shipping.exe")
+        );
     }
 
     #[test]
     fn unrelated_process_scores_zero() {
-        let process = candidate("Discord.exe", "C:\\Users\\kai\\AppData\\Local\\Discord\\Discord.exe");
+        let process = candidate(
+            "Discord.exe",
+            "C:\\Users\\kai\\AppData\\Local\\Discord\\Discord.exe",
+        );
         let score = score_process(&process, &nte_request(true));
         assert_eq!(score, 0);
         assert!(detect_games(&[process], &[nte_request(true)]).is_empty());
@@ -235,7 +276,10 @@ mod tests {
 
     #[test]
     fn launcher_alone_is_not_the_game() {
-        let process = candidate("NTELauncher.exe", "X:\\Games\\Neverness To Everness\\NTELauncher.exe");
+        let process = candidate(
+            "NTELauncher.exe",
+            "X:\\Games\\Neverness To Everness\\NTELauncher.exe",
+        );
         let score = score_process(&process, &nte_request(true));
         // 40 (installation) + 15 (launcher) + 20 (contexte) = 75 < 80 : candidat, pas auto.
         assert_eq!(score, 75);
@@ -261,7 +305,10 @@ mod tests {
 
     #[test]
     fn best_candidate_wins_per_game() {
-        let launcher = candidate("NTELauncher.exe", "X:\\Games\\Neverness To Everness\\NTELauncher.exe");
+        let launcher = candidate(
+            "NTELauncher.exe",
+            "X:\\Games\\Neverness To Everness\\NTELauncher.exe",
+        );
         let game = candidate(
             "HT-Win64-Shipping.exe",
             "X:\\Games\\Neverness To Everness\\Client\\WindowsNoEditor\\HT\\Binaries\\Win64\\HT-Win64-Shipping.exe",

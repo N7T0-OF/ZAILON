@@ -191,7 +191,8 @@ pub fn plan_input_backend(game_name: &str, has_mapping: bool) -> InputBackendPla
         );
     }
     if !has_mapping {
-        constraints.push("Aucune traduction active : la disposition s'applique telle quelle.".to_string());
+        constraints
+            .push("Aucune traduction active : la disposition s'applique telle quelle.".to_string());
     }
 
     let chain: Vec<BackendAvailability> = InputBackendId::PRIORITY
@@ -255,7 +256,12 @@ pub fn plan_input_backend(game_name: &str, has_mapping: bool) -> InputBackendPla
         .map(|item| item.backend)
         .unwrap_or(InputBackendId::Unsupported);
 
-    InputBackendPlan { chosen, chain, anti_cheat, constraints }
+    InputBackendPlan {
+        chosen,
+        chain,
+        anti_cheat,
+        constraints,
+    }
 }
 
 /// Sonde de compatibilité NTE (lecture seule).

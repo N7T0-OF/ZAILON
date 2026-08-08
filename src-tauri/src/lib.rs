@@ -3997,7 +3997,9 @@ fn ensure_dir(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn scan_game_presence(requests: Vec<process_scanner::GamePresenceRequest>) -> Vec<process_scanner::GamePresence> {
+fn scan_game_presence(
+    requests: Vec<process_scanner::GamePresenceRequest>,
+) -> Vec<process_scanner::GamePresence> {
     process_scanner::scan_requests(&requests)
 }
 

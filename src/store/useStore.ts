@@ -380,7 +380,7 @@ export interface Store {
   recordUpdateCheck: (version?: string, error?: string) => void
   prepareInstalledUpdate: (update: { version: string; notes?: string; date?: string }) => void
   dismissInstalledUpdate: () => void
-  launchSelectedGame: () => Promise<void>
+  launchSelectedGame: (options?: { withoutMods?: boolean }) => Promise<void>
   stopPlaying: (gameId?: string, profileId?: string, cleanupError?: string) => void
   tick: () => void
   gameSessions: GameSession[]
@@ -1187,7 +1187,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   recordUpdateCheck: (lastUpdateVersion, lastUpdateError) => set({ lastUpdateCheck: Date.now(), lastUpdateVersion, lastUpdateError }),
   prepareInstalledUpdate: update => set({ lastInstalledUpdate: { ...update, installedAt: Date.now() } }),
   dismissInstalledUpdate: () => set({ lastInstalledUpdate: undefined }),
-  launchSelectedGame: async () => {
+  launchSelectedGame: async (options?: { withoutMods?: boolean }) => {
     const state = get()
     if (state.isPlaying || state.isLaunching) { set({ notice: state.isLaunching ? 'La préparation du jeu est déjà en cours.' : 'Un jeu est déjà en cours. Fermez son processus avant un nouveau lancement afin que ZAILON restaure proprement les fichiers temporaires.' }); return }
     const { game, profile } = selected(state)
@@ -1199,7 +1199,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
         const stamp = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
         get().createRestorePoint(`Avant lancement · ${stamp}`, 'auto')
       }
-      const enabledMods = resolveProfileMods(game, profile).filter(mod => mod.enabled)
+      const enabledMods = options?.withoutMods ? [] : resolveProfileMods(game, profile).filter(mod => mod.enabled)
       const executableParent = game.execPath.replace(/[\\/][^\\/]+$/, '')
       const knownRoot = game.name.toLocaleLowerCase().includes('cyberpunk') && /[\\/]bin[\\/]x64(?:[\\/]|$)/i.test(game.execPath)
         ? game.execPath.split(/[\\/]bin[\\/]x64/i)[0]
@@ -1227,7 +1227,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
         playStartTime: Date.now(),
         sessionTime: 0,
         games: current.games.map(item => item.id !== game.id ? item : { ...item, installedMods: item.installedMods.map(mod => enabledMods.some(enabled => enabled.id === mod.id) && mod.storage === 'staged' ? { ...mod, deploymentStatus: 'runtime-visible' } : mod) }),
-        notice: `${game.name} lancé (PID ${result.pid}) après vérification de ${result.deployedFiles} fichier(s) via ${result.deploymentBackend}. ${result.discordMessage}`,
+        notice: `${game.name} lancé${options?.withoutMods ? ' sans mods' : ''} (PID ${result.pid}) après vérification de ${result.deployedFiles} fichier(s) via ${result.deploymentBackend}. ${result.discordMessage}`,
       }))
       get().beginSession(game.id, profile.id)
     } catch (error) {

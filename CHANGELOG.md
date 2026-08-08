@@ -328,6 +328,9 @@
   Attacher au jeu en cours / Continuer à attendre / Terminer la session.
 - Préférence « Attacher automatiquement si détecté » par jeu (Diagnostic >
   Lancement), utilisée par le rattachement natif Phase 6.
+- Menu déroulant à côté de « Jouer » sur l'Accueil : Jouer, « Préparer et
+  attendre le jeu » (lancement manuel puis attachement) et « Lancer sans mods »
+  (profil vide pour diagnostiquer).
 
 ## 1.9.0 — Profils immuables et diagnostic transparent
 

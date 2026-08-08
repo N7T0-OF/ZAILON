@@ -1,4 +1,4 @@
-import { Boxes, Check, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2 } from 'lucide-react'
+import { Boxes, Check, ChevronDown, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Game } from '../../types'
 import { resourceUrl, native } from '../../lib/native'
@@ -28,11 +28,13 @@ export function HomeView() {
   const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
   const continueWaiting = useStore(state => state.continueWaiting)
   const endSession = useStore(state => state.endSession)
+  const prepareAndWait = useStore(state => state.prepareAndWait)
   const setView = useStore(state => state.setView)
   const setActiveGameTab = useStore(state => state.setActiveGameTab)
   const [discoveryOpen, setDiscoveryOpen] = useState(false)
   const [visualName, setVisualName] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ game: Game; position: { x: number; y: number } }>()
+  const [playMenuOpen, setPlayMenuOpen] = useState(false)
   const [resourcesGameId, setResourcesGameId] = useState<string>()
   const launchPercent = launchProgress?.total
     ? Math.min(100, Math.round((launchProgress.current / launchProgress.total) * 100))
@@ -177,10 +179,23 @@ export function HomeView() {
             </div>
           )}
           <div className="mt-5 flex items-center gap-2">
-            <button type="button" disabled={isPlaying || isLaunching} title={isLaunching ? launchProgress?.message || 'Préparation des mods en arrière-plan' : isPlaying ? 'Le déploiement sera restauré automatiquement à la fermeture du jeu.' : 'Préparer les mods et lancer le jeu'} onClick={() => void launchSelectedGame()} className={`flex min-w-36 items-center justify-center gap-2 rounded-full px-5 py-2.5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all ${isPlaying || isLaunching ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
-              {isLaunching ? <Loader2 size={12} className="animate-spin" /> : <Play size={10} fill="currentColor" />}
-              {isLaunching ? `Préparation${launchPercent === undefined ? '…' : ` ${launchPercent}%`}` : isPlaying ? 'En cours' : 'Jouer'}
-            </button>
+            <div className="relative flex items-center">
+              <button type="button" disabled={isPlaying || isLaunching} title={isLaunching ? launchProgress?.message || 'Préparation des mods en arrière-plan' : isPlaying ? 'Le déploiement sera restauré automatiquement à la fermeture du jeu.' : 'Préparer les mods et lancer le jeu'} onClick={() => void launchSelectedGame()} className={`flex items-center gap-2 rounded-full py-2.5 pl-5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all ${isPlaying || isLaunching ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
+                {isLaunching ? <Loader2 size={12} className="animate-spin" /> : <Play size={10} fill="currentColor" />}
+                {isLaunching ? `Préparation${launchPercent === undefined ? '…' : ` ${launchPercent}%`}` : isPlaying ? 'En cours' : 'Jouer'}
+              </button>
+              <button type="button" disabled={isPlaying || isLaunching} onClick={() => setPlayMenuOpen(open => !open)} title="Options de lancement" aria-label="Options de lancement" aria-expanded={playMenuOpen} className={`flex h-full items-center rounded-r-full border-l border-black/15 px-2 transition-colors ${isPlaying || isLaunching ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/60' : 'bg-[#dbe8e5] text-[#0d1111] hover:bg-white'}`}><ChevronDown size={12} className={`transition-transform ${playMenuOpen ? 'rotate-180' : ''}`} /></button>
+              {playMenuOpen && !isPlaying && !isLaunching && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setPlayMenuOpen(false)} />
+                  <div className="absolute left-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-xl border border-white/[0.09] bg-[#141818] shadow-[0_18px_50px_rgba(0,0,0,0.55)]">
+                    <button type="button" onClick={() => { setPlayMenuOpen(false); void launchSelectedGame() }} className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[11px] text-white/70 hover:bg-white/[0.05]"><Play size={11} className="text-gold/80" /><span><span className="block font-semibold text-white/80">Jouer</span><span className="block text-[10px] text-white/30">Prépare les mods puis lance le jeu (ou son launcher).</span></span></button>
+                    <button type="button" onClick={() => { setPlayMenuOpen(false); prepareAndWait(selectedGame.id, selectedProfile.id) }} className="flex w-full items-center gap-2.5 border-t border-white/[0.05] px-3.5 py-2.5 text-left text-[11px] text-white/70 hover:bg-white/[0.05]"><Clock3 size={11} className="text-gold/80" /><span><span className="block font-semibold text-white/80">Préparer et attendre le jeu</span><span className="block text-[10px] text-white/30">Lancez le jeu vous-même (launcher officiel) — ZAILON l'attache ensuite.</span></span></button>
+                    <button type="button" onClick={() => { setPlayMenuOpen(false); void launchSelectedGame({ withoutMods: true }) }} className="flex w-full items-center gap-2.5 border-t border-white/[0.05] px-3.5 py-2.5 text-left text-[11px] text-white/70 hover:bg-white/[0.05]"><Boxes size={11} className="text-gold/80" /><span><span className="block font-semibold text-white/80">Lancer sans mods</span><span className="block text-[10px] text-white/30">Démarre le jeu avec le profil vide — utile pour diagnostiquer.</span></span></button>
+                  </div>
+                </>
+              )}
+            </div>
             <button type="button" onClick={() => setActiveGameTab('mods')} aria-label="Gérer les mods" title="Gérer les mods" className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.12] bg-black/25 text-white/50 backdrop-blur hover:bg-white/[0.08] hover:text-white"><Settings2 size={12} /></button>
           </div>
           {isLaunching && <div className="mt-3 w-full max-w-md" role="status" aria-live="polite">

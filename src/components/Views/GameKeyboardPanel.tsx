@@ -1,6 +1,6 @@
-import { Check, Copy, Download, Keyboard, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { Check, Copy, Download, Keyboard, Play, Plus, RefreshCw, ShieldAlert, Trash2, Upload, X } from 'lucide-react'
 import { useRef, useState } from 'react'
-import { AZERTY_TO_QWERTY, effectiveInputProfile, effectiveLayout, KEY_OPTIONS, LAYOUT_LABELS, presetForLayout, QWERTZ_TO_QWERTY, QWERTY_TO_AZERTY } from '../../lib/keyboardPresets'
+import { AZERTY_TO_QWERTY, effectiveInputProfile, effectiveLayout, KEY_OPTIONS, LAYOUT_LABELS, presetForLayout, PRESET_GROUPS, QWERTZ_TO_QWERTY, QWERTY_TO_AZERTY } from '../../lib/keyboardPresets'
 import { useStore } from '../../store/useStore'
 import type { Game, GameInputProfile, GameKeyboardLayout, GameKeyMapping } from '../../types'
 import { Toggle } from '../UI/Toggle'
@@ -11,13 +11,19 @@ export function GameKeyboardPanel({ game, profile, embedded = false }: { game: G
   const saveGameInputProfile = useStore(state => state.saveGameInputProfile)
   const deleteGameInputProfile = useStore(state => state.deleteGameInputProfile)
   const setGameKeyboardLayout = useStore(state => state.setGameKeyboardLayout)
+  const remapSuspendShortcut = useStore(state => state.remapSuspendShortcut)
+  const setRemapSuspendShortcut = useStore(state => state.setRemapSuspendShortcut)
+  const remapKillSwitchShortcut = useStore(state => state.remapKillSwitchShortcut)
+  const setRemapKillSwitchShortcut = useStore(state => state.setRemapKillSwitchShortcut)
   const [editingId, setEditingId] = useState<string | undefined>(game.keyboardProfiles?.[0]?.id)
   const [linkTarget, setLinkTarget] = useState('')
+  const [testOpen, setTestOpen] = useState(false)
 
   const profiles = game.keyboardProfiles || []
   const editing = profiles.find(item => item.id === editingId) || profiles[0]
   const effective = effectiveInputProfile(game, profile?.id)
   const effectiveLayoutValue = effectiveLayout(game, profile?.id)
+  const isNte = game.name.toLocaleLowerCase().includes('neverness')
 
   const updateProfile = (patch: Partial<GameInputProfile>) => {
     if (!editing) return
@@ -121,7 +127,22 @@ export function GameKeyboardPanel({ game, profile, embedded = false }: { game: G
       <div className="mt-3 rounded-lg border border-gold/12 bg-gold/[0.03] px-3 py-2 text-[11px] text-white/50">
         <span className="text-white/38">Valeur effective : </span><span className="font-semibold text-gold">{LAYOUT_LABELS[effectiveLayoutValue]}</span>
         <span className="text-white/38"> · Source : </span><span className="text-white/60">{effective ? (effective.profileId ? `Profil « ${game.profiles.find(item => item.id === effective.profileId)?.name || 'supprimé'} »` : 'Ce jeu') : 'Défaut (aucune traduction)'}</span>
+        <button type="button" onClick={() => setTestOpen(true)} className="ml-2 inline-flex items-center gap-1.5 rounded-lg border border-gold/25 px-2.5 py-1 font-semibold text-gold hover:bg-gold/10"><Play size={11} />Tester</button>
       </div>
+      <div className="mt-3 grid gap-2 lg:grid-cols-2">
+        <div className="rounded-lg border border-white/[0.06] bg-black/15 px-3 py-2">
+          <p className="text-[11px] font-semibold text-white/58">Méthode d’application</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-white/36">Ordre de préférence : bindings natifs du jeu → layout reconnu par le jeu → remapping temporaire ZAILON limité à la fenêtre du jeu → Steam Input si réellement compatible → aucune. L’interception (Phase 2) ne touche jamais au bureau, à Discord ni à ZAILON, et n’ajoute aucune langue Windows.</p>
+        </div>
+        <div className="rounded-lg border border-white/[0.06] bg-black/15 px-3 py-2">
+          <p className="text-[11px] font-semibold text-white/58">Raccourcis (backends Phase 2)</p>
+          <div className="mt-1.5 grid gap-2 sm:grid-cols-2">
+            <label className="text-[11px] text-white/40">Suspendre le remapping<input value={remapSuspendShortcut} onChange={event => setRemapSuspendShortcut(event.target.value)} placeholder="Ctrl+Alt+K" className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#101313] px-2 py-1.5 font-mono text-[11px] text-white/70 outline-none focus:border-gold/30" /></label>
+            <label className="text-[11px] text-white/40">Tout désactiver (kill switch)<input value={remapKillSwitchShortcut} onChange={event => setRemapKillSwitchShortcut(event.target.value)} placeholder="Ctrl+Alt+Backspace" className="mt-1 w-full rounded-md border border-white/[0.08] bg-[#101313] px-2 py-1.5 font-mono text-[11px] text-white/70 outline-none focus:border-gold/30" /></label>
+          </div>
+        </div>
+      </div>
+      {isNte && <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-300/15 bg-amber-300/[0.04] px-3 py-2 text-[11px] leading-relaxed text-amber-100/65"><ShieldAlert size={13} className="mt-0.5 shrink-0" /><span>Neverness to Everness utilise <strong>Anti-Cheat Expert</strong> : aucun hook, injection ou driver. La disposition ne peut passer que par un remapping externe limité à la fenêtre du jeu — à valider sur la vraie version Steam, un simple changement de layout logique ne suffit pas pour ce jeu.</span></div>}
     </section>
 
     <section className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-4">
@@ -176,11 +197,14 @@ export function GameKeyboardPanel({ game, profile, embedded = false }: { game: G
           <h2 className="text-xs font-semibold text-white/80">Éditeur de touches — {editing.name}</h2>
           <p className="mt-0.5 text-[11px] text-white/38">Touche physique pressée → touche envoyée au jeu. L’application au lancement sera fournie par les backends Phase 2 (bindings du jeu, puis traduction runtime).</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => applyPreset(AZERTY_TO_QWERTY, 'azerty')} className="rounded-lg border border-white/[0.09] px-2.5 py-1.5 text-[11px] text-white/58 hover:border-gold/25 hover:text-gold">Preset AZERTY → QWERTY</button>
-          <button type="button" onClick={() => applyPreset(QWERTY_TO_AZERTY, 'custom')} className="rounded-lg border border-white/[0.09] px-2.5 py-1.5 text-[11px] text-white/58 hover:border-gold/25 hover:text-gold">Preset QWERTY → AZERTY</button>
-          <button type="button" onClick={() => applyPreset(QWERTZ_TO_QWERTY, 'qwertz')} className="rounded-lg border border-white/[0.09] px-2.5 py-1.5 text-[11px] text-white/58 hover:border-gold/25 hover:text-gold">Preset QWERTZ → QWERTY</button>
-          <button type="button" onClick={() => applyPreset([], 'custom')} className="flex items-center gap-1 rounded-lg border border-white/[0.09] px-2.5 py-1.5 text-[11px] text-white/58 hover:border-gold/25 hover:text-gold"><RefreshCw size={11} />Natif (aucune traduction)</button>
+        <div className="flex flex-wrap items-center gap-2">
+          {PRESET_GROUPS.map(group => (
+            <div key={group.label} className="flex flex-wrap items-center gap-1.5 rounded-lg border border-white/[0.07] bg-black/15 px-2 py-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-white/30">{group.label}</span>
+              {group.presets.map(preset => <button key={preset.label} type="button" onClick={() => applyPreset(preset.mapping, preset.layout)} title={`${preset.label} — ${preset.mapping.length} traduction(s)`} className="rounded-md px-2 py-1 text-[11px] text-white/58 hover:bg-white/[0.06] hover:text-gold">{preset.label}</button>)}
+            </div>
+          ))}
+          <button type="button" onClick={() => applyPreset([], 'custom')} className="flex items-center gap-1 rounded-lg border border-white/[0.09] px-2.5 py-1.5 text-[11px] text-white/58 hover:border-gold/25 hover:text-gold"><RefreshCw size={11} />Natif</button>
           <button type="button" onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1 rounded-lg border border-white/[0.09] px-2.5 py-1.5 text-[11px] text-white/58 hover:border-gold/25 hover:text-gold"><Upload size={11} />Importer</button>
           <button type="button" onClick={() => exportProfile(editing)} className="flex items-center gap-1 rounded-lg border border-white/[0.09] px-2.5 py-1.5 text-[11px] text-white/58 hover:border-gold/25 hover:text-gold"><Download size={11} />Exporter</button>
           <input ref={fileInputRef} type="file" accept=".json,application/json" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) importFile(file); event.target.value = '' }} />
@@ -207,5 +231,34 @@ export function GameKeyboardPanel({ game, profile, embedded = false }: { game: G
         ))}</div>}
       <button type="button" onClick={() => updateProfile({ mapping: [...editing.mapping, { physical: 'Z', gameKey: 'W' }] })} className="mt-3 flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/55 hover:border-gold/25 hover:text-gold"><Plus size={12} />Ajouter une traduction</button>
     </section>}
+    {testOpen && <RemapTestDialog game={game} profileName={profile?.name} layout={effectiveLayoutValue} mapping={effective?.mapping || presetForLayout(effectiveLayoutValue)} onClose={() => setTestOpen(false)} />}
+  </div>
+}
+
+function RemapTestDialog({ game, profileName, layout, mapping, onClose }: { game: Game; profileName?: string; layout: GameKeyboardLayout; mapping: GameKeyMapping[]; onClose: () => void }) {
+  const [pressed, setPressed] = useState<string>()
+  const translate = (key: string) => mapping.find(entry => entry.physical === key)?.gameKey
+  return <div className="fixed inset-0 z-[270] flex items-center justify-center bg-black/75 p-5 backdrop-blur-sm" onMouseDown={onClose}>
+    <section tabIndex={0} className="w-full max-w-md rounded-2xl border border-white/[0.1] bg-[#111414] p-4 shadow-2xl outline-none" onMouseDown={event => event.stopPropagation()} onKeyDown={event => { const key = event.key.toUpperCase(); if (/^[A-Z0-9;,.:/]$/.test(key)) setPressed(key) }}>
+      <header className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-white/82">Tester le remapping</h2>
+          <p className="mt-1 text-[11px] text-white/38">{game.name}{profileName ? ` · ${profileName}` : ''} · {LAYOUT_LABELS[layout]}</p>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Fermer" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06]"><X size={14} /></button>
+      </header>
+      <p className="mt-3 text-[11px] leading-relaxed text-white/42">Appuyez sur une touche de cette fenêtre : ZAILON affiche la traduction prévue. Aperçu uniquement — l’interception réelle (Phase 2) restera limitée à la fenêtre du jeu et ne sera jamais active sur le bureau.</p>
+      <div className="mt-3 rounded-xl border border-gold/20 bg-gold/[0.04] p-3 text-center">
+        {pressed
+          ? <p className="text-xs text-white/60">Touche physique <strong className="font-mono text-lg text-gold">{pressed}</strong> → envoyée au jeu <strong className="font-mono text-lg text-white">{translate(pressed) || pressed}</strong></p>
+          : <p className="text-[11px] text-white/38">Appuyez sur une touche (A–Z, 0–9, ; , . / :)</p>}
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-1.5">
+        {mapping.length
+          ? mapping.map((entry, index) => <div key={`${entry.physical}-${index}`} className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-black/15 px-3 py-2 font-mono text-[11px] text-white/55"><span className="text-gold">{entry.physical}</span><span>→</span><span className="text-white/80">{entry.gameKey}</span></div>)
+          : <p className="col-span-2 text-[11px] text-white/34">Aucune traduction active pour cette disposition.</p>}
+      </div>
+      <footer className="mt-4 flex justify-end"><button type="button" onClick={onClose} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[#101313]">Fermer</button></footer>
+    </section>
   </div>
 }

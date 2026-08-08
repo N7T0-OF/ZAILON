@@ -1,7 +1,8 @@
-import { Boxes, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2 } from 'lucide-react'
-import { useState } from 'react'
+import { Boxes, Check, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { Game } from '../../types'
-import { resourceUrl } from '../../lib/native'
+import { resourceUrl, native } from '../../lib/native'
+import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
 import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
 import { formatSeconds, formatTime, timeAgo } from '../../utils'
 import { GameContextMenu } from '../GameContextMenu'
@@ -24,6 +25,7 @@ export function HomeView() {
   const setView = useStore(state => state.setView)
   const setActiveGameTab = useStore(state => state.setActiveGameTab)
   const [discoveryOpen, setDiscoveryOpen] = useState(false)
+  const [visualName, setVisualName] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ game: Game; position: { x: number; y: number } }>()
   const [resourcesGameId, setResourcesGameId] = useState<string>()
   const launchPercent = launchProgress?.total
@@ -31,6 +33,20 @@ export function HomeView() {
     : undefined
 
   const resourcesGame = games.find(game => game.id === resourcesGameId)
+  useEffect(() => {
+    if (!selectedGame || !selectedProfile || !native.isDesktop()) return
+    let cancelled = false
+    Promise.all([native.visualProfiles.association(selectedGame.id, selectedProfile.id), native.visualProfiles.list()])
+      .then(([associationId, profiles]) => {
+        if (cancelled) return
+        const matched = associationId
+          ? profiles.find(item => item.id === associationId)
+          : profiles.find(item => item.gameAssociations.some(assoc => assoc.gameId === selectedGame.id && (!assoc.profileId || assoc.profileId === selectedProfile.id)))
+        setVisualName(matched?.name || null)
+      })
+      .catch(() => { if (!cancelled) setVisualName(null) })
+    return () => { cancelled = true }
+  }, [selectedGame, selectedProfile])
   if (!selectedGame || !selectedProfile) {
     return <>
       <div className="relative flex h-full min-h-[480px] items-center justify-center overflow-hidden bg-[#0c0e0e] p-7 text-center">
@@ -79,11 +95,11 @@ export function HomeView() {
       onContextMenu={event => { event.preventDefault(); openMenu({ x: event.clientX, y: event.clientY }) }}
     >
       {video
-        ? <video src={video} autoPlay muted loop playsInline className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-70" />
+        ? <video src={video} autoPlay muted loop playsInline className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-80" />
         : background
-          ? <img src={background} alt="" className="pointer-events-none absolute inset-0 h-full w-full opacity-72" style={{ objectFit: heroTransform.fit ?? 'cover', objectPosition: `${heroTransform.x ?? 50}% ${heroTransform.y ?? 50}%`, transform: `scale(${(heroTransform.zoom ?? 100) / 100})` }} />
+          ? <img src={background} alt="" className="pointer-events-none absolute inset-0 h-full w-full opacity-85" style={{ objectFit: heroTransform.fit ?? 'cover', objectPosition: `${heroTransform.x ?? 50}% ${heroTransform.y ?? 50}%`, transform: `scale(${(heroTransform.zoom ?? 100) / 100})` }} />
           : <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_72%_30%,rgba(128,58,111,0.42),transparent_37%),radial-gradient(ellipse_at_68%_54%,rgba(42,78,77,0.18),transparent_40%),linear-gradient(130deg,#141718,#090b0b)]" />}
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(7,9,9,0.98)_0%,rgba(7,9,9,0.88)_30%,rgba(7,9,9,0.34)_64%,rgba(7,9,9,0.52)_100%),linear-gradient(0deg,#090b0b_0%,rgba(9,11,11,0.88)_17%,rgba(9,11,11,0.28)_51%,rgba(7,9,9,0.38)_100%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(7,9,9,0.82)_0%,rgba(7,9,9,0.55)_42%,rgba(7,9,9,0.18)_68%,rgba(7,9,9,0.30)_100%),linear-gradient(0deg,rgba(9,11,11,0.78)_0%,rgba(9,11,11,0.45)_22%,rgba(9,11,11,0.12)_55%,rgba(9,11,11,0.18)_100%)]" />
 
       <div className="relative flex h-full min-h-[520px] flex-col px-[clamp(1.25rem,4vw,4.5rem)] pb-4 pt-5">
         <header className="flex items-start justify-between gap-4">
@@ -112,6 +128,11 @@ export function HomeView() {
             ? <img src={logo} alt={selectedGame.name} className="mt-4 max-h-28 max-w-[min(430px,72vw)] object-contain object-left" />
             : <h1 className="mt-3 max-w-3xl font-display text-[clamp(3.2rem,6.7vw,7rem)] font-black uppercase leading-[0.78] tracking-[-0.025em] text-white">{selectedGame.shortName || selectedGame.name}</h1>}
           <p className="mt-5 text-[11px] text-white/38">Profil <span className="font-semibold text-white/70">{selectedProfile.name}</span><span className="mx-2 text-white/18">•</span>{activeMods} mod{activeMods !== 1 ? 's' : ''} actif{activeMods !== 1 ? 's' : ''}</p>
+          {(activeMods > 0 || effectiveInputProfile(selectedGame, selectedProfile.id) || visualName) && <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            {activeMods > 0 && <HomeBadge label={`${activeMods} mods`} />}
+            {effectiveInputProfile(selectedGame, selectedProfile.id) && <HomeBadge label={LAYOUT_LABELS[effectiveLayout(selectedGame, selectedProfile.id)]} />}
+            {visualName && <HomeBadge label={`Visuel · ${visualName}`} />}
+          </div>}
           <div className="mt-5 flex items-center gap-2">
             <button type="button" disabled={isPlaying || isLaunching} title={isLaunching ? launchProgress?.message || 'Préparation des mods en arrière-plan' : isPlaying ? 'Le déploiement sera restauré automatiquement à la fermeture du jeu.' : 'Préparer les mods et lancer le jeu'} onClick={() => void launchSelectedGame()} className={`flex min-w-36 items-center justify-center gap-2 rounded-full px-5 py-2.5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all ${isPlaying || isLaunching ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
               {isLaunching ? <Loader2 size={12} className="animate-spin" /> : <Play size={10} fill="currentColor" />}
@@ -189,6 +210,10 @@ function MiniStat({ icon: Icon, value, label }: { icon: typeof Boxes; value: str
     <div className="flex items-center justify-between gap-2"><span className="truncate font-display text-xl font-bold text-white/88">{value}</span><Icon size={10} className="flex-none text-white/25" /></div>
     <p className="mt-1 truncate text-[11px] text-white/24">{label}</p>
   </div>
+}
+
+function HomeBadge({ label }: { label: string }) {
+  return <span className="flex items-center gap-1 rounded-full border border-white/[0.09] bg-black/25 px-2 py-0.5 text-[10px] font-medium text-white/58 backdrop-blur-sm"><Check size={9} className="text-emerald-300/80" />{label}</span>
 }
 
 function QuickGame({ game, active, onSelect }: { game: Game; active: boolean; onSelect: () => void }) {

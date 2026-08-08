@@ -23,10 +23,15 @@
 > - Phase 2 · Fusion Téléchargements/Activité — partiellement implémentée : centre
 >   Tâches et Activité avec onglets par état ; timeline par jeu et historique
 >   d’installation par profil restent à faire.
+> - Lot « UI compacte + remapping » (voir `docs/ui-cleanup-and-input-remap.md`) :
+>   Liquid Glass supprimé, toasts courts, nettoyage Téléchargements/Activité avec
+>   rétention, fusion « État & Diagnostic » (Fichiers + Conflits intégrés), dossier
+>   Bypass/Loader + chemins additionnels, bulles ⓘ, presets Déplacement/Complet,
+>   hotkeys de suspension/kill switch, test de remapping, Accueil gradient + badges.
 > - Phases 3-4 : cache par jeu, lazy loading, modes Simple/Avancé, presets de jeu,
 >   environnement de test, outils par jeu — non commencées.
-> - Backends clavier (bindings du jeu puis traduction runtime) : non implémentés,
->   nécessitent des tests sur un vrai jeu avant publication.
+> - Backends clavier (bindings du jeu puis traduction runtime, incl. NTE/ACE) :
+>   non implémentés, nécessitent des tests sur un vrai jeu avant publication.
 
 ## Objectif général
 

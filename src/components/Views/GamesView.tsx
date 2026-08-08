@@ -10,18 +10,16 @@ import { SteamDetectionDialog } from '../SteamDetectionDialog'
 import type { Game, GameTab, Mod, ModImportCandidate, Profile, ProfileArchiveManifest, SensitiveFileAssessment, SensitiveImportAction } from '../../types'
 import { VisualGamePanel } from '../../visual-profiles/ui/VisualGamePanel'
 import { GameConfigurationPanel } from './GameConfigurationPanel'
-import { GameDiagnosticPanel, GameHealthBar } from './GameDiagnosticPanel'
+import { GameDiagnosticPanel, GameHealthBar, type SubSection } from './GameDiagnosticPanel'
 
 const TABS: Array<{ id: GameTab; label: string }> = [
   { id: 'overview', label: 'Aperçu' },
   { id: 'mods', label: 'Mods' },
   { id: 'profiles', label: 'Profils' },
   { id: 'configuration', label: 'Configuration' },
-  { id: 'diagnostic', label: 'Diagnostic' },
+  { id: 'diagnostic', label: 'État & Diagnostic' },
   { id: 'tools', label: 'Outils' },
   { id: 'downloads', label: 'Téléchargements' },
-  { id: 'files', label: 'Vue ZAILON' },
-  { id: 'conflicts', label: 'Conflits' },
   { id: 'visuals', label: 'Visuels' },
 ]
 
@@ -99,6 +97,7 @@ export function GamesView() {
   const [bulkDialog, setBulkDialog] = useState<'move' | 'copy' | 'delete' | 'tag'>()
   const [tagFilter, setTagFilter] = useState('')
   const [deploymentToolBusy, setDeploymentToolBusy] = useState(false)
+  const [diagSection, setDiagSection] = useState<SubSection>('resume')
   const [modDiagnostic, setModDiagnostic] = useState<ModDiagnosticView>()
   const modsListRef = useRef<HTMLDivElement>(null)
   const selectAllRef = useRef<HTMLInputElement>(null)
@@ -481,12 +480,10 @@ export function GamesView() {
       {tab === 'profiles' && <div className="flex-1 space-y-4 overflow-y-auto p-4"><div className="rounded-xl border border-gold/15 bg-gold/[0.035] p-3"><p className="text-xs font-semibold text-white/72">Profils réellement isolés</p><p className="mt-1 text-xs leading-relaxed text-white/45">« Créer vide » produit toujours 0 mod actif, sans ordre, réglage ni overwrite hérité. « Dupliquer » est la seule action qui recopie explicitement l’état du profil source. Les paquets restent dans le store immuable commun.</p></div><div className="space-y-2">{selectedGame.profiles.map(profile => <div key={profile.id} className={`flex flex-wrap items-center gap-2 rounded-xl border px-3 py-3 ${profile.id === selectedProfile.id ? 'border-gold/20 bg-gold/[0.04]' : 'border-white/[0.07] bg-white/[0.02]'}`}><input value={profile.name} disabled={profile.locked} onChange={event => renameProfile(profile.id, event.target.value)} className="min-w-40 flex-1 bg-transparent text-xs font-medium text-white/78 outline-none disabled:opacity-55" /><span className="rounded-full bg-white/[0.035] px-2 py-1 text-[11px] text-white/38">{Object.keys(profile.modStates).length} référencé(s) · {resolveProfileMods(selectedGame, profile).filter(mod => mod.enabled).length} actif(s)</span>{profile.clonedFromProfileId && <span className="text-[11px] text-white/28">copie explicite</span>}<button onClick={() => void openProfileDirectory(profile.id)} title="Ouvrir le dossier racine du profil" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><FolderOpen size={13} /></button><button onClick={() => void checkProfileIntegrity(profile.id)} title="Vérifier l’intégrité" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><ShieldAlert size={13} /></button><button onClick={() => toggleProfileLock(profile.id)} title={profile.locked ? 'Déverrouiller' : 'Verrouiller'} className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white">{profile.locked ? <Lock size={13} /> : <Unlock size={13} />}</button><button onClick={() => duplicateProfile(profile.id)} title="Dupliquer explicitement" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><Copy size={13} /></button><button onClick={() => removeProfile(profile.id)} disabled={selectedGame.profiles.length < 2 || profile.isDefault || profile.locked} title="Placer le profil dans la corbeille ZAILON" className="rounded-lg p-2 text-white/30 hover:bg-red-400/10 hover:text-red-300 disabled:opacity-20"><Trash2 size={13} /></button></div>)}</div><div className="flex gap-2"><input value={profileName} onChange={event => setProfileName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { addProfile(profileName); setProfileName('') } }} placeholder="Nom du nouveau profil vide" className="flex-1 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[11px] text-white/70 outline-none focus:border-gold/30" /><button onClick={() => { addProfile(profileName); setProfileName('') }} className="rounded-lg bg-gold px-3 text-[11px] font-semibold text-[var(--zailon-accent-text)]">Créer vide</button></div><div className="grid gap-2 sm:grid-cols-3"><button onClick={() => void openProfileDirectory(selectedProfile.id, 'root')} className="rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-white/55">Ouvrir la racine</button><button onClick={() => void openProfileDirectory(selectedProfile.id, 'overwrite')} className="rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-white/55">Ouvrir overwrite</button><button onClick={() => void openProfileDirectory(selectedProfile.id, 'generated')} className="rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-white/55">Ouvrir generated</button></div>{selectedProfile.installHistory?.length ? <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"><p className="text-[11px] font-semibold text-white/68">Historique d’installations — {selectedProfile.name}</p><ul className="mt-2 space-y-1">{selectedProfile.installHistory.slice(0, 10).map((entry, index) => <li key={index} className="flex items-center gap-2 text-[11px] text-white/45"><span className={`rounded-full px-1.5 py-0.5 font-mono text-[9px] ${entry.action === 'added' ? 'bg-emerald-300/10 text-emerald-200/80' : 'bg-amber-300/10 text-amber-100/80'}`}>{entry.action === 'added' ? 'Ajouté' : 'Mis à jour'}</span><span className="min-w-0 flex-1 truncate">{entry.name}</span><span className="shrink-0 font-mono text-[10px] text-white/28">{new Date(entry.at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}</span></li>)}</ul></div> : null}</div>}
 
       {tab === 'downloads' && <CollectionDownloadsPanel gameId={selectedGame.id} gameName={selectedGame.name} onOpenProfile={profileId => { void setSelectedProfile(profileId); setTab('profiles') }} />}
-      {tab === 'files' && <VirtualFilesPanel game={selectedGame} profile={selectedProfile} mods={profileMods} />}
-      {tab === 'conflicts' && <div className="flex-1 overflow-y-auto p-4">{resolvedConflicts.length ? <div><div className="mb-3 rounded-xl border border-amber-300/15 bg-amber-300/[0.04] p-3 text-xs text-amber-100/65">Deux mods ou plus modifient le même fichier. ZAILON n’en expose qu’un au jeu et explique ici la conséquence de votre choix.</div><div className="overflow-x-auto rounded-xl border border-white/[0.07]"><table className="w-full text-left text-xs"><thead className="bg-white/[0.03] text-white/42"><tr><th className="px-3 py-2">Chemin résolu</th><th className="px-3 py-2">Conséquence</th><th className="px-3 py-2">Utiliser</th></tr></thead><tbody>{resolvedConflicts.map(conflict => <tr key={conflict.path} className="border-t border-white/[0.06]"><td className="max-w-sm break-all px-3 py-2 font-mono text-white/52">{conflict.path}</td><td className="px-3 py-2 text-white/45"><p>{conflict.owners.length} mods fournissent ce fichier.</p><p className="mt-1 text-[11px] text-amber-100/55">« {conflict.winner.name} » remplacera la version de {conflict.owners.filter(owner => owner.id !== conflict.winner.id).map(owner => `« ${owner.name} »`).join(', ')}.</p></td><td className="px-3 py-2"><select aria-label={`Choisir le mod utilisé pour ${conflict.path}`} value={conflict.winner.id} onChange={event => setConflictWinner(conflict.path, event.target.value)} className="rounded-lg border border-white/[0.08] bg-[#101313] px-2 py-1.5 text-xs text-white/68">{conflict.owners.map(owner => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></td></tr>)}</tbody></table></div></div> : <EmptyPanel icon={ShieldAlert} title="Aucun conflit de fichiers" detail="L’analyse compare les chemins relatifs réellement fournis par chaque mod actif." />}</div>}
       {tab === 'tools' && <div className="grid flex-1 auto-rows-min gap-3 overflow-y-auto p-4 sm:grid-cols-2"><ActionCard icon={ShieldAlert} title="Auditer le déploiement réel" detail="Vérifie les paquets physiques, reconstruit la carte virtuelle en mémoire et contrôle les fournisseurs redscript, RED4ext et CET." disabled={deploymentToolBusy} onClick={() => void auditDeployment()} />{selectedGame.name.toLocaleLowerCase().includes('cyberpunk') && <ActionCard icon={Wrench} title="Réparer l’import MO2 et le déploiement" detail="Snapshot, restaging sécurisé des runtimes confirmés, manifestes normalisés et nouvelle carte virtuelle. La source MO2 reste intacte." disabled={deploymentToolBusy} onClick={() => void repairMo2Deployment()} />}<ActionCard icon={RefreshCw} title="Analyser le dossier Mods" detail="Actualise le catalogue, les tailles, les frameworks et les conflits." onClick={() => void scanMods(selectedGame.id)} /><ActionCard icon={Boxes} title="Nettoyer les doublons" detail="Compare le contenu exact, rattache les profils à une copie unique puis efface uniquement les copies identiques." onClick={() => void deduplicateStagedMods(selectedGame.id)} /><ActionCard icon={Trash2} title="Purger les paquets retirés" detail="Resynchronise les profils, trouve les paquets qui ne sont plus référencés nulle part puis propose leur suppression physique." onClick={() => void purgeUnreferencedStagedMods(selectedGame.id)} /><ActionCard icon={FolderOpen} title="Ouvrir le dossier Mods" detail={selectedGame.modsPath || 'Configurez d’abord un dossier.'} disabled={!selectedGame.modsPath} onClick={() => selectedGame.modsPath && void native.openPath(selectedGame.modsPath)} /><ActionCard icon={FolderInput} title="Importer des dossiers" detail="Prévisualise les racines détectées avant toute copie." onClick={() => setImportOpen(true)} /><ActionCard icon={Archive} title="Importer depuis Mod Organizer 2" detail="Analyse une instance portable, recrée ses profils et copie uniquement les données choisies. La source reste en lecture seule." onClick={() => setMo2ImportOpen(true)} /></div>}
       {tab === 'visuals' && <VisualGamePanel game={selectedGame} zailonProfile={selectedProfile} />}
       {tab === 'configuration' && <GameConfigurationPanel game={selectedGame} profile={selectedProfile} onBrowseExecutable={() => void browseExecutable()} onBrowseModsFolder={() => void browseModsFolder()} onExportProfile={complete => void exportProfile(complete)} onImportProfile={() => void importProfile()} onSaveResources={resources => setGameResources(selectedGame.id, resources)} onOpenVisuals={() => setTab('visuals')} />}
-      {tab === 'diagnostic' && <GameDiagnosticPanel game={selectedGame} profile={selectedProfile} profileMods={profileMods} onOpenConfiguration={() => setTab('configuration')} onOpenTools={() => setTab('tools')} />}
+      {tab === 'diagnostic' && <GameDiagnosticPanel game={selectedGame} profile={selectedProfile} profileMods={profileMods} onOpenConfiguration={() => setTab('configuration')} onOpenTools={() => setTab('tools')} conflicts={resolvedConflicts} onSetWinner={(path, winnerId) => setConflictWinner(path, winnerId)} initialSection={diagSection} />}
     </section>
 
     {steamDialogOpen && <SteamDetectionDialog onClose={() => setSteamDialogOpen(false)} onImport={importDetectedGames} />}
@@ -502,76 +499,7 @@ export function GamesView() {
       else await bulkAddTag(ids, value)
       clearBulkSelection(); setBulkDialog(undefined)
     }} />}
-    {modDiagnostic && <ModDiagnosticDialog diagnostic={modDiagnostic} onClose={() => setModDiagnostic(undefined)} onOpenFiles={() => { setModDiagnostic(undefined); setTab('files') }} />}
-  </div>
-}
-
-function profileDeploymentInput(game: Game, profile: Profile, mods: Mod[]) {
-  const enabledModIds = mods
-    .filter(mod => mod.enabled)
-    .map(mod => mod.stageId || profile.modStates[mod.id]?.packageId || (mod.storage === 'staged' ? mod.id : undefined))
-    .filter((id): id is string => Boolean(id))
-  const executableRoot = game.name.toLocaleLowerCase().includes('cyberpunk')
-    && /[\\/]bin[\\/]x64(?:[\\/]|$)/i.test(game.execPath || '')
-    ? game.execPath?.split(/[\\/]bin[\\/]x64/i)[0]
-    : game.execPath?.replace(/[\\/][^\\/]+$/, '')
-  return {
-    enabledModIds,
-    conflictRules: profile.conflictRules || [],
-    gameRoot: game.installDirectory || executableRoot || undefined,
-  }
-}
-
-function VirtualFilesPanel({ game, profile, mods }: { game: Game; profile: Profile; mods: Mod[] }) {
-  const [audit, setAudit] = useState<ProfileDeploymentAudit>()
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string>()
-  const [query, setQuery] = useState('')
-  const enabledKey = mods.filter(mod => mod.enabled).map(mod => `${mod.id}:${mod.priority}`).join('|')
-  const rulesKey = JSON.stringify(profile.conflictRules || [])
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(undefined)
-    try {
-      const input = profileDeploymentInput(game, profile, mods)
-      setAudit(await native.auditProfileDeployment(game.id, profile.id, input.enabledModIds, input.conflictRules, input.gameRoot))
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
-    } finally {
-      setLoading(false)
-    }
-  }, [game.id, game.installDirectory, game.execPath, profile.id, enabledKey, rulesKey])
-  useEffect(() => { void load() }, [load])
-
-  const byPackageId = useMemo(() => new Map(mods.map(mod => [mod.stageId || profile.modStates[mod.id]?.packageId || mod.id, mod])), [mods, profile.modStates])
-  const normalizedQuery = query.trim().toLocaleLowerCase()
-  const filtered = (audit?.virtualFiles || []).filter(file => {
-    if (!normalizedQuery) return true
-    const winner = byPackageId.get(file.packageId)
-    return file.gameRelativePath.toLocaleLowerCase().includes(normalizedQuery)
-      || file.packageId.toLocaleLowerCase().includes(normalizedQuery)
-      || winner?.name.toLocaleLowerCase().includes(normalizedQuery)
-  })
-  const rendered = filtered.slice(0, 500)
-
-  return <div className="flex min-h-0 flex-1 flex-col">
-    <header className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] p-3">
-      <div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-white/78">Ce que le jeu voit réellement</h2><p className="mt-1 text-[11px] text-white/38">Carte finale calculée depuis les paquets immuables, l’ordre et les règles du profil « {profile.name} ».</p></div>
-      <label className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-black/15 px-2.5"><Search size={12} className="text-white/30" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Chemin, mod ou paquet" className="w-52 bg-transparent py-2 text-xs text-white/68 outline-none" /></label>
-      <button onClick={() => void load()} disabled={loading} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-white/55 disabled:opacity-35"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} />Actualiser</button>
-    </header>
-    {loading && !audit ? <div className="flex flex-1 items-center justify-center text-xs text-white/38">Construction de la carte virtuelle…</div> : error ? <div className="m-4 rounded-xl border border-red-300/15 bg-red-300/[0.04] p-4 text-xs text-red-100/70">{error}</div> : audit && <div className="min-h-0 flex-1 overflow-y-auto p-4">
-      <div className="mb-3 grid gap-2 sm:grid-cols-4"><Metric label="Paquets actifs" value={String(audit.referencedPackages)} /><Metric label="Fichiers gagnants" value={String(audit.virtualFileCount)} /><Metric label="Conflits résolus" value={String(audit.conflicts)} /><Metric label="Références cassées" value={String(audit.brokenReferences)} /></div>
-      <div className={`mb-3 rounded-xl border p-3 text-xs ${audit.deployable ? 'border-emerald-300/15 bg-emerald-300/[0.04] text-emerald-100/68' : 'border-amber-300/18 bg-amber-300/[0.04] text-amber-100/70'}`}>{audit.deployable ? 'Le profil est cohérent et peut être préparé. La colonne « runtime » devient confirmée seulement pendant un lancement réel.' : 'Le profil contient une anomalie bloquante. Consultez les preuves ci-dessous avant de jouer.'}</div>
-      {audit.packages.some(item => !item.deployable) && <div className="mb-3 space-y-1">{audit.packages.filter(item => !item.deployable).map(item => <div key={item.packageId} className="rounded-lg border border-red-300/12 bg-red-300/[0.035] px-3 py-2 text-[11px] text-red-100/65"><strong>{byPackageId.get(item.packageId)?.name || item.packageId}</strong> — {item.errors.join(' · ') || 'Paquet non déployable.'}</div>)}</div>}
-      <div className="overflow-x-auto rounded-xl border border-white/[0.07]"><table className="w-full min-w-[900px] text-left text-xs"><thead className="sticky top-0 bg-[#121515] text-white/42"><tr><th className="px-3 py-2">Chemin exposé</th><th className="px-3 py-2">Mod gagnant</th><th className="px-3 py-2">Remplace</th><th className="px-3 py-2">Décision</th><th className="px-3 py-2">État</th></tr></thead><tbody>{rendered.map(file => {
-        const winner = byPackageId.get(file.packageId)
-        const runtimeVisible = winner?.deploymentStatus === 'runtime-visible' || winner?.deploymentStatus === 'loaded-by-game'
-        return <tr key={`${file.gameRelativePath}:${file.packageId}`} className="border-t border-white/[0.055]"><td className="max-w-md break-all px-3 py-2 font-mono text-white/62">{file.gameRelativePath}<details className="mt-1 text-[11px] text-white/26"><summary className="cursor-pointer">Détails techniques</summary><p className="mt-1 break-all">SHA-256 {file.hash}</p><p className="break-all">{file.sourcePhysicalPath}</p></details></td><td className="px-3 py-2"><span className="font-semibold text-white/68">{winner?.name || file.packageId}</span><span className="mt-1 block text-[11px] text-white/30">{winner?.version ? `v${winner.version}` : file.packageId}</span></td><td className="px-3 py-2 text-white/42">{file.overriddenPackageIds.length ? file.overriddenPackageIds.map(id => byPackageId.get(id)?.name || id).join(', ') : 'Aucun autre mod'}</td><td className="px-3 py-2 text-white/45">{file.winnerReason}</td><td className="px-3 py-2"><span className={`rounded-full px-2 py-1 text-[11px] ${runtimeVisible ? 'bg-emerald-300/10 text-emerald-200' : 'bg-sky-300/10 text-sky-200'}`}>{runtimeVisible ? 'Visible runtime' : 'Prévu'}</span></td></tr>
-      })}</tbody></table></div>
-      {filtered.length > rendered.length && <p className="mt-2 text-[11px] text-white/34">{rendered.length} résultat(s) affiché(s) sur {filtered.length}. Affinez la recherche pour préserver les performances.</p>}
-      {audit.diagnostics.length > 0 && <section className="mt-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"><h3 className="text-xs font-semibold text-white/62">Diagnostics</h3><ul className="mt-2 space-y-1 text-[11px] text-white/42">{audit.diagnostics.map((item, index) => <li key={`${index}:${item}`}>• {item}</li>)}</ul></section>}
-    </div>}
+    {modDiagnostic && <ModDiagnosticDialog diagnostic={modDiagnostic} onClose={() => setModDiagnostic(undefined)} onOpenFiles={() => { setModDiagnostic(undefined); setDiagSection('files'); setTab('diagnostic') }} />}
   </div>
 }
 

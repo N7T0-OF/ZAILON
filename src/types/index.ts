@@ -1,9 +1,16 @@
 export type ViewType = 'home' | 'games' | 'explore' | 'downloads' | 'tools' | 'visuals' | 'news' | 'settings'
 export type Platform = 'gamebanana' | 'nexus' | 'curseforge' | 'ayakamods'
 export type UpdateChannel = 'stable' | 'beta'
+export type DownloadRetention = 'startup' | '1d' | '7d' | 'never'
+export type ModRuntimePathType = 'loader' | 'bypass' | 'plugins' | 'scripts' | 'custom'
+
+export interface GameRuntimePath {
+  name: string
+  path: string
+  type: ModRuntimePathType
+}
 export type TextSize = 'small' | 'normal' | 'large' | 'very-large'
 export type UiDensity = 'compact' | 'comfortable'
-export type LiquidGlassMode = 'off' | 'light' | 'normal' | 'intense' | 'custom'
 export type ExploreColumns = '2' | '3'
 export type ModCategorySource = 'detected' | 'metadata' | 'user'
 export type ModCategoryConfidence = 'high' | 'medium' | 'low'
@@ -16,18 +23,6 @@ export interface ModCategoryTag {
   userLocked?: boolean
 }
 
-export interface LiquidGlassSettings {
-  opacity: number
-  blur: number
-  darkTint: number
-  saturation: number
-  border: number
-  reflection: number
-  shadow: number
-  animations: boolean
-  reduceWhenUnfocused: boolean
-  preferNative: boolean
-}
 export type GameTab = 'overview' | 'mods' | 'profiles' | 'downloads' | 'files' | 'conflicts' | 'tools' | 'visuals' | 'backups' | 'appearance' | 'settings' | 'commands' | 'configuration' | 'diagnostic'
 export type GameKeyboardLayout = 'qwerty' | 'azerty' | 'qwertz' | 'custom'
 export type GameInputActivation = 'while-playing' | 'on-launch'
@@ -216,14 +211,6 @@ export interface ProfileIntegrity {
   files: string[]
 }
 
-export interface WindowEffectsDiagnostic {
-  backend: 'WindowsNative' | 'MacOSNative' | 'LinuxCompositor' | 'SimulatedCss' | 'Opaque'
-  nativeAvailable: boolean
-  active: boolean
-  dynamicBackdropVerified: boolean
-  reason: string
-}
-
 export interface UiNotification {
   id: string
   key: string
@@ -264,6 +251,8 @@ export interface Game {
   backgroundArt?: string
   execPath?: string
   modsPath?: string
+  bypassPath?: string
+  runtimePaths?: GameRuntimePath[]
   installedMods: Mod[]
   profiles: Profile[]
   totalPlaytime: number

@@ -1,14 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { BulkOperation, ExplodMod, ExploreColumns, ExploreSort, Game, GameInputProfile, GameKeyboardLayout, GameResources, GameTab, GamebananaGame, LiquidGlassMode, LiquidGlassSettings, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType, WindowEffectsDiagnostic } from '../types'
+import { BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, Game, GameInputProfile, GameKeyboardLayout, GameResources, GameRuntimePath, GameTab, GamebananaGame, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
 import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
 
-const APP_VERSION = '1.10.0'
+const APP_VERSION = '1.11.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
-export const DEFAULT_LIQUID_GLASS: LiquidGlassSettings = { opacity: 0.86, blur: 18, darkTint: 0.58, saturation: 1.08, border: 0.12, reflection: 0.08, shadow: 0.5, animations: true, reduceWhenUnfocused: true, preferNative: true }
-
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 const asError = (error: unknown) => error instanceof Error ? error.message : String(error)
 const gameNameFromPath = (path: string) => path.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || 'New game'
@@ -301,13 +299,13 @@ export interface Store {
   taskToastsEnabled: boolean
   taskAutoReduceImports: boolean
   libraryViewMode: 'grid' | 'illustrated' | 'compact'
-  liquidGlassMode: LiquidGlassMode
-  liquidGlassSettings: LiquidGlassSettings
-  energySaver: boolean
+  activityMaxEvents: number
+  downloadRetention: DownloadRetention
+  remapSuspendShortcut: string
+  remapKillSwitchShortcut: string
   showSupportButton: boolean
   accentColor: string
   bulkHistory: BulkOperation[]
-  windowEffectDiagnostic?: WindowEffectsDiagnostic
   notificationHistory: UiNotification[]
   notice?: string
   setView: (view: ViewType) => void
@@ -320,6 +318,10 @@ export interface Store {
   removeGame: (gameId: string) => void
   setGamePath: (gameId: string, execPath: string) => Promise<void>
   setModsPath: (gameId: string, modsPath: string) => void
+  setGameBypassPath: (gameId: string, path: string) => void
+  addGameRuntimePath: (gameId: string, path: GameRuntimePath) => void
+  updateGameRuntimePath: (gameId: string, index: number, path: Partial<GameRuntimePath>) => void
+  removeGameRuntimePath: (gameId: string, index: number) => void
   setGameResources: (gameId: string, resources: Partial<GameResources>) => void
   setGameFavorite: (gameId: string, favorite?: boolean) => void
   setGameHidden: (gameId: string, hidden?: boolean) => void
@@ -389,12 +391,14 @@ export interface Store {
   setTaskToastsEnabled: (enabled: boolean) => void
   setTaskAutoReduceImports: (enabled: boolean) => void
   setLibraryViewMode: (mode: Store['libraryViewMode']) => void
-  setLiquidGlassMode: (mode: LiquidGlassMode) => void
-  setLiquidGlassSettings: (settings: Partial<LiquidGlassSettings>) => void
-  setEnergySaver: (enabled: boolean) => void
+  setActivityMaxEvents: (count: number) => void
+  setDownloadRetention: (retention: DownloadRetention) => void
+  setRemapSuspendShortcut: (shortcut: string) => void
+  setRemapKillSwitchShortcut: (shortcut: string) => void
+  cleanupBackgroundTasks: () => void
+  clearBackgroundTasks: () => void
   setShowSupportButton: (enabled: boolean) => void
   setAccentColor: (color: string) => void
-  setWindowEffectDiagnostic: (diagnostic: WindowEffectsDiagnostic) => void
   bulkSetEnabled: (modIds: string[], enabled: boolean) => Promise<void>
   bulkTransferMods: (modIds: string[], destinationProfileId: string, mode: 'copy' | 'move') => Promise<void>
   bulkDeleteMods: (modIds: string[], scope: 'current' | 'all' | 'permanent') => Promise<void>
@@ -466,9 +470,10 @@ export function migratePersistedState(persisted: unknown) {
     taskToastsEnabled: state.taskToastsEnabled ?? true,
     taskAutoReduceImports: state.taskAutoReduceImports ?? true,
     libraryViewMode: state.libraryViewMode || 'grid',
-    liquidGlassMode: state.liquidGlassMode || 'off',
-    liquidGlassSettings: { ...DEFAULT_LIQUID_GLASS, ...(state.liquidGlassSettings || {}) },
-    energySaver: state.energySaver ?? false,
+    activityMaxEvents: state.activityMaxEvents || 250,
+    downloadRetention: state.downloadRetention || 'startup',
+    remapSuspendShortcut: state.remapSuspendShortcut || 'Ctrl+Alt+K',
+    remapKillSwitchShortcut: state.remapKillSwitchShortcut || 'Ctrl+Alt+Backspace',
     showSupportButton: state.showSupportButton ?? true,
     accentColor: /^#[0-9a-f]{6}$/i.test(state.accentColor || '') ? state.accentColor : '#f3faf8',
     bulkHistory: state.bulkHistory || [],
@@ -529,9 +534,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
   taskToastsEnabled: true,
   taskAutoReduceImports: true,
   libraryViewMode: 'grid',
-  liquidGlassMode: 'off',
-  liquidGlassSettings: { ...DEFAULT_LIQUID_GLASS },
-  energySaver: false,
+  activityMaxEvents: 250,
+  downloadRetention: 'startup',
+  remapSuspendShortcut: 'Ctrl+Alt+K',
+  remapKillSwitchShortcut: 'Ctrl+Alt+Backspace',
   showSupportButton: true,
   accentColor: '#f3faf8',
   bulkHistory: [],
@@ -662,6 +668,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
     }
   },
   setModsPath: (gameId, modsPath) => set(state => ({ games: state.games.map(game => game.id === gameId ? { ...game, modsPath } : game) })),
+  setGameBypassPath: (gameId, bypassPath) => set(state => ({ games: state.games.map(game => game.id === gameId ? { ...game, bypassPath } : game) })),
+  addGameRuntimePath: (gameId, path) => set(state => ({ games: state.games.map(game => game.id === gameId ? { ...game, runtimePaths: [...(game.runtimePaths || []), path] } : game) })),
+  updateGameRuntimePath: (gameId, index, path) => set(state => ({ games: state.games.map(game => game.id === gameId ? { ...game, runtimePaths: (game.runtimePaths || []).map((item, itemIndex) => itemIndex === index ? { ...item, ...path } : item) } : game) })),
+  removeGameRuntimePath: (gameId, index) => set(state => ({ games: state.games.map(game => game.id === gameId ? { ...game, runtimePaths: (game.runtimePaths || []).filter((_, itemIndex) => itemIndex !== index) } : game) })),
   setGameResources: (gameId, resources) => set(state => ({
     games: state.games.map(game => game.id === gameId ? { ...game, resources: { ...game.resources, ...resources } } : game),
   })),
@@ -1298,14 +1308,28 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setTaskToastsEnabled: taskToastsEnabled => set({ taskToastsEnabled }),
   setTaskAutoReduceImports: taskAutoReduceImports => set({ taskAutoReduceImports }),
   setLibraryViewMode: libraryViewMode => set({ libraryViewMode }),
-  setLiquidGlassMode: liquidGlassMode => set({ liquidGlassMode }),
-  setLiquidGlassSettings: settings => set(state => ({ liquidGlassSettings: { ...state.liquidGlassSettings, ...settings }, liquidGlassMode: 'custom' })),
-  setEnergySaver: energySaver => set({ energySaver }),
+  setActivityMaxEvents: activityMaxEvents => set({ activityMaxEvents }),
+  setDownloadRetention: downloadRetention => set({ downloadRetention }),
+  setRemapSuspendShortcut: remapSuspendShortcut => set({ remapSuspendShortcut }),
+  setRemapKillSwitchShortcut: remapKillSwitchShortcut => set({ remapKillSwitchShortcut }),
+  cleanupBackgroundTasks: () => set(state => {
+    if (state.downloadRetention === 'never') return {}
+    const cutoffSeconds = Date.now() / 1000 - (state.downloadRetention === 'startup' ? 0 : (state.downloadRetention === '1d' ? 24 : 7 * 24) * 3600)
+    const keepFailedUntil = Date.now() / 1000 - 7 * 24 * 3600
+    const next = state.backgroundTasks.filter(task =>
+      task.status === 'running' || task.status === 'awaiting_user_decision'
+      || task.status === 'failed' && task.updatedAt >= keepFailedUntil
+      || task.updatedAt >= cutoffSeconds
+    )
+    return next.length === state.backgroundTasks.length ? {} : { backgroundTasks: next }
+  }),
+  clearBackgroundTasks: () => set(state => ({
+    backgroundTasks: state.backgroundTasks.filter(task => task.status === 'running' || task.status === 'awaiting_user_decision'),
+  })),
   setShowSupportButton: showSupportButton => set({ showSupportButton }),
   setAccentColor: accentColor => {
     if (/^#[0-9a-f]{6}$/i.test(accentColor)) set({ accentColor })
   },
-  setWindowEffectDiagnostic: windowEffectDiagnostic => set({ windowEffectDiagnostic }),
   bulkSetEnabled: async (modIds, enabled) => {
     const { game, profile } = selected(get())
     if (!game || !profile || !modIds.length) return
@@ -1641,9 +1665,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const action = /confirmer|choisissez|sélectionnez|action requise/i.test(message)
     const success = /terminé|créé|ajouté|installé|intègre|annulée|détecté/i.test(message)
     const kind: UiNotification['kind'] = action ? 'action' : error ? 'error' : warning ? 'warning' : success ? 'success' : 'info'
-    const durationMs = kind === 'action' ? undefined : kind === 'error' ? 10_000 : kind === 'warning' ? 7_000 : 4_000
+    const durationMs = kind === 'action' ? undefined : kind === 'error' ? 8_000 : kind === 'warning' ? 5_000 : 2_000
     const notification: UiNotification = { id: createId(), key: normalized, message, kind, createdAt: Date.now(), durationMs, completed: true }
-    return { notificationHistory: [...state.notificationHistory.filter(item => item.key !== normalized), notification].slice(-100) }
+    return { notificationHistory: [...state.notificationHistory.filter(item => item.key !== normalized), notification].slice(-(state.activityMaxEvents || 250)) }
   }),
   dismissNotification: id => set(state => ({ notificationHistory: state.notificationHistory.map(item => item.id === id ? { ...item, dismissed: true } : item) })),
   clearCompletedNotifications: () => set(state => ({ notificationHistory: state.notificationHistory.filter(item => !item.completed) })),
@@ -1687,9 +1711,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
     taskToastsEnabled: state.taskToastsEnabled,
     taskAutoReduceImports: state.taskAutoReduceImports,
     libraryViewMode: state.libraryViewMode,
-    liquidGlassMode: state.liquidGlassMode,
-    liquidGlassSettings: state.liquidGlassSettings,
-    energySaver: state.energySaver,
+    activityMaxEvents: state.activityMaxEvents,
+    downloadRetention: state.downloadRetention,
+    remapSuspendShortcut: state.remapSuspendShortcut,
+    remapKillSwitchShortcut: state.remapKillSwitchShortcut,
     showSupportButton: state.showSupportButton,
     restorePoints: state.restorePoints,
     autoRestorePoints: state.autoRestorePoints,

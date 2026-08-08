@@ -7,12 +7,17 @@ export const KEY_OPTIONS = [
   ';', ',', '.', '/', ':', '!',
 ]
 
-/** AZERTY → QWERTY : la touche physique Z doit être envoyée W au jeu, etc. */
-export const AZERTY_TO_QWERTY: GameKeyMapping[] = [
+/** Preset « Déplacement uniquement » : uniquement les 4 touches de déplacement (recommandé pour le gameplay). */
+export const MOVEMENT_ONLY_MAPPING: GameKeyMapping[] = [
   { physical: 'Z', gameKey: 'W' },
   { physical: 'Q', gameKey: 'A' },
   { physical: 'W', gameKey: 'Z' },
   { physical: 'A', gameKey: 'Q' },
+]
+
+/** AZERTY → QWERTY : la touche physique Z doit être envoyée W au jeu, etc. */
+export const AZERTY_TO_QWERTY: GameKeyMapping[] = [
+  ...MOVEMENT_ONLY_MAPPING,
   { physical: 'M', gameKey: ';' },
 ]
 
@@ -26,6 +31,31 @@ export const QWERTY_TO_AZERTY: GameKeyMapping[] = AZERTY_TO_QWERTY.map(({ physic
 export const QWERTZ_TO_QWERTY: GameKeyMapping[] = [
   { physical: 'Z', gameKey: 'Y' },
   { physical: 'Y', gameKey: 'Z' },
+]
+
+export interface InputPreset {
+  label: string
+  layout: GameKeyboardLayout
+  mapping: GameKeyMapping[]
+}
+
+/** Groupes de presets : « Déplacement uniquement » (safe pour le gameplay) puis « Clavier complet ». */
+export const PRESET_GROUPS: Array<{ label: string; presets: InputPreset[] }> = [
+  {
+    label: 'Déplacement uniquement',
+    presets: [
+      { label: 'AZERTY → QWERTY', layout: 'azerty', mapping: MOVEMENT_ONLY_MAPPING },
+      { label: 'QWERTY → AZERTY', layout: 'custom', mapping: MOVEMENT_ONLY_MAPPING.map(({ physical, gameKey }) => ({ physical: gameKey, gameKey: physical })) },
+    ],
+  },
+  {
+    label: 'Clavier complet',
+    presets: [
+      { label: 'AZERTY → QWERTY', layout: 'azerty', mapping: AZERTY_TO_QWERTY },
+      { label: 'QWERTY → AZERTY', layout: 'custom', mapping: QWERTY_TO_AZERTY },
+      { label: 'QWERTZ → QWERTY', layout: 'qwertz', mapping: QWERTZ_TO_QWERTY },
+    ],
+  },
 ]
 
 export const LAYOUT_LABELS: Record<GameKeyboardLayout, string> = {

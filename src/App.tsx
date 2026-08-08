@@ -6,7 +6,6 @@ import { CommandPalette } from './components/CommandPalette'
 import { UpdateProvider } from './components/UpdateProvider'
 import { useStore } from './store/useStore'
 import { native, type BackgroundTaskSnapshot, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
-import { windowEffectsBackend } from './lib/windowEffects'
 import { register, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
 import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-profiles/application/shortcuts'
 
@@ -25,13 +24,8 @@ export default function App() {
   const setSelectedProfile = useStore(s => s.setSelectedProfile)
   const textSize = useStore(s => s.textSize)
   const uiDensity = useStore(s => s.uiDensity)
-  const liquidGlassMode = useStore(s => s.liquidGlassMode)
-  const liquidGlassSettings = useStore(s => s.liquidGlassSettings)
-  const energySaver = useStore(s => s.energySaver)
   const accentColor = useStore(s => s.accentColor)
-  const setWindowEffectDiagnostic = useStore(s => s.setWindowEffectDiagnostic)
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
-  const [windowFocused, setWindowFocused] = useState(document.hasFocus())
 
   useEffect(() => {
     const id = setInterval(tick, 1000)
@@ -48,21 +42,6 @@ export default function App() {
     document.documentElement.dataset.textSize = textSize
     document.documentElement.dataset.density = uiDensity
   }, [textSize, uiDensity])
-
-  useEffect(() => {
-    const focused = () => setWindowFocused(true)
-    const blurred = () => {
-      setWindowFocused(false)
-      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
-    }
-    window.addEventListener('focus', focused)
-    window.addEventListener('blur', blurred)
-    return () => { window.removeEventListener('focus', focused); window.removeEventListener('blur', blurred) }
-  }, [])
-
-  useEffect(() => {
-    void windowEffectsBackend.apply({ mode: liquidGlassMode, settings: liquidGlassSettings, energySaver, focused: windowFocused }).then(setWindowEffectDiagnostic)
-  }, [energySaver, liquidGlassMode, liquidGlassSettings, setWindowEffectDiagnostic, windowFocused])
 
   useEffect(() => {
     const hex = accentColor.replace('#', '')
@@ -122,7 +101,10 @@ export default function App() {
   useEffect(() => {
     if (!native.isDesktop()) return
     let unlisten: UnlistenFn | undefined
-    void native.backgroundTasks().then(tasks => useStore.getState().replaceBackgroundTasks(tasks)).catch(() => undefined)
+    void native.backgroundTasks().then(tasks => {
+      useStore.getState().replaceBackgroundTasks(tasks)
+      useStore.getState().cleanupBackgroundTasks()
+    }).catch(() => undefined)
     void listen<BackgroundTaskSnapshot>('background-task-changed', event => useStore.getState().upsertBackgroundTask(event.payload)).then(dispose => { unlisten = dispose })
     return () => unlisten?.()
   }, [])

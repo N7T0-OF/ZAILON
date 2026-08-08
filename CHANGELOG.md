@@ -55,6 +55,97 @@
 
 ### Technical
 
+## [1.11.0] - 2026-08-08
+
+> Release du lot « UI compacte, nettoyage automatique et remapping par jeu » :
+> suppression totale de Liquid Glass, toasts courts, rétention des tâches,
+> fusion État & Diagnostic, dossier Bypass/Loader, bulles ⓘ, presets de touches
+> et Accueil allégé.
+
+### Added
+
+- « Installer dans… » dans Explorer : choix explicite du jeu et du profil de mods
+  cibles avant l’installation d’un mod, indépendamment du jeu sélectionné.
+- Historique d’installations par profil : chaque installation depuis Explorer est
+  enregistrée et visible dans l’onglet Profils (nom, date, action).
+- Filtres Favoris / Récents / Tous dans la Bibliothèque : les favoris passent en
+  premier, les récents sont triés par dernière session.
+- Bulle d’information réutilisable « ⓘ » (ouverture au survol après ~180 ms,
+  Échap / clic extérieur, accessible au clavier) utilisée pour les détails
+  techniques au lieu des longs textes.
+- Dossier « Bypass / Loader » par jeu (Configuration > Lancement) avec choix du
+  dossier et bulle d’aide, pour les jeux qui exigent un loader ou un bypass de
+  signature.
+- « Chemins additionnels » par jeu : liste nom + chemin + type (Loader, Signature
+  bypass, Plugin folder, Script folder, Custom) ajoutable et supprimable.
+- Presets de touches groupés « Déplacement uniquement » (Z→W, Q→A, W→Z, A→Q —
+  recommandé pour le gameplay) et « Clavier complet » (AZERTY ↔ QWERTY, QWERTZ).
+- Dialogue « Tester le remapping » : aperçu de la traduction touche physique →
+  touche envoyée, clairement marqué comme aperçu (interception réelle en Phase 2).
+- Raccourcis configurables du futur backend de remapping : « Suspendre »
+  (Ctrl+Alt+K) et « Tout désactiver / kill switch » (Ctrl+Alt+Backspace).
+- Badges contextuels sur l’Accueil (mods actifs, disposition clavier, profil
+  visuel) affichés uniquement lorsqu’ils sont réellement actifs.
+- Réglages de rétention : « Nombre maximum d’événements » (Activité, défaut 250) et
+  « Nettoyage des téléchargements » (à chaque démarrage / 1 jour / 7 jours / jamais).
+- Bouton « Tout supprimer » dans Téléchargements : efface l’historique terminé et
+  les erreurs, jamais une tâche active ni les mods installés.
+
+### Changed
+
+- Barre d’état : le nom du jeu actif est affiché à gauche avec le profil et le
+  nombre de mods actifs, tâches en cours à droite.
+- Toasts plus courts : succès et information ~2 s, avertissement ~5 s, erreur ~8 s
+  (minuteur suspendu au survol) ; les événements importants restent dans l’historique.
+- Nettoyage automatique au lancement : les anciennes tâches terminées sont retirées
+  selon la rétention choisie, sans jamais toucher aux tâches en cours ni en attente.
+- « État & Diagnostic » fusionne les anciens onglets « Diagnostic », « Vue ZAILON »
+  et « Conflits » : sous-sections Résumé / Fichiers / Mods / Frameworks / Conflits /
+  Déploiement / Entrées / Performances / Logs. La barre d’onglets du jeu passe de
+  10 à 8 entrées.
+- Paramètres > Illustrations : le bloc devient un contrôle compact « Images Steam »
+  avec bulle ⓘ (les sources non configurées ne sont plus affichées en permanence).
+- Accueil : le voile de lisibilité est réduit (la couverture reste nettement
+  visible) et les badges d’état sont ajoutés sous le profil.
+- Commandes : la « Méthode d’application » affiche l’ordre des backends
+  (bindings natifs → layout → remapping limité à la fenêtre → Steam Input → aucune).
+- Note spécifique pour Neverness to Everness : Anti-Cheat Expert interdit tout
+  hook, injection ou driver ; seule une traduction externe limitée à la fenêtre du
+  jeu sera utilisée (à valider sur la vraie version Steam).
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+- Liquid Glass supprimé totalement (réglage, backend, aperçu, diagnostics, texte
+  d’aide et styles CSS associés). ZAILON conserve un thème sombre propre sans
+  prétendre offrir une vraie transparence derrière la fenêtre.
+
+### Known Issues
+
+### Data
+
+- Migration : les anciens réglages Liquid Glass encore présents dans le stockage
+  local sont ignorés (aucun effet, aucune erreur).
+
+### Technical
+
+- `BackgroundCleanupService` frontend : rétention des tâches appliquée au
+  démarrage ; actions `cleanupBackgroundTasks` / `clearBackgroundTasks`.
+- Nouveaux champs `Game` : `bypassPath` et `runtimePaths` (chemins additionnels).
+- `InfoBubble` (`src/components/UI/InfoBubble.tsx`) réutilisable et accessible.
+- Spec durable du nettoyage UI + remapping NTE : `docs/ui-cleanup-and-input-remap.md`.
+- Backends d’application du remapping (interception réelle limitée à la fenêtre du
+  jeu) : Phase 2, non implémentés — nécessitent des tests sur un vrai jeu.
+
 ## [Unreleased]
 
 > Pendant le développement, chaque changement visible par l'utilisateur est ajouté
@@ -65,17 +156,7 @@
 
 ### Added
 
-- « Installer dans… » dans Explorer : choix explicite du jeu et du profil de mods
-  cibles avant l’installation d’un mod, indépendamment du jeu sélectionné.
-- Historique d’installations par profil : chaque installation depuis Explorer est
-  enregistrée et visible dans l’onglet Profils (nom, date, action).
-- Filtres Favoris / Récents / Tous dans la Bibliothèque : les favoris passent en
-  premier, les récents sont triés par dernière session.
-
 ### Changed
-
-- Barre d’état : le nom du jeu actif est affiché à gauche avec le profil et le
-  nombre de mods actifs, tâches en cours à droite.
 
 ### Fixed
 

@@ -355,7 +355,9 @@
   pendant la fenêtre de rattachement — score de correspondance (installation
   +40, candidat +25, launcher +15, contexte +20, seuil auto ≥ 80) avec 6 tests
   unitaires, énumération Windows (Toolhelp + chemin complet) via `windows-sys`,
-  commande `scan_game_presence` appelée par l'Accueil pendant l'attente du jeu.## [Unreleased]
+  commande `scan_game_presence` appelée par l'Accueil pendant l'attente du jeu.
+
+## [Unreleased]
 
 ### Added
 

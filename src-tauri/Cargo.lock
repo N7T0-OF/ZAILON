@@ -5826,7 +5826,7 @@ dependencies = [
 
 [[package]]
 name = "zailon"
-version = "1.24.0"
+version = "1.25.0"
 dependencies = [
  "dirs",
  "keyring",

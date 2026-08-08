@@ -740,7 +740,7 @@
 > `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
 > Release Notes à partir de cette section et refuse de publier si elle est vide.
 
-## [Unreleased]
+## [1.25.0] - 2026-08-08
 
 ### Added
 
@@ -748,6 +748,30 @@
 - Favoris en tête des résultats de la palette Ctrl+K (étoile ★ dans le libellé).
 - Badge « RED4ext ⚠ » honnête sur l'Accueil : affiché quand le loader est actif dans le profil, jamais « ✓ » sans confirmation runtime post-lancement ; badges limités à 3 avec indicateur « +N » (tooltips détaillés).
 - Quick Panel adaptatif : la fenêtre rapide affiche la session prioritaire (jeu, profil, mods actifs, clavier, bypass, RED4ext ⚠) — contenu transmis par la fenêtre principale à l'ouverture, adapté à chaque jeu.
+
+### Changed
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
+## [Unreleased]
+
+### Added
 
 ### Changed
 

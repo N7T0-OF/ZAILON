@@ -588,7 +588,11 @@
 > `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
 > Release Notes à partir de cette section et refuse de publier si elle est vide.
 
-## [Unreleased]
+## [1.21.1] - 2026-08-08
+
+> Release de correctifs : bug bloquant de durée (29770249211h), bouton Jouer
+> unique (plus de menu secondaire), et chaîne NTE tolérante à
+> `ntegloballauncher.exe` — validée par la PR #1 sur Windows + Linux.
 
 ### Added
 
@@ -602,6 +606,36 @@
 ### Fixed
 
 - Bug bloquant de durée : `formatTime` recevait des timestamps epoch (ms) au lieu de minutes → « 29770249211h 15m ». Nouveaux formateurs typés `formatClock` (heure) et `formatElapsedDuration` (durée) avec garde-fous (NaN/Infinity/négatif/absurde → rien d'affiché), 4 tests dédiés.
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
+> Pendant le développement, chaque changement visible par l'utilisateur est ajouté
+> ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
+> cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
+> `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
+> Release Notes à partir de cette section et refuse de publier si elle est vide.
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Fixed
 
 ### Performance
 

@@ -926,7 +926,7 @@
 
 ### Technical
 
-## [Unreleased]
+## [1.32.0] — 2026-08-09
 
 ### Added
 
@@ -937,6 +937,16 @@
 ### Changed
 
 - Le bouton Jouer de l’Accueil n’est plus coupé : `min-width` stable (168 px), `padding-inline`, `white-space: nowrap`, `flex-shrink: 0` — la largeur ne bouge plus entre « Jouer », « Lancement… », « Recherche du jeu… » et « En cours » (FR/EN/DE/PT/ES).
+
+### Removed
+
+- Suppression de la colonne latérale « Bibliothèque » (liste des jeux) dans GamesView — remplacée par la vitrine plein écran.
+
+## [Unreleased]
+
+### Added
+
+### Changed
 
 ### Fixed
 
@@ -949,8 +959,6 @@
 ### Experimental
 
 ### Removed
-
-- Suppression de la colonne latérale « Bibliothèque » (liste des jeux) dans GamesView — remplacée par la vitrine plein écran.
 
 ### Known Issues
 

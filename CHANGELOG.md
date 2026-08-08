@@ -195,13 +195,11 @@
 - Action store `clearNotificationHistory` pour l’effacement complet de la session de
   notifications.
 
-## [Unreleased]
+## [1.13.0] - 2026-08-08
 
-> Pendant le développement, chaque changement visible par l'utilisateur est ajouté
-> ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
-> cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
-> `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
-> Release Notes à partir de cette section et refuse de publier si elle est vide.
+> Release du lot « Phase 3 — Performances » : cache par jeu (compteurs + santé),
+> badges d’état instantanés dans la Bibliothèque et sur l’Accueil, et chargement
+> par tranches de l’onglet Mods.
 
 ### Added
 
@@ -238,6 +236,36 @@
 - Nouveau module `src/lib/workspaceCache.ts` : `getWorkspaceCache`,
   `buildWorkspaceSummary` et le hook `useWorkspaceCache` (calcul lourd hors rendu,
   repli sur le calcul réel si le cache est absent ou expiré).
+
+## [Unreleased]
+
+> Pendant le développement, chaque changement visible par l'utilisateur est ajouté
+> ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
+> cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
+> `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
+> Release Notes à partir de cette section et refuse de publier si elle est vide.
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
 
 ## 1.9.0 — Profils immuables et diagnostic transparent
 

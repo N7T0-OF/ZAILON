@@ -780,12 +780,19 @@ export const native = {
     toggle: () => desktopOnly<boolean>('toggle_quick_panel', {}),
   },
 
-  launchGame: (execPath: string, gameId: string, gameName: string, gameRoot: string, profileId: string, profileName: string, activeMods: number, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, discord: DiscordPresenceConfig | undefined, onProgress: (event: DeploymentProgressEvent) => void) => {
+  launchGame: (execPath: string, gameId: string, gameName: string, gameRoot: string, profileId: string, profileName: string, activeMods: number, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, discord: DiscordPresenceConfig | undefined, launcherBased: boolean, onProgress: (event: DeploymentProgressEvent) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Le lancement est uniquement disponible dans l’application ZAILON.'))
     const channel = new Channel<DeploymentProgressEvent>()
     channel.onmessage = onProgress
-    return invoke<LaunchGameResult>('launch_game', { execPath, gameId, gameName, gameRoot, profileId, profileName, activeMods, enabledModIds, conflictRules, discord, onEvent: channel })
+    return invoke<LaunchGameResult>('launch_game', { execPath, gameId, gameName, gameRoot, profileId, profileName, activeMods, enabledModIds, conflictRules, discord, launcherBased, onEvent: channel })
   },
+  /** Restaure tout déploiement temporaire restant d'un jeu (fin de session
+   * explicite). Pour un jeu lancé via un launcher intermédiaire, le déploiement
+   * reste actif après la fermeture du launcher — il est restauré ici, à la fin
+   * réelle de la session, et au plus tard par la récupération du lancement
+   * suivant. Retourne le nombre de sessions restaurées. */
+  restoreDeploymentSession: (gameId: string, gameRoot: string) =>
+    desktopOnly<number>('restore_deployment_session', { gameId, gameRoot }),
   testDiscordConnection: (clientId: string) => desktopOnly<DiscordConnectionStatus>('test_discord_connection', { clientId }),
   guessModsPath: (execPath: string) => desktopOnly<string>('guess_mods_path', { execPath }),
   scanSteamGames: (steamPath: string | undefined, onEvent: (event: SteamScanEvent) => void) => {

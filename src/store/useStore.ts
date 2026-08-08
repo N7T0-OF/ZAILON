@@ -5,6 +5,8 @@ import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2Impor
 import { adapterFor, FALLBACK_ADAPTER, isLauncherBased } from '../lib/launchAdapters'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
+import { validateCyberpunkFrameworkDeps } from '../lib/frameworkValidator'
+import { mergeModCatalogs, reconcileModStates } from '../lib/profileState'
 
 const APP_VERSION = '1.21.1'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
@@ -143,8 +145,18 @@ function withExactProfileReferences(profile: Profile, catalog: Mod[]): Profile {
 
 export function resolveProfileMods(game?: Game, profile?: Profile): Mod[] {
   if (!game || !profile) return []
-  const catalog = game.installedMods?.length ? game.installedMods : profile.mods || []
-  return decorateMods(catalog.filter(mod => Object.prototype.hasOwnProperty.call(profile.modStates || {}, mod.id)).map((mod, index) => {
+  // Source de vérité unique (spec « compteur de mods fiable ») : union de la
+  // liste installée et des références du profil (anciens imports MO2, ids
+  // ré-importés). Une liste stale ne doit jamais faire disparaître des mods
+  // réellement référencés → le compteur ne peut plus afficher 0 alors que le
+  // déploiement contient des mods.
+  const catalog = mergeModCatalogs(game.installedMods || [], profile.mods || [])
+  const states = profile.modStates || {}
+  // Réconciliation (migration de réparation) : les clés de modStates sans
+  // entrée de catalogue (ids ré-importés, cache périmé) reçoivent un
+  // enregistrement minimal — le profil n'affiche jamais 0 par erreur.
+  const reconciled = reconcileModStates(catalog, states)
+  return decorateMods(reconciled.map((mod, index) => {
     const state = profile.modStates?.[mod.id]
     return {
       ...mod,
@@ -1227,6 +1239,16 @@ export const useStore = create<Store>()(persist((set, get) => ({
         get().createRestorePoint(`Avant lancement · ${stamp}`, 'auto')
       }
       const enabledMods = options?.withoutMods ? [] : resolveProfileMods(game, profile).filter(mod => mod.enabled)
+      // Verrou pré-lancement frameworks (spec Cyberpunk RED4ext §5) : on ne
+      // lance jamais le jeu avec un framework incomplet (ex. plugins RED4ext
+      // sans le core red4ext/red4ext.dll) — sinon « RED4ext could not be loaded ».
+      if (!options?.withoutMods && game.name.toLocaleLowerCase().includes('cyberpunk')) {
+        const validation = validateCyberpunkFrameworkDeps(enabledMods)
+        if (!validation.valid) {
+          set({ notice: `Lancement bloqué — ${validation.blockers.join(' ')} Activez le mod du framework manquant, ou utilisez « Lancer sans mods » depuis le diagnostic pour diagnostiquer.` })
+          return
+        }
+      }
       const executableParent = game.execPath.replace(/[\\/][^\\/]+$/, '')
       const knownRoot = game.name.toLocaleLowerCase().includes('cyberpunk') && /[\\/]bin[\\/]x64(?:[\\/]|$)/i.test(game.execPath)
         ? game.execPath.split(/[\\/]bin[\\/]x64/i)[0]
@@ -1246,7 +1268,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
         showProfile: state.discordShowProfile,
         showModCount: state.discordShowModCount,
         showElapsed: state.discordShowElapsed,
-      } : undefined, progress => set({ launchProgress: progress }))
+      } : undefined, isLauncherBased(adapterFor(game)), progress => set({ launchProgress: progress }))
       set(current => ({
         isLaunching: false,
         launchProgress: undefined,
@@ -1518,6 +1540,13 @@ export const useStore = create<Store>()(persist((set, get) => ({
   endSession: (gameId, reason) => {
     const state = get()
     const session = state.gameSessions.find(item => item.gameId === gameId && item.state !== 'Ended' && item.state !== 'Failed')
+    const game = state.games.find(item => item.id === gameId)
+    // Fin réelle de session : restaure le déploiement temporaire restant. Pour un
+    // jeu lancé via un launcher intermédiaire, le déploiement n'est JAMAIS démonté
+    // à la fermeture du launcher (spec) — il est restauré ici, à la fin de session.
+    if (session?.deploymentActive && game?.installDirectory && native.isDesktop()) {
+      void native.restoreDeploymentSession(game.id, game.installDirectory).catch(() => undefined)
+    }
     if (!session) { state.stopPlaying(gameId, undefined, reason); return }
     state.stopPlaying(gameId, session.profileId, undefined)
     set(current => ({
@@ -1561,6 +1590,11 @@ export const useStore = create<Store>()(persist((set, get) => ({
       }))
       lost.forEach(session => {
         const game = state.games.find(item => item.id === session.gameId)
+        // Le jeu n'a jamais démarré : restaure le déploiement laissé par le
+        // launcher intermédiaire (démontage jamais fait à la sortie du launcher).
+        if (session.deploymentActive && game?.installDirectory && native.isDesktop()) {
+          void native.restoreDeploymentSession(game.id, game.installDirectory).catch(() => undefined)
+        }
         get().recordNotice(`${game?.name || session.gameId} : le launcher a été ouvert mais le jeu n'a pas été détecté.`)
       })
     }

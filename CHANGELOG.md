@@ -633,7 +633,12 @@
 
 ### Added
 
+- Validateur de frameworks pré-lancement (`frameworkValidator`) : Cyberpunk ne se lance plus avec un framework incomplet (plugins RED4ext sans le core red4ext/red4ext.dll, r6/scripts sans redscript, r6/tweaks sans TweakXL, .xl sans ArchiveXL) — lancement bloqué avec un message clair.
+- `ProfileStateRepository` (`profileState.ts`) : union des catalogues installé/profil + réconciliation des ids ré-importés — le compteur de mods ne peut plus afficher 0 alors que le déploiement contient des mods.
+
 ### Changed
+
+- Déploiement lié à la session, plus au PID : pour un jeu lancé via un launcher intermédiaire, la fermeture du launcher ne démonte plus jamais les mods — restauration à la fin réelle de la session (`restore_deployment_session`) et au GameLost.
 
 ### Fixed
 

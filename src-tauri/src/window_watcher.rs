@@ -297,12 +297,10 @@ pub fn is_mode_switch(
 #[cfg(target_os = "windows")]
 pub fn exclusive_fullscreen_active() -> bool {
     use windows_sys::Win32::Graphics::Gdi::{
-        EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS,
+        EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromWindow, DEVMODEW, ENUM_CURRENT_SETTINGS,
+        MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetMonitorInfoW, MonitorFromWindow, MONITORINFO,
-        MONITOR_DEFAULTTONEAREST,
-    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
     // SAFETY : GetForegroundWindow renvoie un handle ; 0 = aucune fenêtre.
     let hwnd = unsafe { GetForegroundWindow() };

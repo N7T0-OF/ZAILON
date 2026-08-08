@@ -19,6 +19,7 @@ use walkdir::WalkDir;
 
 mod input_backends;
 mod process_scanner;
+mod steam_presence;
 mod visual_profiles;
 
 #[cfg(unix)]
@@ -4001,6 +4002,11 @@ fn scan_game_presence(
     requests: Vec<process_scanner::GamePresenceRequest>,
 ) -> Vec<process_scanner::GamePresence> {
     process_scanner::scan_requests(&requests)
+}
+
+#[tauri::command]
+fn steam_running_state(app_ids: Vec<u32>) -> steam_presence::SteamRunningState {
+    steam_presence::steam_running_state(&app_ids)
 }
 
 #[tauri::command]
@@ -14608,6 +14614,7 @@ pub fn run() {
             initialize_fivem_base,
             ensure_dir,
             scan_game_presence,
+            steam_running_state,
             launch_game,
             test_discord_connection,
             guess_mods_path,

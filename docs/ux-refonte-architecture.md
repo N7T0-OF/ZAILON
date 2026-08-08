@@ -15,10 +15,13 @@
 >   diagnostic) ; système `GameSession` livré (la session survit au launcher, fenêtre
 >   de rattachement, attachement manuel, « Préparer et attendre le jeu », Diagnostic >
 >   Lancement) — spec complet dans `docs/multi-stage-launch-system.md` ; module Rust
->   complet spécifié dans `docs/input-backends-rust-design.md` (prêt à poser). La
->   compilation Rust n'est pas possible sur la machine de dev (linker MSVC absent —
->   voir le doc) : validation via PR vers `main` (workflow `verify-native.yml`) ou
->   machine avec VS Build Tools, puis tests sur un vrai jeu (NTE Steam).
+>   `input_backends` posé et **validé** (PR #1, Windows + Linux, 5 tests) ;
+>   `GamePresenceScanner` (`process_scanner`) posé et **validé** (PR #1, Windows +
+>   Linux, 6 tests de scoring, énumération Windows via `windows-sys`) — livrés dans
+>   les 1.16.0/1.17.0. La compilation Rust reste impossible sur la machine de dev
+>   (linker MSVC absent) : validation via la PR #1 (`verify-native.yml`). Reste :
+>   watcher de fenêtres, rattachement auto branché sur les événements natifs, puis
+>   tests sur un vrai jeu (NTE Steam, protocole `docs/nte-keyboard-remap-test.md`).
 >
 > **Progression** :
 > - Phase 1 · Clavier par jeu — fondation implémentée (données, presets, éditeur,

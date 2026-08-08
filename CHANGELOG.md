@@ -274,6 +274,10 @@
   seule. La chaîne de méthode est affichée dans Configuration > Commandes et le
   diagnostic d’entrée complet (ACE, injection, driver, langue Windows) dans
   Diagnostic > Entrées.
+- Conception Rust complète des backends (`docs/input-backends-rust-design.md`) :
+  module `input_backends` prêt à poser (registre, plan, sonde NTE) avec tests
+  unitaires, et boucle de validation documentée (PR → `verify-native.yml` ou
+  machine avec VS Build Tools).
 
 ### Changed
 

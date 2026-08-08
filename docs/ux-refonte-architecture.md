@@ -10,7 +10,12 @@
 > - Phase 3 ✅ Performances (GameWorkspaceCache, badges, lazy loading Mods) — 1.13.0
 > - Phase 4 ✅ Densité & suivi (explications, Stockage, session en jeu, notifications, audit UI, rapports) — 1.12.0
 > - Phase 5 ✅ Expérience avancée (modes Simple/Avancé, recherche de réglages, presets de jeu, environnement de test) — 1.14.0
-> - Phase 6 ⏳ Backends d'application du remapping (Rust, NTE/ACE, tests sur vrai jeu).
+> - Phase 6 🔄 Backends d'application du remapping : fondation TS livrée (registre,
+>   plan par jeu, sonde ACE, UI Commandes + diagnostic) ; module Rust complet spécifié
+>   dans `docs/input-backends-rust-design.md` (prêt à poser). La compilation Rust n'est
+>   pas possible sur la machine de dev (linker MSVC absent — voir le doc) : validation
+>   via PR vers `main` (workflow `verify-native.yml`) ou machine avec VS Build Tools,
+>   puis tests sur un vrai jeu (NTE Steam).
 >
 > **Progression** :
 > - Phase 1 · Clavier par jeu — fondation implémentée (données, presets, éditeur,

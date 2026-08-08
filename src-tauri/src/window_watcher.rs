@@ -57,6 +57,9 @@ pub struct GameWindowMatch {
     pub title: String,
     pub class_name: String,
     pub score: u8,
+    /// Vrai si la fenêtre du jeu est au premier plan : utilisé pour la priorité
+    /// multi-sessions (la session dont la fenêtre a le focus devient prioritaire).
+    pub foreground: bool,
     pub matched_title_pattern: Option<String>,
 }
 
@@ -159,6 +162,7 @@ pub fn detect_windows(
                 title: candidate.title.clone(),
                 class_name: candidate.class_name.clone(),
                 score,
+                foreground: candidate.foreground,
                 matched_title_pattern: matched,
             });
         }

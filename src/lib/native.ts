@@ -659,6 +659,23 @@ export interface SteamRunningState {
   running_app_ids: number[]
 }
 
+export interface GameWindowRequest {
+  gameId: string
+  installRoot?: string
+  gameExecutableCandidates: string[]
+  titlePatterns: string[]
+  reattachContext: boolean
+}
+
+export interface GameWindowMatch {
+  gameId: string
+  pid: number
+  title: string
+  className: string
+  score: number
+  matchedTitlePattern?: string
+}
+
 export type UpdateDownloadEvent =
   | { event: 'Started'; data: { contentLength?: number } }
   | { event: 'Progress'; data: { chunkLength: number } }
@@ -743,6 +760,10 @@ export const native = {
   /** Présence Steam (clé de registre RunningAppID, lecture seule) : preuve
    * supplémentaire du GamePresenceEngine — Steam n'est jamais la seule source. */
   steamRunningState: (appIds: number[]) => desktopOnly<SteamRunningState>('steam_running_state', { appIds }),
+  /** Watcher de fenêtres : la fenêtre principale du jeu est une preuve de
+   * présence indépendante de l'arbre des processus (survit aux launchers,
+   * UAC et relances). */
+  scanGameWindows: (requests: GameWindowRequest[]) => desktopOnly<GameWindowMatch[]>('scan_game_windows', { requests }),
   launchGame: (execPath: string, gameId: string, gameName: string, gameRoot: string, profileId: string, profileName: string, activeMods: number, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, discord: DiscordPresenceConfig | undefined, onProgress: (event: DeploymentProgressEvent) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Le lancement est uniquement disponible dans l’application ZAILON.'))
     const channel = new Channel<DeploymentProgressEvent>()

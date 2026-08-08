@@ -14,7 +14,14 @@ ZAILON : c'est **une source de preuve supplémentaire**.
 3. candidats exécutables de l'adaptateur (launcher + processus finaux) ;
 4. contexte de rattachement (+20, session en attente) ;
 5. **Steam AppID** (`steamAppId` dans l'adaptateur, NTE = 4508340) ;
-6. fenêtre principale du jeu (à venir, Phase 6 — watcher de fenêtres).
+6. **fenêtre principale du jeu** (`window_watcher.rs` — EnumWindows, titre,
+   classe, visibilité, premier plan) : preuve indépendante de l'arbre des
+   processus, elle survit aux launchers, UAC et relances internes.
+
+Le score de fenêtre pondère : installation +40, exécutable final +25, visible
++10, premier plan +5, motif de titre appris +10, contexte +20. Les motifs de
+titre NTE ne sont **jamais devinés** : ils s'ajoutent à l'adaptateur
+(`windowTitlePatterns`) après observation sur la machine réelle.
 
 Score de correspondance (`ProcessMatchScore`, natif) : installation +40,
 exécutable candidat +25, relation launcher +15, contexte +20. Seuils :
@@ -32,7 +39,11 @@ Un seul watcher léger (intervalle 1 s, scan debounce 3 s) dans `App.tsx` :
   `GameLost`) : processus final → `sessionGameDetected` ;
 - scan des **jeux configurés sans session** (`shouldScanExternalGame`) :
   autoAttach activé OU preuve Steam → `attachDetectedGame` (rattachement
-  automatique, aucune action utilisateur).
+  automatique, aucune action utilisateur) ;
+- scan des **fenêtres** en parallèle (`scan_game_windows`) : dès que la fenêtre
+  principale du jeu est visible (score ≥ 80), la session passe en `GameRunning`
+  même si aucun processus candidat n'est encore matché — la fenêtre survit aux
+  transitions de launcher.
 
 `shouldScanExternalGame(game, steamAppIds, autoAttachGameIds, activeGameIds)`
 (logique pure, testée) : pas de scan si le jeu n'est pas installé ou a déjà une

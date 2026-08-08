@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame } from '../../src/lib/gamePresence.ts'
+import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, windowRequestFor } from '../../src/lib/gamePresence.ts'
 import { adapterFor } from '../../src/lib/launchAdapters.ts'
 import type { Game } from '../../src/types.ts'
 
@@ -65,4 +65,22 @@ test('requête externe : reattachContext false', () => {
   const g = game('Cyberpunk 2077', 'C:\\Games\\Cyberpunk 2077')
   const request = presenceRequestFor(g, false)
   assert.equal(request.reattachContext, false)
+})
+
+test('requête fenêtre : exécutables + contexte, motifs jamais devinés', () => {
+  const g = game('Neverness to Everness', 'X:\\Games\\Neverness To Everness')
+  const request = windowRequestFor(g, true)
+  assert.equal(request.gameId, g.id)
+  assert.equal(request.installRoot, g.installDirectory)
+  assert.equal(request.reattachContext, true)
+  assert.ok(request.gameExecutableCandidates.includes('HT-Win64-Shipping.exe'))
+  assert.deepEqual(request.titlePatterns, [])
+})
+
+test('requête fenêtre : motifs appris transmis tels quels', () => {
+  const g = game('Neverness to Everness', 'X:\\Games\\Neverness To Everness')
+  const adapter = { windowTitlePatterns: ['neverness', 'nte'] }
+  ;(g as { launchAdapter?: object }).launchAdapter = adapter
+  const request = windowRequestFor(g, false)
+  assert.deepEqual(request.titlePatterns, ['neverness', 'nte'])
 })

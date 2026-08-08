@@ -315,6 +315,9 @@ export interface GameLaunchAdapter {
   /** AppID Steam du jeu : preuve de présence supplémentaire (Steam n'est pas le
    * seul critère, mais il déclenche la recherche du processus final). */
   steamAppId?: number
+  /** Motifs de titre de fenêtre (sous-chaîne, insensible à la casse) appris lors
+   * des tests réels — jamais devinés (watcher de fenêtres). */
+  windowTitlePatterns?: string[]
 }
 
 export type GameSessionState = 'Preparing' | 'LauncherStarted' | 'WaitingForElevation' | 'WaitingForGame' | 'GameDetected' | 'GameRunning' | 'GameLost' | 'Reattaching' | 'Ending' | 'Ended' | 'Failed'

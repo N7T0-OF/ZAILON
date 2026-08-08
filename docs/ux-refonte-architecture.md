@@ -29,8 +29,13 @@
 >   (`steam_presence.rs`, registre RunningAppID, AppID NTE 4508340, watch dog à
 >   attente prolongée). Docs : `game-session-v2.md`, `smart-play-button.md`,
 >   `game-presence-engine.md`, `quick-game-panel.md`, `nte-steam-presence-fix.md`.
->   Reste : Quick Game Panel (fenêtre native), watcher de fenêtres, puis tests réels
->   NTE Steam (protocole `docs/nte-keyboard-remap-test.md`).
+> - Phase 6 🔄 Watcher de fenêtres natif (`window_watcher.rs`, 1.19.0) : la fenêtre
+>   principale du jeu est une preuve de présence indépendante de l'arbre des
+>   processus (EnumWindows, titre/classe, visibilité, premier plan), scannée en
+>   parallèle des processus par le RunningGamesWatcher — motifs de titre jamais
+>   devinés (`windowTitlePatterns` appris lors des tests réels). Reste : Quick
+>   Game Panel (fenêtre native), puis tests réels NTE Steam (protocole
+>   `docs/nte-keyboard-remap-test.md`).
 >
 > **Progression** :
 > - Phase 1 · Clavier par jeu — fondation implémentée (données, presets, éditeur,

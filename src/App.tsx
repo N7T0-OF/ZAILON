@@ -7,7 +7,7 @@ import { UpdateProvider } from './components/UpdateProvider'
 import { useStore } from './store/useStore'
 import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
-import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame } from './lib/gamePresence'
+import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, windowRequestFor } from './lib/gamePresence'
 import { register, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
 import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-profiles/application/shortcuts'
 
@@ -61,25 +61,33 @@ export default function App() {
       if (!waiters.length && !external.length) return
       scanning = true
       lastScan = now
-      const requests = [
+      const targets = [
         ...waiters.flatMap(session => {
           const game = state.games.find(item => item.id === session.gameId)
-          return game ? [presenceRequestFor(game, true)] : []
+          return game ? [{ game, reattachContext: true }] : []
         }),
-        ...external.map(game => presenceRequestFor(game, false)),
+        ...external.map(game => ({ game, reattachContext: false })),
       ]
-      void native.scanGamePresence(requests)
-        .then(results => {
-          const storeNow = useStore.getState()
-          for (const result of results) {
-            if (result.score < AUTO_ATTACH_THRESHOLD) continue
-            if (waiters.some(session => session.gameId === result.gameId)) {
-              storeNow.sessionGameDetected(result.gameId, result.processName, result.score, ['processus', 'installation'])
-            } else {
-              storeNow.attachDetectedGame(result.gameId, result.processName, result.score, ['processus', 'installation'])
-            }
+      const attach = (results: Array<{ gameId: string; score: number; processName?: string; evidence: string[] }>) => {
+        const storeNow = useStore.getState()
+        for (const result of results) {
+          if (result.score < AUTO_ATTACH_THRESHOLD) continue
+          if (waiters.some(session => session.gameId === result.gameId)) {
+            storeNow.sessionGameDetected(result.gameId, result.processName ?? '', result.score, result.evidence)
+          } else {
+            storeNow.attachDetectedGame(result.gameId, result.processName ?? '', result.score, result.evidence)
           }
-        })
+        }
+      }
+      // Deux preuves complémentaires scannées en parallèle : processus (chemin +
+      // exécutable) et fenêtre principale (visible / premier plan) — la fenêtre
+      // survit aux launchers, UAC et relances internes.
+      void Promise.all([
+        native.scanGamePresence(targets.map(({ game, reattachContext }) => presenceRequestFor(game, reattachContext)))
+          .then(results => attach(results.map(result => ({ gameId: result.gameId, score: result.score, processName: result.processName, evidence: ['processus', 'installation'] })))),
+        native.scanGameWindows(targets.map(({ game, reattachContext }) => windowRequestFor(game, reattachContext)))
+          .then(results => attach(results.map(result => ({ gameId: result.gameId, score: result.score, evidence: ['fenêtre', 'processus'] })))),
+      ])
         .catch(() => undefined)
         .finally(() => { scanning = false })
     }, 1000)

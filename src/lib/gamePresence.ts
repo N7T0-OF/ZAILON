@@ -1,6 +1,6 @@
 import type { Game } from '../types/index.ts'
 import { adapterFor } from './launchAdapters.ts'
-import type { GamePresenceRequest } from './native.ts'
+import type { GamePresenceRequest, GameWindowRequest } from './native.ts'
 
 /**
  * GamePresenceEngine — logique pure de détection de présence, testable.
@@ -39,6 +39,20 @@ export function presenceRequestFor(game: Game, reattachContext: boolean): GamePr
     installRoot: game.installDirectory,
     launcherExecutable: adapter.launcherExecutable,
     gameExecutableCandidates: adapter.gameExecutableCandidates,
+    reattachContext,
+  }
+}
+
+/** Construit la requête de watcher de fenêtres pour un jeu. Les motifs de
+ * titre ne sont jamais devinés : ils viennent de l'adaptateur (appris lors des
+ * tests réels). */
+export function windowRequestFor(game: Game, reattachContext: boolean): GameWindowRequest {
+  const adapter = adapterFor(game)
+  return {
+    gameId: game.id,
+    installRoot: game.installDirectory,
+    gameExecutableCandidates: adapter.gameExecutableCandidates,
+    titlePatterns: adapter.windowTitlePatterns ?? [],
     reattachContext,
   }
 }

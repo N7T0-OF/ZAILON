@@ -413,15 +413,29 @@
 
 ### Known Issues
 
-### Data
-
-### Technical
-
 ## [Unreleased]
 
 ### Added
 
+- **Watcher de fenêtres natif** (`window_watcher.rs`, validé par la PR #1) :
+  la fenêtre principale du jeu (EnumWindows, titre, classe, visibilité,
+  premier plan) est une preuve de présence indépendante de l'arbre des
+  processus — elle survit aux launchers, aux élévations UAC et aux relances
+  internes. Scannée en parallèle des processus par le RunningGamesWatcher, elle
+  fait passer la session en `GameRunning` dès que la fenêtre est visible
+  (score ≥ 80 : installation +40, exécutable +25, visible +10, premier plan
+  +5, motif de titre appris +10). Les motifs de titre NTE ne sont jamais
+  devinés : `windowTitlePatterns` s'ajoute à l'adaptateur après observation
+  réelle.
+- Tests : 5 tests unitaires Rust (score de fenêtre, hors-installation ignoré,
+  launcher ≠ jeu, motif de titre optionnel) + 2 tests frontend
+  `test:game-presence` (requête fenêtre, motifs transmis tels quels).
+
 ### Changed
+
+- `docs/game-presence-engine.md` : source de preuve « fenêtre principale »
+  implémentée ; `docs/ux-refonte-architecture.md` : roadmap Phase 6 — watcher
+  de fenêtres livré (1.19.0).
 
 ### Fixed
 

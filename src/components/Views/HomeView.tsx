@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { Game } from '../../types'
 import { resourceUrl, native } from '../../lib/native'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
+import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
 import { formatSeconds, formatTime, timeAgo } from '../../utils'
 import { GameContextMenu } from '../GameContextMenu'
@@ -10,6 +11,7 @@ import { GameResourcesDialog } from '../GameResourcesDialog'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
 
 export function HomeView() {
+  const summaries = useWorkspaceCache()
   const games = useStore(state => state.games)
   const selectedGame = useStore(getSelectedGame)
   const selectedProfile = useStore(getSelectedProfile)
@@ -190,7 +192,7 @@ export function HomeView() {
             <div className="grid h-[72px] grid-cols-3 gap-2">
               {Array.from({ length: 3 }, (_, index) => {
                 const game = quickGames[index]
-                return game ? <QuickGame key={game.id} game={game} active={game.id === selectedGame.id} onSelect={() => setSelectedGame(game.id)} /> : <div key={`empty-${index}`} className="rounded-lg border border-dashed border-white/[0.06] bg-black/10" />
+                return game ? <QuickGame key={game.id} game={game} summary={summaries[game.id]} active={game.id === selectedGame.id} onSelect={() => setSelectedGame(game.id)} /> : <div key={`empty-${index}`} className="rounded-lg border border-dashed border-white/[0.06] bg-black/10" />
               })}
             </div>
             <p className="mt-1 truncate text-[11px] text-white/26">{visibleGames.length} élément{visibleGames.length !== 1 ? 's' : ''} dans ZAILON</p>
@@ -230,11 +232,15 @@ function HomeBadge({ label }: { label: string }) {
   return <span className="flex items-center gap-1 rounded-full border border-white/[0.09] bg-black/25 px-2 py-0.5 text-[10px] font-medium text-white/58 backdrop-blur-sm"><Check size={9} className="text-emerald-300/80" />{label}</span>
 }
 
-function QuickGame({ game, active, onSelect }: { game: Game; active: boolean; onSelect: () => void }) {
+function QuickGame({ game, summary, active, onSelect }: { game: Game; summary?: { health?: { verdict: 'ok' | 'vigilance' | 'attention' }; profileCounts?: Record<string, { active: number }> }; active: boolean; onSelect: () => void }) {
   const cover = resourceUrl(game.resources?.coverPath || game.resources?.bannerPath || game.resources?.backgroundPath) || game.backgroundArt
+  const firstProfileId = game.profiles[0]?.id
+  const activeCount = firstProfileId ? summary?.profileCounts?.[firstProfileId]?.active : undefined
+  const healthTone = summary?.health ? (summary.health.verdict === 'ok' ? 'bg-emerald-300/85' : summary.health.verdict === 'vigilance' ? 'bg-amber-300/85' : 'bg-red-300/85') : undefined
   return <button type="button" onClick={onSelect} title={game.name} className={`group/quick relative min-w-0 overflow-hidden rounded-lg border text-left ${active ? 'border-[#dbe8e5]/28' : 'border-white/[0.06] hover:border-white/20'}`}>
     {cover ? <img src={cover} alt="" className="absolute inset-0 h-full w-full object-cover opacity-68 transition-transform group-hover/quick:scale-105" /> : <div className="absolute inset-0 bg-[linear-gradient(135deg,#25292a,#101313)]" />}
     <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
-    <span className="absolute inset-x-1.5 bottom-1.5 truncate text-[11px] font-semibold text-white/78">{game.name}</span>
+    {healthTone && <span className={`absolute right-1 top-1 h-2 w-2 rounded-full ${healthTone}`} title={`Santé : ${summary?.health?.verdict}`} />}
+    <span className="absolute inset-x-1.5 bottom-1.5 flex items-center gap-1 truncate text-[11px] font-semibold text-white/78"><span className="min-w-0 flex-1 truncate">{game.name}</span>{activeCount !== undefined && <span className="shrink-0 font-mono text-[9px] text-white/40">{activeCount} actif(s)</span>}</span>
   </button>
 }

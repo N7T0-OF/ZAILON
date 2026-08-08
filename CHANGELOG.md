@@ -214,6 +214,9 @@
 - GameWorkspaceCache : compteurs de mods par profil et résumé santé mis en cache
   par jeu (localStorage, empreinte + TTL 60 s), rafraîchis en arrière-plan.
   Le sélecteur de profils s’ouvre instantanément même avec de grandes bibliothèques.
+- Les cartes de la Bibliothèque et les jeux récents de l’Accueil affichent
+  directement l’état (pastille santé et mods actifs) depuis le cache, sans
+  calcul au rendu.
 
 ### Security
 

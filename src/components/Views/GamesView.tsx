@@ -412,9 +412,14 @@ export function GamesView() {
       <div className={`${libraryViewMode === 'grid' ? 'grid grid-cols-2 content-start gap-2' : 'space-y-1'} mt-2 flex-1 overflow-y-auto px-2`} role="listbox" aria-label="Jeux de la bibliothèque">
         {visibleGames.map(game => {
           const cover = resourceUrl(game.resources?.coverPath || game.resources?.bannerPath || game.resources?.backgroundPath || game.backgroundArt)
+          const summary = summaries[game.id]
+          const firstProfileId = game.profiles[0]?.id
+          const active = firstProfileId ? summary?.profileCounts[firstProfileId]?.active : undefined
+          const health = summary?.health
+          const healthTone = health ? (health.verdict === 'ok' ? 'bg-emerald-300/85' : health.verdict === 'vigilance' ? 'bg-amber-300/85' : 'bg-red-300/85') : 'bg-white/20'
           return <button key={game.id} role="option" aria-selected={game.id === selectedGame.id} onClick={() => setSelectedGame(game.id)} className={`overflow-hidden rounded-lg text-left ${game.id === selectedGame.id ? 'border border-gold/35 bg-gold/10 text-gold' : 'border border-white/[0.055] text-white/58 hover:bg-white/[0.04]'} ${libraryViewMode === 'compact' ? 'w-full px-2.5 py-2' : libraryViewMode === 'illustrated' ? 'flex w-full items-center gap-2 p-1.5' : ''}`}>
             {libraryViewMode !== 'compact' && <span className={`relative block shrink-0 overflow-hidden bg-white/[0.035] ${libraryViewMode === 'grid' ? 'aspect-[3/4] w-full' : 'h-12 w-9 rounded'}`}>{cover ? <img src={cover} alt="" className="h-full w-full object-cover" /> : <span className="flex h-full items-center justify-center text-lg font-bold text-white/18">{game.name[0]}</span>}</span>}
-            <span className={libraryViewMode === 'grid' ? 'block p-2' : 'min-w-0'}><span className="block truncate text-xs font-semibold">{game.name}</span>{libraryViewMode !== 'compact' && <span className="mt-0.5 block truncate font-mono text-[11px] text-white/30">{game.installedMods.length} mods</span>}</span>
+            <span className={libraryViewMode === 'grid' ? 'block p-2' : 'min-w-0'}><span className="flex items-center gap-1.5 truncate text-xs font-semibold"><span className={`h-1.5 w-1.5 shrink-0 rounded-full ${healthTone}`} title={health ? `Santé : ${health.verdict}` : 'Santé non calculée'} />{game.name}</span>{libraryViewMode !== 'compact' && <span className="mt-0.5 block truncate font-mono text-[11px] text-white/30">{active !== undefined ? `${active} actif(s)` : `${game.installedMods.length} mods`}</span>}</span>
           </button>
         })}
       </div>

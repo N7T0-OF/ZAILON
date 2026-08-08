@@ -357,7 +357,14 @@
   unitaires, énumération Windows (Toolhelp + chemin complet) via `windows-sys`,
   commande `scan_game_presence` appelée par l'Accueil pendant l'attente du jeu.
 
-## [Unreleased]
+## [1.18.0] - 2026-08-08
+
+> Release du correctif critique du bouton Jouer : SmartPlayButton (un seul CTA),
+> suppression des actions manuelles Attacher / Continuer à attendre / Terminer la
+> session, GameSessionV2 (la session appartient au jeu, pas au PID),
+> GamePresenceEngine avec rattachement automatique des jeux lancés hors ZAILON
+> et preuve Steam native (registre RunningAppID, AppID NTE 4508340) — validés
+> par la PR #1 sur Windows + Linux.
 
 ### Added
 
@@ -392,7 +399,27 @@
 - `docs/ux-refonte-architecture.md` : roadmap Phase 6 — jalon GameSessionV2 +
   GamePresenceEngine livré (1.18.0).
 
+### Fixed
 
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
+## [Unreleased]
+
+### Added
 
 ### Changed
 

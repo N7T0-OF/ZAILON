@@ -146,13 +146,11 @@
 - Backends d’application du remapping (interception réelle limitée à la fenêtre du
   jeu) : Phase 2, non implémentés — nécessitent des tests sur un vrai jeu.
 
-## [Unreleased]
+## [1.12.0] - 2026-08-08
 
-> Pendant le développement, chaque changement visible par l'utilisateur est ajouté
-> ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
-> cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
-> `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
-> Release Notes à partir de cette section et refuse de publier si elle est vide.
+> Release du lot « Densité UI, session en jeu et suivi du stockage » : préférence
+> « Réduire les explications », centre Stockage, écran de session, badges runtime,
+> effacement de l’historique de notifications et audit de densité automatique.
 
 ### Added
 
@@ -196,6 +194,36 @@
   `docs/history-retention-policy.md`.
 - Action store `clearNotificationHistory` pour l’effacement complet de la session de
   notifications.
+
+## [Unreleased]
+
+> Pendant le développement, chaque changement visible par l'utilisateur est ajouté
+> ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
+> cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
+> `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
+> Release Notes à partir de cette section et refuse de publier si elle est vide.
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
 
 ## 1.9.0 — Profils immuables et diagnostic transparent
 

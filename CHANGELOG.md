@@ -413,7 +413,12 @@
 
 ### Known Issues
 
-## [Unreleased]
+## [1.19.0] - 2026-08-08
+
+> Release du watcher de fenêtres natif : la fenêtre principale du jeu est
+> désormais une preuve de présence à part entière (visible / premier plan,
+> survit aux launchers, aux UAC et aux relances) — validée par la PR #1 sur
+> Windows + Linux.
 
 ### Added
 
@@ -436,6 +441,36 @@
 - `docs/game-presence-engine.md` : source de preuve « fenêtre principale »
   implémentée ; `docs/ux-refonte-architecture.md` : roadmap Phase 6 — watcher
   de fenêtres livré (1.19.0).
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
+> Pendant le développement, chaque changement visible par l'utilisateur est ajouté
+> ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
+> cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
+> `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
+> Release Notes à partir de cette section et refuse de publier si elle est vide.
+
+## [Unreleased]
+
+### Added
+
+### Changed
 
 ### Fixed
 

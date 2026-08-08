@@ -61,6 +61,18 @@ test('la requête de présence embarque la chaîne de l\'adaptateur', () => {
   assert.equal(request.launcherExecutable, 'NTELauncher.exe')
 })
 
+test('signatures apprises incluses dans la requête (spec NTE §7 / #36)', () => {
+  const g = game('Neverness to Everness', 'X:\\Games\\Neverness To Everness')
+  const without = presenceRequestFor(g, true)
+  assert.equal(without.learnedSignatures, undefined)
+  const withLearned = presenceRequestFor(g, true, [
+    { filename: 'HT-Win64-Shipping-2.exe', relativePath: 'Client/WindowsNoEditor/HT/Binaries/Win64/HT-Win64-Shipping-2.exe', publisher: 'NTE Global' },
+  ])
+  assert.equal(withLearned.learnedSignatures?.length, 1)
+  assert.equal(withLearned.learnedSignatures?.[0].filename, 'HT-Win64-Shipping-2.exe')
+  assert.ok(withLearned.learnedSignatures?.[0].relativePath?.includes('Win64'))
+})
+
 test('requête externe : reattachContext false', () => {
   const g = game('Cyberpunk 2077', 'C:\\Games\\Cyberpunk 2077')
   const request = presenceRequestFor(g, false)

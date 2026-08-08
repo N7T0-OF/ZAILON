@@ -904,6 +904,8 @@
 
 ### Added
 
+- Signatures de processus apprises par installation (spec NTE §7 / #36) : le processus final confirmé (confiance ≥ 80) devient la référence de détection — au lancement suivant, même exécutable renommé par une mise à jour du jeu, la détection est instantanée (bonus +25 nom appris, +15 chemin relatif).
+
 ### Changed
 
 ### Fixed

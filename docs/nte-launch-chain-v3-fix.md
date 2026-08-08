@@ -74,7 +74,21 @@ intermédiaire), un toast apparaît en haut à droite pendant 2,5 s :
 La décision `recovered` vs `detected` est une fonction pure (`recoveryKind`,
 `sessionPriority.ts`, testée) ; le toast est auto-fermé, fermable au clic.
 
-## 7. Limites restantes
+## 7. Signatures apprises (spec §7 / #36)
+
+Quand le processus final est confirmé (score ≥ 80), ZAILON enregistre sa
+signature par installation (`gameProcessSignatures`, persisté, format
+`schemaVersion: 1`) : nom de l'exécutable, chemin relatif sous l'installation,
+éditeur éventuel. Au lancement suivant, la requête de présence embarque ces
+signatures (`learnedSignatures`) :
+
+- **+25** si le nom du processus correspond à une signature apprise ;
+- **+15** supplémentaires si le chemin relatif appris correspond aussi ;
+- test natif `learned_signature_boosts_the_final_process` : un exécutable
+  NOUVEAU (pas dans les candidats de l'adaptateur) atteint 80/100 grâce à la
+  signature apprise — résistance aux mises à jour qui renomment l'exe (spec §6).
+
+## 8. Limites restantes
 
 - La vraie chaîne NTE (nom exact du processus final, fenêtres) reste à confirmer
   sur la machine avec le jeu (protocole `docs/nte-keyboard-remap-test.md`).

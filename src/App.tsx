@@ -5,7 +5,7 @@ import { AppWindow } from './components/Layout/AppWindow'
 import { CommandPalette } from './components/CommandPalette'
 import { UpdateProvider } from './components/UpdateProvider'
 import { resolveProfileMods, useStore } from './store/useStore'
-import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
+import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type LearnedProcessSignature, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
 import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, windowRequestFor } from './lib/gamePresence'
 import { pickPrioritySession } from './lib/sessionPriority'
@@ -107,8 +107,22 @@ export default function App() {
       // exécutable) et fenêtre principale (visible / premier plan) — la fenêtre
       // survit aux launchers, UAC et relances internes.
       void Promise.all([
-        native.scanGamePresence(attachTargets.map(({ game, reattachContext }) => presenceRequestFor(game, reattachContext)))
-          .then(results => attach(results.map(result => ({ gameId: result.gameId, score: result.score, processName: result.processName, evidence: ['processus', 'installation'] })))),
+        native.scanGamePresence(attachTargets.map(({ game, reattachContext }) => presenceRequestFor(game, reattachContext, learnedSignaturesFor(game.id))))
+          .then(results => {
+            attach(results.map(result => ({ gameId: result.gameId, score: result.score, processName: result.processName, evidence: ['processus', 'installation'] })))
+            // Apprentissage des signatures (spec NTE §7 / #36) : un processus
+            // final confirmé (score ≥ 80) devient la référence de détection —
+            // au prochain lancement, même exe renommé par une mise à jour du jeu.
+            for (const result of results) {
+              if (result.score < AUTO_ATTACH_THRESHOLD || !result.processName) continue
+              const game = useStore.getState().games.find(item => item.id === result.gameId)
+              const root = game?.installDirectory
+              const relative = root && result.processPath?.toLowerCase().startsWith(root.toLowerCase())
+                ? result.processPath.slice(root.length).replace(/^[\\/]+/, '').replace(/\\/g, '/')
+                : undefined
+              useStore.getState().learnGameProcessSignature(result.gameId, result.processName, relative || undefined)
+            }
+          }),
         native.scanGameWindows(targets.map(({ game, reattachContext }) => windowRequestFor(game, reattachContext)))
           .then(results => {
             attach(results.map(result => ({ gameId: result.gameId, score: result.score, evidence: ['fenêtre', 'processus'] })))
@@ -370,6 +384,15 @@ export default function App() {
       {exclusiveNoticeOpen && <QuickPanelExclusiveNotice onClose={() => setExclusiveNoticeOpen(false)} />}
     </div>
   )
+}
+
+/** Signatures apprises d'un jeu pour la requête de présence (spec NTE §7 / #36).
+ * Lecture directe du store persisté — au prochain lancement, la détection est
+ * instantanée même si l'exécutable final a changé (mise à jour du jeu). */
+function learnedSignaturesFor(gameId: string): LearnedProcessSignature[] | undefined {
+  const signature = useStore.getState().gameProcessSignatures?.[gameId]
+  if (!signature) return undefined
+  return [{ filename: signature.filename, relativePath: signature.relativePath, publisher: signature.publisher }]
 }
 
 // Spec « Correctif NTE » §21-24 — notification « jeu en cours » : affichée en

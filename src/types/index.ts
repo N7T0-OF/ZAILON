@@ -30,6 +30,21 @@ export type ExploreColumns = '2' | '3'
 export type ModCategorySource = 'detected' | 'metadata' | 'user'
 export type ModCategoryConfidence = 'high' | 'medium' | 'low'
 
+/** Signature de processus final apprise (spec NTE §7 / #36) : enregistrée quand
+ * le vrai exe d'un jeu est détecté avec forte confiance, réutilisée au lancement
+ * suivant pour une détection instantanée — même si l'exécutable change après une
+ * mise à jour. Cache par installation, format versionné. */
+export interface GameProcessSignature {
+  /** Nom de l'exécutable final (ex. HT-Win64-Shipping.exe). */
+  filename: string
+  /** Chemin relatif sous l'installation. */
+  relativePath?: string
+  /** Éditeur / signature du processus, si disponible. */
+  publisher?: string
+  seenAt: number
+  schemaVersion: 1
+}
+
 export interface ModCategoryTag {
   id: string
   label: string

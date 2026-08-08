@@ -646,6 +646,16 @@ export interface GamePresenceRequest {
   launcherExecutableCandidates?: string[]
   gameExecutableCandidates: string[]
   reattachContext: boolean
+  /** Signatures apprises (spec NTE §7 / #36) : nom + chemin relatif du
+   * processus final confirmé lors d'un lancement précédent. */
+  learnedSignatures?: LearnedProcessSignature[]
+}
+
+/** Signature de processus apprise par installation (cache versionné). */
+export interface LearnedProcessSignature {
+  filename: string
+  relativePath?: string
+  publisher?: string
 }
 
 export interface GamePresence {

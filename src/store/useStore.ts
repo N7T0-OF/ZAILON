@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, Game, GameInputProfile, GameKeyboardLayout, GamePreset, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, SessionSource, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
+import { BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, Game, GameInputProfile, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, SessionSource, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
 import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { adapterFor, FALLBACK_ADAPTER, isLauncherBased } from '../lib/launchAdapters'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
@@ -435,6 +435,10 @@ export interface Store {
   recordLastKnownGoodFrameworks: (gameId: string) => void
   /** Verrouille/déverrouille les frameworks d'un profil (spec §42). */
   setLockFrameworks: (gameId: string, profileId: string, locked: boolean) => void
+  /** Signatures de processus final apprises par installation (spec NTE §7 / #36). */
+  gameProcessSignatures?: Record<string, GameProcessSignature | undefined>
+  /** Apprend la signature d'un processus final confirmé (confiance ≥ 80). */
+  learnGameProcessSignature: (gameId: string, filename: string, relativePath?: string, publisher?: string) => void
   /** Recalcule la Rich Presence vers la session prioritaire (spec
    * multi-sessions §14) : une seule activité publiée, celle de la session
    * prioritaire — appelé à chaque changement de priorité. */
@@ -1843,6 +1847,22 @@ export const useStore = create<Store>()(persist((set, get) => ({
       profiles: game.profiles.map(profile => profile.id !== profileId ? profile : { ...profile, lockFrameworks: locked }),
     }),
   })),
+  /** Apprentissage (§7 / #36) : le processus final confirmé devient la référence
+   * de détection — au prochain lancement, même si l'exécutable a changé (mise à
+   * jour du jeu), la signature apprise permet une détection instantanée. */
+  learnGameProcessSignature: (gameId, filename, relativePath, publisher) => {
+    if (!filename.trim()) return
+    const signature: GameProcessSignature = {
+      filename,
+      relativePath: relativePath || undefined,
+      publisher: publisher || undefined,
+      seenAt: Date.now(),
+      schemaVersion: 1,
+    }
+    set(current => ({
+      gameProcessSignatures: { ...(current.gameProcessSignatures || {}), [gameId]: signature },
+    }))
+  },
   /** Rich Presence prioritaire (§14) : publiée pour la session prioritaire en
    * cours quand la présence est activée, arrêtée sinon. Appelée par
    * `applyInputArbiter` (donc à chaque transition de session / changement de

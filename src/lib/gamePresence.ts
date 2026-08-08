@@ -1,6 +1,6 @@
 import type { Game } from '../types/index.ts'
 import { adapterFor } from './launchAdapters.ts'
-import type { GamePresenceRequest, GameWindowRequest } from './native.ts'
+import type { GamePresenceRequest, GameWindowRequest, LearnedProcessSignature } from './native.ts'
 
 /**
  * GamePresenceEngine — logique pure de détection de présence, testable.
@@ -31,8 +31,10 @@ export function shouldScanExternalGame(
   return appId !== undefined && steamAppIds.includes(appId)
 }
 
-/** Construit la requête de scan pour un jeu (session en attente ou externe). */
-export function presenceRequestFor(game: Game, reattachContext: boolean): GamePresenceRequest {
+/** Construit la requête de scan pour un jeu (session en attente ou externe).
+ * `learned` : signatures apprises lors des lancements précédents (spec NTE §7 /
+ * #36) — le nom appris donne un score fort, même si l'exécutable a changé. */
+export function presenceRequestFor(game: Game, reattachContext: boolean, learned?: LearnedProcessSignature[]): GamePresenceRequest {
   const adapter = adapterFor(game)
   return {
     gameId: game.id,
@@ -41,6 +43,7 @@ export function presenceRequestFor(game: Game, reattachContext: boolean): GamePr
     launcherExecutableCandidates: adapter.launcherExecutableCandidates ?? [],
     gameExecutableCandidates: adapter.gameExecutableCandidates,
     reattachContext,
+    learnedSignatures: learned?.length ? learned : undefined,
   }
 }
 

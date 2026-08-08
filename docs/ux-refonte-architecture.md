@@ -31,8 +31,10 @@
 >   Suite : préférence « Réduire les explications », audit `npm run audit:ui`,
 >   rapports `docs/ui-cleanup-and-input-remap-report.md`, `docs/history-retention-policy.md`,
 >   `docs/settings-density-audit.md`, `docs/nte-keyboard-remap-test.md`.
-> - Phases 3-4 : cache par jeu, lazy loading, modes Simple/Avancé, presets de jeu,
->   environnement de test, outils par jeu — non commencées.
+> - Phase 3 · GameWorkspaceCache — fondation implémentée (compteurs de profils +
+>   santé par jeu en cache local, rafraîchi en arrière-plan, rendu instantané du
+>   sélecteur de profils). Lazy loading des sections lourdes, modes Simple/Avancé,
+>   presets de jeu, environnement de test, outils par jeu — restent à faire.
 > - Backends clavier (bindings du jeu puis traduction runtime, incl. NTE/ACE) :
 >   non implémentés, nécessitent des tests sur un vrai jeu avant publication.
 

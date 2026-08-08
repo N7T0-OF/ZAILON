@@ -5,6 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { appVersion, getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
 import { BackgroundTaskSnapshot, CollectionInstallPlan, Mo2ImportOptions, Mo2ImportPreview, Mo2ImportResult, ProfileDeploymentAudit, native, pickExecutable, pickFolder, pickFolders, pickProfileArchive, resourceUrl, saveProfileArchive } from '../../lib/native'
 import { ModCard } from '../UI/ModCard'
+import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { formatTime, timeAgo } from '../../utils'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
 import type { Game, GameTab, Mod, ModImportCandidate, Profile, ProfileArchiveManifest, SensitiveFileAssessment, SensitiveImportAction } from '../../types'
@@ -102,6 +103,7 @@ export function GamesView() {
   const modsListRef = useRef<HTMLDivElement>(null)
   const selectAllRef = useRef<HTMLInputElement>(null)
 
+  const summaries = useWorkspaceCache()
   const profileMods = useMemo(() => resolveProfileMods(selectedGame, selectedProfile), [selectedGame, selectedProfile])
   const filteredMods = profileMods.filter(mod => mod.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()) && (!tagFilter || mod.categoryTags?.some(tag => tag.id === tagFilter)))
   const availableTags = [...new Map(profileMods.flatMap(mod => mod.categoryTags || []).map(tag => [tag.id, tag])).values()].sort((left, right) => left.label.localeCompare(right.label))
@@ -433,7 +435,7 @@ export function GamesView() {
               <div className="fixed inset-0 z-30" onClick={() => setProfileMenuOpen(false)} />
               <div className="absolute left-0 top-full z-40 mt-2 w-80 rounded-xl border border-white/[0.1] bg-[#111414]/98 p-2 shadow-2xl backdrop-blur-xl">
                 <div className="max-h-72 overflow-y-auto">{selectedGame.profiles.map(profile => {
-                  const count = resolveProfileMods(selectedGame, profile).filter(mod => mod.enabled).length
+                  const count = summaries[selectedGame.id]?.profileCounts[profile.id]?.active ?? resolveProfileMods(selectedGame, profile).filter(mod => mod.enabled).length
                   return <button key={profile.id} type="button" onClick={() => { void setSelectedProfile(profile.id); setProfileMenuOpen(false) }} className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-white/[0.05] ${profile.id === selectedProfile.id ? 'bg-gold/[0.07]' : ''}`}>
                     <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-white/78">{profile.name}</span><span className="mt-0.5 block text-[10px] text-white/34">{count} mod(s) actif(s){profile.lastPlayed ? ` · joué ${timeAgo(profile.lastPlayed)}` : ''}</span></span>
                     {profile.locked && <span className="rounded-full border border-emerald-300/20 bg-emerald-300/[0.05] px-2 py-0.5 text-[9px] text-emerald-200">Stable</span>}

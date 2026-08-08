@@ -211,6 +211,10 @@
 
 ### Performance
 
+- GameWorkspaceCache : compteurs de mods par profil et résumé santé mis en cache
+  par jeu (localStorage, empreinte + TTL 60 s), rafraîchis en arrière-plan.
+  Le sélecteur de profils s’ouvre instantanément même avec de grandes bibliothèques.
+
 ### Security
 
 ### Compatibility
@@ -224,6 +228,10 @@
 ### Data
 
 ### Technical
+
+- Nouveau module `src/lib/workspaceCache.ts` : `getWorkspaceCache`,
+  `buildWorkspaceSummary` et le hook `useWorkspaceCache` (calcul lourd hors rendu,
+  repli sur le calcul réel si le cache est absent ou expiré).
 
 ## 1.9.0 — Profils immuables et diagnostic transparent
 

@@ -8,6 +8,7 @@ import { createUserTag, withInferredTags } from '../lib/modCategories'
 import { validateCyberpunkFrameworkDeps } from '../lib/frameworkValidator'
 import { mergeModCatalogs, reconcileModStates } from '../lib/profileState'
 import { arbitrateInputProfiles, pickPrioritySession, recoveryKind } from '../lib/sessionPriority'
+import { compareFrameworkSets, fingerprintFrameworkSet, hasFrameworkChanges, type FrameworkSnapshot } from '../lib/lastKnownGood'
 
 const APP_VERSION = '1.26.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
@@ -423,6 +424,13 @@ export interface Store {
    * `recovered` = session reprise après redémarrage de ZAILON. */
   sessionToast?: { kind: 'started' | 'detected' | 'recovered'; gameName: string; at: number }
   setSessionToast: (toast?: { kind: 'started' | 'detected' | 'recovered'; gameName: string; at: number }) => void
+  /** Empreinte des frameworks au dernier lancement réussi, par jeu (spec
+   * « Last Known Good » §41) — `undefined` = aucune référence encore. */
+  lastKnownGoodFrameworks?: Record<string, FrameworkSnapshot | undefined>
+  /** Enregistre l'empreinte actuelle des frameworks du profil actif du jeu. */
+  recordLastKnownGoodFrameworks: (gameId: string) => void
+  /** Verrouille/déverrouille les frameworks d'un profil (spec §42). */
+  setLockFrameworks: (gameId: string, profileId: string, locked: boolean) => void
   cancelSession: (gameId: string) => void
   applyInputArbiter: () => void
   beginSession: (gameId: string, profileId: string, source?: SessionSource) => void
@@ -1269,6 +1277,23 @@ export const useStore = create<Store>()(persist((set, get) => ({
           return
         }
       }
+      // Last Known Good (§41-42) : si une référence existe et la configuration
+      // des frameworks a changé depuis le dernier lancement réussi, on avertit
+      // (et on BLOQUE si le profil est verrouillé — pas de remplacement silencieux).
+      if (!options?.withoutMods) {
+        const previous = state.lastKnownGoodFrameworks?.[game.id]
+        const current = fingerprintFrameworkSet(enabledMods)
+        if (previous && hasFrameworkChanges(previous, current)) {
+          const changes = compareFrameworkSets(previous, current)
+            .map(change => `${change.framework} (${change.kind === 'added' ? 'ajouté' : change.kind === 'removed' ? 'retiré' : 'mis à jour'}${change.previousVersion && change.currentVersion && change.previousVersion !== change.currentVersion ? ` : ${change.previousVersion} → ${change.currentVersion}` : ''})`)
+            .join(', ')
+          if (profile.lockFrameworks) {
+            set({ notice: `Lancement bloqué — le profil est verrouillé (frameworks) et la configuration a changé depuis le dernier lancement réussi : ${changes}. Déverrouillez les frameworks (Configuration) ou restaurez la configuration précédente.` })
+            return
+          }
+          set({ notice: `Attention — la configuration des frameworks a changé depuis le dernier lancement réussi : ${changes}. Vérifiez dans État & Diagnostic > Frameworks avant de continuer.` })
+        }
+      }
       const executableParent = game.execPath.replace(/[\\/][^\\/]+$/, '')
       const knownRoot = game.name.toLocaleLowerCase().includes('cyberpunk') && /[\\/]bin[\\/]x64(?:[\\/]|$)/i.test(game.execPath)
         ? game.execPath.split(/[\\/]bin[\\/]x64/i)[0]
@@ -1422,6 +1447,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
       // détecté → « En cours via ZAILON » (jamais au lancement du launcher).
       get().setSessionToast({ kind: 'started', gameName: game.name, at: now })
     }
+    // Spec #41 : le jeu fonctionne → nouvelle référence Last Known Good.
+    get().recordLastKnownGoodFrameworks(gameId)
     get().applyInputArbiter()
   },
   /** GamePresenceEngine : un jeu configuré tourne hors ZAILON (Steam, launcher
@@ -1472,6 +1499,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
       gameName: game.name,
       at: now,
     })
+    // Spec #41 : jeu fonctionnel (détecté) → référence Last Known Good.
+    get().recordLastKnownGoodFrameworks(gameId)
     get().applyInputArbiter()
   },
   attachGameSession: (gameId, profileId, processName) => {
@@ -1782,6 +1811,23 @@ export const useStore = create<Store>()(persist((set, get) => ({
     state.applyInputArbiter()
   },
   setSessionToast: toast => set({ sessionToast: toast }),
+  /** Last Known Good (§41) : empreinte des frameworks du profil actif, à
+   * enregistrer quand le processus final est détecté (jeu fonctionnel). */
+  recordLastKnownGoodFrameworks: gameId => {
+    const state = get()
+    const game = state.games.find(item => item.id === gameId)
+    const profile = game?.profiles.find(item => item.id === state.selectedProfileId) ?? game?.profiles[0]
+    if (!game || !profile) return
+    const snapshot = fingerprintFrameworkSet(resolveProfileMods(game, profile))
+    if (!Object.keys(snapshot).length) return
+    set(current => ({ lastKnownGoodFrameworks: { ...(current.lastKnownGoodFrameworks || {}), [gameId]: snapshot } }))
+  },
+  setLockFrameworks: (gameId, profileId, locked) => set(state => ({
+    games: state.games.map(game => game.id !== gameId ? game : {
+      ...game,
+      profiles: game.profiles.map(profile => profile.id !== profileId ? profile : { ...profile, lockFrameworks: locked }),
+    }),
+  })),
   /** Annule une session encore en recherche (launcher ouvert, jeu pas encore
    * identifié) : arrête le suivi ZAILON et restaure le déploiement SANS toucher
    * au launcher externe (Steam / launcher officiel peuvent rester ouverts). */

@@ -169,6 +169,10 @@ export interface Profile {
   description?: string
   color?: string
   locked?: boolean
+  /** Verrouille les frameworks du profil (spec « Last Known Good » §42) :
+   * empêche le remplacement silencieux / l'auto-update des loaders — les mods
+   * utilisateur peuvent continuer à évoluer. */
+  lockFrameworks?: boolean
   stableSince?: number
   lastSuccessfulLaunch?: number
   isDefault?: boolean

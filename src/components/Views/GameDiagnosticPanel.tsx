@@ -2,6 +2,7 @@ import { Activity, AlertTriangle, CheckCircle2, ClipboardList, FileClock, Folder
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { inputDiagnosticRows } from '../../lib/inputBackends'
 import { effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
+import { compareFrameworkSets, fingerprintFrameworkSet } from '../../lib/lastKnownGood'
 import { adapterFor, LAUNCH_BEHAVIOR_LABELS, SESSION_STATE_LABELS } from '../../lib/launchAdapters'
 import { native, type ProfileDeploymentAudit } from '../../lib/native'
 import { useStore } from '../../store/useStore'
@@ -231,6 +232,7 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
             <span key={provider.frameworkId} className="flex items-center gap-1.5 rounded-full bg-white/[0.035] px-2.5 py-1 font-mono text-[11px] text-white/55">{provider.frameworkId}<span className={`h-1.5 w-1.5 rounded-full ${provider.enabled && provider.runtimeVisible ? 'bg-emerald-300' : 'bg-amber-300'}`} /></span>
           ))}</div>
         </div>}
+        <FrameworkLastKnownGood gameId={game.id} profile={profile} profileMods={profileMods} />
       </div>}
 
       {section === 'conflicts' && (conflicts.length
@@ -403,6 +405,32 @@ function LaunchSessionPanel({ game }: { game: Game }) {
       <p className="text-[11px] font-semibold text-white/68">Sessions récentes</p>
       <ul className="mt-2 divide-y divide-white/[0.05]">{pastSessions.map(item => <li key={item.id} className="flex flex-wrap items-center gap-2 py-2 text-[11px]"><span className={`h-1.5 w-1.5 rounded-full ${item.state === 'Ended' ? 'bg-white/30' : 'bg-red-300/80'}`} /><span className="text-white/55">{SESSION_STATE_LABELS[item.state]}</span><span className="text-white/28">Profil {game.profiles.find(profile => profile.id === item.profileId)?.name || item.profileId}</span><span className="ml-auto text-white/26">{formatClock(item.startedAt)}</span></li>)}</ul>
     </div>}
+  </div>
+}
+
+/** Last Known Good des frameworks (spec §41-42) : référence du dernier
+ * lancement réussi, différences détectées, verrou anti-remplacement silencieux. */
+function FrameworkLastKnownGood({ gameId, profile, profileMods }: { gameId: string; profile: Profile; profileMods: Mod[] }) {
+  const lastKnownGoodFrameworks = useStore(state => state.lastKnownGoodFrameworks?.[gameId])
+  const recordLastKnownGoodFrameworks = useStore(state => state.recordLastKnownGoodFrameworks)
+  const setLockFrameworks = useStore(state => state.setLockFrameworks)
+  const current = fingerprintFrameworkSet(profileMods)
+  const changes = compareFrameworkSets(lastKnownGoodFrameworks, current)
+  const hasReference = Boolean(lastKnownGoodFrameworks && Object.keys(lastKnownGoodFrameworks).length)
+  const currentFrameworks = Object.keys(current)
+  if (!currentFrameworks.length) return null
+  return <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="text-[11px] font-semibold text-white/68">Last Known Good · frameworks</p>
+      <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest ${changes.length ? 'bg-amber-300/10 text-amber-100/75' : 'bg-emerald-300/10 text-emerald-200/70'}`}>{hasReference ? (changes.length ? `${changes.length} changement(s)` : 'À jour') : 'Aucune référence'}</span>
+    </div>
+    <p className="mt-1.5 text-[11px] leading-relaxed text-white/40">Référence enregistrée quand le jeu tourne (processus final détecté). Si la configuration change avant un lancement, ZAILON avertit — et bloque si le profil est verrouillé.</p>
+    {changes.length > 0 && <ul className="mt-2 space-y-1 text-[11px] text-amber-100/70">{changes.map(change => <li key={change.framework}>• {change.framework} — {change.kind === 'added' ? 'ajouté' : change.kind === 'removed' ? 'retiré' : `mis à jour${change.previousVersion && change.currentVersion && change.previousVersion !== change.currentVersion ? ` : ${change.previousVersion} → ${change.currentVersion}` : ''}`}</li>)}</ul>}
+    {currentFrameworks.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{currentFrameworks.map(name => <span key={name} className="rounded-full bg-white/[0.04] px-2 py-0.5 font-mono text-[10px] text-white/50">{name}{current[name]?.version ? ` ${current[name]!.version}` : ''}</span>)}</div>}
+    <div className="mt-3 flex flex-wrap items-center gap-3">
+      <button type="button" onClick={() => recordLastKnownGoodFrameworks(gameId)} className="rounded-lg border border-white/[0.09] px-2.5 py-1.5 text-[11px] font-semibold text-white/60 hover:bg-white/[0.05] hover:text-white">Enregistrer comme référence</button>
+      <label className="flex items-center gap-2 text-[11px] text-white/55"><Toggle checked={Boolean(profile.lockFrameworks)} onChange={() => setLockFrameworks(gameId, profile.id, !profile.lockFrameworks)} />Verrouiller les frameworks</label>
+    </div>
   </div>
 }
 

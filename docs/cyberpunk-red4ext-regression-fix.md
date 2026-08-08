@@ -74,10 +74,25 @@ est présent : le chargement réel se confirme au runtime après lancement
 | `src/lib/native.ts` | `launchGame(…, launcherBased)` + `restoreDeploymentSession` |
 | `src-tauri/src/lib.rs` | `launch_game(launcher_based)` : pas de démontage à la sortie du launcher ; commande `restore_deployment_session` |
 
-## 5. Limites restantes
+## 5. Last Known Good des frameworks (spec §41-42)
+
+Implémenté dans `src/lib/lastKnownGood.ts` (module pur, 5 tests) :
+
+- **Empreinte** : pour chaque framework actif (RED4ext, redscript, ArchiveXL,
+  TweakXL — nom déclaré ou inféré par chemin, plugins avant le préfixe
+  générique `red4ext/`), hash FNV-1a de l'union des fichiers triés + version.
+- **Enregistrement** : à chaque détection du processus final
+  (`sessionGameDetected` / `attachDetectedGame`) — la référence correspond à un
+  jeu qui a réellement tourné.
+- **Vérification au lancement** : si la référence existe et l'empreinte a changé,
+  ZAILON avertit ; si le profil est « Verrouiller les frameworks » (§42), le
+  lancement est bloqué (pas de remplacement silencieux des loaders).
+- **UI** : État & Diagnostic > Frameworks → carte Last Known Good (différences,
+  versions, « Enregistrer comme référence », verrou par profil).
+
+## 6. Limites restantes
 
 - La confirmation réelle « RED4ext chargé » (log runtime) se fait sur machine
   avec le jeu — non exécutable dans cet environnement.
-- Le bouton « Réparer RED4ext » (reconstruction manifeste/VirtualFileMap) et le
-  « Last Known Good » des frameworks restent à implémenter (dépendent des
-  vérifications réelles sur la machine).
+- Le bouton « Réparer RED4ext » (reconstruction manifeste/VirtualFileMap) reste
+  à implémenter (dépend des vérifications réelles sur la machine).

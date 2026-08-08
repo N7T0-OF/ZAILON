@@ -799,6 +799,9 @@
 
 ### Added
 
+- Last Known Good des frameworks : l'empreinte des frameworks actifs (RED4ext, redscript, ArchiveXL, TweakXL) est enregistrée à chaque détection du processus final. Si la configuration change avant un lancement, ZAILON avertit — et bloque si le profil est « Verrouiller les frameworks » (anti-remplacement silencieux).
+- État & Diagnostic > Frameworks : carte Last Known Good (différences détaillées, versions, bouton « Enregistrer comme référence », verrou par profil).
+
 ### Changed
 
 ### Fixed

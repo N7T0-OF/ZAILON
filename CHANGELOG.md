@@ -550,12 +550,47 @@
 > `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
 > Release Notes à partir de cette section et refuse de publier si elle est vide.
 
-## [Unreleased]
+## [1.21.0] - 2026-08-08
+
+> Release du Mode jeu ZAILON + détection du plein écran exclusif : activité
+> réduite pendant le jeu, auto-minimisation, et message « Utiliser Borderless »
+> au lieu d'un panneau rapide qui ne pourrait pas s'afficher — validée par la
+> PR #1 sur Windows + Linux.
 
 ### Added
 
 - Détection du plein écran exclusif (`exclusive_fullscreen_active`) : au raccourci du panneau rapide, ZAILON affiche « Le panneau rapide n'est pas disponible en plein écran exclusif » avec [Utiliser Borderless] [Fermer] au lieu d'ouvrir une fenêtre qui ne pourrait pas s'afficher (aucune injection).
 - Section « Mode jeu » dans les réglages : réduire l'activité ZAILON pendant le jeu (watcher ralenti, animations décoratives suspendues), réduire ZAILON lorsque le jeu démarre, restaurer ZAILON après le jeu — actives par défaut.
+
+### Changed
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
+> Pendant le développement, chaque changement visible par l'utilisateur est ajouté
+> ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
+> cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
+> `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
+> Release Notes à partir de cette section et refuse de publier si elle est vide.
+
+## [Unreleased]
+
+### Added
 
 ### Changed
 

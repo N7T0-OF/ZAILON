@@ -88,6 +88,13 @@ export function HomeView() {
   const activeMods = profileMods.filter(mod => mod.enabled).length
   const installedMods = profileMods.length
   const activePercent = installedMods ? Math.round((activeMods / installedMods) * 100) : 0
+  // Badge framework honnête (spec #38-39) : RED4ext ⚠ quand le loader est actif
+  // dans le profil mais le chargement réel n'est PAS confirmé — jamais ✓ sans
+  // confirmation runtime post-lancement.
+  const red4extActive = profileMods.some(mod => mod.enabled && (
+    (mod.framework ?? '').toLowerCase().includes('red4ext')
+    || (mod.files ?? []).some(file => file.toLowerCase().replace(/\\/g, '/').startsWith('red4ext/'))
+  ))
   const heroResource = selectedGame.resources?.backgroundPath || selectedGame.resources?.bannerPath || selectedGame.resources?.coverPath
   const background = resourceUrl(heroResource) || selectedGame.backgroundArt
   const heroTransform = selectedGame.resources?.backgroundPath
@@ -99,7 +106,9 @@ export function HomeView() {
   const logo = resourceUrl(selectedGame.resources?.logoPath)
   const gameIcon = resourceUrl(selectedGame.resources?.iconPath || selectedGame.resources?.coverPath || selectedGame.resources?.bannerPath)
   const visibleGames = games.filter(game => !game.hidden || game.id === selectedGame.id)
-  const quickGames = [selectedGame, ...visibleGames.filter(game => game.id !== selectedGame.id)].slice(0, 3)
+  // Favoris Accueil (spec « Quick Overlay + Favoris ») : les jeux marqués
+  // favoris remplacent « Bibliothèque récente », 6 max, ordre d'ajout.
+  const favoriteGames = visibleGames.filter(game => game.favorite).slice(0, 6)
   const activity = Array.from({ length: 7 }, (_, index) => selectedGame.profiles[index]?.playtime ?? 0)
   const activityMaximum = Math.max(1, ...activity)
   const profileActivity = selectedGame.profiles.reduce((total, profile) => total + profile.playtime, 0)
@@ -145,13 +154,23 @@ export function HomeView() {
             ? <img src={logo} alt={selectedGame.name} className="mt-4 max-h-28 max-w-[min(430px,72vw)] object-contain object-left" />
             : <h1 className="mt-3 max-w-3xl font-display text-[clamp(3.2rem,6.7vw,7rem)] font-black uppercase leading-[0.78] tracking-[-0.025em] text-white">{selectedGame.shortName || selectedGame.name}</h1>}
           <p className="mt-5 text-[11px] text-white/38">Profil <span className="font-semibold text-white/70">{selectedProfile.name}</span><span className="mx-2 text-white/18">•</span>{activeMods} mod{activeMods !== 1 ? 's' : ''} actif{activeMods !== 1 ? 's' : ''}</p>
-          {(activeMods > 0 || effectiveInputProfile(selectedGame, selectedProfile.id) || visualName || selectedGame.bypassPath || (selectedGame.runtimePaths || []).length > 0) && <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-            {activeMods > 0 && <HomeBadge label={`${activeMods} mods`} />}
-            {effectiveInputProfile(selectedGame, selectedProfile.id) && <HomeBadge label={LAYOUT_LABELS[effectiveLayout(selectedGame, selectedProfile.id)]} />}
-            {visualName && <HomeBadge label={`Visuel · ${visualName}`} />}
-            {selectedGame.bypassPath && <HomeBadge label="Bypass / Loader" />}
-            {(selectedGame.runtimePaths || []).length > 0 && <HomeBadge label={`${selectedGame.runtimePaths!.length} chemin(s) runtime`} />}
-          </div>}
+          {(() => {
+            const badges = [
+              ...(activeMods > 0 ? [{ label: `${activeMods} mods`, title: 'Mods actifs du profil' }] : []),
+              ...(effectiveInputProfile(selectedGame, selectedProfile.id) ? [{ label: LAYOUT_LABELS[effectiveLayout(selectedGame, selectedProfile.id)], title: 'Disposition clavier active' }] : []),
+              ...(visualName ? [{ label: `Visuel · ${visualName}`, title: 'Profil visuel actif' }] : []),
+              ...(red4extActive ? [{ label: 'RED4ext ⚠', title: 'Loader RED4ext actif — chargement à confirmer après lancement' }] : []),
+              ...(selectedGame.bypassPath ? [{ label: 'Bypass / Loader', title: 'Dossier bypass configuré' }] : []),
+              ...((selectedGame.runtimePaths || []).length > 0 ? [{ label: `${selectedGame.runtimePaths!.length} runtime`, title: 'Chemins runtime déployés' }] : []),
+            ]
+            if (!badges.length) return null
+            const shown = badges.slice(0, 3)
+            const extra = badges.length - shown.length
+            return <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+              {shown.map((badge, index) => <HomeBadge key={index} label={badge.label} title={badge.title} />)}
+              {extra > 0 && <span className="rounded-full border border-white/[0.09] bg-black/25 px-2 py-0.5 text-[10px] font-medium text-white/40" title={badges.slice(3).map(badge => badge.label).join(' · ')}>+{extra}</span>}
+            </div>
+          })()}
           {activeSession && activeSession.state === 'GameRunning' && (
             <div className="mt-4 max-w-md rounded-xl border border-emerald-300/20 bg-emerald-300/[0.05] p-3 backdrop-blur-md">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -228,14 +247,16 @@ export function HomeView() {
             <p className="mt-1 truncate text-[11px] text-white/26">{selectedGame.lastPlayed ? `Dernière session ${timeAgo(selectedGame.lastPlayed)}` : 'Prêt pour une première session'}</p>
           </DashboardPanel>
 
-          <DashboardPanel eyebrow="Bibliothèque récente" footer="Toute la bibliothèque" onFooter={() => setView('games')}>
-            <div className="grid h-[72px] grid-cols-3 gap-2">
-              {Array.from({ length: 3 }, (_, index) => {
-                const game = quickGames[index]
-                return game ? <QuickGame key={game.id} game={game} summary={summaries[game.id]} active={game.id === selectedGame.id} onSelect={() => setSelectedGame(game.id)} /> : <div key={`empty-${index}`} className="rounded-lg border border-dashed border-white/[0.06] bg-black/10" />
-              })}
-            </div>
-            <p className="mt-1 truncate text-[11px] text-white/26">{visibleGames.length} élément{visibleGames.length !== 1 ? 's' : ''} dans ZAILON</p>
+          <DashboardPanel eyebrow="Favoris" footer="Toute la bibliothèque" onFooter={() => setView('games')}>
+            {favoriteGames.length > 0
+              ? <div className={`grid grid-cols-3 gap-2 ${favoriteGames.length > 3 ? 'h-[156px]' : 'h-[72px]'}`}>
+                  {favoriteGames.map(game => <QuickGame key={game.id} game={game} summary={summaries[game.id]} active={game.id === selectedGame.id} onSelect={() => setSelectedGame(game.id)} favorite />)}
+                </div>
+              : <div className="flex h-[72px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-white/[0.06] bg-black/10 px-3 text-center">
+                  <p className="text-[11px] leading-relaxed text-white/34">Ajoutez vos jeux et applications préférés depuis la Bibliothèque.</p>
+                  <button type="button" onClick={() => setView('games')} className="rounded-lg border border-white/[0.1] px-3 py-1.5 text-[10px] font-semibold text-white/60 hover:bg-white/[0.06] hover:text-white/85">Ouvrir la Bibliothèque</button>
+                </div>}
+            <p className="mt-1 truncate text-[11px] text-white/26">{favoriteGames.length > 0 ? `${favoriteGames.length} favori${favoriteGames.length !== 1 ? 's' : ''} · clic droit sur un jeu pour en ajouter` : `${visibleGames.length} élément${visibleGames.length !== 1 ? 's' : ''} dans ZAILON`}</p>
           </DashboardPanel>
         </div>
       </div>
@@ -297,11 +318,11 @@ function MiniStat({ icon: Icon, value, label }: { icon: typeof Boxes; value: str
   </div>
 }
 
-function HomeBadge({ label }: { label: string }) {
-  return <span className="flex items-center gap-1 rounded-full border border-white/[0.09] bg-black/25 px-2 py-0.5 text-[10px] font-medium text-white/58 backdrop-blur-sm"><Check size={9} className="text-emerald-300/80" />{label}</span>
+function HomeBadge({ label, title }: { label: string; title?: string }) {
+  return <span title={title} className="flex items-center gap-1 rounded-full border border-white/[0.09] bg-black/25 px-2 py-0.5 text-[10px] font-medium text-white/58 backdrop-blur-sm"><Check size={9} className="text-emerald-300/80" />{label}</span>
 }
 
-function QuickGame({ game, summary, active, onSelect }: { game: Game; summary?: { health?: { verdict: 'ok' | 'vigilance' | 'attention' }; profileCounts?: Record<string, { active: number }> }; active: boolean; onSelect: () => void }) {
+function QuickGame({ game, summary, active, onSelect, favorite }: { game: Game; summary?: { health?: { verdict: 'ok' | 'vigilance' | 'attention' }; profileCounts?: Record<string, { active: number }> }; active: boolean; onSelect: () => void; favorite?: boolean }) {
   const cover = resourceUrl(game.resources?.coverPath || game.resources?.bannerPath || game.resources?.backgroundPath) || game.backgroundArt
   const firstProfileId = game.profiles[0]?.id
   const activeCount = firstProfileId ? summary?.profileCounts?.[firstProfileId]?.active : undefined
@@ -310,6 +331,7 @@ function QuickGame({ game, summary, active, onSelect }: { game: Game; summary?: 
     {cover ? <img src={cover} alt="" className="absolute inset-0 h-full w-full object-cover opacity-68 transition-transform group-hover/quick:scale-105" /> : <div className="absolute inset-0 bg-[linear-gradient(135deg,#25292a,#101313)]" />}
     <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
     {healthTone && <span className={`absolute right-1 top-1 h-2 w-2 rounded-full ${healthTone}`} title={`Santé : ${summary?.health?.verdict}`} />}
+    {favorite && <span className="absolute left-1 top-1 text-[10px] text-amber-300/90" title="Favori">★</span>}
     <span className="absolute inset-x-1.5 bottom-1.5 flex items-center gap-1 truncate text-[11px] font-semibold text-white/78"><span className="min-w-0 flex-1 truncate">{game.name}</span>{activeCount !== undefined && <span className="shrink-0 font-mono text-[9px] text-white/40">{activeCount} actif(s)</span>}</span>
   </button>
 }

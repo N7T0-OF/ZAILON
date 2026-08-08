@@ -49,8 +49,10 @@ export function CommandPalette() {
   const items = useMemo<PaletteItem[]>(() => {
     const state = useStore.getState()
     const result: PaletteItem[] = []
-    for (const game of state.games) {
-      result.push({ id: `game:${game.id}`, group: 'Jeux', label: game.name, detail: `${game.profiles.length} profil(s) · ${game.installedMods.length} mod(s)`, icon: Gamepad2, run: () => {
+    // Favoris en tête des résultats locaux (spec « Favoris Accueil » §36).
+    const orderedGames = [...state.games].sort((left, right) => Number(Boolean(right.favorite)) - Number(Boolean(left.favorite)))
+    for (const game of orderedGames) {
+      result.push({ id: `game:${game.id}`, group: 'Jeux', label: game.favorite ? `${game.name} ★` : game.name, detail: `${game.profiles.length} profil(s) · ${game.installedMods.length} mod(s)`, icon: Gamepad2, run: () => {
         state.setView('games')
         state.setSelectedGame(game.id)
         state.setActiveGameTab('overview')

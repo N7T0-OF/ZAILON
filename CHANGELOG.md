@@ -744,6 +744,10 @@
 
 ### Added
 
+- Favoris Accueil : la section « Bibliothèque récente » est remplacée par « Favoris » (6 jeux max, étoile ★, message d'aide si vide, accès direct à la Bibliothèque) — les favoris se gèrent via le clic droit sur un jeu (Ajouter/Retirer).
+- Favoris en tête des résultats de la palette Ctrl+K (étoile ★ dans le libellé).
+- Badge « RED4ext ⚠ » honnête sur l'Accueil : affiché quand le loader est actif dans le profil, jamais « ✓ » sans confirmation runtime post-lancement ; badges limités à 3 avec indicateur « +N » (tooltips détaillés).
+
 ### Changed
 
 ### Fixed

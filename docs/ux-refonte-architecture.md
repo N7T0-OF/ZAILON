@@ -9,7 +9,7 @@
 > - Phase 2 ✅ UI compacte + remapping (Liquid Glass supprimé, toasts, rétention, État & Diagnostic, Bypass, bulles ⓘ, presets NTE) — 1.11.0
 > - Phase 3 ✅ Performances (GameWorkspaceCache, badges, lazy loading Mods) — 1.13.0
 > - Phase 4 ✅ Densité & suivi (explications, Stockage, session en jeu, notifications, audit UI, rapports) — 1.12.0
-> - Phase 5 🔄 Expérience avancée : modes Simple/Avancé (en cours), recherche de réglages, presets de jeu, environnement de test, outils par jeu.
+> - Phase 5 ✅ Expérience avancée (modes Simple/Avancé, recherche de réglages, presets de jeu, environnement de test) — 1.14.0
 > - Phase 6 ⏳ Backends d'application du remapping (Rust, NTE/ACE, tests sur vrai jeu).
 >
 > **Progression** :
@@ -39,15 +39,16 @@
 >   Suite : préférence « Réduire les explications », audit `npm run audit:ui`,
 >   rapports `docs/ui-cleanup-and-input-remap-report.md`, `docs/history-retention-policy.md`,
 >   `docs/settings-density-audit.md`, `docs/nte-keyboard-remap-test.md`.
-> - Phase 5 · Modes Simple/Avancé — en cours : préférence « Mode avancé », réglages
->   techniques repliés dans « Avancé » (dossier Bypass/Loader, chemins additionnels),
->   recherche de réglages dans Paramètres (index global + navigation vers le jeu),
->   presets de jeu (profil + clavier + visuel, appliquer/dupliquer/supprimer).
->   Environnement de test, outils par jeu : restent à faire.
+> - Phase 5 · Expérience avancée — livrée (1.14.0) : préférence « Mode avancé »,
+>   réglages techniques repliés dans « Avancé » (dossier Bypass/Loader, chemins
+>   additionnels), recherche de réglages dans Paramètres (index global + navigation
+>   vers le jeu), presets de jeu (profil + clavier + visuel,
+>   appliquer/dupliquer/supprimer), environnement de test par jeu (audit en lecture
+>   seule + intégrité + prérequis + historique 10 tests + effacer l’historique).
 > - Phase 3 · GameWorkspaceCache — fondation implémentée (compteurs de profils +
 >   santé par jeu en cache local, rafraîchi en arrière-plan, rendu instantané du
->   sélecteur de profils). Lazy loading des sections lourdes, modes Simple/Avancé,
->   presets de jeu, environnement de test, outils par jeu — restent à faire.
+>   sélecteur de profils). Lazy loading des sections lourdes — livré ; modes
+>   Simple/Avancé, presets, environnement de test — livrés en Phase 5 (1.14.0).
 > - Backends clavier (bindings du jeu puis traduction runtime, incl. NTE/ACE) :
 >   non implémentés, nécessitent des tests sur un vrai jeu avant publication.
 

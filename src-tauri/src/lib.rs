@@ -19,6 +19,7 @@ use walkdir::WalkDir;
 
 mod input_backends;
 mod process_scanner;
+mod quick_panel;
 mod steam_presence;
 mod visual_profiles;
 mod window_watcher;
@@ -14624,6 +14625,9 @@ pub fn run() {
             scan_game_presence,
             scan_game_windows,
             steam_running_state,
+            open_quick_panel,
+            close_quick_panel,
+            toggle_quick_panel,
             launch_game,
             test_discord_connection,
             guess_mods_path,

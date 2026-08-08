@@ -13,6 +13,22 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Signature de processus apprise (spec NTE §7 / « Signatures apprises ») :
+/// enregistrée quand le processus final d'un jeu est détecté avec forte
+/// confiance, réutilisée au lancement suivant pour une détection instantanée.
+/// Format versionné (`schemaVersion` côté frontend) — ne jamais rescanner tout
+/// le système pour la ré-apprendre.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LearnedProcessSignature {
+    /// Nom de l'exécutable final (ex. HT-Win64-Shipping.exe).
+    pub filename: String,
+    /// Chemin relatif sous l'installation (ex. Client/WindowsNoEditor/…).
+    pub relative_path: Option<String>,
+    /// Éditeur / signature du processus, si disponible.
+    pub publisher: Option<String>,
+}
+
 /// Demande de détection pour un jeu, envoyée par le frontend pendant la fenêtre
 /// de rattachement d'une session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +49,10 @@ pub struct GamePresenceRequest {
     /// Vrai quand le scan se fait pendant la fenêtre de rattachement d'une session
     /// (relation launcher connue + fenêtre temporelle) → +20 au score.
     pub reattach_context: bool,
+    /// Signatures apprises lors des lancements précédents (spec §7 / #36) : le
+    /// nom appris (+ chemin relatif) donne un score fort au processus final,
+    /// même après une mise à jour qui change l'exécutable.
+    pub learned_signatures: Vec<LearnedProcessSignature>,
 }
 
 /// Processus candidat observé sur le système.
@@ -110,6 +130,33 @@ pub fn score_process(candidate: &ProcessCandidate, request: &GamePresenceRequest
     // la fenêtre de rattachement — relation connue + fenêtre temporelle).
     if request.reattach_context {
         score += 20;
+    }
+
+    // Signatures apprises (§7 / #36) : le nom du processus correspond à un
+    // processus final confirmé lors d'un lancement précédent → +25, et +15
+    // supplémentaires si le chemin relatif sous l'installation correspond aussi.
+    if request
+        .learned_signatures
+        .iter()
+        .any(|signature| name == signature.filename.to_lowercase())
+    {
+        score += 25;
+        if let Some(relative) = request
+            .learned_signatures
+            .iter()
+            .find(|signature| name == signature.filename.to_lowercase())
+            .and_then(|signature| signature.relative_path.as_deref())
+        {
+            if let Some(root) = &request.install_root {
+                let root = normalize(root);
+                let expected = normalize(relative);
+                if !root.is_empty()
+                    && normalize(&candidate.executable_path).ends_with(&format!("/{expected}"))
+                {
+                    score += 15;
+                }
+            }
+        }
     }
 
     (score.min(100)) as u8
@@ -257,6 +304,7 @@ mod tests {
                 "NTE-Win64-Shipping.exe".to_string(),
             ],
             reattach_context,
+            learned_signatures: Vec::new(),
         }
     }
 
@@ -335,6 +383,31 @@ mod tests {
         let process = candidate("nte-helper.exe", "C:\\Temp\\nte-helper.exe");
         let score = score_process(&process, &nte_request(true));
         assert_eq!(score, 20); // uniquement le contexte de rattachement
+    }
+
+    #[test]
+    fn learned_signature_boosts_the_final_process() {
+        // Après une mise à jour, l'exécutable final est NOUVEAU (pas dans les
+        // candidats) mais sa signature a été apprise au lancement précédent.
+        let mut request = nte_request(false);
+        request.learned_signatures = vec![LearnedProcessSignature {
+            filename: "HT-Win64-Shipping-2.exe".to_string(),
+            relative_path: Some(
+                "Client/WindowsNoEditor/HT/Binaries/Win64/HT-Win64-Shipping-2.exe".to_string(),
+            ),
+            publisher: None,
+        }];
+        let process = candidate(
+            "HT-Win64-Shipping-2.exe",
+            "X:\\Games\\Neverness To Everness\\Client\\WindowsNoEditor\\HT\\Binaries\\Win64\\HT-Win64-Shipping-2.exe",
+        );
+        // 40 (installation) + 25 (signature apprise) + 15 (chemin relatif appris) = 80 ≥ 80
+        // → détection automatique SANS connaître le nom à l'avance (spec §6-7).
+        let score = score_process(&process, &request);
+        assert_eq!(score, 80);
+        let results = detect_games(&[process], &[request]);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].score, 80);
     }
 
     #[test]

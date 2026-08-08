@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn dword_parsing() {
-        assert_eq!(dword_from_bytes(&[0x84, 0xDC, 0x44, 0x00]), Some(4508340));
+        assert_eq!(dword_from_bytes(&[0xB4, 0xCA, 0x44, 0x00]), Some(4508340));
         assert_eq!(dword_from_bytes(&[0, 0, 0, 0]), Some(0));
         assert_eq!(dword_from_bytes(&[1, 2]), None);
     }

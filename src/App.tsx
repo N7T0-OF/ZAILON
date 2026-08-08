@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Bell, CheckCircle2, Download, ExternalLink, Info, X } from 'lucide-react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { AppWindow } from './components/Layout/AppWindow'
@@ -7,6 +7,7 @@ import { UpdateProvider } from './components/UpdateProvider'
 import { useStore } from './store/useStore'
 import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
+import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame } from './lib/gamePresence'
 import { register, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
 import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-profiles/application/shortcuts'
 
@@ -29,34 +30,54 @@ export default function App() {
   const accentColor = useStore(s => s.accentColor)
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
 
+  // GamePresenceEngine : un seul watcher léger suit (a) les sessions en attente
+  // de leur processus final, (b) les jeux configurés lancés hors ZAILON, et
+  // (c) la preuve Steam (registre RunningAppID) — Steam n'est jamais la seule
+  // source, mais il déclenche la recherche du processus final au lieu de
+  // terminer la session.
+  const steamAppIdsRef = useRef<number[]>([])
   useEffect(() => {
     let scanning = false
     let lastScan = 0
+    let lastSteamCheck = 0
     const id = setInterval(() => {
-      tick()
-      useStore.getState().sessionWatchdog()
-      const now = Date.now()
-      if (scanning || now - lastScan < 3000 || !native.isDesktop()) return
       const state = useStore.getState()
+      tick()
+      if (!native.isDesktop()) return
+      const now = Date.now()
+      const installed = state.games.filter(game => game.installDirectory)
+      const appIds = [...new Set(installed.map(game => adapterFor(game).steamAppId).filter((id): id is number => id !== undefined))]
+      if (appIds.length > 0 && now - lastSteamCheck >= 3000) {
+        lastSteamCheck = now
+        void native.steamRunningState(appIds)
+          .then(result => { steamAppIdsRef.current = result.running_app_ids ?? [] })
+          .catch(() => undefined)
+      }
+      state.sessionWatchdog(steamAppIdsRef.current)
+      if (scanning || now - lastScan < 3000) return
       const waiters = state.gameSessions.filter(session => session.state === 'WaitingForGame' || session.state === 'GameLost' || session.state === 'WaitingForElevation')
-      if (!waiters.length) return
+      const activeIds = state.gameSessions.filter(session => session.state !== 'Ended' && session.state !== 'Failed').map(session => session.gameId)
+      const external = installed.filter(game => shouldScanExternalGame(game, steamAppIdsRef.current, state.autoAttachGames ?? [], activeIds))
+      if (!waiters.length && !external.length) return
       scanning = true
       lastScan = now
-      const requests = waiters.map(session => {
-        const game = state.games.find(item => item.id === session.gameId)
-        const adapter = game ? adapterFor(game) : FALLBACK_ADAPTER
-        return {
-          gameId: session.gameId,
-          installRoot: game?.installDirectory,
-          launcherExecutable: adapter.launcherExecutable,
-          gameExecutableCandidates: adapter.gameExecutableCandidates,
-          reattachContext: true,
-        }
-      })
+      const requests = [
+        ...waiters.flatMap(session => {
+          const game = state.games.find(item => item.id === session.gameId)
+          return game ? [presenceRequestFor(game, true)] : []
+        }),
+        ...external.map(game => presenceRequestFor(game, false)),
+      ]
       void native.scanGamePresence(requests)
         .then(results => {
+          const storeNow = useStore.getState()
           for (const result of results) {
-            if (result.score >= 80) useStore.getState().sessionGameDetected(result.gameId, result.processName, result.score)
+            if (result.score < AUTO_ATTACH_THRESHOLD) continue
+            if (waiters.some(session => session.gameId === result.gameId)) {
+              storeNow.sessionGameDetected(result.gameId, result.processName, result.score, ['processus', 'installation'])
+            } else {
+              storeNow.attachDetectedGame(result.gameId, result.processName, result.score, ['processus', 'installation'])
+            }
           }
         })
         .catch(() => undefined)

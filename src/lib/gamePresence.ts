@@ -1,0 +1,47 @@
+import type { Game } from '../types/index.ts'
+import { adapterFor } from './launchAdapters.ts'
+import type { GamePresenceRequest } from './native.ts'
+
+/**
+ * GamePresenceEngine — logique pure de détection de présence, testable.
+ *
+ * Philosophie (GameSessionV2) : ZAILON « possède » une session, pas un PID. Un
+ * jeu configuré qui tourne hors ZAILON (Steam, launcher externe, redémarrage)
+ * doit être rattaché automatiquement, sans bouton « Attacher » dans l'UI
+ * standard. Steam n'est jamais la seule source de vérité, mais sa présence
+ * (AppID actif dans le registre) déclenche la recherche du processus final au
+ * lieu de terminer la session.
+ */
+
+/** Un jeu configuré doit-il être scanné comme candidat externe ?
+ * - jamais s'il a déjà une session active (le watcher de session s'en charge) ;
+ * - si l'utilisateur a activé « Attacher automatiquement si détecté » ;
+ * - si Steam indique que son AppID tourne (preuve forte, indépendante de la
+ *   préférence — Steam sait que le jeu est lancé, ZAILON doit le suivre). */
+export function shouldScanExternalGame(
+  game: Game,
+  steamAppIds: number[],
+  autoAttachGameIds: string[],
+  activeGameIds: string[],
+): boolean {
+  if (!game.installDirectory) return false
+  if (activeGameIds.includes(game.id)) return false
+  if (autoAttachGameIds.includes(game.id)) return true
+  const appId = adapterFor(game).steamAppId
+  return appId !== undefined && steamAppIds.includes(appId)
+}
+
+/** Construit la requête de scan pour un jeu (session en attente ou externe). */
+export function presenceRequestFor(game: Game, reattachContext: boolean): GamePresenceRequest {
+  const adapter = adapterFor(game)
+  return {
+    gameId: game.id,
+    installRoot: game.installDirectory,
+    launcherExecutable: adapter.launcherExecutable,
+    gameExecutableCandidates: adapter.gameExecutableCandidates,
+    reattachContext,
+  }
+}
+
+/** Seuil de confiance au-dessus duquel le rattachement est automatique. */
+export const AUTO_ATTACH_THRESHOLD = 80

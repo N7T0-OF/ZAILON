@@ -1,0 +1,68 @@
+// Tests unitaires du GamePresenceEngine (GameSessionV2).
+// Exécutés par Node 24 (type stripping natif) : aucun framework, aucune dépendance.
+//   node --test .github/scripts/test-game-presence.ts
+
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame } from '../../src/lib/gamePresence.ts'
+import { adapterFor } from '../../src/lib/launchAdapters.ts'
+import type { Game } from '../../src/types.ts'
+
+const game = (name: string, installDirectory?: string): Game => ({
+  id: name.toLocaleLowerCase().replace(/[^a-z0-9]+/g, '-'),
+  name,
+  installDirectory,
+  installedMods: [],
+  profiles: [],
+  totalPlaytime: 0,
+} as Game)
+
+test('adaptateur NTE expose son AppID Steam (4508340)', () => {
+  assert.equal(adapterFor(game('Neverness to Everness')).steamAppId, 4508340)
+})
+
+test('seuil de rattachement automatique fixé à 80', () => {
+  assert.equal(AUTO_ATTACH_THRESHOLD, 80)
+})
+
+test('pas de scan externe si le jeu n\'est pas installé', () => {
+  const g = game('Cyberpunk 2077', undefined)
+  assert.equal(shouldScanExternalGame(g, [], [], []), false)
+  assert.equal(shouldScanExternalGame(g, [], ['cyberpunk-2077'], []), false)
+})
+
+test('pas de scan externe si une session est déjà active', () => {
+  const g = game('Cyberpunk 2077', 'C:\\Games\\Cyberpunk 2077')
+  assert.equal(shouldScanExternalGame(g, [], [], ['cyberpunk-2077']), false)
+})
+
+test('autoAttach activé → scan externe', () => {
+  const g = game('Cyberpunk 2077', 'C:\\Games\\Cyberpunk 2077')
+  assert.equal(shouldScanExternalGame(g, [], ['cyberpunk-2077'], []), true)
+})
+
+test('preuve Steam (AppID actif) → scan externe même sans autoAttach', () => {
+  const g = game('Neverness to Everness', 'X:\\Games\\Neverness To Everness')
+  assert.equal(shouldScanExternalGame(g, [4508340], [], []), true)
+})
+
+test('preuve Steam d\'un autre jeu → pas de scan', () => {
+  const g = game('Neverness to Everness', 'X:\\Games\\Neverness To Everness')
+  assert.equal(shouldScanExternalGame(g, [1091500], [], []), false)
+})
+
+test('la requête de présence embarque la chaîne de l\'adaptateur', () => {
+  const g = game('Neverness to Everness', 'X:\\Games\\Neverness To Everness')
+  const request = presenceRequestFor(g, true)
+  assert.equal(request.gameId, g.id)
+  assert.equal(request.installRoot, g.installDirectory)
+  assert.equal(request.reattachContext, true)
+  assert.ok(request.gameExecutableCandidates.includes('HT-Win64-Shipping.exe'))
+  assert.equal(request.launcherExecutable, 'NTELauncher.exe')
+})
+
+test('requête externe : reattachContext false', () => {
+  const g = game('Cyberpunk 2077', 'C:\\Games\\Cyberpunk 2077')
+  const request = presenceRequestFor(g, false)
+  assert.equal(request.reattachContext, false)
+})

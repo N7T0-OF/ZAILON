@@ -355,11 +355,42 @@
   pendant la fenêtre de rattachement — score de correspondance (installation
   +40, candidat +25, launcher +15, contexte +20, seuil auto ≥ 80) avec 6 tests
   unitaires, énumération Windows (Toolhelp + chemin complet) via `windows-sys`,
-  commande `scan_game_presence` appelée par l'Accueil pendant l'attente du jeu.
-
-## [Unreleased]
+  commande `scan_game_presence` appelée par l'Accueil pendant l'attente du jeu.## [Unreleased]
 
 ### Added
+
+- **GameSessionV2 + GamePresenceEngine** : la session appartient au jeu, plus au
+  PID. Un jeu configuré lancé hors ZAILON (Steam, launcher externe, redémarrage)
+  est rattaché automatiquement (source `external`, mods pré-lancement affichés
+  honnêtement comme non préparés) — plus aucun bouton « Attacher ».
+- **SmartPlayButton** : un seul CTA par jeu piloté par l'état de session
+  (Jouer → Préparation… → Lancement… → Recherche du jeu… → En cours → Réessayer).
+  Les actions manuelles « Attacher / Continuer à attendre / Terminer la
+  session » sont supprimées de l'interface standard (Accueil + page du jeu) ;
+  cliquer sur « En cours » ouvre la confirmation de sortie (Retour au jeu /
+  Quitter le jeu, avec confirmation de perte de progression) — jamais une
+  seconde instance.
+- **Preuve Steam native** (`steam_presence.rs`, validé par la PR #1) : lecture
+  seule du registre `HKCU\Software\Valve\Steam\RunningAppID` (AppID NTE
+  4508340) — si Steam indique que le jeu tourne alors que ZAILON a perdu le
+  processus, ZAILON cherche le processus final au lieu de terminer la session
+  (watchdog à attente prolongée).
+- **RunningGamesWatcher** : scan périodique léger des jeux configurés sans
+  session (autoAttach ou preuve Steam) → rattachement automatique, notification
+  « Jeu détecté — session ZAILON récupérée automatiquement ».
+- Tests unitaires `npm run test:game-presence` (9 tests, `node:test` sans
+  dépendance) : AppID NTE, seuil auto, gating du scan externe, requêtes de
+  présence, preuve Steam.
+- Docs de conception : `docs/game-session-v2.md`, `docs/smart-play-button.md`,
+  `docs/game-presence-engine.md`, `docs/quick-game-panel.md` (conception —
+  fenêtre native, pas d'injection), `docs/nte-steam-presence-fix.md`.
+
+### Changed
+
+- `docs/ux-refonte-architecture.md` : roadmap Phase 6 — jalon GameSessionV2 +
+  GamePresenceEngine livré (1.18.0).
+
+
 
 ### Changed
 

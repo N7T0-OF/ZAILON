@@ -26,7 +26,6 @@ export function HomeView() {
   const isPlaying = useStore(state => state.isPlaying)
   const sessionTime = useStore(state => state.sessionTime)
   const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
-  const continueWaiting = useStore(state => state.continueWaiting)
   const endSession = useStore(state => state.endSession)
   const prepareAndWait = useStore(state => state.prepareAndWait)
   const setView = useStore(state => state.setView)
@@ -35,7 +34,16 @@ export function HomeView() {
   const [visualName, setVisualName] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ game: Game; position: { x: number; y: number } }>()
   const [playMenuOpen, setPlayMenuOpen] = useState(false)
+  const [quitOpen, setQuitOpen] = useState(false)
+  const [quitConfirm, setQuitConfirm] = useState(false)
   const [resourcesGameId, setResourcesGameId] = useState<string>()
+
+  // SmartPlayButton — un seul CTA : l'état du jeu pilote le libellé et le
+  // comportement (Jouer → Préparation… → Recherche du jeu… → En cours).
+  const sessionRunning = activeSession?.state === 'GameRunning'
+  const sessionWaiting = Boolean(activeSession && (activeSession.state === 'WaitingForGame' || activeSession.state === 'WaitingForElevation' || activeSession.state === 'LauncherStarted'))
+  const sessionFailed = activeSession?.state === 'GameLost'
+  const playBusy = isLaunching || sessionWaiting
   const launchPercent = launchProgress?.total
     ? Math.min(100, Math.round((launchProgress.current / launchProgress.total) * 100))
     : undefined
@@ -173,21 +181,17 @@ export function HomeView() {
           {activeSession && activeSession.state === 'GameLost' && (
             <div className="mt-4 max-w-md rounded-xl border border-red-300/20 bg-red-300/[0.05] p-3 backdrop-blur-md">
               <p className="font-mono text-[11px] uppercase tracking-widest text-red-200/90">Jeu non détecté</p>
-              <p className="mt-1 text-[11px] leading-relaxed text-white/52">Le launcher a été ouvert mais le jeu n'a pas été détecté pendant la fenêtre de rattachement. Le déploiement reste actif.</p>
-              <div className="mt-2.5 flex flex-wrap gap-2">
-                <button type="button" onClick={() => continueWaiting(activeSession.gameId)} className="rounded-lg border border-gold/25 px-3 py-1.5 text-[11px] font-semibold text-gold hover:bg-gold/10">Continuer à attendre</button>
-                <button type="button" onClick={() => endSession(activeSession.gameId)} className="rounded-lg border border-white/[0.12] px-3 py-1.5 text-[11px] text-white/60 hover:bg-white/[0.06]">Terminer la session</button>
-              </div>
+              <p className="mt-1 text-[11px] leading-relaxed text-white/52">Le launcher a été ouvert mais le jeu n'a pas été détecté. ZAILON continue de chercher automatiquement — le déploiement reste actif. Cliquez sur « Jouer » pour relancer si besoin.</p>
             </div>
           )}
           <div className="mt-5 flex items-center gap-2">
             <div className="relative flex items-center">
-              <button type="button" disabled={isPlaying || isLaunching} title={isLaunching ? launchProgress?.message || 'Préparation des mods en arrière-plan' : isPlaying ? 'Le déploiement sera restauré automatiquement à la fermeture du jeu.' : 'Préparer les mods et lancer le jeu'} onClick={() => void launchSelectedGame()} className={`flex items-center gap-2 rounded-full py-2.5 pl-5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all ${isPlaying || isLaunching ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
-                {isLaunching ? <Loader2 size={12} className="animate-spin" /> : <Play size={10} fill="currentColor" />}
-                {isLaunching ? `Préparation${launchPercent === undefined ? '…' : ` ${launchPercent}%`}` : isPlaying ? 'En cours' : 'Jouer'}
+              <button type="button" disabled={playBusy} title={sessionRunning ? 'Le jeu est en cours. Cliquez pour le quitter.' : playBusy ? 'En attente du jeu…' : 'Préparer les mods et lancer le jeu'} onClick={sessionRunning ? () => { setQuitConfirm(false); setQuitOpen(true) } : () => void launchSelectedGame()} className={`flex items-center gap-2 rounded-full py-2.5 pl-5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all ${playBusy ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : sessionRunning ? 'bg-emerald-300/90 text-[#0c1212] hover:-translate-y-0.5 hover:bg-emerald-200' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
+                {playBusy ? <Loader2 size={12} className="animate-spin" /> : sessionRunning ? <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-900/60" /> : <Play size={10} fill="currentColor" />}
+                {isLaunching ? `Préparation${launchPercent === undefined ? '…' : ` ${launchPercent}%`}` : sessionRunning ? 'En cours' : sessionWaiting ? (activeSession?.state === 'WaitingForElevation' ? 'Autorisation requise…' : activeSession?.state === 'LauncherStarted' ? 'Lancement…' : 'Recherche du jeu…') : sessionFailed ? 'Réessayer' : 'Jouer'}
               </button>
-              <button type="button" disabled={isPlaying || isLaunching} onClick={() => setPlayMenuOpen(open => !open)} title="Options de lancement" aria-label="Options de lancement" aria-expanded={playMenuOpen} className={`flex h-full items-center rounded-r-full border-l border-black/15 px-2 transition-colors ${isPlaying || isLaunching ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/60' : 'bg-[#dbe8e5] text-[#0d1111] hover:bg-white'}`}><ChevronDown size={12} className={`transition-transform ${playMenuOpen ? 'rotate-180' : ''}`} /></button>
-              {playMenuOpen && !isPlaying && !isLaunching && (
+              <button type="button" disabled={playBusy || sessionRunning} onClick={() => setPlayMenuOpen(open => !open)} title="Options de lancement" aria-label="Options de lancement" aria-expanded={playMenuOpen} className={`flex h-full items-center rounded-r-full border-l border-black/15 px-2 transition-colors ${playBusy || sessionRunning ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/60' : 'bg-[#dbe8e5] text-[#0d1111] hover:bg-white'}`}><ChevronDown size={12} className={`transition-transform ${playMenuOpen ? 'rotate-180' : ''}`} /></button>
+              {playMenuOpen && !playBusy && !sessionRunning && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setPlayMenuOpen(false)} />
                   <div className="absolute left-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-xl border border-white/[0.09] bg-[#141818] shadow-[0_18px_50px_rgba(0,0,0,0.55)]">
@@ -248,6 +252,34 @@ export function HomeView() {
     {discoveryOpen && <SteamDetectionDialog onClose={() => setDiscoveryOpen(false)} onImport={importDetectedGames} />}
     {resourcesGame && <GameResourcesDialog game={resourcesGame} onClose={() => setResourcesGameId(undefined)} onChange={resources => setGameResources(resourcesGame.id, resources)} />}
     {menu && <GameContextMenu game={menu.game} position={menu.position} onClose={() => setMenu(undefined)} onEditResources={() => setResourcesGameId(menu.game.id)} />}
+    {quitOpen && (
+      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setQuitOpen(false)}>
+        <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-white/[0.09] bg-[#141818] shadow-[0_24px_70px_rgba(0,0,0,0.6)]" onClick={event => event.stopPropagation()}>
+          <div className="border-b border-white/[0.06] px-5 py-4">
+            <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-white/30">Quitter le jeu</p>
+            <p className="mt-1 font-display text-base font-bold text-white/90">{selectedGame.name}</p>
+          </div>
+          <div className="px-5 py-4">
+            {!quitConfirm
+              ? <p className="text-[11px] leading-relaxed text-white/55">Le jeu est actuellement en cours d'exécution. Souhaitez-vous vraiment le quitter ?</p>
+              : <p className="text-[11px] leading-relaxed text-amber-100/70">Toute progression non sauvegardée dans le jeu peut être perdue.</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              {!quitConfirm ? (
+                <>
+                  <button type="button" onClick={() => setQuitOpen(false)} className="rounded-lg bg-gold px-3.5 py-2 text-[11px] font-semibold text-[#101313] hover:bg-gold/90">Retour au jeu</button>
+                  <button type="button" onClick={() => setQuitConfirm(true)} className="rounded-lg border border-white/[0.12] px-3.5 py-2 text-[11px] font-semibold text-white/70 hover:bg-white/[0.06]">Quitter le jeu</button>
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => setQuitConfirm(false)} className="rounded-lg border border-white/[0.12] px-3.5 py-2 text-[11px] font-semibold text-white/70 hover:bg-white/[0.06]">Annuler</button>
+                  <button type="button" onClick={() => { setQuitOpen(false); setQuitConfirm(false); endSession(selectedGame.id) }} className="rounded-lg bg-red-300/90 px-3.5 py-2 text-[11px] font-semibold text-[#160a0a] hover:bg-red-200">Quitter le jeu</button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
   </div>
 }
 

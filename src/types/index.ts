@@ -312,11 +312,14 @@ export interface GameLaunchAdapter {
   reattachWindowSeconds: number
   endGraceSeconds: number
   launchChainStages: string[]
+  /** AppID Steam du jeu : preuve de présence supplémentaire (Steam n'est pas le
+   * seul critère, mais il déclenche la recherche du processus final). */
+  steamAppId?: number
 }
 
 export type GameSessionState = 'Preparing' | 'LauncherStarted' | 'WaitingForElevation' | 'WaitingForGame' | 'GameDetected' | 'GameRunning' | 'GameLost' | 'Reattaching' | 'Ending' | 'Ended' | 'Failed'
 
-export type SessionSource = 'zailon' | 'manual' | 'reattached' | 'recovered'
+export type SessionSource = 'zailon' | 'manual' | 'reattached' | 'recovered' | 'external'
 
 export interface GameLaunchChainStep {
   at: number
@@ -345,6 +348,9 @@ export interface GameSession {
   timeline: GameLaunchChainStep[]
   confidence?: number
   finalProcess?: string
+  /** Preuves ayant conduit à la présence (GamePresenceEngine) : processus,
+   * chemin d'installation, Steam AppID, fenêtre… */
+  presenceEvidence?: string[]
 }
 
 export interface GameTestRun {

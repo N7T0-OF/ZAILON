@@ -654,6 +654,11 @@ export interface GamePresence {
   matchedExecutable?: string
 }
 
+export interface SteamRunningState {
+  steam_running: boolean
+  running_app_ids: number[]
+}
+
 export type UpdateDownloadEvent =
   | { event: 'Started'; data: { contentLength?: number } }
   | { event: 'Progress'; data: { chunkLength: number } }
@@ -735,6 +740,9 @@ export const native = {
   trashProfileState: (gameId: string, profileId: string) => desktopOnly<string>('trash_profile_state', { gameId, profileId }),
   initializeFiveMBase: (gameId: string, installDirectory: string) => desktopOnly<BaseSnapshotResult>('initialize_fivem_base', { gameId, installDirectory }),
   scanGamePresence: (requests: GamePresenceRequest[]) => desktopOnly<GamePresence[]>('scan_game_presence', { requests }),
+  /** Présence Steam (clé de registre RunningAppID, lecture seule) : preuve
+   * supplémentaire du GamePresenceEngine — Steam n'est jamais la seule source. */
+  steamRunningState: (appIds: number[]) => desktopOnly<SteamRunningState>('steam_running_state', { appIds }),
   launchGame: (execPath: string, gameId: string, gameName: string, gameRoot: string, profileId: string, profileName: string, activeMods: number, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, discord: DiscordPresenceConfig | undefined, onProgress: (event: DeploymentProgressEvent) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Le lancement est uniquement disponible dans l’application ZAILON.'))
     const channel = new Channel<DeploymentProgressEvent>()

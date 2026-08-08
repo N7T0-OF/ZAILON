@@ -387,12 +387,13 @@ export interface Store {
   beginSession: (gameId: string, profileId: string, source?: SessionSource) => void
   onGameProcessStopped: (payload: { gameId: string; profileId?: string; cleanupError?: string; processName?: string }) => void
   sessionLauncherExited: (gameId: string, processName?: string) => void
-  sessionGameDetected: (gameId: string, processName: string, confidence?: number) => void
+  sessionGameDetected: (gameId: string, processName: string, confidence?: number, evidence?: string[]) => void
+  attachDetectedGame: (gameId: string, processName: string, confidence?: number, evidence?: string[]) => void
   attachGameSession: (gameId: string, profileId: string, processName?: string) => void
   prepareAndWait: (gameId: string, profileId: string) => void
   continueWaiting: (gameId: string) => void
   endSession: (gameId: string, reason?: string) => void
-  sessionWatchdog: () => void
+  sessionWatchdog: (steamAppIds?: number[]) => void
   setExplorePlatform: (platform: Platform) => void
   setExploreGame: (gameId: number) => void
   setExploreGameQuery: (query: string) => void
@@ -1325,7 +1326,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
         : `${game.name} : processus initial fermé (launcher). En attente du jeu — le déploiement reste actif pendant ${adapter.reattachWindowSeconds} s.`,
     }))
   },
-  sessionGameDetected: (gameId, processName, confidence) => {
+  sessionGameDetected: (gameId, processName, confidence, evidence) => {
     const state = get()
     const game = state.games.find(item => item.id === gameId)
     const session = state.gameSessions.find(item => item.gameId === gameId && item.state !== 'Ended' && item.state !== 'Failed')
@@ -1339,6 +1340,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
         gameDetectedAt: item.gameDetectedAt || now,
         finalProcess: processName,
         confidence,
+        presenceEvidence: evidence || item.presenceEvidence,
         runtimeToolsActive: true,
         inputProfileActive: true,
         visualProfileActive: true,
@@ -1347,6 +1349,48 @@ export const useStore = create<Store>()(persist((set, get) => ({
       } : item),
     }))
     if (firstDetected) get().recordNotice(`${game.name} détecté — session ZAILON reconnectée.`)
+  },
+  /** GamePresenceEngine : un jeu configuré tourne hors ZAILON (Steam, launcher
+   * externe…) — la session est créée automatiquement, sans bouton « Attacher ».
+   * Le déploiement pré-lancement n'est pas appliqué (deploymentActive: false) ;
+   * les fonctions runtime attachables (QWERTY, visuel, compteur) le sont. */
+  attachDetectedGame: (gameId, processName, confidence, evidence) => {
+    const state = get()
+    const game = state.games.find(item => item.id === gameId)
+    if (!game) return
+    const existing = state.gameSessions.find(item => item.gameId === gameId && item.state !== 'Ended' && item.state !== 'Failed')
+    if (existing) { state.sessionGameDetected(gameId, processName, confidence, evidence); return }
+    const adapter = adapterFor(game)
+    const profile = [...game.profiles].sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0))[0] ?? game.profiles[0]
+    if (!profile) return
+    const now = Date.now()
+    const session: GameSession = {
+      id: createId(),
+      gameId,
+      profileId: profile.id,
+      launchStrategy: adapter.launchBehavior,
+      launcherProcessIds: [],
+      gameProcessIds: [],
+      startedAt: now,
+      gameDetectedAt: now,
+      state: 'GameRunning',
+      runtimeToolsActive: true,
+      deploymentActive: false,
+      inputProfileActive: true,
+      visualProfileActive: true,
+      source: 'external',
+      finalProcess: processName,
+      confidence,
+      presenceEvidence: evidence,
+      timeline: [{ at: now, stage: 'GameAttached', detail: `${processName || 'Processus'} détecté hors ZAILON (${evidence?.join(', ') || 'présence'}) — confiance ${confidence ?? '—'}%` }],
+    }
+    set(current => ({
+      gameSessions: [session, ...current.gameSessions.filter(item => item.gameId !== gameId || item.state === 'Ended' || item.state === 'Failed')],
+      isPlaying: true,
+      playStartTime: now,
+      sessionTime: 0,
+    }))
+    get().recordNotice(`${game.name} détecté — session ZAILON récupérée automatiquement.`)
   },
   attachGameSession: (gameId, profileId, processName) => {
     const state = get()
@@ -1463,22 +1507,46 @@ export const useStore = create<Store>()(persist((set, get) => ({
       } : item),
     }))
   },
-  sessionWatchdog: () => {
+  /** Watchdog de session : quand la fenêtre de rattachement expire, la session
+   * passe en GameLost — SAUF si Steam indique encore que le jeu tourne
+   * (preuve de présence supplémentaire, spec GameSessionV2) : dans ce cas
+   * l'attente est prolongée, le déploiement et le compteur restent actifs. */
+  sessionWatchdog: (steamAppIds = []) => {
     const state = get()
     const now = Date.now()
-    const lost = state.gameSessions.filter(item => (item.state === 'WaitingForGame' || item.state === 'WaitingForElevation') && item.reattachUntil !== undefined && now > item.reattachUntil)
-    if (!lost.length) return
-    set(current => ({
-      gameSessions: current.gameSessions.map(item => lost.some(lostItem => lostItem.id === item.id) ? {
-        ...item,
-        state: 'GameLost',
-        timeline: [...item.timeline, { at: now, stage: 'GameLost', detail: 'Aucun processus final détecté pendant la fenêtre de rattachement' }],
-      } : item),
-    }))
-    lost.forEach(session => {
+    const expired = state.gameSessions.filter(item => (item.state === 'WaitingForGame' || item.state === 'WaitingForElevation') && item.reattachUntil !== undefined && now > item.reattachUntil)
+    if (!expired.length) return
+    const steamAlive = new Set(steamAppIds)
+    const stillWaiting: GameSession[] = []
+    const lost: GameSession[] = []
+    for (const session of expired) {
       const game = state.games.find(item => item.id === session.gameId)
-      get().recordNotice(`${game?.name || session.gameId} : le launcher a été ouvert mais le jeu n'a pas été détecté.`)
-    })
+      const adapter = game ? adapterFor(game) : FALLBACK_ADAPTER
+      if (adapter.steamAppId !== undefined && steamAlive.has(adapter.steamAppId)) stillWaiting.push(session)
+      else lost.push(session)
+    }
+    if (lost.length) {
+      set(current => ({
+        gameSessions: current.gameSessions.map(item => lost.some(lostItem => lostItem.id === item.id) ? {
+          ...item,
+          state: 'GameLost',
+          timeline: [...item.timeline, { at: now, stage: 'GameLost', detail: 'Aucun processus final détecté pendant la fenêtre de rattachement' }],
+        } : item),
+      }))
+      lost.forEach(session => {
+        const game = state.games.find(item => item.id === session.gameId)
+        get().recordNotice(`${game?.name || session.gameId} : le launcher a été ouvert mais le jeu n'a pas été détecté.`)
+      })
+    }
+    if (stillWaiting.length) {
+      set(current => ({
+        gameSessions: current.gameSessions.map(item => stillWaiting.some(stillItem => stillItem.id === item.id) ? {
+          ...item,
+          reattachUntil: now + 45_000,
+          timeline: [...item.timeline, { at: now, stage: 'SteamEvidence', detail: 'Steam indique que le jeu est encore actif — attente prolongée' }],
+        } : item),
+      }))
+    }
   },
   setExplorePlatform: explorePlatform => set({ explorePlatform, exploreMods: [], explorePage: 1, exploreError: undefined }),
   setExploreGame: exploreGameId => set(state => {

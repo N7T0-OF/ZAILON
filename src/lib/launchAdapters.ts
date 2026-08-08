@@ -29,6 +29,7 @@ const NTE_ADAPTER: GameLaunchAdapter = {
   reattachWindowSeconds: 90,
   endGraceSeconds: 10,
   launchChainStages: ['Steam', 'NTELauncher', 'UAC', 'ElevatedLauncher', 'Game'],
+  steamAppId: 4508340,
 }
 
 const CYBERPUNK_ADAPTER: GameLaunchAdapter = {

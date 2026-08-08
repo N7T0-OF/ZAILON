@@ -22,6 +22,15 @@
 >   (linker MSVC absent) : validation via la PR #1 (`verify-native.yml`). Reste :
 >   watcher de fenêtres, rattachement auto branché sur les événements natifs, puis
 >   tests sur un vrai jeu (NTE Steam, protocole `docs/nte-keyboard-remap-test.md`).
+> - Phase 6 🔄 GameSessionV2 + GamePresenceEngine (1.18.0) : SmartPlayButton (un seul
+>   CTA, actions manuelles Attacher/Continuer/Terminer supprimées de l'UI standard,
+>   modal Quitter), détection de présence indépendante du lancement (rattachement
+>   auto d'un jeu lancé hors ZAILON, source `external`), preuve Steam native
+>   (`steam_presence.rs`, registre RunningAppID, AppID NTE 4508340, watch dog à
+>   attente prolongée). Docs : `game-session-v2.md`, `smart-play-button.md`,
+>   `game-presence-engine.md`, `quick-game-panel.md`, `nte-steam-presence-fix.md`.
+>   Reste : Quick Game Panel (fenêtre native), watcher de fenêtres, puis tests réels
+>   NTE Steam (protocole `docs/nte-keyboard-remap-test.md`).
 >
 > **Progression** :
 > - Phase 1 · Clavier par jeu — fondation implémentée (données, presets, éditeur,

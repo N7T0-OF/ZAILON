@@ -18,6 +18,10 @@ const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Mat
  * lancé quand ZAILON redémarre, spec §24) — fenêtre de 20 s. */
 const STORE_BOOTED_AT = Date.now()
 const RECOVERY_GRACE_MS = 20_000
+/** Jeu dont le profil visuel a été appliqué par ZAILON (arbitrage multi-apps) :
+ * permet de restaurer l'état système quand la session prioritaire change sans
+ * association (jamais de profil d'un autre jeu laissé actif). Non persisté. */
+let lastVisualAppliedGameId: string | undefined
 const asError = (error: unknown) => error instanceof Error ? error.message : String(error)
 const gameNameFromPath = (path: string) => path.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') || 'New game'
 const normalizedPath = (path?: string) => (path || '').trim().replace(/\//g, '\\').toLocaleLowerCase()
@@ -435,6 +439,10 @@ export interface Store {
    * multi-sessions §14) : une seule activité publiée, celle de la session
    * prioritaire — appelé à chaque changement de priorité. */
   syncDiscordPresence: () => void
+  /** Arbitrage des Visual Profiles (spec multi-sessions §9) : UN seul profil au
+   * premier plan — appliqué pour la session prioritaire en cours (association),
+   * restauré sinon. Recalcule aussi les indicateurs `visualProfileActive`. */
+  syncVisualProfiles: () => Promise<void>
   cancelSession: (gameId: string) => void
   applyInputArbiter: () => void
   beginSession: (gameId: string, profileId: string, source?: SessionSource) => void
@@ -1864,6 +1872,40 @@ export const useStore = create<Store>()(persist((set, get) => ({
       },
     }).catch(() => undefined)
   },
+  /** Visual Profiles multi-apps (§9) : seule la session au premier plan applique
+   * son profil — l'association du jeu/profil est appliquée à l'Alt+Tab (la
+   * session devient prioritaire), l'état système est restauré quand aucune
+   * session prioritaire n'a d'association ou plus aucune session n'est active. */
+  syncVisualProfiles: async () => {
+    const state = get()
+    const priorityGameId = pickPrioritySession(state.gameSessions, state.pinnedPriorityGameId, state.foregroundGameId)
+    const session = state.gameSessions.find(item => item.gameId === priorityGameId && item.state === 'GameRunning')
+    const game = session ? state.games.find(item => item.id === session.gameId) : undefined
+    const profile = session && game ? game.profiles.find(item => item.id === session.profileId) : undefined
+    // Indicateurs : un seul profil « actif » possible — celui de la prioritaire
+    // (même arbitrage que les entrées : seule la prioritaire en GameRunning).
+    const visual = arbitrateInputProfiles(state.gameSessions, priorityGameId)
+    set(current => ({
+      gameSessions: current.gameSessions.map(item => item.visualProfileActive === visual[item.gameId] ? item : { ...item, visualProfileActive: visual[item.gameId] }),
+    }))
+    if (!session || !game || !profile) {
+      if (lastVisualAppliedGameId) {
+        lastVisualAppliedGameId = undefined
+        await native.visualProfiles.restore().catch(() => undefined)
+      }
+      return
+    }
+    const visualProfileId = await native.visualProfiles.association(game.id, profile.id).catch(() => null)
+    if (visualProfileId) {
+      await native.visualProfiles.apply(visualProfileId).catch(() => undefined)
+      lastVisualAppliedGameId = game.id
+    } else if (lastVisualAppliedGameId && lastVisualAppliedGameId !== game.id) {
+      // La session prioritaire n'a pas d'association mais un autre jeu avait
+      // appliqué un profil → restaurer pour ne jamais superposer deux profils.
+      lastVisualAppliedGameId = undefined
+      await native.visualProfiles.restore().catch(() => undefined)
+    }
+  },
   /** Annule une session encore en recherche (launcher ouvert, jeu pas encore
    * identifié) : arrête le suivi ZAILON et restaure le déploiement SANS toucher
    * au launcher externe (Steam / launcher officiel peuvent rester ouverts). */
@@ -1908,6 +1950,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
     }))
     // §14 : la Rich Presence suit la session prioritaire (une seule activité).
     get().syncDiscordPresence()
+    // §9 : un seul Visual Profile au premier plan (association appliquée/
+    // restaurée selon la session prioritaire).
+    void get().syncVisualProfiles()
   },
   setReduceExplanations: reduceExplanations => set({ reduceExplanations }),
   setAdvancedMode: advancedMode => set({ advancedMode }),

@@ -56,10 +56,22 @@ commandes natives `set_discord_activity_for` / `clear_discord_activity_for`
 session, épinglage, Alt+Tab) et par `toggleDiscord`. Quand la session prioritaire
 ferme, la priorité est recalculée et la RPC bascule automatiquement.
 
+### 7. Visual Profiles multi-apps (§9)
+
+`syncVisualProfiles()` (store, appelé par `applyInputArbiter` à chaque
+changement de priorité) garantit **un seul profil visuel au premier plan** :
+
+- la session prioritaire en cours (épinglée → premier plan → Running récent)
+  applique son association visuelle (`visualProfiles.apply`) ;
+- si elle n'a pas d'association mais qu'un autre jeu avait appliqué un profil,
+  l'état système est **restauré** (`restore`) — jamais deux profils superposés ;
+- les indicateurs `visualProfileActive` sont recalculés par le même arbitrage
+  que les entrées (une seule session « active » à la fois).
+
 ## Ce qui reste (dépend de la machine réelle / du backend fenêtres)
 
-- **Visual Profiles multi-apps** : un seul profil au premier plan (règle déjà
-  respectée côté session — à confirmer sur machine).
+- **Confirmation sur machine réelle** : l'application/restauration effective
+  des profils selon l'Alt+Tab se confirme avec les jeux installés.
 - **Indicateur dans la barre de statut** : le header porte l'indicateur
   « N en cours » (spec) ; la barre de statut peut l'afficher aussi en option.
 

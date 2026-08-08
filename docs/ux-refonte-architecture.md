@@ -28,6 +28,9 @@
 >   rétention, fusion « État & Diagnostic » (Fichiers + Conflits intégrés), dossier
 >   Bypass/Loader + chemins additionnels, bulles ⓘ, presets Déplacement/Complet,
 >   hotkeys de suspension/kill switch, test de remapping, Accueil gradient + badges.
+>   Suite : préférence « Réduire les explications », audit `npm run audit:ui`,
+>   rapports `docs/ui-cleanup-and-input-remap-report.md`, `docs/history-retention-policy.md`,
+>   `docs/settings-density-audit.md`, `docs/nte-keyboard-remap-test.md`.
 > - Phases 3-4 : cache par jeu, lazy loading, modes Simple/Avancé, presets de jeu,
 >   environnement de test, outils par jeu — non commencées.
 > - Backends clavier (bindings du jeu puis traduction runtime, incl. NTE/ACE) :

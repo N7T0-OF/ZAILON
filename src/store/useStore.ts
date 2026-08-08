@@ -303,6 +303,7 @@ export interface Store {
   downloadRetention: DownloadRetention
   remapSuspendShortcut: string
   remapKillSwitchShortcut: string
+  reduceExplanations: boolean
   showSupportButton: boolean
   accentColor: string
   bulkHistory: BulkOperation[]
@@ -395,6 +396,7 @@ export interface Store {
   setDownloadRetention: (retention: DownloadRetention) => void
   setRemapSuspendShortcut: (shortcut: string) => void
   setRemapKillSwitchShortcut: (shortcut: string) => void
+  setReduceExplanations: (enabled: boolean) => void
   cleanupBackgroundTasks: () => void
   clearBackgroundTasks: () => void
   setShowSupportButton: (enabled: boolean) => void
@@ -474,6 +476,7 @@ export function migratePersistedState(persisted: unknown) {
     downloadRetention: state.downloadRetention || 'startup',
     remapSuspendShortcut: state.remapSuspendShortcut || 'Ctrl+Alt+K',
     remapKillSwitchShortcut: state.remapKillSwitchShortcut || 'Ctrl+Alt+Backspace',
+    reduceExplanations: state.reduceExplanations ?? false,
     showSupportButton: state.showSupportButton ?? true,
     accentColor: /^#[0-9a-f]{6}$/i.test(state.accentColor || '') ? state.accentColor : '#f3faf8',
     bulkHistory: state.bulkHistory || [],
@@ -538,6 +541,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   downloadRetention: 'startup',
   remapSuspendShortcut: 'Ctrl+Alt+K',
   remapKillSwitchShortcut: 'Ctrl+Alt+Backspace',
+  reduceExplanations: false,
   showSupportButton: true,
   accentColor: '#f3faf8',
   bulkHistory: [],
@@ -1312,6 +1316,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setDownloadRetention: downloadRetention => set({ downloadRetention }),
   setRemapSuspendShortcut: remapSuspendShortcut => set({ remapSuspendShortcut }),
   setRemapKillSwitchShortcut: remapKillSwitchShortcut => set({ remapKillSwitchShortcut }),
+  setReduceExplanations: reduceExplanations => set({ reduceExplanations }),
   cleanupBackgroundTasks: () => set(state => {
     if (state.downloadRetention === 'never') return {}
     const cutoffSeconds = Date.now() / 1000 - (state.downloadRetention === 'startup' ? 0 : (state.downloadRetention === '1d' ? 24 : 7 * 24) * 3600)
@@ -1715,6 +1720,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     downloadRetention: state.downloadRetention,
     remapSuspendShortcut: state.remapSuspendShortcut,
     remapKillSwitchShortcut: state.remapKillSwitchShortcut,
+    reduceExplanations: state.reduceExplanations,
     showSupportButton: state.showSupportButton,
     restorePoints: state.restorePoints,
     autoRestorePoints: state.autoRestorePoints,

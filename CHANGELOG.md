@@ -156,6 +156,9 @@
 
 ### Added
 
+- Préférence « Réduire les explications » (Paramètres > Préférences et lisibilité) :
+  masque les descriptions secondaires, le détail passe dans les bulles ⓘ.
+
 ### Changed
 
 ### Fixed
@@ -175,6 +178,12 @@
 ### Data
 
 ### Technical
+
+- `npm run audit:ui` : audit automatique de densité UI (blocs > 160 caractères) qui
+  produit `docs/settings-density-audit.md` (16 blocs détectés, plan MoveToTooltip / Shorten).
+- Rapports du lot consignés : `docs/ui-cleanup-and-input-remap-report.md`,
+  `docs/nte-keyboard-remap-test.md` (protocole de validation NTE, Phase 2),
+  `docs/history-retention-policy.md`.
 
 ## 1.9.0 — Profils immuables et diagnostic transparent
 

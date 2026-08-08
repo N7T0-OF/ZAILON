@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "test:gamebanana-api": "node .github/scripts/check-gamebanana-api.mjs",
     "test:visual-safety": "node .github/scripts/check-visual-safety.mjs",
+    "audit:ui": "node .github/scripts/ui-density-audit.mjs",
     "release:notes": "node .github/scripts/generate-release-notes.mjs",
     "preview": "vite preview",
     "tauri": "tauri",

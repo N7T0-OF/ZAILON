@@ -39,6 +39,7 @@ interface Props {
 export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBrowseModsFolder, onExportProfile, onImportProfile, onSaveResources, onOpenVisuals }: Props) {
   const setGamePath = useStore(state => state.setGamePath)
   const setModsPath = useStore(state => state.setModsPath)
+  const reduceExplanations = useStore(state => state.reduceExplanations)
   const setGameBypassPath = useStore(state => state.setGameBypassPath)
   const addGameRuntimePath = useStore(state => state.addGameRuntimePath)
   const updateGameRuntimePath = useStore(state => state.updateGameRuntimePath)
@@ -107,7 +108,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.03] text-gold/75"><Rocket size={16} /></span>
         <div className="min-w-0 flex-1">
           <h2 className="text-xs font-semibold text-white/80">Configuration de {game.name}</h2>
-          <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-white/38">Réglages propres à ce jeu, regroupés ici. Les Paramètres globaux restent dans le menu Paramètres de ZAILON.</p>
+          {!reduceExplanations && <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-white/38">Réglages propres à ce jeu, regroupés ici. Les Paramètres globaux restent dans le menu Paramètres de ZAILON.</p>}
         </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-2 text-[11px]">

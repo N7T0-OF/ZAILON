@@ -4018,6 +4018,16 @@ fn scan_game_windows(
     window_watcher::scan_requests(&requests)
 }
 
+/// Vrai si la fenêtre au premier plan est en plein écran exclusif (le mode
+/// d'affichage a quitté la résolution du bureau). Utilisé par le Quick Game
+/// Panel : en exclusif, une fenêtre ZAILON ne peut pas s'afficher au-dessus du
+/// jeu — on montre le message « Utiliser Borderless » au lieu d'ouvrir le
+/// panneau. Heuristique documentée (spec #41).
+#[tauri::command]
+fn exclusive_fullscreen_active() -> bool {
+    window_watcher::exclusive_fullscreen_active()
+}
+
 #[tauri::command]
 fn discord_write_frame(
     stream: &mut dyn DiscordStream,
@@ -14624,6 +14634,7 @@ pub fn run() {
             ensure_dir,
             scan_game_presence,
             scan_game_windows,
+            exclusive_fullscreen_active,
             steam_running_state,
             quick_panel::open_quick_panel,
             quick_panel::close_quick_panel,

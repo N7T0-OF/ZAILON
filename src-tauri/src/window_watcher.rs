@@ -275,6 +275,80 @@ pub fn scan_requests(requests: &[GameWindowRequest]) -> Vec<GameWindowMatch> {
     detect_windows(&candidates, requests)
 }
 
+/// Vrai si le mode d'affichage courant d'un écran a quitté la résolution du
+/// bureau (plein écran exclusif). Heuristique documentée : en plein écran
+/// exclusif, la résolution active change (EnumDisplaySettings / ENUM_CURRENT),
+/// tandis qu'en borderless/fenêtré elle reste identique au bureau.
+///
+/// Limite honnête : un jeu exclusif lancé à la résolution exacte du bureau
+/// n'est pas distinguable par cette méthode — c'est documenté dans la spec.
+pub fn is_mode_switch(
+    mode_width: u32,
+    mode_height: u32,
+    desktop_width: u32,
+    desktop_height: u32,
+) -> bool {
+    mode_width != desktop_width || mode_height != desktop_height
+}
+
+/// Détecte si la fenêtre au premier plan est en plein écran exclusif.
+/// Windows-only (lecture de la résolution active) ; retourne `false` ailleurs
+/// (Linux/Wayland n'expose pas ce mode de façon fiable).
+#[cfg(target_os = "windows")]
+pub fn exclusive_fullscreen_active() -> bool {
+    use windows_sys::Win32::Graphics::Gdi::{
+        EnumDisplaySettingsW, DEVMODEW, ENUM_CURRENT_SETTINGS,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetMonitorInfoW, MonitorFromWindow, MONITORINFO,
+        MONITOR_DEFAULTTONEAREST,
+    };
+
+    // SAFETY : GetForegroundWindow renvoie un handle ; 0 = aucune fenêtre.
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.is_null() {
+        return false;
+    }
+    // SAFETY : MonitorFromWindow avec MONITOR_DEFAULTTONEAREST retourne un
+    // handle d'écran toujours valide pour un HWND existant.
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    if monitor.is_null() {
+        return false;
+    }
+
+    // SAFETY : GetMonitorInfoW remplit la structure ; on lit rcMonitor (taille
+    // du bureau pour cet écran) et szDevice (nom du périphérique).
+    let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
+    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    let ok = unsafe { GetMonitorInfoW(monitor, &mut info) };
+    if ok == 0 {
+        return false;
+    }
+    let desktop_width = (info.rcMonitor.right - info.rcMonitor.left) as u32;
+    let desktop_height = (info.rcMonitor.bottom - info.rcMonitor.top) as u32;
+
+    // SAFETY : EnumDisplaySettingsW(ENUM_CURRENT_SETTINGS) remplit DEVMODEW ;
+    // en plein écran exclusif la résolution active diffère de celle du bureau.
+    let mut mode: DEVMODEW = unsafe { std::mem::zeroed() };
+    mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+    let ok =
+        unsafe { EnumDisplaySettingsW(info.szDevice.as_ptr(), ENUM_CURRENT_SETTINGS, &mut mode) };
+    if ok == 0 {
+        return false;
+    }
+    is_mode_switch(
+        mode.dmPelsWidth,
+        mode.dmPelsHeight,
+        desktop_width,
+        desktop_height,
+    )
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn exclusive_fullscreen_active() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,5 +454,17 @@ mod tests {
         let (score, _) = score_window(&candidate, &nte_request(true, &[]));
         // 10 + 5 + 20 = 35 → pas le jeu (hors installation, hors candidats finaux).
         assert_eq!(score, 35);
+    }
+
+    #[test]
+    fn mode_switch_detects_exclusive_fullscreen() {
+        // Résolution active 1280×720 alors que le bureau est en 1920×1080 →
+        // le mode d'affichage a été commuté (plein écran exclusif).
+        assert!(is_mode_switch(1280, 720, 1920, 1080));
+        // Borderless / fenêtré : la résolution active reste celle du bureau.
+        assert!(!is_mode_switch(1920, 1080, 1920, 1080));
+        // Limite documentée : exclusif à la résolution du bureau n'est pas
+        // distinguable par cette seule preuve.
+        assert!(!is_mode_switch(1920, 1080, 1920, 1080));
     }
 }

@@ -21,8 +21,13 @@ pub struct GamePresenceRequest {
     pub game_id: String,
     /// Racine d'installation : tout processus sous ce chemin est un candidat fort.
     pub install_root: Option<String>,
-    /// Nom du launcher officiel (ex. NTELauncher.exe).
+    /// Nom du launcher officiel principal (ex. NTELauncher.exe) — conservé pour
+    /// compatibilité, la liste ci-dessous est la source complète.
     pub launcher_executable: Option<String>,
+    /// Launchers intermédiaires connus (ex. `ntegloballauncher.exe` pour NTE) :
+    /// un stage launcher est un candidat valide (+15) mais JAMAIS le jeu final —
+    /// la détection continue vers le vrai processus.
+    pub launcher_executable_candidates: Vec<String>,
     /// Noms des exécutables du jeu final (ex. HT-Win64-Shipping.exe).
     pub game_executable_candidates: Vec<String>,
     /// Vrai quand le scan se fait pendant la fenêtre de rattachement d'une session
@@ -85,11 +90,20 @@ pub fn score_process(candidate: &ProcessCandidate, request: &GamePresenceRequest
         score += 25;
     }
 
-    // +15 : le nom correspond au launcher officiel (présent, mais pas le jeu final).
-    if let Some(launcher) = &request.launcher_executable {
-        if !launcher.is_empty() && name == launcher.to_lowercase() {
-            score += 15;
-        }
+    // +15 : le nom correspond à un launcher intermédiaire connu (présent, mais
+    // pas le jeu final — la recherche du processus final continue toujours).
+    let launcher_names: Vec<String> = request
+        .launcher_executable_candidates
+        .iter()
+        .chain(request.launcher_executable.iter())
+        .filter(|candidate| !candidate.is_empty())
+        .cloned()
+        .collect();
+    if launcher_names
+        .iter()
+        .any(|launcher| name == launcher.to_lowercase())
+    {
+        score += 15;
     }
 
     // +20 : contexte de rattachement (le launcher vient de céder la main pendant
@@ -234,6 +248,10 @@ mod tests {
             game_id: "nte".to_string(),
             install_root: Some("X:\\Games\\Neverness To Everness\\".to_string()),
             launcher_executable: Some("NTELauncher.exe".to_string()),
+            launcher_executable_candidates: vec![
+                "NTELauncher.exe".to_string(),
+                "ntegloballauncher.exe".to_string(),
+            ],
             game_executable_candidates: vec![
                 "HT-Win64-Shipping.exe".to_string(),
                 "NTE-Win64-Shipping.exe".to_string(),
@@ -281,6 +299,21 @@ mod tests {
         let score = score_process(&process, &nte_request(true));
         // 40 (installation) + 15 (launcher) + 20 (contexte) = 75 < 80 : candidat, pas auto.
         assert_eq!(score, 75);
+    }
+
+    #[test]
+    fn nte_global_launcher_is_a_valid_stage_but_not_the_game() {
+        // ntegloballauncher.exe est un stage intermédiaire VALIDE (launcher +15),
+        // jamais le processus final — la détection continue vers le vrai jeu.
+        let process = candidate(
+            "ntegloballauncher.exe",
+            "X:\\Games\\Neverness To Everness\\NTEGlobal\\ntegloballauncher.exe",
+        );
+        let score = score_process(&process, &nte_request(true));
+        // 40 (installation) + 15 (launcher candidat) + 20 (contexte) = 75 < 80 :
+        // stage valide, pas d'auto-attachement comme « jeu ».
+        assert_eq!(score, 75);
+        assert!(detect_games(&[process], &[nte_request(true)]).is_empty());
     }
 
     #[test]

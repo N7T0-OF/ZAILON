@@ -668,7 +668,11 @@
 > `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
 > Release Notes à partir de cette section et refuse de publier si elle est vide.
 
-## [Unreleased]
+## [1.23.0] - 2026-08-08
+
+> Release du bloc X de session + multi-apps actives : session prioritaire,
+> indicateur « N en cours » dans le header, confirmation avant quitter/arrêter,
+> et un seul mapping clavier actif à la fois — validée par Verify ZAILON.
 
 ### Added
 
@@ -679,6 +683,36 @@
 ### Changed
 
 - Le Quick Panel (Ctrl+Alt+Z) cible la session prioritaire au lieu de la première session trouvée.
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
+> Pendant le développement, chaque changement visible par l'utilisateur est ajouté
+> ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
+> cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
+> `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
+> Release Notes à partir de cette section et refuse de publier si elle est vide.
+
+## [Unreleased]
+
+### Added
+
+### Changed
 
 ### Fixed
 

@@ -258,13 +258,10 @@
   disque, prérequis de configuration, historique des 10 derniers tests avec verdict
   et bouton « Effacer l’historique ».
 
-## [Unreleased]
+## [1.15.0] - 2026-08-08
 
-> Pendant le développement, chaque changement visible par l'utilisateur est ajouté
-> ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
-> cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
-> `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
-> Release Notes à partir de cette section et refuse de publier si elle est vide.
+> Release de la Phase 6 — architecture des entrées et lancement multi-étapes :
+> ZAILON possède une session de jeu, plus un simple PID.
 
 ### Added
 
@@ -313,6 +310,14 @@
 
 - Suivi de progression en 6 phases consigné dans `docs/ux-refonte-architecture.md`
   (Phases 1-4 livrées, Phase 5 en cours, Phase 6 backends Rust NTE).
+
+## [Unreleased]
+
+> Pendant le développement, chaque changement visible par l'utilisateur est ajouté
+> ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
+> cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
+> `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
+> Release Notes à partir de cette section et refuse de publier si elle est vide.
 
 ## 1.9.0 — Profils immuables et diagnostic transparent
 

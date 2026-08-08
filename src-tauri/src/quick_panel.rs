@@ -18,7 +18,7 @@ const MARGIN: i32 = 24;
 
 /// Ouvre (ou ramène au premier plan) le panneau rapide.
 #[tauri::command]
-fn open_quick_panel(app: AppHandle) -> Result<(), String> {
+pub fn open_quick_panel(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(LABEL) {
         let _ = window.show();
         let _ = window.set_focus();
@@ -67,7 +67,7 @@ fn open_quick_panel(app: AppHandle) -> Result<(), String> {
 
 /// Ferme le panneau rapide s'il est ouvert (ex. fin de session).
 #[tauri::command]
-fn close_quick_panel(app: AppHandle) -> Result<(), String> {
+pub fn close_quick_panel(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(LABEL) {
         let _ = window.close();
     }
@@ -76,7 +76,7 @@ fn close_quick_panel(app: AppHandle) -> Result<(), String> {
 
 /// Bascule le panneau : ouvert → fermé, fermé → ouvert.
 #[tauri::command]
-fn toggle_quick_panel(app: AppHandle) -> Result<bool, String> {
+pub fn toggle_quick_panel(app: AppHandle) -> Result<bool, String> {
     if let Some(window) = app.get_webview_window(LABEL) {
         if window.is_visible().unwrap_or(false) {
             let _ = window.close();

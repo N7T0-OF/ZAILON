@@ -8,6 +8,7 @@ import { useStore } from './store/useStore'
 import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
 import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, windowRequestFor } from './lib/gamePresence'
+import { pickPrioritySession } from './lib/sessionPriority'
 import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-profiles/application/shortcuts'
@@ -178,7 +179,9 @@ export default function App() {
     void listen<{ action: 'toggle-keyboard' | 'focus-main' }>('quick-panel-action', event => {
       const store = useStore.getState()
       if (event.payload.action === 'toggle-keyboard') {
-        const session = store.gameSessions.find(item => item.state !== 'Ended' && item.state !== 'Failed')
+        // Spec multi-sessions : le panneau rapide cible la session PRIORITAIRE.
+        const priorityGameId = pickPrioritySession(store.gameSessions, store.pinnedPriorityGameId)
+        const session = store.gameSessions.find(item => item.gameId === priorityGameId && item.state === 'GameRunning')
         if (session) store.setSessionInputActive(session.gameId, !session.inputProfileActive)
       } else if (event.payload.action === 'focus-main') {
         store.setView('home')

@@ -1,4 +1,4 @@
-import { Boxes, Check, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2 } from 'lucide-react'
+import { Boxes, Check, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Game } from '../../types'
 import { resourceUrl, native } from '../../lib/native'
@@ -9,6 +9,7 @@ import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } fro
 import { formatSeconds, formatTime, timeAgo } from '../../utils'
 import { GameContextMenu } from '../GameContextMenu'
 import { GameResourcesDialog } from '../GameResourcesDialog'
+import { SessionStopModal } from '../SessionStopModal'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
 
 export function HomeView() {
@@ -27,6 +28,7 @@ export function HomeView() {
   const sessionTime = useStore(state => state.sessionTime)
   const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
   const endSession = useStore(state => state.endSession)
+  const cancelSession = useStore(state => state.cancelSession)
   const setView = useStore(state => state.setView)
   const setActiveGameTab = useStore(state => state.setActiveGameTab)
   const [discoveryOpen, setDiscoveryOpen] = useState(false)
@@ -34,6 +36,7 @@ export function HomeView() {
   const [menu, setMenu] = useState<{ game: Game; position: { x: number; y: number } }>()
   const [quitOpen, setQuitOpen] = useState(false)
   const [quitConfirm, setQuitConfirm] = useState(false)
+  const [stopSearchingOpen, setStopSearchingOpen] = useState(false)
   const [resourcesGameId, setResourcesGameId] = useState<string>()
 
   // SmartPlayButton — un seul CTA : l'état du jeu pilote le libellé et le
@@ -157,6 +160,7 @@ export function HomeView() {
                   <p className="mt-1 text-[11px] text-white/52">Profil <span className="font-semibold text-white/75">{selectedProfile.name}</span> · <span className="text-emerald-200/85">{formatSeconds(sessionTime)}</span>{effectiveInputProfile(selectedGame, selectedProfile.id) ? <span> · <span className="text-emerald-200/70">{LAYOUT_LABELS[effectiveLayout(selectedGame, selectedProfile.id)]}</span></span> : null}</p>
                 </div>
                 <span className="flex items-center gap-1.5 rounded-full border border-emerald-300/25 bg-emerald-300/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-100/85"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-300" />En jeu</span>
+                <button type="button" onClick={() => { setQuitConfirm(false); setQuitOpen(true) }} title="Quitter le jeu" aria-label="Quitter le jeu" className="rounded-lg p-1.5 text-white/30 hover:bg-red-400/10 hover:text-red-300"><X size={13} /></button>
               </div>
               <p className="mt-2 text-[11px] leading-relaxed text-white/35">La session se termine quand le jeu se ferme ; ZAILON restaure alors automatiquement le déploiement et le remapping.</p>
             </div>
@@ -173,12 +177,13 @@ export function HomeView() {
                 {activeSession.reattachUntil
                   ? <span className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold ${activeSession.state === 'WaitingForElevation' ? 'border-sky-300/25 bg-sky-300/10 text-sky-100/85' : 'border-amber-300/25 bg-amber-300/10 text-amber-100/85'}`}><Clock3 size={10} />{Math.max(0, Math.ceil((activeSession.reattachUntil - Date.now()) / 1000))} s</span>
                   : <span className="rounded-full border border-amber-300/25 bg-amber-300/10 px-2.5 py-1 text-[10px] font-semibold text-amber-100/85">Rattachement</span>}
+                <button type="button" onClick={() => setStopSearchingOpen(true)} title="Arrêter la recherche" aria-label="Arrêter la recherche" className="rounded-lg p-1.5 text-white/30 hover:bg-red-400/10 hover:text-red-300"><X size={13} /></button>
               </div>
             </div>
           )}
           {activeSession && activeSession.state === 'GameLost' && (
             <div className="mt-4 max-w-md rounded-xl border border-red-300/20 bg-red-300/[0.05] p-3 backdrop-blur-md">
-              <p className="font-mono text-[11px] uppercase tracking-widest text-red-200/90">Le jeu n'a pas démarré</p>
+              <div className="flex items-center justify-between gap-3"><p className="font-mono text-[11px] uppercase tracking-widest text-red-200/90">Le jeu n'a pas démarré</p><button type="button" onClick={() => endSession(selectedGame.id)} title="Fermer cette session" aria-label="Fermer cette session" className="rounded-lg p-1.5 text-white/30 hover:bg-red-400/10 hover:text-red-300"><X size={13} /></button></div>
               <p className="mt-1 text-[11px] leading-relaxed text-white/52">ZAILON a suivi automatiquement Steam, le launcher et l'élévation, puis a cherché le processus final jusqu'à l'épuisement des preuves. Le déploiement reste en place. Réessayez, ou ouvrez le diagnostic pour voir la chaîne complète.</p>
             </div>
           )}
@@ -239,6 +244,7 @@ export function HomeView() {
     {discoveryOpen && <SteamDetectionDialog onClose={() => setDiscoveryOpen(false)} onImport={importDetectedGames} />}
     {resourcesGame && <GameResourcesDialog game={resourcesGame} onClose={() => setResourcesGameId(undefined)} onChange={resources => setGameResources(resourcesGame.id, resources)} />}
     {menu && <GameContextMenu game={menu.game} position={menu.position} onClose={() => setMenu(undefined)} onEditResources={() => setResourcesGameId(menu.game.id)} />}
+    {stopSearchingOpen && activeSession && <SessionStopModal gameName={selectedGame.name} searching onCancel={() => setStopSearchingOpen(false)} onConfirm={() => { setStopSearchingOpen(false); cancelSession(selectedGame.id) }} />}
     {quitOpen && (
       <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setQuitOpen(false)}>
         <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-white/[0.09] bg-[#141818] shadow-[0_24px_70px_rgba(0,0,0,0.6)]" onClick={event => event.stopPropagation()}>

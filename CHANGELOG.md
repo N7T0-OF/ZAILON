@@ -672,7 +672,13 @@
 
 ### Added
 
+- Multi-sessions actives : session prioritaire (épinglée ou automatique = la plus récente), indicateur « N en cours » dans le header avec mini-liste (état, durée, étoile prioritaire, X).
+- Bouton X sur chaque session (header + Accueil) avec confirmation : quitter le jeu (jamais brutalement au premier clic) ou arrêter la recherche (le launcher externe reste ouvert).
+- Arbitrage des mappings clavier : un seul mapping de fenêtre actif à la fois (la session prioritaire) — `inputProfileActive` recalé automatiquement à chaque transition.
+
 ### Changed
+
+- Le Quick Panel (Ctrl+Alt+Z) cible la session prioritaire au lieu de la première session trouvée.
 
 ### Fixed
 

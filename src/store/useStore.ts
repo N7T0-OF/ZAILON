@@ -7,6 +7,7 @@ import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchG
 import { createUserTag, withInferredTags } from '../lib/modCategories'
 import { validateCyberpunkFrameworkDeps } from '../lib/frameworkValidator'
 import { mergeModCatalogs, reconcileModStates } from '../lib/profileState'
+import { arbitrateInputProfiles, pickPrioritySession } from '../lib/sessionPriority'
 
 const APP_VERSION = '1.22.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
@@ -405,6 +406,11 @@ export interface Store {
   stopPlaying: (gameId?: string, profileId?: string, cleanupError?: string) => void
   tick: () => void
   gameSessions: GameSession[]
+  /** Session prioritaire épinglée (spec multi-sessions) : `undefined` = automatique. */
+  pinnedPriorityGameId?: string
+  setPinnedPriority: (gameId?: string) => void
+  cancelSession: (gameId: string) => void
+  applyInputArbiter: () => void
   beginSession: (gameId: string, profileId: string, source?: SessionSource) => void
   onGameProcessStopped: (payload: { gameId: string; profileId?: string; cleanupError?: string; processName?: string }) => void
   sessionLauncherExited: (gameId: string, processName?: string) => void
@@ -1397,6 +1403,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       } : item),
     }))
     if (firstDetected) get().recordNotice(`${game.name} détecté — session ZAILON reconnectée.`)
+    get().applyInputArbiter()
   },
   /** GamePresenceEngine : un jeu configuré tourne hors ZAILON (Steam, launcher
    * externe…) — la session est créée automatiquement, sans bouton « Attacher ».
@@ -1439,6 +1446,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       sessionTime: 0,
     }))
     get().recordNotice(`${game.name} détecté — session ZAILON récupérée automatiquement.`)
+    get().applyInputArbiter()
   },
   attachGameSession: (gameId, profileId, processName) => {
     const state = get()
@@ -1561,6 +1569,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
         timeline: [...item.timeline, { at: Date.now(), stage: 'GameExited', detail: reason || 'Session terminée' }],
       } : item),
     }))
+    get().applyInputArbiter()
   },
   /** Watchdog de session : quand la fenêtre de rattachement expire, la session
    * passe en GameLost — SAUF si Steam indique encore que le jeu tourne
@@ -1732,6 +1741,55 @@ export const useStore = create<Store>()(persist((set, get) => ({
         inputProfileActive: active,
         timeline: [...item.timeline, { at: Date.now(), stage: active ? 'InputProfileEnabled' : 'InputProfileDisabled', detail: 'Panneau rapide' }],
       } : item),
+    }))
+  },
+  /** Priorité épinglée : la session du jeu reste prioritaire même si une autre
+   * prend le premier plan (spec multi-sessions). `undefined` = automatique. */
+  setPinnedPriority: pinnedPriorityGameId => {
+    set({ pinnedPriorityGameId })
+    get().applyInputArbiter()
+  },
+  /** Annule une session encore en recherche (launcher ouvert, jeu pas encore
+   * identifié) : arrête le suivi ZAILON et restaure le déploiement SANS toucher
+   * au launcher externe (Steam / launcher officiel peuvent rester ouverts). */
+  cancelSession: gameId => {
+    const state = get()
+    const game = state.games.find(item => item.id === gameId)
+    const session = state.gameSessions.find(item => item.gameId === gameId && item.state !== 'Ended' && item.state !== 'Failed')
+    if (!session) return
+    if (session.deploymentActive && game?.installDirectory && native.isDesktop()) {
+      void native.restoreDeploymentSession(game.id, game.installDirectory).catch(() => undefined)
+    }
+    state.stopPlaying(gameId, session.profileId, undefined)
+    set(current => ({
+      gameSessions: current.gameSessions.map(item => item.id === session.id ? {
+        ...item,
+        state: 'Ended',
+        endedAt: Date.now(),
+        deploymentActive: false,
+        inputProfileActive: false,
+        visualProfileActive: false,
+        timeline: [...item.timeline, { at: Date.now(), stage: 'GameExited', detail: 'Recherche annulée par l’utilisateur — le launcher externe peut rester ouvert' }],
+      } : item),
+      pinnedPriorityGameId: current.pinnedPriorityGameId === gameId ? undefined : current.pinnedPriorityGameId,
+    }))
+    get().recordNotice(`${game?.name || gameId} : suivi ZAILON arrêté. Le launcher externe n’a pas été fermé.`)
+  },
+  /** Arbitrage des mappings clavier (spec « un seul mapping de fenêtre actif à
+   * la fois ») : seule la session prioritaire en GameRunning garde son entrée
+   * active. Appelé après chaque transition de session et changement de priorité. */
+  applyInputArbiter: () => {
+    const state = get()
+    const priority = pickPrioritySession(state.gameSessions, state.pinnedPriorityGameId)
+    const active = arbitrateInputProfiles(state.gameSessions, priority)
+    set(current => ({
+      gameSessions: current.gameSessions.map(item => item.inputProfileActive === active[item.gameId] ? item : {
+        ...item,
+        inputProfileActive: active[item.gameId],
+        timeline: item.state === 'GameRunning' && item.inputProfileActive !== active[item.gameId]
+          ? [...item.timeline, { at: Date.now(), stage: active[item.gameId] ? 'InputProfileEnabled' : 'InputProfileDisabled', detail: 'Arbitrage multi-sessions — session prioritaire' }]
+          : item.timeline,
+      }),
     }))
   },
   setReduceExplanations: reduceExplanations => set({ reduceExplanations }),

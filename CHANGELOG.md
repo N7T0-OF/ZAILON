@@ -319,6 +319,16 @@
 > `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
 > Release Notes à partir de cette section et refuse de publier si elle est vide.
 
+### Added
+
+- Configuration > Lancement : « Chaîne de lancement » avec test en lecture seule
+  (méthode, launcher, candidats du jeu final, cohérence de l’exécutable, verdict
+  de compatibilité) — aucun processus lancé, aucun fichier modifié.
+- Banner « Launcher en cours / Jeu non détecté » sur la page du jeu avec actions
+  Attacher au jeu en cours / Continuer à attendre / Terminer la session.
+- Préférence « Attacher automatiquement si détecté » par jeu (Diagnostic >
+  Lancement), utilisée par le rattachement natif Phase 6.
+
 ## 1.9.0 — Profils immuables et diagnostic transparent
 
 - Références exactes `packageId`/`versionId`/`contentHash` par profil.

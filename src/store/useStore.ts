@@ -307,6 +307,7 @@ export interface Store {
   reduceExplanations: boolean
   advancedMode: boolean
   showSupportButton: boolean
+  autoAttachGames: string[]
   accentColor: string
   bulkHistory: BulkOperation[]
   notificationHistory: UiNotification[]
@@ -418,6 +419,7 @@ export interface Store {
   cleanupBackgroundTasks: () => void
   clearBackgroundTasks: () => void
   setShowSupportButton: (enabled: boolean) => void
+  setGameAutoAttach: (gameId: string, enabled: boolean) => void
   setAccentColor: (color: string) => void
   bulkSetEnabled: (modIds: string[], enabled: boolean) => Promise<void>
   bulkTransferMods: (modIds: string[], destinationProfileId: string, mode: 'copy' | 'move') => Promise<void>
@@ -498,6 +500,7 @@ export function migratePersistedState(persisted: unknown) {
     reduceExplanations: state.reduceExplanations ?? false,
     advancedMode: state.advancedMode ?? false,
     showSupportButton: state.showSupportButton ?? true,
+    autoAttachGames: state.autoAttachGames || [],
     accentColor: /^#[0-9a-f]{6}$/i.test(state.accentColor || '') ? state.accentColor : '#f3faf8',
     bulkHistory: state.bulkHistory || [],
     notificationHistory: state.notificationHistory || [],
@@ -566,6 +569,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   reduceExplanations: false,
   advancedMode: false,
   showSupportButton: true,
+  autoAttachGames: [],
   accentColor: '#f3faf8',
   bulkHistory: [],
   notificationHistory: [],
@@ -1596,6 +1600,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
     backgroundTasks: state.backgroundTasks.filter(task => task.status === 'running' || task.status === 'awaiting_user_decision'),
   })),
   setShowSupportButton: showSupportButton => set({ showSupportButton }),
+  setGameAutoAttach: (gameId, enabled) => set(state => ({
+    autoAttachGames: enabled ? [...new Set([...(state.autoAttachGames || []), gameId])] : (state.autoAttachGames || []).filter(id => id !== gameId),
+  })),
   setAccentColor: accentColor => {
     if (/^#[0-9a-f]{6}$/i.test(accentColor)) set({ accentColor })
   },
@@ -1988,6 +1995,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     reduceExplanations: state.reduceExplanations,
     advancedMode: state.advancedMode,
     showSupportButton: state.showSupportButton,
+    autoAttachGames: state.autoAttachGames,
     restorePoints: state.restorePoints,
     autoRestorePoints: state.autoRestorePoints,
   }),

@@ -6,6 +6,7 @@ import { adapterFor, LAUNCH_BEHAVIOR_LABELS, SESSION_STATE_LABELS } from '../../
 import { native, type ProfileDeploymentAudit } from '../../lib/native'
 import { useStore } from '../../store/useStore'
 import type { Game, GameTestRun, Mod, Profile } from '../../types'
+import { Toggle } from '../UI/Toggle'
 import { formatSeconds, formatTime, timeAgo } from '../../utils'
 
 export interface GameHealth {
@@ -349,6 +350,8 @@ function LaunchSessionPanel({ game }: { game: Game }) {
   const endSession = useStore(state => state.endSession)
   const continueWaiting = useStore(state => state.continueWaiting)
   const selectedProfileId = useStore(state => state.selectedProfileId)
+  const autoAttachGames = useStore(state => state.autoAttachGames || [])
+  const setGameAutoAttach = useStore(state => state.setGameAutoAttach)
   const profileId = selectedProfileId || game.profiles[0]?.id || ''
   const adapter = adapterFor(game)
   const now = Date.now()
@@ -362,7 +365,10 @@ function LaunchSessionPanel({ game }: { game: Game }) {
     </div>
 
     <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
-      <p className="text-[11px] font-semibold text-white/68">Session {activeSession ? <span className={`ml-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${activeSession.state === 'GameRunning' ? 'border-emerald-300/25 bg-emerald-300/[0.08] text-emerald-200' : activeSession.state === 'GameLost' ? 'border-red-300/25 bg-red-300/[0.08] text-red-200' : 'border-amber-300/25 bg-amber-300/[0.08] text-amber-100'}`}>{SESSION_STATE_LABELS[activeSession.state]}</span> : '—'}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] font-semibold text-white/68">Session {activeSession ? <span className={`ml-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${activeSession.state === 'GameRunning' ? 'border-emerald-300/25 bg-emerald-300/[0.08] text-emerald-200' : activeSession.state === 'GameLost' ? 'border-red-300/25 bg-red-300/[0.08] text-red-200' : 'border-amber-300/25 bg-amber-300/[0.08] text-amber-100'}`}>{SESSION_STATE_LABELS[activeSession.state]}</span> : '—'}</p>
+        <label className="flex items-center gap-2 text-[11px] text-white/45"><Toggle size="sm" checked={autoAttachGames.includes(game.id)} onChange={() => setGameAutoAttach(game.id, !autoAttachGames.includes(game.id))} />Attacher automatiquement si détecté</label>
+      </div>
       {activeSession
         ? <div className="mt-3 space-y-2 text-[11px]">
           <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">

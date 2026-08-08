@@ -1,7 +1,8 @@
-import { Archive, Bookmark, ChevronDown, Copy, FileArchive, Gamepad2, History, Keyboard, Layers3, MonitorDown, Palette, Plus, Rocket, Settings2, ShieldCheck, Trash2, Upload, Wrench } from 'lucide-react'
+import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, Gamepad2, History, Keyboard, Layers3, MonitorDown, Palette, Plus, Rocket, Settings2, ShieldCheck, Trash2, Upload, Wrench } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
+import { adapterFor, isLauncherBased, LAUNCH_BEHAVIOR_LABELS } from '../../lib/launchAdapters'
 import { native, pickFolder } from '../../lib/native'
 import { resolveProfileMods, useStore } from '../../store/useStore'
 import type { Game, GamePreset, GameResources, ModRuntimePathType, Profile } from '../../types'
@@ -174,6 +175,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
             <button type="button" onClick={() => void native.createDesktopShortcut(game.id, profile.id, game.name, game.resources?.iconPath || game.execPath).then(path => window.alert(`Raccourci créé :\n${path}`)).catch(error => window.alert(String(error)))} className="flex items-center gap-2 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313]"><MonitorDown size={14} />Créer sur le bureau</button>
           </div>
         </div>
+        <LaunchChainTest game={game} />
       </ConfigCard>
 
       <ConfigCard id="apparence" title="Apparence" icon={Palette} badge={visualName ? `Profil visuel : ${visualName}` : undefined} open={open.includes('apparence')} onToggle={() => toggle('apparence')}>
@@ -285,6 +287,39 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
         <p className="text-[11px] leading-relaxed text-white/38">Profils de performance par jeu (Équilibré / Performance / Qualité), pause des téléchargements et scans pendant le jeu, priorité du processus : prévus aux phases 2-4 de la refonte UX.</p>
       </ConfigCard>
     </div>
+  </div>
+}
+
+function LaunchChainTest({ game }: { game: Game }) {
+  const adapter = adapterFor(game)
+  const launcherBased = isLauncherBased(adapter)
+  const [testedAt, setTestedAt] = useState<number>()
+  const execName = game.execPath?.split(/[\\/]/).pop()?.toLocaleLowerCase()
+  const matchesKnown = execName
+    ? [adapter.launcherExecutable, ...adapter.gameExecutableCandidates].filter(Boolean).some(candidate => execName === candidate?.toLocaleLowerCase())
+    : false
+  const checks = [
+    { label: 'Exécutable du jeu configuré', ok: Boolean(game.execPath), detail: game.execPath || 'Choisissez l’exécutable (launcher ou jeu final).' },
+    { label: 'Dossier du jeu configuré', ok: Boolean(game.installDirectory), detail: game.installDirectory || 'Indiquez le dossier d’installation pour rattacher les processus par chemin.' },
+    { label: 'Dossier Mods configuré', ok: Boolean(game.modsPath), detail: game.modsPath || 'Requis pour préparer les mods avant le launcher.' },
+    { label: 'Candidats du jeu final connus', ok: !launcherBased || adapter.gameExecutableCandidates.length > 0, detail: launcherBased ? (adapter.gameExecutableCandidates.join(', ') || 'Aucun candidat — le rattachement automatique sera impossible.') : 'Processus direct : le jeu final est l’exécutable configuré.' },
+    { label: launcherBased ? 'Exécutable cohérent avec la chaîne' : 'Exécutable reconnu', ok: matchesKnown, detail: matchesKnown ? (execName || '') : launcherBased ? `${execName || '—'} ne correspond ni au launcher ni aux candidats connus — le rattachement pourra nécessiter un attachement manuel.` : 'Aucune signature connue — l’attachement manuel reste disponible.' },
+  ]
+  const required = checks.filter(item => item.label !== 'Exécutable reconnu')
+  const ok = required.every(item => item.ok)
+  const chain = launcherBased ? adapter.launchChainStages.join(' → ') : 'ZAILON → ' + (execName || 'jeu')
+
+  return <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="flex items-center gap-2 text-[11px] font-semibold text-white/68"><Rocket size={12} className="text-gold/75" />Chaîne de lancement <span className="rounded-full bg-white/[0.035] px-2 py-0.5 font-mono text-[10px] text-white/38">{LAUNCH_BEHAVIOR_LABELS[adapter.launchBehavior]}</span></p>
+        <p className="mt-1 font-mono text-[10px] leading-relaxed text-white/40">{chain}{adapter.launcherExecutable ? ` · launcher ${adapter.launcherExecutable}` : ''}</p>
+      </div>
+      <button type="button" onClick={() => setTestedAt(Date.now())} className="flex items-center gap-1.5 rounded-lg border border-gold/25 px-3 py-2 text-[11px] font-semibold text-gold hover:bg-gold/10"><ShieldCheck size={12} />Tester la chaîne</button>
+    </div>
+    <ul className="mt-3 space-y-1.5">{checks.map(item => <li key={item.label} className="flex items-start gap-2 text-[11px]"><span className={`mt-0.5 shrink-0 ${item.ok ? 'text-emerald-300/80' : 'text-amber-300/80'}`}>{item.ok ? <CheckCircle2 size={12} /> : <AlertTriangle size={12} />}</span><span className="min-w-0"><span className={`block ${item.ok ? 'text-white/60' : 'text-amber-100/80'}`}>{item.label}</span><span className="block truncate text-[10px] text-white/28">{item.detail}</span></span></li>)}</ul>
+    {testedAt && <p className={`mt-3 rounded-lg border px-3 py-2 text-[11px] ${ok ? 'border-emerald-300/15 bg-emerald-300/[0.04] text-emerald-100/70' : 'border-amber-300/15 bg-amber-300/[0.04] text-amber-100/75'}`}>{ok ? `Chaîne compatible — vérifié à ${formatTime(testedAt)}. Le test est en lecture seule : aucun fichier n’est modifié, aucun processus lancé.` : `Chaîne incomplète — vérifié à ${formatTime(testedAt)}. Corrigez les points ci-dessus avant de lancer.`}</p>}
+    <p className="mt-2 text-[10px] leading-relaxed text-white/26">Le test vérifie uniquement la configuration (aucun lancement). La détection réelle du processus final (launcher → jeu) sera fournie par le backend natif Phase 6.</p>
   </div>
 }
 

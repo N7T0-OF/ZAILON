@@ -52,6 +52,10 @@ export function GamesView() {
   const setSelectedProfile = useStore(state => state.setSelectedProfile)
   const setView = useStore(state => state.setView)
   const backgroundTasks = useStore(state => state.backgroundTasks)
+  const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
+  const attachGameSession = useStore(state => state.attachGameSession)
+  const continueWaiting = useStore(state => state.continueWaiting)
+  const endSession = useStore(state => state.endSession)
   const addGameFromExecutable = useStore(state => state.addGameFromExecutable)
   const importDetectedGames = useStore(state => state.importDetectedGames)
   const removeGame = useStore(state => state.removeGame)
@@ -475,6 +479,15 @@ export function GamesView() {
           <button type="button" onClick={() => setTab('profiles')} className="rounded-full border border-white/[0.07] px-2.5 py-1 text-[10px] text-white/38 hover:border-gold/25 hover:text-gold">{selectedGame.profiles.length} profil(s)</button>
         </div>
         <GameHealthBar game={selectedGame} profile={selectedProfile} profileMods={profileMods} onVerify={() => setTab('diagnostic')} />
+        {activeSession && activeSession.state !== 'GameRunning' && (
+          <div className={`flex flex-wrap items-center gap-3 border-b px-4 py-2.5 text-[11px] ${activeSession.state === 'GameLost' ? 'border-red-300/15 bg-red-300/[0.04]' : 'border-amber-300/15 bg-amber-300/[0.04]'}`}>
+            <span className={`font-semibold ${activeSession.state === 'GameLost' ? 'text-red-200/85' : 'text-amber-100/85'}`}>{activeSession.state === 'GameLost' ? 'Jeu non détecté' : 'Launcher en cours — en attente du jeu'}</span>
+            <span className="min-w-0 flex-1 text-white/38">{activeSession.state === 'GameLost' ? 'Le jeu n’a pas été détecté pendant la fenêtre de rattachement. Le déploiement reste actif.' : 'Le launcher officiel a pris le relais. Rattachez le processus final pour activer QWERTY, le profil visuel et le compteur.'}</span>
+            <button type="button" onClick={() => attachGameSession(selectedGame.id, activeSession.profileId)} className="rounded-lg border border-gold/25 px-3 py-1.5 font-semibold text-gold hover:bg-gold/10">Attacher au jeu en cours</button>
+            <button type="button" onClick={() => continueWaiting(selectedGame.id)} className="rounded-lg border border-white/[0.12] px-3 py-1.5 text-white/60 hover:bg-white/[0.06]">Continuer à attendre</button>
+            <button type="button" onClick={() => endSession(selectedGame.id)} className="rounded-lg border border-white/[0.12] px-3 py-1.5 text-white/60 hover:bg-white/[0.06]">Terminer la session</button>
+          </div>
+        )}
       </header>
 
       <nav className="flex min-h-10 items-center overflow-x-auto border-b border-white/[0.05] px-3 thin-scroll"><div className="flex min-w-max gap-1">{TABS.map(item => <button key={item.id} onClick={() => setTab(item.id)} className={`border-b-2 px-2.5 py-2.5 text-[11px] ${tab === item.id ? 'border-gold text-gold' : 'border-transparent text-white/38 hover:text-white/70'}`}>{item.id === 'visuals' && selectedGame.name.toLocaleLowerCase().includes('rust') ? 'Visuels système' : item.label}</button>)}</div></nav>

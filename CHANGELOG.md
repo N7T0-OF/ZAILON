@@ -874,11 +874,35 @@
 
 ### Technical
 
-## [Unreleased]
+## [1.30.0] - 2026-08-08
 
 ### Added
 
 - Bouton « Réparer RED4ext » (État & Diagnostic > Frameworks) : snapshot automatique, audit complet (paquet, core, plugins, table virtuelle, références) et verdict structuré avec actions — jamais de téléchargement automatique ; renvoi vers la réparation MO2 si les références sont cassées.
+
+### Changed
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
+## [Unreleased]
+
+### Added
 
 ### Changed
 

@@ -247,6 +247,13 @@
 
 ### Added
 
+- Mode avancé (Paramètres > Préférences et lisibilité) : les réglages techniques des
+  pages du jeu (dossier Bypass / Loader, chemins additionnels) sont repliés dans une
+  section « Avancé » fermée par défaut, et toujours visibles en mode avancé.
+- Recherche de réglages dans Paramètres : index des réglages globaux et par jeu
+  (ex. « clavier » → Bibliothèque > Jeu > Configuration > Commandes), avec liens
+  directs et défilement vers la section concernée.
+
 ### Changed
 
 ### Fixed
@@ -266,6 +273,9 @@
 ### Data
 
 ### Technical
+
+- Suivi de progression en 6 phases consigné dans `docs/ux-refonte-architecture.md`
+  (Phases 1-4 livrées, Phase 5 en cours, Phase 6 backends Rust NTE).
 
 ## 1.9.0 — Profils immuables et diagnostic transparent
 

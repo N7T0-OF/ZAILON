@@ -1,6 +1,7 @@
-import { AlertCircle, CheckCircle2, Database, ExternalLink, EyeOff, FileText, HardDrive, Heart, Info, KeyRound, Link2, Palette, Radio, RefreshCw, Settings2, ShieldAlert, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { AlertCircle, CheckCircle2, ChevronRight, Database, ExternalLink, EyeOff, FileText, HardDrive, Heart, Info, KeyRound, Link2, Palette, Radio, RefreshCw, Search, Settings2, ShieldAlert, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
+import type { GameTab } from '../../types'
 import { appVersion, useStore } from '../../store/useStore'
 import { DiscordConnectionStatus, native, ProviderConnectionStatus } from '../../lib/native'
 import { formatTime } from '../../utils'
@@ -13,6 +14,30 @@ function formatDate(value?: number | string) {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? 'Unknown' : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }
+
+const SETTINGS_INDEX: Array<{ id: string; label: string; path: string; keywords: string; tab?: GameTab; sectionLabel?: string }> = [
+  { id: 'language', label: 'Langue', path: 'Paramètres > Préférences et lisibilité', keywords: 'langue language anglais français', sectionLabel: 'Préférences et lisibilité' },
+  { id: 'text-size', label: 'Taille du texte', path: 'Paramètres > Préférences et lisibilité', keywords: 'texte taille text size lisibilité', sectionLabel: 'Préférences et lisibilité' },
+  { id: 'density', label: 'Densité', path: 'Paramètres > Préférences et lisibilité', keywords: 'compact confortable densite', sectionLabel: 'Préférences et lisibilité' },
+  { id: 'reduce-explanations', label: 'Réduire les explications', path: 'Paramètres > Préférences et lisibilité', keywords: 'explications bulles descriptions aide', sectionLabel: 'Préférences et lisibilité' },
+  { id: 'advanced-mode', label: 'Mode avancé', path: 'Paramètres > Préférences et lisibilité', keywords: 'avance technique', sectionLabel: 'Préférences et lisibilité' },
+  { id: 'accent', label: 'Couleur d’accent', path: 'Paramètres > Apparence', keywords: 'accent couleur theme', sectionLabel: 'Couleur d’accent' },
+  { id: 'artwork', label: 'Images Steam', path: 'Paramètres > Illustrations automatiques', keywords: 'illustrations images steam artwork couverture', sectionLabel: 'Illustrations automatiques' },
+  { id: 'tasks', label: 'Tâches et notifications', path: 'Paramètres > Tâches et notifications', keywords: 'taches notifications toasts progression', sectionLabel: 'Tâches et notifications' },
+  { id: 'storage', label: 'Stockage', path: 'Paramètres > Stockage', keywords: 'stockage espace disque nettoyage', sectionLabel: 'Stockage' },
+  { id: 'discord', label: 'Discord Rich Presence', path: 'Paramètres > Discord', keywords: 'discord presence activite', sectionLabel: 'Discord Rich Presence' },
+  { id: 'providers', label: 'Fournisseurs de mods', path: 'Paramètres > Fournisseurs de mods', keywords: 'nexus curseforge cle api fournisseurs credentials', sectionLabel: 'Fournisseurs de mods' },
+  { id: 'nxm', label: 'Liens Nexus NXM', path: 'Paramètres > Liens Nexus NXM', keywords: 'nxm liens association vortex', sectionLabel: 'Liens Nexus NXM' },
+  { id: 'mod-updates', label: 'Mises à jour des mods', path: 'Paramètres > Mises à jour des mods', keywords: 'mises a jour mods frequence', sectionLabel: 'Mises à jour des mods' },
+  { id: 'app-updates', label: 'Canal et mises à jour', path: 'Paramètres > Application updates', keywords: 'canal stable beta mise a jour application updater', sectionLabel: 'Application updates' },
+  { id: 'about', label: 'À propos / version', path: 'Paramètres > À propos', keywords: 'version apropos support', sectionLabel: 'À propos' },
+  { id: 'keyboard', label: 'Clavier / Commandes (AZERTY, QWERTY)', path: 'Bibliothèque > Jeu > Configuration > Commandes', keywords: 'clavier commandes azerty qwerty qwertz remapping touches disposition', tab: 'configuration' },
+  { id: 'bypass', label: 'Dossier Bypass / Loader', path: 'Bibliothèque > Jeu > Configuration > Lancement (Avancé)', keywords: 'bypass loader asi paks chemins', tab: 'configuration' },
+  { id: 'executable', label: 'Exécutable du jeu', path: 'Bibliothèque > Jeu > Configuration > Lancement', keywords: 'executable lancement chemin', tab: 'configuration' },
+  { id: 'visual-profile', label: 'Profil visuel', path: 'Bibliothèque > Jeu > Configuration > Apparence', keywords: 'visuel visual profile apparence', tab: 'configuration' },
+  { id: 'restore-points', label: 'Points de restauration', path: 'Bibliothèque > Jeu > Configuration > Sauvegardes', keywords: 'sauvegardes snapshots restauration points', tab: 'configuration' },
+  { id: 'diagnostic', label: 'Santé / Diagnostic du jeu', path: 'Bibliothèque > Jeu > État & Diagnostic', keywords: 'sante diagnostic erreurs frameworks deploiement', tab: 'diagnostic' },
+]
 
 export function SettingsView() {
   const games = useStore(state => state.games)
@@ -38,6 +63,12 @@ export function SettingsView() {
   const setUiDensity = useStore(state => state.setUiDensity)
   const reduceExplanations = useStore(state => state.reduceExplanations)
   const setReduceExplanations = useStore(state => state.setReduceExplanations)
+  const advancedMode = useStore(state => state.advancedMode)
+  const setAdvancedMode = useStore(state => state.setAdvancedMode)
+  const setView = useStore(state => state.setView)
+  const setActiveGameTab = useStore(state => state.setActiveGameTab)
+  const setSelectedGame = useStore(state => state.setSelectedGame)
+  const selectedGame = useStore(state => state.games.find(game => game.id === state.selectedGameId))
   const setAutoArtwork = useStore(state => state.setAutoArtwork)
   const toggleDiscord = useStore(state => state.toggleDiscord)
   const setDiscordClientId = useStore(state => state.setDiscordClientId)
@@ -81,6 +112,23 @@ export function SettingsView() {
   const [busyProvider, setBusyProvider] = useState<string>()
   const [discordStatus, setDiscordStatus] = useState<DiscordConnectionStatus>()
   const [testingDiscord, setTestingDiscord] = useState(false)
+  const [settingsQuery, setSettingsQuery] = useState('')
+  const settingsResults = useMemo(() => {
+    const query = settingsQuery.trim().toLocaleLowerCase()
+    if (!query) return []
+    return SETTINGS_INDEX.filter(entry => `${entry.label} ${entry.keywords}`.toLocaleLowerCase().includes(query)).slice(0, 8)
+  }, [settingsQuery])
+  const goToSetting = (entry: (typeof SETTINGS_INDEX)[number]) => {
+    setSettingsQuery('')
+    if (entry.tab) {
+      if (selectedGame) setSelectedGame(selectedGame.id)
+      setView('games')
+      setActiveGameTab(entry.tab)
+    } else {
+      const section = Array.from(document.querySelectorAll<HTMLElement>('section')).find(element => element.textContent?.includes(entry.sectionLabel || ''))
+      section?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }
 
   useEffect(() => {
     if (!native.isDesktop()) return
@@ -157,8 +205,9 @@ export function SettingsView() {
 
   return <div className="h-full overflow-y-auto p-4">
     <div className="mb-5"><h1 className="font-display text-lg font-bold text-white">Paramètres</h1><p className="text-[11px] text-white/35">Configuration native, données locales et mises à jour signées</p></div>
+    <section className="mb-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3"><div className="mb-2 flex items-center gap-2 text-gold/70"><Search size={13} /><h2 className="text-[11px] font-mono uppercase tracking-widest">Rechercher un réglage</h2></div><input value={settingsQuery} onChange={event => setSettingsQuery(event.target.value)} placeholder="Ex. : clavier, stockage, images, canal…" className="w-full rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-white/72 outline-none focus:border-gold/30" />{settingsResults.length > 0 && <div className="mt-2 space-y-1">{settingsResults.map(entry => <button key={entry.id} type="button" onClick={() => goToSetting(entry)} className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/[0.06] bg-black/15 px-3 py-2 text-left hover:border-gold/25"><span className="min-w-0"><span className="block truncate text-xs font-medium text-white/75">{entry.label}</span><span className="mt-0.5 block truncate text-[10px] text-white/35">{entry.path}</span></span><ChevronRight size={13} className="shrink-0 text-white/30" /></button>)}</div>}{settingsQuery.trim() && settingsResults.length === 0 && <p className="mt-2 text-[11px] text-white/34">Aucun réglage trouvé pour « {settingsQuery.trim()} ».</p>}</section>
     <div className="space-y-4">
-      <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3"><div className="mb-3 flex items-center gap-2 text-gold/70"><Settings2 size={13} /><h2 className="text-[11px] font-mono uppercase tracking-widest">Préférences et lisibilité</h2></div><div className="grid gap-3 md:grid-cols-3"><label className="block text-[11px] text-white/45">Langue<select value={language} onChange={event => setLanguage(event.target.value)} className="mt-1.5 block w-full rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/70"><option value="en">English</option><option value="fr">Français</option></select></label><label className="block text-[11px] text-white/45">Taille du texte<select value={textSize} onChange={event => setTextSize(event.target.value as typeof textSize)} className="mt-1.5 block w-full rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/70"><option value="small">Petite (minimum 14 px)</option><option value="normal">Normale</option><option value="large">Grande</option><option value="very-large">Très grande</option></select></label><label className="block text-[11px] text-white/45">Densité<select value={uiDensity} onChange={event => setUiDensity(event.target.value as typeof uiDensity)} className="mt-1.5 block w-full rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/70"><option value="comfortable">Confortable</option><option value="compact">Compacte</option></select></label></div><label className="mt-3 flex items-center justify-between gap-4 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/58"><span className="flex items-center gap-2"><strong className="text-white/76">Réduire les explications</strong><InfoBubble text="Un réglage = une ligne : les descriptions secondaires sont masquées et le détail passe dans les bulles ⓘ. Recommandé pour les utilisateurs habitués. (Par défaut après l’onboarding.)" /></span><input type="checkbox" checked={reduceExplanations} onChange={event => setReduceExplanations(event.target.checked)} className="accent-gold" /></label>{!reduceExplanations && <p className="mt-3 text-[11px] leading-relaxed text-white/35">Aucun texte essentiel ne descend sous 14 px. Ce réglage change les variables typographiques centrales, pas un zoom global. Les panneaux restent défilables quand l’espace manque.</p>}</section>
+      <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3"><div className="mb-3 flex items-center gap-2 text-gold/70"><Settings2 size={13} /><h2 className="text-[11px] font-mono uppercase tracking-widest">Préférences et lisibilité</h2></div><div className="grid gap-3 md:grid-cols-3"><label className="block text-[11px] text-white/45">Langue<select value={language} onChange={event => setLanguage(event.target.value)} className="mt-1.5 block w-full rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/70"><option value="en">English</option><option value="fr">Français</option></select></label><label className="block text-[11px] text-white/45">Taille du texte<select value={textSize} onChange={event => setTextSize(event.target.value as typeof textSize)} className="mt-1.5 block w-full rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/70"><option value="small">Petite (minimum 14 px)</option><option value="normal">Normale</option><option value="large">Grande</option><option value="very-large">Très grande</option></select></label><label className="block text-[11px] text-white/45">Densité<select value={uiDensity} onChange={event => setUiDensity(event.target.value as typeof uiDensity)} className="mt-1.5 block w-full rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/70"><option value="comfortable">Confortable</option><option value="compact">Compacte</option></select></label></div>      <label className="mt-3 flex items-center justify-between gap-4 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/58"><span className="flex items-center gap-2"><strong className="text-white/76">Réduire les explications</strong><InfoBubble text="Un réglage = une ligne : les descriptions secondaires sont masquées et le détail passe dans les bulles ⓘ. Recommandé pour les utilisateurs habitués. (Par défaut après l’onboarding.)" /></span><input type="checkbox" checked={reduceExplanations} onChange={event => setReduceExplanations(event.target.checked)} className="accent-gold" /></label><label className="mt-2 flex items-center justify-between gap-4 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/58"><span className="flex items-center gap-2"><strong className="text-white/76">Mode avancé</strong><InfoBubble text="Affiche les réglages techniques des pages du jeu (dossier Bypass / Loader, chemins additionnels…) au lieu de les laisser repliés dans « Avancé »." /></span><input type="checkbox" checked={advancedMode} onChange={event => setAdvancedMode(event.target.checked)} className="accent-gold" /></label>{!reduceExplanations && <p className="mt-3 text-[11px] leading-relaxed text-white/35">Aucun texte essentiel ne descend sous 14 px. Ce réglage change les variables typographiques centrales, pas un zoom global. Les panneaux restent défilables quand l’espace manque.</p>}</section>
 
       <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
         <div className="mb-3 flex items-center gap-2 text-gold/70"><Palette size={13} /><h2 className="font-mono text-[11px] uppercase tracking-widest">Apparence · Couleur d’accent</h2></div>

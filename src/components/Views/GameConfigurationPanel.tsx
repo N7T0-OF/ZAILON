@@ -1,4 +1,4 @@
-import { Archive, ChevronDown, FileArchive, Gamepad2, History, Keyboard, Layers3, MonitorDown, Palette, Plus, Rocket, ShieldCheck, Trash2, Upload, Wrench } from 'lucide-react'
+import { Archive, ChevronDown, FileArchive, Gamepad2, History, Keyboard, Layers3, MonitorDown, Palette, Plus, Rocket, Settings2, ShieldCheck, Trash2, Upload, Wrench } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
@@ -40,6 +40,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
   const setGamePath = useStore(state => state.setGamePath)
   const setModsPath = useStore(state => state.setModsPath)
   const reduceExplanations = useStore(state => state.reduceExplanations)
+  const advancedMode = useStore(state => state.advancedMode)
   const setGameBypassPath = useStore(state => state.setGameBypassPath)
   const addGameRuntimePath = useStore(state => state.addGameRuntimePath)
   const updateGameRuntimePath = useStore(state => state.updateGameRuntimePath)
@@ -58,6 +59,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
     } catch { return DEFAULT_OPEN }
   })
   const [visualName, setVisualName] = useState<string | null>(null)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(open))
@@ -124,27 +126,35 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
       <ConfigCard id="lancement" title="Lancement" icon={Rocket} badge={`${game.execPath ? 'Exécutable configuré' : 'À configurer'}`} open={open.includes('lancement')} onToggle={() => toggle('lancement')}>
         <Field label="Exécutable du jeu" value={game.execPath || ''} placeholder="Sélectionnez l’exécutable" onChange={value => void setGamePath(game.id, value)} onBrowse={onBrowseExecutable} />
         <Field label="Dossier Mods" value={game.modsPath || ''} placeholder="Sélectionnez le dossier Mods" onChange={value => setModsPath(game.id, value)} onBrowse={onBrowseModsFolder} />
-        <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
-          <div className="flex items-center gap-2"><span className="text-[11px] text-white/45">Dossier Bypass / Loader</span><InfoBubble text="Certains jeux nécessitent un loader, un bypass de signature ou un dossier intermédiaire pour charger les mods (ex. Ultimate ASI Loader, dossier Paks). Laissez vide si le jeu n’en utilise pas." /></div>
-          <div className="mt-1.5 flex gap-2">
-            <input value={game.bypassPath || ''} onChange={event => setGameBypassPath(game.id, event.target.value)} placeholder="Optionnel — dossier du loader ou bypass" className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-white/72 outline-none focus:border-gold/30" />
-            <button type="button" onClick={async () => { const path = await pickFolder(`Choisir le dossier Bypass / Loader — ${game.name}`); if (path) setGameBypassPath(game.id, path) }} className="rounded-lg border border-white/[0.09] bg-white/[0.025] px-3 py-2 text-[11px] text-white/55 hover:border-gold/25 hover:text-gold">Choisir</button>
-          </div>
-        </div>
-        <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2"><span className="text-[11px] text-white/45">Chemins additionnels</span><InfoBubble text="Certains jeux ont une structure inhabituelle : plusieurs dossiers utiles au runtime (plugin folder, dossier de scripts, signature bypass…). Ajoutez-les ici pour éviter de recoder ZAILON pour chaque jeu." /></div>
-            <button type="button" onClick={() => addGameRuntimePath(game.id, { name: '', path: '', type: 'loader' })} className="flex items-center gap-1.5 rounded-lg border border-gold/25 px-2.5 py-1.5 text-[11px] font-semibold text-gold hover:bg-gold/10"><Plus size={12} />Ajouter</button>
-          </div>
-          {(game.runtimePaths || []).map((entry, index) => (
-            <div key={index} className="mt-2 grid gap-2 sm:grid-cols-[1fr_1.5fr_auto_auto]">
-              <input value={entry.name} onChange={event => updateGameRuntimePath(game.id, index, { name: event.target.value })} placeholder="Nom (ex. ASI Loader)" className="min-w-0 rounded-lg border border-white/[0.08] bg-black/20 px-2.5 py-2 text-[11px] text-white/70 outline-none focus:border-gold/30" />
-              <input value={entry.path} onChange={event => updateGameRuntimePath(game.id, index, { path: event.target.value })} placeholder="Chemin" className="min-w-0 rounded-lg border border-white/[0.08] bg-black/20 px-2.5 py-2 text-[11px] text-white/70 outline-none focus:border-gold/30" />
-              <select value={entry.type} onChange={event => updateGameRuntimePath(game.id, index, { type: event.target.value as ModRuntimePathType })} className="rounded-lg border border-white/[0.08] bg-[#101313] px-2 py-2 text-[11px] text-white/68">{RUNTIME_TYPE_LABELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-              <button type="button" onClick={() => removeGameRuntimePath(game.id, index)} title="Retirer ce chemin" className="rounded-lg p-2 text-white/30 hover:bg-red-400/10 hover:text-red-300"><Trash2 size={12} /></button>
+        <div className="rounded-xl border border-white/[0.07] bg-white/[0.02]">
+          <button type="button" onClick={() => setAdvancedOpen(open => !open)} className="flex w-full items-center justify-between px-3 py-2.5 text-left" aria-expanded={advancedOpen || advancedMode}>
+            <span className="flex items-center gap-2 text-[11px] font-semibold text-white/60"><Settings2 size={12} />Avancé</span>
+            <span className="flex items-center gap-2 text-[11px] text-white/30">{advancedMode ? 'Toujours visible (mode avancé)' : 'Détails techniques'}<ChevronDown size={12} className={`transition-transform ${advancedOpen || advancedMode ? 'rotate-180' : ''}`} /></span>
+          </button>
+          {(advancedOpen || advancedMode) && <div className="space-y-3 border-t border-white/[0.05] px-3 pb-3 pt-3">
+            <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+              <div className="flex items-center gap-2"><span className="text-[11px] text-white/45">Dossier Bypass / Loader</span><InfoBubble text="Certains jeux nécessitent un loader, un bypass de signature ou un dossier intermédiaire pour charger les mods (ex. Ultimate ASI Loader, dossier Paks). Laissez vide si le jeu n’en utilise pas." /></div>
+              <div className="mt-1.5 flex gap-2">
+                <input value={game.bypassPath || ''} onChange={event => setGameBypassPath(game.id, event.target.value)} placeholder="Optionnel — dossier du loader ou bypass" className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-white/72 outline-none focus:border-gold/30" />
+                <button type="button" onClick={async () => { const path = await pickFolder(`Choisir le dossier Bypass / Loader — ${game.name}`); if (path) setGameBypassPath(game.id, path) }} className="rounded-lg border border-white/[0.09] bg-white/[0.025] px-3 py-2 text-[11px] text-white/55 hover:border-gold/25 hover:text-gold">Choisir</button>
+              </div>
             </div>
-          ))}
-          {(game.runtimePaths || []).length === 0 && <p className="mt-2 text-[11px] text-white/32">Aucun chemin additionnel. La plupart des jeux n’en ont pas besoin.</p>}
+            <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2"><span className="text-[11px] text-white/45">Chemins additionnels</span><InfoBubble text="Certains jeux ont une structure inhabituelle : plusieurs dossiers utiles au runtime (plugin folder, dossier de scripts, signature bypass…). Ajoutez-les ici pour éviter de recoder ZAILON pour chaque jeu." /></div>
+                <button type="button" onClick={() => addGameRuntimePath(game.id, { name: '', path: '', type: 'loader' })} className="flex items-center gap-1.5 rounded-lg border border-gold/25 px-2.5 py-1.5 text-[11px] font-semibold text-gold hover:bg-gold/10"><Plus size={12} />Ajouter</button>
+              </div>
+              {(game.runtimePaths || []).map((entry, index) => (
+                <div key={index} className="mt-2 grid gap-2 sm:grid-cols-[1fr_1.5fr_auto_auto]">
+                  <input value={entry.name} onChange={event => updateGameRuntimePath(game.id, index, { name: event.target.value })} placeholder="Nom (ex. ASI Loader)" className="min-w-0 rounded-lg border border-white/[0.08] bg-black/20 px-2.5 py-2 text-[11px] text-white/70 outline-none focus:border-gold/30" />
+                  <input value={entry.path} onChange={event => updateGameRuntimePath(game.id, index, { path: event.target.value })} placeholder="Chemin" className="min-w-0 rounded-lg border border-white/[0.08] bg-black/20 px-2.5 py-2 text-[11px] text-white/70 outline-none focus:border-gold/30" />
+                  <select value={entry.type} onChange={event => updateGameRuntimePath(game.id, index, { type: event.target.value as ModRuntimePathType })} className="rounded-lg border border-white/[0.08] bg-[#101313] px-2 py-2 text-[11px] text-white/68">{RUNTIME_TYPE_LABELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+                  <button type="button" onClick={() => removeGameRuntimePath(game.id, index)} title="Retirer ce chemin" className="rounded-lg p-2 text-white/30 hover:bg-red-400/10 hover:text-red-300"><Trash2 size={12} /></button>
+                </div>
+              ))}
+              {(game.runtimePaths || []).length === 0 && <p className="mt-2 text-[11px] text-white/32">Aucun chemin additionnel. La plupart des jeux n’en ont pas besoin.</p>}
+            </div>
+          </div>}
         </div>
         <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
           <div className="flex flex-wrap items-center justify-between gap-3">

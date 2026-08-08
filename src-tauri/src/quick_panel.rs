@@ -18,7 +18,7 @@ const MARGIN: i32 = 24;
 
 /// Ouvre (ou ramène au premier plan) le panneau rapide.
 #[tauri::command]
-pub fn open_quick_panel(app: AppHandle) -> Result<(), String> {
+fn open_quick_panel(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(LABEL) {
         let _ = window.show();
         let _ = window.set_focus();
@@ -47,12 +47,13 @@ pub fn open_quick_panel(app: AppHandle) -> Result<(), String> {
     // Fermeture automatique à la perte de focus — mais pas avant que la fenêtre
     // n'ait reçu le focus une première fois (évite une fermeture immédiate à
     // l'ouverture à cause de la course de focus initiale).
+    // NB : on_window_event prend une closure `Fn` — on utilise donc Cell<bool>.
     let close_handle = window.clone();
-    let mut ever_focused = false;
+    let ever_focused = std::cell::Cell::new(false);
     window.on_window_event(move |event| match event {
-        tauri::WindowEvent::Focused(true) => ever_focused = true,
+        tauri::WindowEvent::Focused(true) => ever_focused.set(true),
         tauri::WindowEvent::Focused(false) => {
-            if ever_focused {
+            if ever_focused.get() {
                 let _ = close_handle.close();
             }
         }
@@ -66,7 +67,7 @@ pub fn open_quick_panel(app: AppHandle) -> Result<(), String> {
 
 /// Ferme le panneau rapide s'il est ouvert (ex. fin de session).
 #[tauri::command]
-pub fn close_quick_panel(app: AppHandle) -> Result<(), String> {
+fn close_quick_panel(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(LABEL) {
         let _ = window.close();
     }
@@ -75,7 +76,7 @@ pub fn close_quick_panel(app: AppHandle) -> Result<(), String> {
 
 /// Bascule le panneau : ouvert → fermé, fermé → ouvert.
 #[tauri::command]
-pub fn toggle_quick_panel(app: AppHandle) -> Result<bool, String> {
+fn toggle_quick_panel(app: AppHandle) -> Result<bool, String> {
     if let Some(window) = app.get_webview_window(LABEL) {
         if window.is_visible().unwrap_or(false) {
             let _ = window.close();

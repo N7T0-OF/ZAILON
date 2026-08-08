@@ -466,7 +466,11 @@
 > `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
 > Release Notes à partir de cette section et refuse de publier si elle est vide.
 
-## [Unreleased]
+## [1.20.0] - 2026-08-08
+
+> Release du Quick Game Panel : fenêtre native ZAILON (jamais une injection)
+> pour régler visuel et clavier pendant le jeu — validée par la PR #1 sur
+> Windows + Linux.
 
 ### Added
 
@@ -479,6 +483,36 @@
   défaut) ; actions relayées à la fenêtre principale par événements
   (`toggle-keyboard` / `focus-main`). Plein écran exclusif : non pris en
   charge (message à implémenter) — jamais d'overlay injecté.
+
+### Changed
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
+> Pendant le développement, chaque changement visible par l'utilisateur est ajouté
+> ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
+> cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
+> `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
+> Release Notes à partir de cette section et refuse de publier si elle est vide.
+
+## [Unreleased]
+
+### Added
 
 ### Changed
 

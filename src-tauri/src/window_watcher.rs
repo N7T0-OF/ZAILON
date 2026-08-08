@@ -298,7 +298,7 @@ pub fn is_mode_switch(
 pub fn exclusive_fullscreen_active() -> bool {
     use windows_sys::Win32::Graphics::Gdi::{
         EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromWindow, DEVMODEW, ENUM_CURRENT_SETTINGS,
-        MONITORINFO, MONITOR_DEFAULTTONEAREST,
+        MONITORINFOEXW, MONITOR_DEFAULTTONEAREST,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
@@ -314,16 +314,18 @@ pub fn exclusive_fullscreen_active() -> bool {
         return false;
     }
 
-    // SAFETY : GetMonitorInfoW remplit la structure ; on lit rcMonitor (taille
-    // du bureau pour cet écran) et szDevice (nom du périphérique).
-    let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
-    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-    let ok = unsafe { GetMonitorInfoW(monitor, &mut info) };
+    // SAFETY : GetMonitorInfoW remplit la structure ; MONITORINFOEXW commence
+    // par MONITORINFO (layout compatible) — on lit rcMonitor (taille du bureau
+    // pour cet écran) et szDevice (nom du périphérique pour EnumDisplaySettingsW).
+    let mut info = MONITORINFOEXW::default();
+    info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+    let ok = unsafe { GetMonitorInfoW(monitor, &mut info.monitorInfo) };
     if ok == 0 {
         return false;
     }
-    let desktop_width = (info.rcMonitor.right - info.rcMonitor.left) as u32;
-    let desktop_height = (info.rcMonitor.bottom - info.rcMonitor.top) as u32;
+    let desktop_width = (info.monitorInfo.rcMonitor.right - info.monitorInfo.rcMonitor.left) as u32;
+    let desktop_height =
+        (info.monitorInfo.rcMonitor.bottom - info.monitorInfo.rcMonitor.top) as u32;
 
     // SAFETY : EnumDisplaySettingsW(ENUM_CURRENT_SETTINGS) remplit DEVMODEW ;
     // en plein écran exclusif la résolution active diffère de celle du bureau.

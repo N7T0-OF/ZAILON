@@ -510,6 +510,46 @@
 > `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
 > Release Notes à partir de cette section et refuse de publier si elle est vide.
 
+## [1.20.1] - 2026-08-08
+
+> Release du correctif urgent de la fenêtre « Nouveautés de la mise à jour » :
+> modale 3 zones (header/body/footer fixes) qui ne déborde plus jamais de
+> l'écran, résumé + « Voir tous les changements », toast pour les patchs.
+
+### Added
+
+- Composant réutilisable `ScrollableModal` (3 zones : header/body/footer fixes, max-h responsive, Échap/×/backdrop, verrou du scroll arrière) pour toutes les grandes modales.
+- Parser Markdown sûr sans dépendance (`safeMarkdown`) : HTML échappé, liens http(s) uniquement, images bornées — 9 tests unitaires.
+- Fenêtre Nouveautés : résumé (~8 changements) + « Voir tous les changements », option « Ne plus afficher automatiquement », failsafe si le contenu échoue, et toast pour les mises à jour mineures (patch) au lieu de la grosse modale.
+
+### Changed
+
+### Fixed
+
+- Fenêtre « Nouveautés de la mise à jour » : la modale ne déborde plus de l'écran ni ne bloque le bouton Fermer avec un long changelog (header et footer toujours visibles, seul le contenu central défile).
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+### Data
+
+### Technical
+
+> Pendant le développement, chaque changement visible par l'utilisateur est ajouté
+> ci-dessous dans la catégorie appropriée (voir `AGENTS.md`). Au moment d'une release,
+> cette section est renommée `## [X.Y.Z] - AAAA-MM-JJ` puis une nouvelle section
+> `[Unreleased]` vide est recréée. Le workflow GitHub génère automatiquement les
+> Release Notes à partir de cette section et refuse de publier si elle est vide.
+
 ## [Unreleased]
 
 ### Added

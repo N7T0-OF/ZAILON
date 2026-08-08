@@ -6,7 +6,7 @@ import { adapterFor, FALLBACK_ADAPTER, isLauncherBased } from '../lib/launchAdap
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
 
-const APP_VERSION = '1.20.0'
+const APP_VERSION = '1.20.1'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 const asError = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -273,7 +273,9 @@ export interface Store {
   lastUpdateCheck?: number
   lastUpdateVersion?: string
   lastUpdateError?: string
-  lastInstalledUpdate?: { version: string; notes?: string; date?: string; installedAt: number }
+  lastInstalledUpdate?: { version: string; notes?: string; date?: string; previousVersion?: string; installedAt: number }
+  lastSeenReleaseNotesVersion?: string
+  showReleaseNotesOnUpdate: boolean
   isLaunching: boolean
   launchProgress?: DeploymentProgressEvent
   isPlaying: boolean
@@ -382,6 +384,8 @@ export interface Store {
   recordUpdateCheck: (version?: string, error?: string) => void
   prepareInstalledUpdate: (update: { version: string; notes?: string; date?: string }) => void
   dismissInstalledUpdate: () => void
+  setLastSeenReleaseNotes: (version: string) => void
+  setShowReleaseNotesOnUpdate: (enabled: boolean) => void
   launchSelectedGame: (options?: { withoutMods?: boolean }) => Promise<void>
   stopPlaying: (gameId?: string, profileId?: string, cleanupError?: string) => void
   tick: () => void
@@ -578,6 +582,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   advancedMode: false,
   showSupportButton: true,
   autoAttachGames: [],
+  showReleaseNotesOnUpdate: true,
   accentColor: '#f3faf8',
   bulkHistory: [],
   notificationHistory: [],
@@ -1193,8 +1198,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setAutoInstallModUpdates: autoInstallModUpdates => set(state => ({ autoInstallModUpdates, autoDownloadModUpdates: autoInstallModUpdates ? true : state.autoDownloadModUpdates })),
   setUpdateChannel: updateChannel => set({ updateChannel }),
   recordUpdateCheck: (lastUpdateVersion, lastUpdateError) => set({ lastUpdateCheck: Date.now(), lastUpdateVersion, lastUpdateError }),
-  prepareInstalledUpdate: update => set({ lastInstalledUpdate: { ...update, installedAt: Date.now() } }),
+  prepareInstalledUpdate: update => set({ lastInstalledUpdate: { ...update, previousVersion: APP_VERSION, installedAt: Date.now() } }),
   dismissInstalledUpdate: () => set({ lastInstalledUpdate: undefined }),
+  setLastSeenReleaseNotes: lastSeenReleaseNotesVersion => set({ lastSeenReleaseNotesVersion }),
+  setShowReleaseNotesOnUpdate: showReleaseNotesOnUpdate => set({ showReleaseNotesOnUpdate }),
   launchSelectedGame: async (options?: { withoutMods?: boolean }) => {
     const state = get()
     if (state.isPlaying || state.isLaunching) { set({ notice: state.isLaunching ? 'La préparation du jeu est déjà en cours.' : 'Un jeu est déjà en cours. Fermez son processus avant un nouveau lancement afin que ZAILON restaure proprement les fichiers temporaires.' }); return }
@@ -2073,6 +2080,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
     lastUpdateVersion: state.lastUpdateVersion,
     lastUpdateError: state.lastUpdateError,
     lastInstalledUpdate: state.lastInstalledUpdate,
+    lastSeenReleaseNotesVersion: state.lastSeenReleaseNotesVersion,
+    showReleaseNotesOnUpdate: state.showReleaseNotesOnUpdate,
     explorePlatform: state.explorePlatform,
     exploreGameId: state.exploreGameId,
     explorePinnedGames: state.explorePinnedGames,

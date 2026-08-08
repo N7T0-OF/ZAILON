@@ -264,13 +264,14 @@ mod tests {
     }
 
     #[test]
-    fn unrelated_process_scores_zero() {
+    fn unrelated_process_never_reaches_detection() {
         let process = candidate(
             "Discord.exe",
             "C:\\Users\\kai\\AppData\\Local\\Discord\\Discord.exe",
         );
         let score = score_process(&process, &nte_request(true));
-        assert_eq!(score, 0);
+        // Seul le contexte de rattachement contribue (+20) : jamais ≥ 50 → ignoré.
+        assert_eq!(score, 20);
         assert!(detect_games(&[process], &[nte_request(true)]).is_empty());
     }
 

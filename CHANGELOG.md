@@ -946,6 +946,13 @@
 
 ### Added
 
+- **Moteur d'illustrations unifié** (`artworkRegistry.ts`) : registre unique des six fournisseurs (Steam officiel, SteamGridDB, IGDB, Nexus, GameBanana, CurseForge) avec priorité, capacités par type d'image et **état honnête** — jamais de fournisseur affiché comme fonctionnel sans connecteur réel.
+- **Recherche d'illustrations multi-source** : « Source de recherche » (Automatique / Toutes les sources) dans l'éditeur d'apparence ; en automatique, Steam officiel est essayé d'abord puis SteamGridDB en secours ; les résultats des sources sont **fusionnés en une seule grille** (l'utilisateur choisit une image, pas un fournisseur) et **dédupliqués** (URL normalisée, paramètres de cache CDN ignorés).
+- **Connecteur SteamGridDB natif** : `search_game_artwork` accepte des clés API (`api_keys`) et interroge SteamGridDB (grids / heroes / logos / icons) quand une clé est enregistrée ; nouvelle commande `test_artwork_provider` pour vérifier une clé.
+- **Paramètres > Illustrations** : liste compacte de l'état des six sources (✓ disponible / Non configuré / Connecteur non disponible avec bulle ⓘ), clé SteamGridDB (Enregistrer / Remplacer / Tester la connexion / Supprimer, stockée localement, transmise uniquement à SteamGridDB) et mode de source.
+- **« Changer l'apparence… » activé** dans le menu contextuel de la Bibliothèque : ouvre directement l'éditeur d'apparence avec la recherche automatique.
+- **Auto-artwork** : la recherche automatique pour les nouveaux jeux passe aussi la clé SteamGridDB si elle est enregistrée.
+
 ### Changed
 
 ### Fixed

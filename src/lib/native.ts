@@ -562,7 +562,8 @@ export interface CollectionStagingResult {
 
 export interface ArtworkCandidate {
   id: string
-  provider: 'steam'
+  /** Identifiant du fournisseur qui a produit l'image (ex. `steam`, `steamgriddb`). */
+  provider: string
   sourceLabel: string
   gameName: string
   kind: GameResourceKind
@@ -887,8 +888,15 @@ export const native = {
     desktopOnly<string>('store_game_resource', { gameId, kind, sourcePath }),
   cacheRemoteGameResource: (gameId: string, kind: Exclude<GameResourceKind, 'video'>, sourceUrl: string) =>
     desktopOnly<string>('cache_remote_game_resource', { gameId, kind, sourceUrl }),
-  searchGameArtwork: (gameName: string, provider: string | undefined, providerGameId: string | undefined, kind: Exclude<GameResourceKind, 'video'>) =>
-    desktopOnly<ArtworkCandidate[]>('search_game_artwork', { gameName, provider, providerGameId, kind }),
+  /** Recherche multi-source : Steam officiel toujours, + chaque fournisseur
+   * dont une clé est fournie dans `apiKeys` (ex. `steamgriddb`). Les résultats
+   * sont fusionnés et dédupliqués côté natif dans une seule liste. */
+  searchGameArtwork: (gameName: string, provider: string | undefined, providerGameId: string | undefined, kind: Exclude<GameResourceKind, 'video'>, apiKeys?: Record<string, string>) =>
+    desktopOnly<ArtworkCandidate[]>('search_game_artwork', { gameName, provider, providerGameId, kind, apiKeys }),
+  /** Teste une clé API d'un fournisseur d'illustrations (ex. SteamGridDB).
+   * Retourne un message lisible ; rejette en cas de clé invalide. */
+  testArtworkProvider: (provider: 'steamgriddb', apiKey: string) =>
+    desktopOnly<string>('test_artwork_provider', { provider, apiKey }),
   removeGameResource: (gameId: string, resourcePath: string) =>
     desktopOnly<void>('remove_game_resource', { gameId, resourcePath }),
   openPath: (path: string) => desktopOnly<void>('open_path', { path }),

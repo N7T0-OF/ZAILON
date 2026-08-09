@@ -245,7 +245,7 @@ function makeGame({ name, execPath, modsPath, platform = 'standalone', provider,
   }
 }
 
-async function automaticArtworkForGame(game: Game): Promise<Partial<GameResources>> {
+async function automaticArtworkForGame(game: Game, steamGridDbKey: string): Promise<Partial<GameResources>> {
   if (!native.isDesktop()) return {}
   const assignments: Array<{ kind: 'cover' | 'background' | 'banner' | 'logo' | 'icon'; key: 'coverPath' | 'backgroundPath' | 'bannerPath' | 'logoPath' | 'iconPath' }> = [
     { kind: 'cover', key: 'coverPath' },
@@ -254,10 +254,11 @@ async function automaticArtworkForGame(game: Game): Promise<Partial<GameResource
     { kind: 'logo', key: 'logoPath' },
     { kind: 'icon', key: 'iconPath' },
   ]
+  const apiKeys: Record<string, string> = steamGridDbKey.trim() ? { steamgriddb: steamGridDbKey.trim() } : {}
   const resources: Partial<GameResources> = {}
   for (const assignment of assignments) {
     try {
-      const candidates = await native.searchGameArtwork(game.name, game.provider || game.platform, game.providerGameId, assignment.kind)
+      const candidates = await native.searchGameArtwork(game.name, game.provider || game.platform, game.providerGameId, assignment.kind, apiKeys)
       for (const candidate of candidates) {
         try {
           resources[assignment.key] = await native.cacheRemoteGameResource(game.id, assignment.kind, candidate.url)
@@ -281,6 +282,12 @@ export interface Store {
   textSize: TextSize
   uiDensity: UiDensity
   autoArtwork: boolean
+  /** Clé API SteamGridDB (illustrations). Stockée localement, transmise
+   * uniquement à SteamGridDB — jamais à un autre fournisseur. */
+  artworkSteamGridDbKey: string
+  /** Mode de recherche d'illustrations : première source fiable ou toutes les
+   * sources disponibles (spec « Refonte Apparence » §1-2). */
+  artworkSourceMode: 'automatic' | 'all'
   discordPresence: boolean
   discordClientId: string
   discordLargeImageKey: string
@@ -399,6 +406,8 @@ export interface Store {
   setTextSize: (size: TextSize) => void
   setUiDensity: (density: UiDensity) => void
   setAutoArtwork: (enabled: boolean) => void
+  setArtworkSteamGridDbKey: (value: string) => void
+  setArtworkSourceMode: (mode: 'automatic' | 'all') => void
   toggleDiscord: () => void
   setDiscordClientId: (value: string) => void
   setDiscordLargeImageKey: (value: string) => void
@@ -607,6 +616,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
   textSize: 'normal',
   uiDensity: 'comfortable',
   autoArtwork: false,
+  artworkSteamGridDbKey: '',
+  artworkSourceMode: 'automatic',
   discordPresence: false,
   discordClientId: '',
   discordLargeImageKey: '',
@@ -757,7 +768,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       }
       if (get().autoArtwork) {
         fresh.forEach(game => {
-          void automaticArtworkForGame(game).then(resources => {
+          void automaticArtworkForGame(game, get().artworkSteamGridDbKey).then(resources => {
             if (!Object.keys(resources).length) return
             set(state => ({
               games: state.games.map(current => current.id === game.id ? { ...current, resources: { ...current.resources, ...resources } } : current),
@@ -1259,6 +1270,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setTextSize: textSize => set({ textSize }),
   setUiDensity: uiDensity => set({ uiDensity }),
   setAutoArtwork: autoArtwork => set({ autoArtwork }),
+  setArtworkSteamGridDbKey: artworkSteamGridDbKey => set({ artworkSteamGridDbKey }),
+  setArtworkSourceMode: artworkSourceMode => set({ artworkSourceMode }),
   toggleDiscord: () => {
     set(state => ({ discordPresence: !state.discordPresence }))
     get().syncDiscordPresence()
@@ -2360,6 +2373,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
     textSize: state.textSize,
     uiDensity: state.uiDensity,
     autoArtwork: state.autoArtwork,
+    artworkSteamGridDbKey: state.artworkSteamGridDbKey,
+    artworkSourceMode: state.artworkSourceMode,
     discordPresence: state.discordPresence,
     discordClientId: state.discordClientId,
     discordLargeImageKey: state.discordLargeImageKey,

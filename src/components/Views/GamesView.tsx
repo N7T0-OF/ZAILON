@@ -13,6 +13,7 @@ import type { Game, GameSession, GameTab, Mod, ModImportCandidate, Profile, Prof
 import { VisualGamePanel } from '../../visual-profiles/ui/VisualGamePanel'
 import { GameConfigurationPanel } from './GameConfigurationPanel'
 import { GameDiagnosticPanel, GameHealthBar, type SubSection } from './GameDiagnosticPanel'
+import { GameResourcesDialog } from '../GameResourcesDialog'
 
 const TABS: Array<{ id: GameTab; label: string }> = [
   { id: 'overview', label: 'Aperçu' },
@@ -580,8 +581,11 @@ function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, fil
   const pinnedPriorityGameId = useStore(state => state.pinnedPriorityGameId)
   const foregroundGameId = useStore(state => state.foregroundGameId)
   const setGameFavorite = useStore(state => state.setGameFavorite)
+  const setGameResources = useStore(state => state.setGameResources)
   const searchRef = useRef<HTMLInputElement>(null)
   const [context, setContext] = useState<{ gameId: string; x: number; y: number }>()
+  const [resourcesGameId, setResourcesGameId] = useState<string>()
+  const resourcesGame = resourcesGameId ? games.find(item => item.id === resourcesGameId) : undefined
 
   const activeByGame = useMemo(() => {
     const map = new Map<string, GameSession>()
@@ -655,10 +659,11 @@ function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, fil
         {(() => { const game = games.find(item => item.id === context.gameId); if (!game) return null; return <>
           <button type="button" onClick={() => { setGameFavorite(game.id); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/68 hover:bg-white/[0.05]"><Star size={12} className={game.favorite ? 'fill-gold text-gold' : 'text-white/35'} />{game.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}</button>
           <button type="button" onClick={() => { onOpen(game.id); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/68 hover:bg-white/[0.05]"><Play size={12} className="text-white/35" />Ouvrir</button>
-          <button type="button" disabled title="Arrive avec le moteur d’illustrations unifié (prochaine étape)" className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/30 disabled:cursor-not-allowed"><ImageIcon size={12} />Changer l’apparence…</button>
+          <button type="button" onClick={() => { setResourcesGameId(game.id); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/68 hover:bg-white/[0.05]"><ImageIcon size={12} />Changer l’apparence…</button>
         </> })()}
       </div>
     </div>}
+    {resourcesGame && <GameResourcesDialog game={resourcesGame} onClose={() => setResourcesGameId(undefined)} onChange={resources => setGameResources(resourcesGame.id, resources)} />}
   </div>
 }
 

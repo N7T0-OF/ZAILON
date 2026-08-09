@@ -8,6 +8,7 @@ import { formatTime } from '../../utils'
 import { useUpdater } from '../UpdateProvider'
 import { CREATOR_LINKS } from '../../config/creatorLinks'
 import { InfoBubble } from '../UI/InfoBubble'
+import { artworkProvidersWithState } from '../../lib/artworkRegistry'
 
 function formatDate(value?: number | string) {
   if (!value) return 'Never'
@@ -22,7 +23,7 @@ const SETTINGS_INDEX: Array<{ id: string; label: string; path: string; keywords:
   { id: 'reduce-explanations', label: 'Réduire les explications', path: 'Paramètres > Préférences et lisibilité', keywords: 'explications bulles descriptions aide', sectionLabel: 'Préférences et lisibilité' },
   { id: 'advanced-mode', label: 'Mode avancé', path: 'Paramètres > Préférences et lisibilité', keywords: 'avance technique', sectionLabel: 'Préférences et lisibilité' },
   { id: 'accent', label: 'Couleur d’accent', path: 'Paramètres > Apparence', keywords: 'accent couleur theme', sectionLabel: 'Couleur d’accent' },
-  { id: 'artwork', label: 'Images Steam', path: 'Paramètres > Illustrations automatiques', keywords: 'illustrations images steam artwork couverture', sectionLabel: 'Illustrations automatiques' },
+  { id: 'artwork', label: 'Illustrations', path: 'Paramètres > Illustrations', keywords: 'illustrations images steam steamgriddb artwork couverture bannière logo icône sources', sectionLabel: 'Illustrations' },
   { id: 'tasks', label: 'Tâches et notifications', path: 'Paramètres > Tâches et notifications', keywords: 'taches notifications toasts progression', sectionLabel: 'Tâches et notifications' },
   { id: 'storage', label: 'Stockage', path: 'Paramètres > Stockage', keywords: 'stockage espace disque nettoyage', sectionLabel: 'Stockage' },
   { id: 'discord', label: 'Discord Rich Presence', path: 'Paramètres > Discord', keywords: 'discord presence activite', sectionLabel: 'Discord Rich Presence' },
@@ -123,6 +124,13 @@ export function SettingsView() {
   const [discordStatus, setDiscordStatus] = useState<DiscordConnectionStatus>()
   const [testingDiscord, setTestingDiscord] = useState(false)
   const [settingsQuery, setSettingsQuery] = useState('')
+  const artworkSteamGridDbKey = useStore(state => state.artworkSteamGridDbKey)
+  const setArtworkSteamGridDbKey = useStore(state => state.setArtworkSteamGridDbKey)
+  const artworkSourceMode = useStore(state => state.artworkSourceMode)
+  const setArtworkSourceMode = useStore(state => state.setArtworkSourceMode)
+  const [artworkGridDbDraft, setArtworkGridDbDraft] = useState('')
+  const [artworkMessage, setArtworkMessage] = useState<string>()
+  const [testingArtworkKey, setTestingArtworkKey] = useState(false)
   const settingsResults = useMemo(() => {
     const query = settingsQuery.trim().toLocaleLowerCase()
     if (!query) return []
@@ -200,6 +208,18 @@ export function SettingsView() {
     }
   }
 
+  const testArtworkKey = async () => {
+    setTestingArtworkKey(true)
+    setArtworkMessage(undefined)
+    try {
+      setArtworkMessage(await native.testArtworkProvider('steamgriddb', artworkSteamGridDbKey))
+    } catch (reason) {
+      setArtworkMessage(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setTestingArtworkKey(false)
+    }
+  }
+
   const revokeProvider = async (provider: 'nexus' | 'curseforge') => {
     setBusyProvider(provider)
     try {
@@ -229,7 +249,26 @@ export function SettingsView() {
 
       <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3"><div className="mb-3 flex items-center gap-2 text-gold/70"><Settings2 size={13} /><h2 className="text-[11px] font-mono uppercase tracking-widest">Tâches et notifications</h2></div><div className="grid gap-2 sm:grid-cols-2"><label className="flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/58">Afficher les cartes de progression<input type="checkbox" checked={taskToastsEnabled} onChange={event => setTaskToastsEnabled(event.target.checked)} className="accent-gold" /></label><label className="flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/58">Réduire automatiquement l’import<input type="checkbox" checked={taskAutoReduceImports} onChange={event => setTaskAutoReduceImports(event.target.checked)} className="accent-gold" /></label></div>{!reduceExplanations && <p className="mt-2 text-[11px] text-white/32">Masquer une carte ne supprime jamais la tâche. L’historique complet reste disponible dans Téléchargements.</p>}</section>
 
-      <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3"><div className="mb-3 flex items-center gap-2 text-gold/70"><Settings2 size={13} /><h2 className="text-[11px] font-mono uppercase tracking-widest">Illustrations automatiques</h2></div><label className="flex items-center justify-between gap-4 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/62"><span className="flex items-center gap-2"><strong className="text-white/76">Images Steam</strong><InfoBubble text="ZAILON peut proposer des illustrations officielles Steam pour les nouveaux jeux. La copie locale reste soumise à confirmation. Source actuelle : Steam officiel, sans clé. SteamGridDB et d’autres sources pourront être ajoutées lorsqu’une intégration compatible sera configurée." /></span><input type="checkbox" checked={autoArtwork} onChange={event => setAutoArtwork(event.target.checked)} className="accent-gold" /></label></section>
+      <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+        <div className="mb-3 flex items-center gap-2 text-gold/70"><Palette size={13} /><h2 className="text-[11px] font-mono uppercase tracking-widest">Illustrations</h2></div>
+        <label className="flex items-center justify-between gap-4 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/62"><span className="flex items-center gap-2"><strong className="text-white/76">Images automatiques pour les nouveaux jeux</strong><InfoBubble text="ZAILON peut proposer des illustrations pour les nouveaux jeux détectés. La copie locale reste toujours soumise à confirmation. Sources actives : Steam officiel, + SteamGridDB si une clé est enregistrée." /></span><input type="checkbox" checked={autoArtwork} onChange={event => setAutoArtwork(event.target.checked)} className="accent-gold" /></label>
+        <div className="mt-2 flex items-center justify-between gap-4 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/62"><span className="flex items-center gap-2"><strong className="text-white/76">Source de recherche</strong><InfoBubble text="Automatique : essaie la première source fiable, puis les autres seulement si elle ne renvoie rien. Toutes les sources : une seule recherche fusionnée avec toutes les sources disponibles. Une source indisponible ne bloque jamais la recherche." /></span><select value={artworkSourceMode} onChange={event => setArtworkSourceMode(event.target.value as 'automatic' | 'all')} className="rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/72"><option value="automatic">Automatique</option><option value="all">Toutes les sources</option></select></div>
+        <div className="mt-3 rounded-lg bg-white/[0.025] p-3">
+          <p className="mb-2 text-[11px] font-semibold text-white/55">État des sources</p>
+          <div className="space-y-1.5">{artworkProvidersWithState({ steamgriddbApiKey: artworkSteamGridDbKey }).map(provider => <div key={provider.id} className="flex items-center gap-2 text-[11px]"><span className="w-36 shrink-0 text-white/65">{provider.label}</span><span className={provider.state === 'available' ? 'text-emerald-300/72' : provider.state === 'not-configured' ? 'text-amber-200/70' : 'text-white/30'}>{provider.state === 'available' ? '✓ disponible' : provider.state === 'not-configured' ? 'Non configuré' : 'Connecteur non disponible'}</span><InfoBubble text={provider.reason({ steamgriddbApiKey: artworkSteamGridDbKey })} /></div>)}</div>
+        </div>
+        <div className="mt-2 rounded-lg bg-white/[0.025] p-3">
+          <p className="mb-2 text-[11px] font-semibold text-white/55">SteamGridDB</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input type="password" value={artworkGridDbDraft} onChange={event => setArtworkGridDbDraft(event.target.value)} autoComplete="new-password" spellCheck={false} placeholder={artworkSteamGridDbKey ? 'Coller une nouvelle clé pour la remplacer' : 'Coller la clé API SteamGridDB (gratuite)'} className="min-w-[240px] flex-1 rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-gold/30" />
+            <button type="button" onClick={() => { if (!artworkGridDbDraft.trim()) return; setArtworkSteamGridDbKey(artworkGridDbDraft.trim()); setArtworkGridDbDraft(''); setArtworkMessage('Clé SteamGridDB enregistrée localement.') }} disabled={!artworkGridDbDraft.trim()} className="rounded bg-gold px-3 py-1.5 text-[11px] font-semibold text-ink-400 disabled:opacity-30">{artworkSteamGridDbKey ? 'Remplacer' : 'Enregistrer'}</button>
+            {artworkSteamGridDbKey && <button type="button" onClick={() => void testArtworkKey()} disabled={testingArtworkKey} className="rounded border border-white/[0.1] px-3 py-1.5 text-[11px] text-white/64 disabled:opacity-35">{testingArtworkKey ? 'Test…' : 'Tester la connexion'}</button>}
+            {artworkSteamGridDbKey && <button type="button" onClick={() => { setArtworkSteamGridDbKey(''); setArtworkMessage('Clé SteamGridDB supprimée.') }} className="rounded border border-red-300/15 px-2 py-1.5 text-[11px] text-red-200/60">Supprimer</button>}
+          </div>
+          {artworkMessage && <p className="mt-2 text-[11px] text-white/45">{artworkMessage}</p>}
+          <p className="mt-2 text-[11px] leading-relaxed text-white/32">La clé est stockée localement et transmise uniquement à SteamGridDB, uniquement pour les illustrations. Les connecteurs IGDB, Nexus, GameBanana et CurseForge ne sont pas branchés dans cette version : leur état « non disponible » n’affiche jamais de résultat fictif.</p>
+        </div>
+      </section>
 
       <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3"><div className="mb-3 flex items-center gap-2 text-gold/70"><Radio size={13} /><h2 className="text-[11px] font-mono uppercase tracking-widest">Discord Rich Presence réelle</h2></div><label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/62"><span><strong className="block text-white/76">Activer pendant le jeu</strong><span className="mt-1 block leading-relaxed text-white/36">ZAILON se connecte au canal IPC local de Discord au lancement du jeu, publie l’activité puis la nettoie quand le processus se ferme.</span></span><input type="checkbox" checked={discordPresence} onChange={toggleDiscord} className="mt-1 accent-gold" /></label><div className="mt-3 grid gap-3 md:grid-cols-2"><label className="text-[11px] text-white/48">Application ID / Client ID public<input value={discordClientId} onChange={event => setDiscordClientId(event.target.value.replace(/\D/g, '').slice(0, 32))} inputMode="numeric" placeholder="Identifiant numérique Discord" className="mt-1.5 block w-full rounded-lg border border-white/[0.08] bg-ink-200 px-3 py-2 text-[11px] text-white/72 outline-none focus:border-gold/30" /></label><label className="text-[11px] text-white/48">Clé de grande image (optionnelle)<input value={discordLargeImageKey} onChange={event => setDiscordLargeImageKey(event.target.value.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128))} placeholder="zailon ou clé d’asset Discord" className="mt-1.5 block w-full rounded-lg border border-white/[0.08] bg-ink-200 px-3 py-2 text-[11px] text-white/72 outline-none focus:border-gold/30" /></label></div><div className="mt-3 grid gap-2 sm:grid-cols-3"><label className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/54">Afficher le profil<input type="checkbox" checked={discordShowProfile} onChange={event => setDiscordShowProfile(event.target.checked)} className="accent-gold" /></label><label className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/54">Afficher les mods actifs<input type="checkbox" checked={discordShowModCount} onChange={event => setDiscordShowModCount(event.target.checked)} className="accent-gold" /></label><label className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/54">Afficher le temps écoulé<input type="checkbox" checked={discordShowElapsed} onChange={event => setDiscordShowElapsed(event.target.checked)} className="accent-gold" /></label></div><div className="mt-3 flex flex-wrap items-center gap-3"><button type="button" onClick={() => void testDiscord()} disabled={testingDiscord || !discordClientId.trim()} className="rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/64 hover:bg-white/[0.05] disabled:opacity-35">{testingDiscord ? 'Test IPC…' : 'Tester avec Discord lancé'}</button>{discordStatus && <span className={`text-[11px] ${discordStatus.connected ? 'text-emerald-300/72' : 'text-amber-200/72'}`}>{discordStatus.message}</span>}</div><p className="mt-3 text-[11px] leading-relaxed text-white/30">Aucun client secret n’est nécessaire ni accepté. Le Client ID est public et sert uniquement à identifier l’application Discord.</p></section>
 

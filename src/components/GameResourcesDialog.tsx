@@ -1,9 +1,11 @@
-import { Check, ImagePlus, Move, RotateCcw, Save, Search, Trash2, Upload, X, ZoomIn } from 'lucide-react'
+import { Check, ImagePlus, Info, Move, RotateCcw, Save, Search, Trash2, Upload, X, ZoomIn } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Game, GameResources } from '../types'
 import { ArtworkCandidate, GameResourceKind, native, pickGameResource, resourceUrl } from '../lib/native'
+import { artworkProvidersWithState, artworkSearchPlan, dedupeArtworkCandidates, resultSourceLabels } from '../lib/artworkRegistry'
+import { useStore } from '../store/useStore'
 
 type ResourceKey = 'coverPath' | 'logoPath' | 'iconPath' | 'backgroundPath' | 'bannerPath' | 'videoPath'
 type ResourceSlot = { kind: GameResourceKind; key: ResourceKey; label: string; hint: string; ratio: string }
@@ -52,6 +54,10 @@ export function GameAppearanceEditor({ game, onSave, onCancel, embedded = false,
   const [error, setError] = useState<string>()
   const [artworkCandidates, setArtworkCandidates] = useState<ArtworkCandidate[]>([])
   const [selectedArtwork, setSelectedArtwork] = useState<ArtworkCandidate>()
+  const [unavailableSources, setUnavailableSources] = useState<Array<{ id: string; label: string; reason: string }>>([])
+  const artworkSteamGridDbKey = useStore(state => state.artworkSteamGridDbKey)
+  const artworkSourceMode = useStore(state => state.artworkSourceMode)
+  const setArtworkSourceMode = useStore(state => state.setArtworkSourceMode)
   const activePath = draft[activeSlot.key]
   const fields = transformFields[activeSlot.kind as keyof typeof transformFields]
 
@@ -60,6 +66,7 @@ export function GameAppearanceEditor({ game, onSave, onCancel, embedded = false,
     setDraft({ ...game.resources })
     setArtworkCandidates([])
     setSelectedArtwork(undefined)
+    setUnavailableSources([])
     stagedPaths.current.clear()
   }, [game.id])
 
@@ -97,12 +104,33 @@ export function GameAppearanceEditor({ game, onSave, onCancel, embedded = false,
     setBusy(true)
     setError(undefined)
     setSelectedArtwork(undefined)
+    setArtworkCandidates([])
+    setUnavailableSources([])
     try {
-      const candidates = await native.searchGameArtwork(game.name, game.provider || game.platform, game.providerGameId, activeSlot.kind)
-      setArtworkCandidates(candidates)
-      setSelectedArtwork(candidates[0])
+      const config = { steamgriddbApiKey: artworkSteamGridDbKey }
+      const plan = artworkSearchPlan(artworkSourceMode, config, activeSlot.kind)
+      let merged: ArtworkCandidate[] = []
+      let lastError: string | undefined
+      for (const attempt of plan.attempts) {
+        try {
+          const candidates = await native.searchGameArtwork(game.name, game.provider || game.platform, game.providerGameId, activeSlot.kind, attempt.apiKeys)
+          merged = merged.concat(candidates)
+          // Mode automatique : première source fiable gagne, sans blocage si une autre échoue.
+          if (candidates.length > 0) break
+        } catch (reason) {
+          lastError = reason instanceof Error ? reason.message : String(reason)
+        }
+      }
+      const deduped = dedupeArtworkCandidates(merged)
+      if (deduped.length === 0) {
+        setError(lastError ?? 'Aucune source n’a fourni d’image pour cet emplacement.')
+        setUnavailableSources(plan.skipped)
+        return
+      }
+      setArtworkCandidates(deduped)
+      setSelectedArtwork(deduped[0])
+      setUnavailableSources(plan.skipped)
     } catch (reason) {
-      setArtworkCandidates([])
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setBusy(false)
@@ -205,7 +233,7 @@ export function GameAppearanceEditor({ game, onSave, onCancel, embedded = false,
         <div className="grid grid-cols-3 gap-1 lg:grid-cols-1">
           {resources.map(slot => {
             const path = draft[slot.key]
-            return <button type="button" key={slot.key} onClick={() => { setActiveSlot(slot); setArtworkCandidates([]); setSelectedArtwork(undefined) }} className={`flex min-w-0 items-center gap-2 rounded-lg p-2 text-left transition-colors ${slot.key === activeSlot.key ? 'bg-white/[0.075] text-white' : 'text-white/40 hover:bg-white/[0.04] hover:text-white/66'}`}>
+            return <button type="button" key={slot.key} onClick={() => { setActiveSlot(slot); setArtworkCandidates([]); setSelectedArtwork(undefined); setUnavailableSources([]) }} className={`flex min-w-0 items-center gap-2 rounded-lg p-2 text-left transition-colors ${slot.key === activeSlot.key ? 'bg-white/[0.075] text-white' : 'text-white/40 hover:bg-white/[0.04] hover:text-white/66'}`}>
               <ResourceThumb path={path} isVideo={slot.kind === 'video'} />
               <span className="hidden min-w-0 flex-1 lg:block"><span className="block truncate text-[11px] font-medium">{slot.label}</span><span className="mt-0.5 block truncate text-[11px] text-white/28">{path ? 'Personnalisé' : 'Par défaut'}</span></span>
             </button>
@@ -215,13 +243,16 @@ export function GameAppearanceEditor({ game, onSave, onCancel, embedded = false,
 
       <main className="flex min-h-[330px] min-w-0 flex-col p-4">
         <div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold text-white/80">{activeSlot.label}</h3><p className="mt-0.5 text-[11px] text-white/32">{activeSlot.hint}</p></div><span className="rounded border border-white/[0.07] px-1.5 py-0.5 font-mono text-[11px] uppercase text-white/25">{activeSlot.kind === 'video' ? 'MP4 · WEBM' : 'PNG · JPG · WEBP · AVIF · SVG'}</span></div>
-        {activeSlot.kind !== 'video' && <div className="mt-3 flex flex-wrap gap-1.5" aria-label="Fournisseurs d’illustrations"><span className="rounded-full border border-gold/28 bg-gold/[0.07] px-2.5 py-1 text-[11px] font-semibold text-gold/78">Steam officiel</span>{['SteamGridDB', 'IGDB', 'Nexus', 'GameBanana', 'CurseForge'].map(provider => <span key={provider} title="Connecteur non configuré : aucun résultat fictif ne sera affiché" className="cursor-not-allowed rounded-full border border-white/[0.06] px-2.5 py-1 text-[11px] text-white/22">{provider}</span>)}</div>}
+        {activeSlot.kind !== 'video' && <div className="mt-3 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-[11px] text-white/38">Source de recherche</span><div className="flex gap-0.5 rounded-lg border border-white/[0.07] p-0.5">{(['automatic', 'all'] as const).map(mode => <button key={mode} type="button" onClick={() => setArtworkSourceMode(mode)} className={`rounded-md px-2.5 py-1 text-[11px] ${artworkSourceMode === mode ? 'bg-white/[0.09] text-white/80' : 'text-white/35 hover:text-white/60'}`}>{mode === 'automatic' ? 'Automatique' : 'Toutes les sources'}</button>)}</div></div>
+          <div className="flex flex-wrap gap-1.5" aria-label="Sources d’illustrations">{artworkProvidersWithState({ steamgriddbApiKey: artworkSteamGridDbKey }).map(provider => { const available = provider.state === 'available'; return <span key={provider.id} title={`${provider.label} — ${provider.reason({ steamgriddbApiKey: artworkSteamGridDbKey })}`} className={`rounded-full border px-2.5 py-1 text-[11px] ${available ? 'border-gold/28 bg-gold/[0.07] font-semibold text-gold/78' : 'cursor-not-allowed border-white/[0.06] text-white/22'}`}>{provider.label}{!available && ' ⓘ'}</span> })}</div>
+        </div>}
         <div className="relative mt-3 flex min-h-52 flex-1 items-center justify-center overflow-hidden rounded-xl border border-white/[0.075] bg-[linear-gradient(45deg,rgba(255,255,255,.022)_25%,transparent_25%,transparent_75%,rgba(255,255,255,.022)_75%),linear-gradient(45deg,rgba(255,255,255,.022)_25%,transparent_25%,transparent_75%,rgba(255,255,255,.022)_75%)] bg-[length:18px_18px] bg-[position:0_0,9px_9px]" style={{ aspectRatio: activeSlot.ratio }}>
           {previewSource ? activeSlot.kind === 'video' ? <video src={previewSource} controls muted loop className="h-full w-full object-cover" /> : <img src={previewSource} alt={`Aperçu ${activeSlot.label}`} className="h-full w-full" style={previewStyle} /> : <div className="text-center text-white/24"><ImagePlus size={27} className="mx-auto" /><p className="mt-2 text-[11px]">Aucune ressource locale</p><p className="mt-1 text-[11px] text-white/18">Déposez un fichier ou utilisez Parcourir</p></div>}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/55 to-transparent" />
           <span className="pointer-events-none absolute bottom-2 left-2 rounded bg-black/45 px-1.5 py-1 font-mono text-[11px] text-white/42 backdrop-blur">{selectedArtwork ? `APERÇU · ${selectedArtwork.sourceLabel}` : 'APERÇU ZAILON'}</span>
         </div>
-        {artworkCandidates.length > 0 && <div className="mt-3"><div className="mb-2 flex items-center justify-between gap-2"><p className="text-[11px] font-semibold text-white/55">Résultats Steam officiels · confirmation requise</p><span className="text-[11px] text-white/30">{artworkCandidates.length} image(s)</span></div><div className="flex gap-2 overflow-x-auto pb-1">{artworkCandidates.map(candidate => <button key={candidate.id} type="button" onClick={() => setSelectedArtwork(candidate)} className={`relative h-20 w-28 shrink-0 overflow-hidden rounded-lg border ${selectedArtwork?.id === candidate.id ? 'border-gold/70 ring-1 ring-gold/30' : 'border-white/[0.08]'}`}><img src={candidate.url} alt={`${candidate.sourceLabel} pour ${candidate.gameName}`} loading="lazy" className="h-full w-full object-cover" />{selectedArtwork?.id === candidate.id && <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-gold text-black"><Check size={11} /></span>}</button>)}</div>{selectedArtwork && <p className="mt-2 text-[11px] leading-relaxed text-white/34">{selectedArtwork.gameName} · {selectedArtwork.sourceLabel}. {selectedArtwork.attribution}</p>}</div>}
+        {artworkCandidates.length > 0 && <div className="mt-3"><div className="mb-2 flex items-center justify-between gap-2"><p className="text-[11px] font-semibold text-white/55">Résultats · {resultSourceLabels(artworkCandidates).join(', ') || 'aucune source'} · confirmation requise</p><span className="text-[11px] text-white/30">{artworkCandidates.length} image(s)</span></div><div className="flex gap-2 overflow-x-auto pb-1">{artworkCandidates.map(candidate => <button key={candidate.id} type="button" onClick={() => setSelectedArtwork(candidate)} className={`relative h-20 w-28 shrink-0 overflow-hidden rounded-lg border ${selectedArtwork?.id === candidate.id ? 'border-gold/70 ring-1 ring-gold/30' : 'border-white/[0.08]'}`}><img src={candidate.url} alt={`${candidate.sourceLabel} pour ${candidate.gameName}`} loading="lazy" className="h-full w-full object-cover" />{selectedArtwork?.id === candidate.id && <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-gold text-black"><Check size={11} /></span>}</button>)}</div>{unavailableSources.length > 0 && <p className="mt-2 flex items-start gap-1.5 text-[11px] text-white/30"><Info size={11} className="mt-0.5 shrink-0" /><span>{unavailableSources.length} source(s) indisponible(s) : {unavailableSources.map(source => source.label).join(', ')} — {unavailableSources[0].reason}</span></p>}{selectedArtwork && <p className="mt-2 text-[11px] leading-relaxed text-white/34">{selectedArtwork.gameName} · {selectedArtwork.sourceLabel}. {selectedArtwork.attribution}</p>}</div>}
         <div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => void browse()} disabled={busy} className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-[11px] font-semibold text-black hover:bg-white/88 disabled:opacity-40"><Upload size={11} /> {activePath ? 'Remplacer localement' : 'Parcourir'}</button>{activeSlot.kind !== 'video' && <button type="button" onClick={() => void searchArtwork()} disabled={busy} className="flex items-center gap-1.5 rounded-lg border border-gold/22 bg-gold/[0.05] px-3 py-1.5 text-[11px] font-semibold text-gold/80 hover:bg-gold/[0.09] disabled:opacity-40"><Search size={12} />Rechercher automatiquement</button>}{selectedArtwork && <button type="button" onClick={() => void useSelectedArtwork()} disabled={busy} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-1.5 text-[11px] font-semibold text-black disabled:opacity-40"><Check size={12} />Utiliser cette image</button>}{activePath && <button type="button" onClick={() => void removeActive()} disabled={busy} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-1.5 text-[11px] text-white/48 hover:bg-white/[0.055] hover:text-white"><Trash2 size={10} /> Retirer</button>}</div>
       </main>
 

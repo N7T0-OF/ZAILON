@@ -1234,7 +1234,7 @@
 - **Réglages Apparence** (spec §11-12) : mode « Animations » (Automatique / Activées / Réduites, défaut Automatique — suit « Réduire les animations » du système) + ligne compacte « Effet 3D des couvertures » avec bulle d'aide.
 - **Parallaxe respectueux des contraintes** (spec §10, §13) : désactivé sur écrans tactiles, quand les animations sont réduites ou que le toggle est éteint ; aucun calcul hors survol.
 
-## [Unreleased]
+## 1.46.0 — Diagnostic Visual Profiles compact + historique complet
 
 ### Added
 
@@ -1242,6 +1242,10 @@
 - **Historique cliquable** (spec §4) : « N version(s) » ouvre une fenêtre avec toutes les versions — actions **Restaurer / Comparer / Supprimer** (corbeille ZAILON). Le comparateur affiche les 12 réglages version vs actuel, différences surlignées.
 - **Historique plafonné à 50 versions** côté natif (spec §4) : les plus anciennes partent en corbeille — plus jamais des milliers de copies.
 - **Nouvelles commandes natives** : `read_visual_profile_version` (lecture seule pour comparer) et `delete_visual_profile_version`.
+
+## [Unreleased]
+
+### Added
 
 ### Changed
 

@@ -1263,6 +1263,18 @@
 - **Artwork automatique suspendu** (spec §12) : quand un jeu actif met les scans en pause, la recherche d'illustrations automatique est suspendue (reprise au prochain ajout de jeu — aucune file orpheline).
 - **Gating des actions lourdes** (spec §8, §12) : les boutons **Analyser** (onglet Mods) et **Détecter** (Bibliothèque) sont désactivés pendant le jeu avec une infobulle « En pause — jeu actif (profil Performance). Reprenez après la fermeture du jeu. »
 
+## 1.49.0 — Fiabilité des profils : correction du bug « 0 mods »
+
+### Fixed
+
+- **Bug critique « 0 mods »** (spec Fiabilité profils §1-11, §56-60) : un profil pouvait afficher `0 mods actifs` au démarrage alors que ses paquets staged existaient — un cache UI vide persisté (`installedMods`) était traité comme la vérité jusqu'au clic « Analyser ». Le catalogue installé de chaque jeu est désormais **réconcilié avec le store staged réel au démarrage** (`refreshStagedCatalogs`, lecture des manifest.json uniquement — léger).
+- **Invariant anti-« clear silencieux »** (spec §8) : toute transaction de profil qui ferait passer un profil de > 0 à 0 actifs SANS être une désactivation massive explicite ou une suppression explicite est **rejetée avant toute écriture** — « Une modification anormale du profil a été détectée et annulée. » Les opérations légitimes (Désactiver toute la sélection, Retirer tous les mods, transfert, annulation groupée) passent explicitement le garde.
+- **Restauration automatique** (spec §5-6) : si des références de profil sont absentes du catalogue, un toast « Profil restauré automatiquement » signale la réconciliation (rapport de réparation : références + actifs restaurés).
+
+### Added
+
+- **`src/lib/profileConsistency.ts`** (logique pure, 12 tests) : compteur canonique depuis les modStates (`enabledCountFromState`, spec §2/§10 — jamais une liste rendue), détection du clear silencieux (`isSilentClear`), détection du besoin de re-scan (`needsStagedRefresh`, spec §9), rapport de réparation (`repairReport`, spec §57).
+
 ## [Unreleased]
 
 ### Added

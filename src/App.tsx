@@ -43,6 +43,7 @@ export default function App() {
   const globalPerformanceMode = useStore(s => s.globalPerformanceMode)
   const batteryPerformanceBehavior = useStore(s => s.batteryPerformanceBehavior)
   const reconcileRuntimeActivity = useStore(s => s.reconcileRuntimeActivity)
+  const refreshStagedCatalogs = useStore(s => s.refreshStagedCatalogs)
   const autoMinimizeOnGameStart = useStore(s => s.autoMinimizeOnGameStart)
   const restoreAfterGame = useStore(s => s.restoreAfterGame)
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
@@ -55,6 +56,14 @@ export default function App() {
   useEffect(() => {
     reconcileRuntimeActivity()
   }, [gameSessions, performanceModes, performanceCustom, globalPerformanceMode, batteryPerformanceBehavior, reconcileRuntimeActivity])
+
+  // Fiabilité des profils (spec §9-10) : au démarrage, le catalogue installé
+  // de chaque jeu est réconcilié avec le store staged — un cache UI vide
+  // persisté ne fait plus afficher « 0 mods » à un profil qui référence des
+  // paquets (toast « Profil restauré automatiquement » si réparation).
+  useEffect(() => {
+    void refreshStagedCatalogs()
+  }, [refreshStagedCatalogs])
 
   // GamePresenceEngine : un seul watcher léger suit (a) les sessions en attente
   // de leur processus final, (b) les jeux configurés lancés hors ZAILON, et

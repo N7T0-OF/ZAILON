@@ -10,6 +10,7 @@ import { mergeModCatalogs, reconcileModStates } from '../lib/profileState'
 import { arbitrateInputProfiles, pickPrioritySession, recoveryKind } from '../lib/sessionPriority'
 import { compareFrameworkSets, fingerprintFrameworkSet, hasFrameworkChanges, type FrameworkSnapshot } from '../lib/lastKnownGood'
 import { effectivePerformance, type DownloadPolicy, type PerformanceMode, type ScanPolicy, type ZailonPerformancePolicies } from '../lib/performanceProfiles'
+import { enabledCountFromState, isSilentClear, repairReport } from '../lib/profileConsistency'
 import { evaluateSessionEnd } from '../lib/sessionEnd'
 
 const APP_VERSION = '1.48.0'
@@ -72,7 +73,20 @@ const withProfilePaths = (profile: Profile, paths: Awaited<ReturnType<typeof nat
   deploymentPath: paths.deploymentPath,
 })
 
-async function persistProfileTransaction(gameId: string, operationId: string, beforeProfiles: Profile[], afterProfiles: Profile[]) {
+async function persistProfileTransaction(gameId: string, operationId: string, beforeProfiles: Profile[], afterProfiles: Profile[], opts: { explicitDisableAll?: boolean; allowEmpty?: boolean } = {}) {
+  // Invariant anti-« 0 mods silencieux » (spec Fiabilité profils §8) : une
+  // transaction qui ferait passer un profil de > 0 à 0 actifs SANS être une
+  // désactivation massive explicite ou une suppression explicite est rejetée
+  // AVANT toute écriture — le profil ne peut plus être vidé par un bug ou un
+  // cache vide. Les opérations légitimes (bulkSetEnabled sur tous les actifs,
+  // suppression de tous les mods, restauration volontaire) passent le flag.
+  for (const before of beforeProfiles) {
+    const after = afterProfiles.find(candidate => candidate.id === before.id)
+    if (!after) continue
+    if (isSilentClear(enabledCountFromState(before), enabledCountFromState(after), opts)) {
+      throw new Error('Une modification anormale du profil a été détectée et annulée. La désactivation massive n’est possible que via « Désactiver » sur la sélection complète.')
+    }
+  }
   if (!native.isDesktop()) return afterProfiles
   await native.applyProfileTransaction(gameId, operationId, beforeProfiles, afterProfiles)
   return Promise.all(afterProfiles.map(async profile => withProfilePaths(profile, await native.syncProfileState(gameId, profile))))
@@ -423,6 +437,11 @@ export interface Store {
   registerImportedStages: (gameId: string, profileId: string, installedPaths: string[], enabled: boolean) => Promise<void>
   completeMo2Import: (gameId: string, result: Mo2ImportResult) => Promise<void>
   scanMods: (gameId?: string) => Promise<void>
+  /** Re-scan staged au démarrage (spec Fiabilité profils §9-10) : le catalogue
+   * installé est réconcilié avec le store staged réel pour qu'un cache vide
+   * persisté ne fasse jamais afficher « 0 mods » à un profil qui possède des
+   * références. Toast « Profil restauré automatiquement » si réparation. */
+  refreshStagedCatalogs: () => Promise<void>
   toggleMod: (modId: string) => Promise<void>
   deleteMod: (modId: string) => Promise<void>
   moveMod: (modId: string, direction: -1 | 1) => void
@@ -1234,6 +1253,35 @@ export const useStore = create<Store>()(persist((set, get) => ({
       if (updated && native.isDesktop()) await native.syncProfileState(game.id, updated)
     } catch (error) {
       set({ notice: asError(error) })
+    }
+  },
+  refreshStagedCatalogs: async () => {
+    // Spec Fiabilité profils §9-10 : au démarrage, le catalogue installé de
+    // chaque jeu est réconcilié avec le store staged réel (lecture des
+    // manifest.json uniquement — léger). Un cache UI vide persisté ne peut
+    // plus faire afficher « 0 mods » à un profil qui référence des paquets.
+    if (!native.isDesktop()) return
+    const current = get().games
+    let repairedProfiles = 0
+    let changed = false
+    const nextGames = await Promise.all(current.map(async game => {
+      try {
+        const stagedMods = await native.listStagedMods(game.id)
+        const catalog = scannedMods(stagedMods, game.installedMods || [])
+        const report = repairReport({ installedMods: catalog, profiles: game.profiles })
+        if (report) repairedProfiles += 1
+        const same = catalog.length === (game.installedMods || []).length
+          && catalog.every((mod, index) => mod.id === game.installedMods?.[index]?.id)
+        if (same) return game
+        changed = true
+        return { ...game, installedMods: catalog }
+      } catch {
+        return game
+      }
+    }))
+    if (changed) set(state => ({ games: nextGames }))
+    if (repairedProfiles > 0) {
+      set({ notice: `Profil${repairedProfiles > 1 ? 's' : ''} restauré${repairedProfiles > 1 ? 's' : ''} automatiquement — références réconciliées avec le store staged.` })
     }
   },
   toggleMod: async modId => {
@@ -2163,7 +2211,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
     })
     const id = createId()
     try {
-      const [persisted] = await persistProfileTransaction(game.id, id, [cloneProfile(profile)], [next])
+      // Désactiver TOUTE la sélection des actifs = désactivation massive
+      // explicite (spec §8) — le garde anti-clear est levé dans ce cas.
+      const explicitDisableAll = !enabled && resolved.filter(mod => mod.enabled).every(mod => allowed.has(mod.id))
+      const [persisted] = await persistProfileTransaction(game.id, id, [cloneProfile(profile)], [next], { explicitDisableAll })
       const operation: BulkOperation = {
         id, kind: enabled ? 'enable' : 'disable', gameId: game.id, profileIds: [profile.id], modIds,
         createdAt: Date.now(), label: `${enabled ? 'Activation' : 'Désactivation'} de ${modIds.length} mod(s)`,
@@ -2196,7 +2247,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const transactionBefore = mode === 'move' ? before : [before[1]]
     const id = createId()
     try {
-      const persisted = await persistProfileTransaction(game.id, id, transactionBefore, after)
+      // Un « move » qui déplace tous les mods actifs de la source est une
+      // opération explicite — le garde anti-clear est levé.
+      const persisted = await persistProfileTransaction(game.id, id, transactionBefore, after, { allowEmpty: mode === 'move' })
       const operation: BulkOperation = {
         id, kind: mode, gameId: game.id, profileIds: [source.id, destination.id], modIds, createdAt: Date.now(),
         label: `${mode === 'move' ? 'Transfert' : 'Copie'} de ${modIds.length} mod(s) vers ${destination.name}`,
@@ -2244,7 +2297,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
       let persisted = after
       let profileError = ''
       try {
-        persisted = await persistProfileTransaction(game.id, createId(), before, after)
+        // Suppression physique explicite — le garde anti-clear est levé.
+        persisted = await persistProfileTransaction(game.id, createId(), before, after, { allowEmpty: true })
       } catch (error) {
         profileError = asError(error)
       }
@@ -2275,7 +2329,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
     })
     const id = createId()
     try {
-      const persisted = await persistProfileTransaction(game.id, id, before, after)
+      // Retrait explicite de mods du/des profil(s) — garde anti-clear levé.
+      const persisted = await persistProfileTransaction(game.id, id, before, after, { allowEmpty: true })
       const operation: BulkOperation = {
         id, kind: 'delete', gameId: game.id, profileIds: targets.map(item => item.id), modIds, createdAt: Date.now(),
         label: `Retrait de ${modIds.length} mod(s) ${scope === 'all' ? 'de tous les profils' : `du profil ${profile.name}`}`,
@@ -2401,7 +2456,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
       let restoredProfiles = operation.beforeProfiles
       if (operation.beforeProfiles.length) {
         const current = operation.afterProfiles.map(profile => game.profiles.find(item => item.id === profile.id)).filter(Boolean) as Profile[]
-        restoredProfiles = await persistProfileTransaction(game.id, createId(), current.map(cloneProfile), operation.beforeProfiles.map(cloneProfile))
+        // Restauration explicite de l'état antérieur à l'opération annulée.
+        restoredProfiles = await persistProfileTransaction(game.id, createId(), current.map(cloneProfile), operation.beforeProfiles.map(cloneProfile), { allowEmpty: true })
       }
       set(state => ({
         games: state.games.map(item => item.id !== game.id ? item : {

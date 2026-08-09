@@ -971,7 +971,14 @@
 
 ### Added
 
+- **Paramètres > À propos > « Historique des versions »** : ouvre le journal local des mises à jour (ex-fonction Outils, spec §39).
+- **Onglet Profils** : bouton « Importer depuis Mod Organizer 2… » (ex-fonction Outils, spec §42).
+- **Configuration > Général** : icônes dossier à côté de l’Exécutable, du Dossier Mods et du Dossier Bypass pour ouvrir dans l’Explorateur (spec §43).
+
 ### Changed
+
+- **Section Outils supprimée** : la navigation principale et la page du jeu n’ont plus d’entrée « Outils ». Chaque fonction a été redistribuée (voir `docs/tools-page-removal-map.md`) — Détection locale et Ajout manuel restent dans la Bibliothèque, l’audit et la réparation MO2 dans État & Diagnostic, l’import MO2 dans Profils, le journal dans Paramètres > À propos.
+- **Palette Ctrl+K** : « Détecter des jeux » ouvre la Bibliothèque (fini l’ancienne page Outils) ; l’entrée « Ouvrir Outils » est retirée.
 
 ### Fixed
 
@@ -984,6 +991,8 @@
 ### Experimental
 
 ### Removed
+
+- **Page et onglet « Outils » supprimés** (`ToolsView.tsx`, onglet de la page jeu, entrées de navigation, types `ViewType`/`GameTab`). Aucune fonction utile perdue — chaque action a une destination documentée dans la carte de redistribution.
 
 ### Known Issues
 

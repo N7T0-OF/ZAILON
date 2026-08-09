@@ -97,13 +97,14 @@ interface Props {
   profile: Profile
   profileMods: Mod[]
   onOpenConfiguration: () => void
-  onOpenTools: () => void
+  onRepairMo2?: () => void
+  repairBusy?: boolean
   conflicts?: ResolvedConflict[]
   onSetWinner?: (path: string, winnerId: string) => void
   initialSection?: SubSection
 }
 
-export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfiguration, onOpenTools, conflicts = [], onSetWinner, initialSection }: Props) {
+export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfiguration, onRepairMo2, repairBusy = false, conflicts = [], onSetWinner, initialSection }: Props) {
   const [section, setSection] = useState<SubSection>(initialSection || 'resume')
   const [audit, setAudit] = useState<ProfileDeploymentAudit | undefined>()
   const [busy, setBusy] = useState(false)
@@ -258,7 +259,7 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
           ))}</div>
         </div>}
         <FrameworkLastKnownGood gameId={game.id} profile={profile} profileMods={profileMods} />
-        <Red4extRepairCard summary={repair} audit={audit} busy={repairing} onRepair={() => void repairRed4ext()} onOpenTools={onOpenTools} />
+        <Red4extRepairCard summary={repair} audit={audit} busy={repairing} onRepair={() => void repairRed4ext()} onRepairMo2={onRepairMo2} />
       </div>}
 
       {section === 'conflicts' && (conflicts.length
@@ -268,7 +269,7 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
       {section === 'deployment' && <div>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => void runAudit()} disabled={busy || !native.isDesktop()} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313] disabled:opacity-40">{busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}{busy ? 'Analyse en cours…' : (audit ? 'Relancer l’audit' : 'Lancer l’audit')}</button>
-          <button type="button" onClick={onOpenTools} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/55 hover:border-gold/25 hover:text-gold"><Wrench size={12} />Outils de réparation</button>
+          {onRepairMo2 && <button type="button" onClick={onRepairMo2} disabled={repairBusy} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/55 hover:border-gold/25 hover:text-gold disabled:cursor-not-allowed disabled:opacity-40">{repairBusy ? <Loader2 size={12} className="animate-spin" /> : <Wrench size={12} />}{repairBusy ? 'Réparation en cours…' : 'Réparer l’import MO2 et le déploiement'}</button>}
         </div>
         {audit && <div className="mt-4 space-y-3">
           <div className={`rounded-xl border p-4 ${audit.deployable ? 'border-emerald-300/20 bg-emerald-300/[0.04]' : 'border-amber-300/20 bg-amber-300/[0.04]'}`}>
@@ -478,7 +479,7 @@ const RED4EXT_VERDICT_TONE: Record<Red4extRepairSummary['verdict'], string> = {
 
 /** Bouton « Réparer RED4ext » (spec §9) : diagnostic complet + actions — jamais
  * de téléchargement automatique (le bouton Outils ouvre la réparation MO2). */
-function Red4extRepairCard({ summary, audit, busy, onRepair, onOpenTools }: { summary: Red4extRepairSummary | undefined; audit: ProfileDeploymentAudit | undefined; busy: boolean; onRepair: () => void; onOpenTools: () => void }) {
+function Red4extRepairCard({ summary, audit, busy, onRepair, onRepairMo2 }: { summary: Red4extRepairSummary | undefined; audit: ProfileDeploymentAudit | undefined; busy: boolean; onRepair: () => void; onRepairMo2?: () => void }) {
   const provider = audit?.providers.find(item => item.frameworkId.toLocaleLowerCase().includes('red4ext'))
   const stateRows: Array<{ label: string; value: 'ok' | 'missing' | 'unknown'; hint?: string }> = summary
     ? [
@@ -506,7 +507,7 @@ function Red4extRepairCard({ summary, audit, busy, onRepair, onOpenTools }: { su
         </div>
       ))}</div>
       <ul className="mt-2 space-y-1 text-[11px] opacity-80">{summary.actions.map((action, index) => <li key={index}>• {action}</li>)}</ul>
-      {summary.verdict === 'deployment-broken' && <button type="button" onClick={onOpenTools} className="mt-2 rounded-lg border border-white/[0.12] px-2.5 py-1.5 text-[11px] font-semibold text-white/70 hover:bg-white/[0.05]">Ouvrir les outils de réparation</button>}
+      {summary.verdict === 'deployment-broken' && onRepairMo2 && <button type="button" onClick={onRepairMo2} className="mt-2 rounded-lg border border-white/[0.12] px-2.5 py-1.5 text-[11px] font-semibold text-white/70 hover:bg-white/[0.05]">Réparer le déploiement (import MO2)</button>}
     </div>}
   </div>
 }

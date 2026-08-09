@@ -1,4 +1,4 @@
-import { Compass, Download, Gamepad2, Monitor, Play, Plus, Radar, Search, Settings, Wrench } from 'lucide-react'
+import { Compass, Download, Gamepad2, Monitor, Play, Plus, Radar, Search, Settings } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 
@@ -15,9 +15,8 @@ const ACTION_ITEMS: Array<Omit<PaletteItem, 'id' | 'label' | 'detail'> & { label
   { group: 'Actions', label: 'Ouvrir les Paramètres', detail: 'Réglages globaux de ZAILON', icon: Settings, run: () => useStore.getState().setView('settings') },
   { group: 'Actions', label: 'Ouvrir Explorer', detail: 'Nexus, GameBanana, Collections', icon: Compass, run: () => useStore.getState().setView('explore') },
   { group: 'Actions', label: 'Ouvrir Téléchargements', detail: 'Centre des tâches et de l’activité', icon: Download, run: () => useStore.getState().setView('downloads') },
-  { group: 'Actions', label: 'Ouvrir Outils', detail: 'Détection, ajout, journal', icon: Wrench, run: () => useStore.getState().setView('tools') },
   { group: 'Actions', label: 'Ouvrir Visual Profiles', detail: 'Profils visuels système', icon: Monitor, run: () => useStore.getState().setView('visuals') },
-  { group: 'Actions', label: 'Détecter des jeux', detail: 'Steam, Epic, applications Windows', icon: Radar, run: () => useStore.getState().setView('tools') },
+  { group: 'Actions', label: 'Détecter des jeux', detail: 'Steam, Epic, applications Windows — dans la Bibliothèque', icon: Radar, run: () => { useStore.getState().setGamesBrowsing(true); useStore.getState().setView('games') } },
   { group: 'Actions', label: 'Ajouter un jeu', detail: 'Choisir un exécutable', icon: Plus, run: () => { void useStore.getState().addGameFromExecutable() } },
 ]
 

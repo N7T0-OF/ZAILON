@@ -1,4 +1,4 @@
-export type ViewType = 'home' | 'games' | 'explore' | 'downloads' | 'tools' | 'visuals' | 'news' | 'settings'
+export type ViewType = 'home' | 'games' | 'explore' | 'downloads' | 'visuals' | 'news' | 'settings'
 export type Platform = 'gamebanana' | 'nexus' | 'curseforge' | 'ayakamods'
 export type UpdateChannel = 'stable' | 'beta'
 export type DownloadRetention = 'startup' | '1d' | '7d' | 'never'
@@ -53,7 +53,7 @@ export interface ModCategoryTag {
   userLocked?: boolean
 }
 
-export type GameTab = 'overview' | 'mods' | 'profiles' | 'downloads' | 'files' | 'conflicts' | 'tools' | 'visuals' | 'backups' | 'appearance' | 'settings' | 'commands' | 'configuration' | 'diagnostic'
+export type GameTab = 'overview' | 'mods' | 'profiles' | 'downloads' | 'files' | 'conflicts' | 'visuals' | 'backups' | 'appearance' | 'settings' | 'commands' | 'configuration' | 'diagnostic'
 export type GameKeyboardLayout = 'qwerty' | 'azerty' | 'qwertz' | 'custom'
 export type GameInputActivation = 'while-playing' | 'on-launch'
 

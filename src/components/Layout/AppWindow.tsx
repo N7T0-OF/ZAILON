@@ -7,7 +7,6 @@ import { ExploreView } from '../Views/ExploreView'
 import { NewsView } from '../Views/NewsView'
 import { SettingsView } from '../Views/SettingsView'
 import { DownloadsView } from '../Views/DownloadsView'
-import { ToolsView } from '../Views/ToolsView'
 import { StatusBar } from './StatusBar'
 import { VisualProfilesPage } from '../../visual-profiles/ui/VisualProfilesPage'
 
@@ -19,7 +18,6 @@ export function AppWindow() {
     games: GamesView,
     explore: ExploreView,
     downloads: DownloadsView,
-    tools: ToolsView,
     visuals: VisualProfilesPage,
     news: NewsView,
     settings: SettingsView,

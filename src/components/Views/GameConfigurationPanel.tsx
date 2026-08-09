@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, Gamepad2, History, Keyboard, Layers3, MonitorDown, Palette, Plus, Rocket, Settings2, ShieldCheck, Trash2, Upload, Wrench } from 'lucide-react'
+import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, History, Keyboard, Layers3, MonitorDown, Palette, Plus, Rocket, Settings2, ShieldCheck, Trash2, Upload, Wrench } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
@@ -134,8 +134,8 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
 
     <div className="space-y-3">
       <ConfigCard id="lancement" title="Lancement" icon={Rocket} badge={`${game.execPath ? 'Exécutable configuré' : 'À configurer'}`} open={open.includes('lancement')} onToggle={() => toggle('lancement')}>
-        <Field label="Exécutable du jeu" value={game.execPath || ''} placeholder="Sélectionnez l’exécutable" onChange={value => void setGamePath(game.id, value)} onBrowse={onBrowseExecutable} />
-        <Field label="Dossier Mods" value={game.modsPath || ''} placeholder="Sélectionnez le dossier Mods" onChange={value => setModsPath(game.id, value)} onBrowse={onBrowseModsFolder} />
+        <Field label="Exécutable du jeu" value={game.execPath || ''} placeholder="Sélectionnez l’exécutable" onChange={value => void setGamePath(game.id, value)} onBrowse={onBrowseExecutable} onOpen={game.execPath ? () => void native.openPath(game.execPath!) : undefined} />
+        <Field label="Dossier Mods" value={game.modsPath || ''} placeholder="Sélectionnez le dossier Mods" onChange={value => setModsPath(game.id, value)} onBrowse={onBrowseModsFolder} onOpen={game.modsPath ? () => void native.openPath(game.modsPath!) : undefined} />
         <div className="rounded-xl border border-white/[0.07] bg-white/[0.02]">
           <button type="button" onClick={() => setAdvancedOpen(open => !open)} className="flex w-full items-center justify-between px-3 py-2.5 text-left" aria-expanded={advancedOpen || advancedMode}>
             <span className="flex items-center gap-2 text-[11px] font-semibold text-white/60"><Settings2 size={12} />Avancé</span>
@@ -147,6 +147,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
               <div className="mt-1.5 flex gap-2">
                 <input value={game.bypassPath || ''} onChange={event => setGameBypassPath(game.id, event.target.value)} placeholder="Optionnel — dossier du loader ou bypass" className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-white/72 outline-none focus:border-gold/30" />
                 <button type="button" onClick={async () => { const path = await pickFolder(`Choisir le dossier Bypass / Loader — ${game.name}`); if (path) setGameBypassPath(game.id, path) }} className="rounded-lg border border-white/[0.09] bg-white/[0.025] px-3 py-2 text-[11px] text-white/55 hover:border-gold/25 hover:text-gold">Choisir</button>
+                {game.bypassPath && <button type="button" onClick={() => void native.openPath(game.bypassPath!)} title="Ouvrir le dossier Bypass dans l’Explorateur" className="rounded-lg border border-white/[0.09] bg-white/[0.025] p-2 text-white/45 hover:border-gold/25 hover:text-gold"><FolderOpen size={13} /></button>}
               </div>
             </div>
             <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
@@ -348,11 +349,12 @@ function ConfigCard({ id, title, icon: Icon, badge, open, onToggle, children }: 
   </section>
 }
 
-function Field({ label, value, placeholder, onChange, onBrowse }: { label: string; value: string; placeholder: string; onChange: (value: string) => void; onBrowse: () => void }) {
+function Field({ label, value, placeholder, onChange, onBrowse, onOpen }: { label: string; value: string; placeholder: string; onChange: (value: string) => void; onBrowse: () => void; onOpen?: () => void }) {
   return <label className="block">
     <span className="text-[11px] text-white/45">{label}</span>
     <div className="mt-1.5 flex gap-2">
       <input value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-white/72 outline-none focus:border-gold/30" />
+      {onOpen && <button type="button" onClick={onOpen} title="Ouvrir dans l’Explorateur" className="rounded-lg border border-white/[0.09] bg-white/[0.025] p-2 text-white/45 hover:border-gold/25 hover:text-gold"><FolderOpen size={13} /></button>}
       <button type="button" onClick={onBrowse} className="rounded-lg border border-white/[0.09] bg-white/[0.025] px-3 py-2 text-[11px] text-white/55 hover:border-gold/25 hover:text-gold">Parcourir</button>
     </div>
   </label>

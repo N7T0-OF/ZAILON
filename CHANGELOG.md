@@ -1181,9 +1181,15 @@
 
 ### Added
 
+- **Import Cyberpunk — résolution de racines par fichier** (spec §23-27) : chaque fichier d'un dossier importé est mappé à sa racine de jeu la plus spécifique via `cyberpunk_map_file` (contient l'élimination des conteneurs inutiles) — un framework multi-racines comme TweakXL (`r6/tweaks` **et** `red4ext/plugins`) n'est plus empilé sous une seule destination.
+
 ### Changed
 
+- **Staging Cyberpunk** : la branche « structure ambiguë » de `stage_content` reconstruit désormais les racines **fichier par fichier** (`CyberpunkMappedByFile`) au lieu d'une destination globale unique ; les fichiers sans racine déterministe suivent l'extension (.archive → `archive/pc/mod`, .reds → `r6/scripts`) puis le fallback `mods/<nom>`. Le nom du dossier n'est jamais une partie du chemin jeu (spec §27).
+
 ### Fixed
+
+- **« TweakXL requis » / « ArchiveXL requis » alors que les fichiers existent** : la cause était une destination unique par paquet — le contenu restant (ex. `red4ext/plugins/…`) était empilé sous la première racine détectée (ex. `r6/tweaks/…`) ou sous `mods/`. Le mapping par fichier projette chaque fichier à la bonne racine.
 
 ### Performance
 

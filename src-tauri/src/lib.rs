@@ -2929,6 +2929,59 @@ struct RootDetectionResult {
     reason: String,
 }
 
+/// Spec « Import Cyberpunk façon MO2 » §23-27 : destination jeu d'un fichier
+/// relatif à la racine d'un paquet. Chaque fichier est mappé à sa racine la
+/// plus spécifique ; les conteneurs inutiles (nom du mod, « Cyberpunk 2077 »…)
+/// sont supprimés — le nom du dossier n'est JAMAIS une partie du chemin jeu.
+/// `None` = aucune racine Cyberpunk déterministe (l'appelant décide).
+fn cyberpunk_map_file(relative: &Path) -> Option<PathBuf> {
+    let parts = relative
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        return None;
+    }
+    let lower = parts
+        .iter()
+        .map(|part| part.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    const ROOTS: [&str; 9] = [
+        "archive", "r6", "red4ext", "bin", "mods", "tools", "engine", "plugins", "config",
+    ];
+    // `plugins` en tête → red4ext/plugins (mods RED4ext ; `bin/x64/plugins`
+    // reste sous `bin/…` grâce à la boucle qui matche `bin` d'abord).
+    if lower[0] == "plugins" {
+        let mut destination = PathBuf::from("red4ext").join("plugins");
+        for part in &parts[1..] {
+            destination.push(part);
+        }
+        return Some(destination);
+    }
+    if ROOTS.contains(&lower[0].as_str()) {
+        return Some(relative.to_path_buf());
+    }
+    // Conteneurs inutiles en tête → chercher la première racine connue en
+    // profondeur (un framework multi-racines comme TweakXL fournit r6/tweaks
+    // ET red4ext/plugins sous le même dossier racine).
+    for (index, segment) in lower.iter().enumerate().skip(1) {
+        if ROOTS.contains(&segment.as_str()) {
+            let mut destination = PathBuf::new();
+            if segment == "plugins" {
+                destination.push("red4ext");
+            }
+            for part in &parts[index..] {
+                destination.push(part);
+            }
+            return Some(destination);
+        }
+    }
+    None
+}
+
 fn detect_candidate_root(path: &Path) -> RootDetectionResult {
     let detected_root = if path.is_dir() {
         unwrap_package_root(path)
@@ -6718,70 +6771,62 @@ fn stage_content(
             copy_tree_cancellable_secure(&root, &target, cancel, security)?;
             diagnostics.push("Paquet classé comme plugin client FiveM. Les ressources serveur ne sont jamais déployées par cet adaptateur.".into());
         } else if cyberpunk && !contains_game_root_layout(&root) {
-            if let Some(relative) = cyberpunk_relative_destination(&root) {
-                layout = "CyberpunkNormalizedFragment".to_string();
-                diagnostics.push(format!(
-                    "Racine Cyberpunk reconstruite vers {}.",
-                    relative.to_string_lossy().replace('\\', "/")
-                ));
-                copy_tree_cancellable_secure(&root, &content.join(relative), cancel, security)?;
-            } else if WalkDir::new(&root)
-                .max_depth(2)
+            // Spec §23-27 : résolution par FICHIER. Un framework fournit souvent
+            // plusieurs racines (TweakXL → r6/tweaks + red4ext/plugins) ; une
+            // destination globale unique empilait le contenu restant au mauvais
+            // endroit (→ « TweakXL requis » alors qu'il est présent). Chaque
+            // fichier est mappé à sa racine la plus spécifique ; les conteneurs
+            // inutiles sont supprimés ; le nom du dossier n'est jamais une
+            // partie du chemin jeu. Les fichiers sans racine déterministe
+            // suivent l'extension (.archive → archive/pc/mod, .reds →
+            // r6/scripts) puis le fallback mods/<nom>.
+            let root_name = safe_archive_component(
+                root.file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("mod"),
+            );
+            let mut mapped = 0usize;
+            for entry in WalkDir::new(&root)
+                .follow_links(false)
                 .into_iter()
-                .filter_map(Result::ok)
-                .any(|entry| {
-                    entry
-                        .path()
+                .map(|entry| entry.map_err(to_error))
+            {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err("TASK_CANCELLED".into());
+                }
+                let entry = entry?;
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                let relative = entry
+                    .path()
+                    .strip_prefix(&root)
+                    .map_err(to_error)?
+                    .to_path_buf();
+                validate_archive_relative(&relative)?;
+                let destination = cyberpunk_map_file(&relative).unwrap_or_else(|| {
+                    let extension = relative
                         .extension()
                         .and_then(|value| value.to_str())
-                        .is_some_and(|value| value.eq_ignore_ascii_case("archive"))
-                })
-            {
-                layout = "CyberpunkArchive".to_string();
-                diagnostics.push(
-                    "Archive(s) Cyberpunk sans racine explicite : destination archive/pc/mod."
-                        .into(),
-                );
-                copy_tree_cancellable_secure(
-                    &root,
-                    &content.join("archive/pc/mod"),
-                    cancel,
-                    security,
-                )?;
-            } else if WalkDir::new(&root)
-                .max_depth(3)
-                .into_iter()
-                .filter_map(Result::ok)
-                .any(|entry| {
-                    entry
-                        .path()
-                        .extension()
-                        .and_then(|value| value.to_str())
-                        .is_some_and(|value| value.eq_ignore_ascii_case("reds"))
-                })
-            {
-                layout = "CyberpunkRedscript".to_string();
-                diagnostics.push(
-                    "Script(s) REDscript sans racine explicite : destination r6/scripts.".into(),
-                );
-                copy_tree_cancellable_secure(&root, &content.join("r6/scripts"), cancel, security)?;
-            } else {
-                layout = "GenericModsFolder".to_string();
-                diagnostics.push(
-                    "Structure Cyberpunk ambiguë : aucun chemin de jeu déterministe, stockage sous mods/<nom> avec vérification manuelle.".into(),
-                );
-                let name = safe_archive_component(
-                    root.file_name()
-                        .and_then(|value| value.to_str())
-                        .unwrap_or("mod"),
-                );
-                copy_tree_cancellable_secure(
-                    &root,
-                    &content.join("mods").join(name),
-                    cancel,
-                    security,
-                )?;
+                        .unwrap_or_default()
+                        .to_ascii_lowercase();
+                    if extension == "archive" {
+                        PathBuf::from("archive/pc/mod").join(&relative)
+                    } else if extension == "reds" {
+                        PathBuf::from("r6/scripts").join(&relative)
+                    } else {
+                        PathBuf::from("mods").join(&root_name).join(&relative)
+                    }
+                });
+                validate_archive_relative(&destination)?;
+                copy_sensitive_aware_file(entry.path(), &content.join(&destination), security)?;
+                mapped += 1;
             }
+            layout = "CyberpunkMappedByFile".to_string();
+            diagnostics.push(format!(
+                "Racines Cyberpunk reconstruites fichier par fichier : {} fichier(s) mappés, conteneurs inutiles supprimés.",
+                mapped
+            ));
         } else if contains_game_root_layout(&root) {
             layout = if cyberpunk {
                 "CyberpunkGameRoot"
@@ -15307,6 +15352,76 @@ mod tests {
             windows_provider("A local utility", "Independent", "C:\\Tools"),
             "Applications Windows"
         );
+    }
+
+    // Spec « Import Cyberpunk façon MO2 » §23-27 — mapping par fichier.
+    fn map_path(relative: &str) -> Option<String> {
+        cyberpunk_map_file(Path::new(relative))
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+    }
+
+    #[test]
+    fn cyberpunk_map_file_keeps_known_roots() {
+        assert_eq!(
+            map_path("r6/tweaks/x.yaml").as_deref(),
+            Some("r6/tweaks/x.yaml")
+        );
+        assert_eq!(
+            map_path("red4ext/plugins/TweakXL/y.lua").as_deref(),
+            Some("red4ext/plugins/TweakXL/y.lua")
+        );
+        assert_eq!(
+            map_path("archive/pc/mod/z.archive").as_deref(),
+            Some("archive/pc/mod/z.archive")
+        );
+        assert_eq!(
+            map_path("bin/x64/plugins/cyber_engine_tweaks.asi").as_deref(),
+            Some("bin/x64/plugins/cyber_engine_tweaks.asi")
+        );
+    }
+
+    #[test]
+    fn cyberpunk_map_file_strips_useless_containers() {
+        // TweakXL fournit r6/tweaks ET red4ext/plugins sous le même dossier :
+        // le nom du paquet n'est JAMAIS une partie du chemin jeu (spec §27).
+        assert_eq!(
+            map_path("TweakXL/r6/tweaks/x.yaml").as_deref(),
+            Some("r6/tweaks/x.yaml")
+        );
+        assert_eq!(
+            map_path("TweakXL/red4ext/plugins/init.lua").as_deref(),
+            Some("red4ext/plugins/init.lua")
+        );
+        assert_eq!(
+            map_path("ArchiveXL/red4ext/plugins/ArchiveXL/ArchiveXL.xl").as_deref(),
+            Some("red4ext/plugins/ArchiveXL/ArchiveXL.xl")
+        );
+        assert_eq!(
+            map_path("Cyberpunk 2077/r6/scripts/x.reds").as_deref(),
+            Some("r6/scripts/x.reds")
+        );
+        assert_eq!(
+            map_path("SomeFolder/red4ext/plugins/ArchiveXL/ArchiveXL.xl").as_deref(),
+            Some("red4ext/plugins/ArchiveXL/ArchiveXL.xl")
+        );
+    }
+
+    #[test]
+    fn cyberpunk_map_file_plugins_go_to_red4ext() {
+        assert_eq!(
+            map_path("plugins/TweakXL/init.lua").as_deref(),
+            Some("red4ext/plugins/TweakXL/init.lua")
+        );
+        assert_eq!(
+            map_path("core_01/plugins/ArchiveXL/ArchiveXL.xl").as_deref(),
+            Some("red4ext/plugins/ArchiveXL/ArchiveXL.xl")
+        );
+    }
+
+    #[test]
+    fn cyberpunk_map_file_unknown_files_return_none() {
+        assert_eq!(map_path("README.txt"), None);
+        assert_eq!(map_path("TweakXL/docs/readme.md"), None);
     }
 }
 

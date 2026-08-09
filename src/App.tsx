@@ -8,7 +8,7 @@ import { UpdateProvider } from './components/UpdateProvider'
 import { resolveProfileMods, useStore } from './store/useStore'
 import { buildRuntimeToastContent } from './lib/runtimeToast'
 import type { PerformanceMode } from './lib/performanceProfiles'
-import { activeSessionsForQuickPanel, modsPreparedFor, quickPanelPerformanceState, type QuickPanelSessionEntry } from './lib/quickPanelState'
+import { activeSessionsForQuickPanel, modsPreparedFor, nextSessionAfterCurrent, quickPanelPerformanceState, type QuickPanelSessionEntry } from './lib/quickPanelState'
 import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type LearnedProcessSignature, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
 import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, STEAM_BACKED_ATTACH_THRESHOLD, windowRequestFor } from './lib/gamePresence'
@@ -464,11 +464,33 @@ export default function App() {
     return () => unlisten?.()
   }, [])
 
-  // Fermeture automatique du panneau quand plus aucune session n'est en cours.
+  // Fermeture ciblée (spec §47, §84) : quand la session cible du panneau se
+  // termine, bascule vers la session suivante (prioritaire restante) — le
+  // panneau reste ouvert. Il ne se ferme que si plus aucune session n'est en
+  // cours. La cible épinglée disparue ne bloque pas : priorité recalculée.
   useEffect(() => {
     if (!native.isDesktop()) return
-    const running = gameSessions.some(session => session.state === 'GameRunning')
-    if (!running) void native.quickPanel.close().catch(() => undefined)
+    const store = useStore.getState()
+    const priorityGameId = pickPrioritySession(gameSessions, store.pinnedPriorityGameId, store.foregroundGameId)
+    const currentTarget = quickPanelTargetRef.current ?? priorityGameId
+    const running = gameSessions.filter(session => session.state === 'GameRunning')
+    if (running.length === 0) {
+      quickPanelTargetRef.current = undefined
+      void native.quickPanel.close().catch(() => undefined)
+      return
+    }
+    const targetStillRunning = running.some(session => session.gameId === currentTarget)
+    if (!targetStillRunning) {
+      const next = nextSessionAfterCurrent(gameSessions, store.games, currentTarget, store.pinnedPriorityGameId, store.foregroundGameId)
+      if (next) {
+        quickPanelTargetRef.current = next
+        emitQuickPanelSessions(store)
+        emitQuickPanelStateFor(store, next)
+      } else {
+        quickPanelTargetRef.current = undefined
+        void native.quickPanel.close().catch(() => undefined)
+      }
+    }
   }, [gameSessions])
 
   // Mode jeu ZAILON (spec #49-51) : quand un jeu passe en cours, on réduit

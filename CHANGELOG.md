@@ -1328,6 +1328,18 @@
 - **`activeSessionsForQuickPanel`** dans `src/lib/quickPanelState.ts` (logique pure, 3 tests multi-session) : liste des sessions non terminales triées priorité d'abord.
 - Nouveaux événements : `quick-panel-sessions` (liste) et actions `set-target` / `pin-target`.
 
+## 1.55.0 — Quick Panel : fermeture ciblée et bascule de session
+
+### Added
+
+- **Fermeture ciblée** (spec Quick Panel §47, §84) : quand la session affichée par le panneau se termine, le panneau **bascule automatiquement vers la session suivante** (la prioritaire parmi celles restantes) au lieu de se fermer — il ne se ferme que si plus aucune session n'est en cours.
+- **Pin disparu ne bloque pas** (spec §84) : si la session épinglée ★ se termine, la priorité est recalculée sur les sessions vivantes et le panneau bascule normalement (le pin est retiré par le store).
+- **`nextSessionAfterCurrent`** dans `src/lib/quickPanelState.ts` (logique pure, 4 tests : bascule vers la prioritaire restante, fermeture si rien, pin disparu, pin d'une autre session respecté) : exclut la cible disparue et les sessions terminales, applique `pickPrioritySession` sur le reste.
+
+### Fixed
+
+- Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
+
 ## [Unreleased]
 
 ### Added

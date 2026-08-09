@@ -74,3 +74,22 @@ export function activeSessionsForQuickPanel(
     }))
     .sort((left, right) => Number(right.isPriority) - Number(left.isPriority))
 }
+
+/**
+ * Spec §47, §84 : quand la session ciblée par le panneau se termine, le panneau
+ * bascule vers la session suivante (la prioritaire parmi celles restantes, en
+ * excluant la cible disparue) — ou retourne `undefined` s'il ne reste rien, au
+ *quel cas le panneau se ferme. La cible épinglée disparue ne bloque pas : la
+ *priorité est recalculée sur les sessions vivantes.
+ */
+export function nextSessionAfterCurrent(
+  sessions: GameSession[],
+  games: Pick<Game, 'id' | 'name'>[],
+  currentGameId: string | undefined,
+  pinnedGameId: string | undefined,
+  foregroundGameId: string | undefined,
+): string | undefined {
+  const terminal = new Set(['Ended', 'Failed', 'Aborted'])
+  const active = sessions.filter(session => session.gameId !== currentGameId && !terminal.has(session.state))
+  return pickPrioritySession(active, pinnedGameId, foregroundGameId)
+}

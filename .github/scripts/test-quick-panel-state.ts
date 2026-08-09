@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { activeSessionsForQuickPanel, modsPreparedFor, quickPanelPerformanceState } from '../../src/lib/quickPanelState.ts'
+import { activeSessionsForQuickPanel, modsPreparedFor, nextSessionAfterCurrent, quickPanelPerformanceState } from '../../src/lib/quickPanelState.ts'
 import type { GameSession } from '../../src/types'
 
 const session = (overrides: Partial<GameSession> = {}): GameSession => ({
@@ -81,4 +81,38 @@ test('multi-session : les sessions terminales sont exclues (spec §47)', () => {
   const entries = activeSessionsForQuickPanel(sessions, [{ id: 'cyberpunk', name: 'Cyberpunk 2077' }, { id: 'nte', name: 'Neverness to Everness' }], undefined, undefined)
   assert.equal(entries.length, 1)
   assert.equal(entries[0].gameId, 'cyberpunk')
+})
+
+test('bascule : la cible disparue est exclue, la prioritaire restante gagne (spec §47)', () => {
+  const sessions = [
+    session({ id: 's1', gameId: 'cyberpunk', state: 'Ended' }),
+    session({ id: 's2', gameId: 'nte', state: 'GameRunning' }),
+  ]
+  const next = nextSessionAfterCurrent(sessions, [{ id: 'cyberpunk', name: 'Cyberpunk 2077' }, { id: 'nte', name: 'Neverness to Everness' }], 'cyberpunk', undefined, undefined)
+  assert.equal(next, 'nte')
+})
+
+test('bascule : sans autre session active, le panneau se ferme (spec §47)', () => {
+  const sessions = [session({ id: 's1', gameId: 'cyberpunk', state: 'Ended' })]
+  const next = nextSessionAfterCurrent(sessions, [{ id: 'cyberpunk', name: 'Cyberpunk 2077' }], 'cyberpunk', undefined, undefined)
+  assert.equal(next, undefined)
+})
+
+test('bascule : la cible épinglée disparue ne bloque pas la priorité (spec §84)', () => {
+  const sessions = [
+    session({ id: 's1', gameId: 'cyberpunk', state: 'Ended' }),
+    session({ id: 's2', gameId: 'nte', state: 'GameRunning' }),
+  ]
+  const next = nextSessionAfterCurrent(sessions, [{ id: 'cyberpunk', name: 'Cyberpunk 2077' }, { id: 'nte', name: 'Neverness to Everness' }], 'cyberpunk', 'cyberpunk', undefined)
+  assert.equal(next, 'nte')
+})
+
+test('bascule : le pin d\'une autre session est respecté (spec §84)', () => {
+  const sessions = [
+    session({ id: 's1', gameId: 'cyberpunk', state: 'Ended' }),
+    session({ id: 's2', gameId: 'nte', state: 'GameRunning' }),
+    session({ id: 's3', gameId: 'photoshop', state: 'GameRunning' }),
+  ]
+  const next = nextSessionAfterCurrent(sessions, [{ id: 'cyberpunk', name: 'Cyberpunk 2077' }, { id: 'nte', name: 'Neverness to Everness' }, { id: 'photoshop', name: 'Photoshop' }], 'cyberpunk', 'photoshop', 'nte')
+  assert.equal(next, 'photoshop')
 })

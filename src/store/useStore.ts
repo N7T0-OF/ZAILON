@@ -11,6 +11,14 @@ import { arbitrateInputProfiles, pickPrioritySession, recoveryKind } from '../li
 import { compareFrameworkSets, fingerprintFrameworkSet, hasFrameworkChanges, type FrameworkSnapshot } from '../lib/lastKnownGood'
 import { effectivePerformance, type DownloadPolicy, type PerformanceMode, type ScanPolicy, type ZailonPerformancePolicies } from '../lib/performanceProfiles'
 import { enabledCountFromState, isSilentClear, repairReport } from '../lib/profileConsistency'
+import { createDebouncer } from '../lib/persistDebounce'
+
+// Sauvegarde debounced des réglages continus (spec §17) : le color picker
+// d'accent n'écrit pas sur disque à chaque pixel — coalescence 250 ms, flush
+// forcé à la fermeture via `flushPendingSettings` (App.tsx, beforeunload).
+const accentDebouncer = createDebouncer((value: string) => {
+  useStore.setState({ accentColor: value })
+}, 250)
 import { evaluateSessionEnd } from '../lib/sessionEnd'
 
 const APP_VERSION = '1.49.0'
@@ -569,6 +577,9 @@ export interface Store {
   setShowSupportButton: (enabled: boolean) => void
   setGameAutoAttach: (gameId: string, enabled: boolean) => void
   setAccentColor: (color: string) => void
+  /** Écrit immédiatement les réglages debouncés en attente (spec §17 — flush à
+   * la fermeture de l'application). */
+  flushPendingSettings: () => void
   bulkSetEnabled: (modIds: string[], enabled: boolean) => Promise<void>
   bulkTransferMods: (modIds: string[], destinationProfileId: string, mode: 'copy' | 'move') => Promise<void>
   bulkDeleteMods: (modIds: string[], scope: 'current' | 'all' | 'permanent') => Promise<void>
@@ -2196,8 +2207,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
     autoAttachGames: enabled ? [...new Set([...(state.autoAttachGames || []), gameId])] : (state.autoAttachGames || []).filter(id => id !== gameId),
   })),
   setAccentColor: accentColor => {
-    if (/^#[0-9a-f]{6}$/i.test(accentColor)) set({ accentColor })
+    if (/^#[0-9a-f]{6}$/i.test(accentColor)) accentDebouncer.push(accentColor)
   },
+  flushPendingSettings: () => { accentDebouncer.flush() },
   bulkSetEnabled: async (modIds, enabled) => {
     const { game, profile } = selected(get())
     if (!game || !profile || !modIds.length) return
@@ -2597,6 +2609,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     explorePage: state.explorePage,
     exploreSort: state.exploreSort,
     exploreGrid: state.exploreGrid,
+    exploreSearch: state.exploreSearch,
     taskToastsEnabled: state.taskToastsEnabled,
     taskAutoReduceImports: state.taskAutoReduceImports,
     libraryViewMode: state.libraryViewMode,

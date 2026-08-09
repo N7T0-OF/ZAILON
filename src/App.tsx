@@ -44,6 +44,7 @@ export default function App() {
   const batteryPerformanceBehavior = useStore(s => s.batteryPerformanceBehavior)
   const reconcileRuntimeActivity = useStore(s => s.reconcileRuntimeActivity)
   const refreshStagedCatalogs = useStore(s => s.refreshStagedCatalogs)
+  const flushPendingSettings = useStore(s => s.flushPendingSettings)
   const autoMinimizeOnGameStart = useStore(s => s.autoMinimizeOnGameStart)
   const restoreAfterGame = useStore(s => s.restoreAfterGame)
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
@@ -64,6 +65,17 @@ export default function App() {
   useEffect(() => {
     void refreshStagedCatalogs()
   }, [refreshStagedCatalogs])
+
+  // Persistance UI (spec §17) : les réglages debouncés (accent, sliders) sont
+  // écrits immédiatement à la fermeture — aucune valeur récente n'est perdue.
+  useEffect(() => {
+    const flush = () => flushPendingSettings()
+    window.addEventListener('beforeunload', flush)
+    return () => {
+      window.removeEventListener('beforeunload', flush)
+      flush()
+    }
+  }, [flushPendingSettings])
 
   // GamePresenceEngine : un seul watcher léger suit (a) les sessions en attente
   // de leur processus final, (b) les jeux configurés lancés hors ZAILON, et

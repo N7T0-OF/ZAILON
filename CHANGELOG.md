@@ -1275,6 +1275,17 @@
 
 - **`src/lib/profileConsistency.ts`** (logique pure, 12 tests) : compteur canonique depuis les modStates (`enabledCountFromState`, spec §2/§10 — jamais une liste rendue), détection du clear silencieux (`isSilentClear`), détection du besoin de re-scan (`needsStagedRefresh`, spec §9), rapport de réparation (`repairReport`, spec §57).
 
+## 1.50.0 — Persistance UI : Explorer mémorise son état + réglages debouncés
+
+### Added
+
+- **`exploreSearch` persisté** (spec §16) : la recherche de l'Explorer survit au redémarrage, comme le mode grille, le nombre de colonnes, le tri, la plateforme, le jeu sélectionné, la page et le filtre NSFW — le bloc `ExplorerPreferences` (spec §14) est désormais intégralement persisté.
+- **Sauvegarde debounced des réglages continus** (spec §17) : le color picker d'accent n'écrit plus sur disque à chaque pixel — coalescence **250 ms** via `src/lib/persistDebounce.ts` (helper pur, 6 tests : coalescence, fenêtre, flush, cancel), avec **flush forcé à la fermeture** (`flushPendingSettings` sur `beforeunload`) — aucune valeur récente perdue.
+
+### Removed
+
+- **Bloc « Gratuit en permanence » supprimé** de Visual Profiles (spec §35, critère bloquant §71) : texte permanent inutile, n'apportait rien à l'utilisation courante.
+
 ## [Unreleased]
 
 ### Added

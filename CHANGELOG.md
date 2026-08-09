@@ -1215,7 +1215,7 @@
 - **Correctif du faux « TweakXL requis »** : la vérification pré-lancement comparait un chemin de dossier par égalité exacte de fichier → échouait toujours, même avec TweakXL correctement stagé sous `red4ext/plugins/TweakXL/…`. Les besoins sont désormais satisfaits par des capacités (dossier canonique OU signature), agrégées sur l'ensemble des mods actifs (graphe global).
 - **TweakXL, ArchiveXL et Codeware ajoutés aux fournisseurs détectés** (audit + manifeste + « Comparer avec la racine attendue ») : les 6 frameworks (RED4ext, redscript, TweakXL, ArchiveXL, Codeware, CET) apparaissent désormais dans le comparateur.
 
-## [Unreleased]
+## 1.44.0 — Diagnostic hiérarchique des frameworks Cyberpunk
 
 ### Added
 
@@ -1223,6 +1223,10 @@
 - **États distingués** (spec §40) : prêt / manquant / **non requis** (absent mais rien n'en dépend — jamais un blocage) / **mal placé** (fourni par signature mais hors emplacement canonique) / **non exposé** (dans le profil mais absent de la table virtuelle) / **compatibilité** (empreinte changée depuis le Last Known Good).
 - **Carte « Diagnostic hiérarchique · frameworks »** dans État & Diagnostic > Frameworks : les 6 frameworks dans l'ordre, cause primaire en bannière rouge, conséquences grisées, avertissements Last Known Good.
 - **Verrou pré-lancement hiérarchique** : le lancement bloqué affiche la cause primaire puis ses conséquences (« Framework principal non chargé : RED4ext — … Conséquences : TweakXL, ArchiveXL ») au lieu de messages indépendants.
+
+## [Unreleased]
+
+### Added
 
 ### Changed
 

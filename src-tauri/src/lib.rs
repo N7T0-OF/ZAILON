@@ -12534,10 +12534,12 @@ fn ensure_zailon_association() -> Result<(), String> {
 #[cfg(desktop)]
 #[tauri::command]
 fn create_desktop_shortcut(
+    app: AppHandle,
     game_id: String,
     profile_id: String,
     game_name: String,
     icon_path: Option<String>,
+    exec_path: Option<String>,
 ) -> Result<String, String> {
     safe_game_id(&game_id)?;
     safe_game_id(&profile_id)?;
@@ -12549,21 +12551,28 @@ fn create_desktop_shortcut(
     {
         ensure_zailon_association()?;
         let executable = std::env::current_exe().map_err(to_error)?;
-        let icon = icon_path
-            .map(PathBuf::from)
-            .filter(|path| path.is_file())
-            .unwrap_or(executable);
-        let mut shortcut = desktop.join(format!("ZAILON - {safe_name}.url"));
+        let icon =
+            resolve_shortcut_icon(&app, &game_id, icon_path.as_deref(), exec_path.as_deref())?;
+        let mut shortcut = desktop.join(format!("ZAILON - {safe_name}.lnk"));
         let mut suffix = 2;
         while shortcut.exists() {
-            shortcut = desktop.join(format!("ZAILON - {safe_name} ({suffix}).url"));
+            shortcut = desktop.join(format!("ZAILON - {safe_name} ({suffix}).lnk"));
             suffix += 1;
         }
-        let content = format!(
-            "[InternetShortcut]\r\nURL={uri}\r\nIconFile={}\r\nIconIndex=0\r\n",
-            icon.to_string_lossy()
-        );
-        fs::write(&shortcut, content).map_err(to_error)?;
+        let working_dir = executable
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| desktop.clone());
+        write_windows_shortcut_lnk(
+            &shortcut,
+            &executable,
+            &uri,
+            &working_dir,
+            &icon,
+            &format!(
+                "ZAILON - {safe_name} — lance le jeu via ZAILON (profil, mods, clavier, visuel)"
+            ),
+        )?;
         return Ok(shortcut.to_string_lossy().to_string());
     }
     #[cfg(target_os = "linux")]
@@ -12576,12 +12585,14 @@ fn create_desktop_shortcut(
             shortcut = desktop.join(format!("ZAILON - {safe_name} ({suffix}).desktop"));
             suffix += 1;
         }
-        let icon = icon_path
-            .filter(|value| Path::new(value).is_file())
-            .unwrap_or_default();
+        // Icône : chemin local absolu (PNG accepté par les environnements de
+        // bureau) ; sinon entrée vide → icône générique de l'application.
+        let icon =
+            resolve_shortcut_icon(&app, &game_id, icon_path.as_deref(), exec_path.as_deref())?;
         let content = format!(
-            "[Desktop Entry]\nType=Application\nName=ZAILON - {safe_name}\nExec=\"{}\" \"{uri}\"\nIcon={icon}\nTerminal=false\nCategories=Game;\n",
-            executable.display()
+            "[Desktop Entry]\nType=Application\nName=ZAILON - {safe_name}\nExec=\"{}\" \"{uri}\"\nIcon={}\nTerminal=false\nCategories=Game;\n",
+            executable.display(),
+            icon.display()
         );
         fs::write(&shortcut, content).map_err(to_error)?;
         fs::set_permissions(&shortcut, fs::Permissions::from_mode(0o755)).map_err(to_error)?;
@@ -12602,6 +12613,231 @@ fn create_desktop_shortcut(
     }
     #[allow(unreachable_code)]
     Err("Desktop shortcuts are not supported on this platform.".into())
+}
+
+/// Résout l'icône d'un raccourci dans l'ordre (spec raccourci §20) :
+/// 1. icône personnalisée / Apparence (ico, exe, dll → direct ; png → enveloppée
+///    dans un conteneur .ico Vista+ pour Windows, utilisée telle quelle sur Linux) ;
+/// 2. icône native extraite par Windows de l'exécutable du jeu (exe) ;
+/// 3. icône générique ZAILON en dernier recours — jamais de raccourci sans
+///    Icône valide (critère bloquant §57).
+fn resolve_shortcut_icon(
+    app: &AppHandle,
+    game_id: &str,
+    icon_path: Option<&str>,
+    exec_path: Option<&str>,
+) -> Result<PathBuf, String> {
+    if let Some(candidate) = icon_path.map(PathBuf::from).filter(|path| path.is_file()) {
+        let extension = candidate
+            .extension()
+            .map(|value| value.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        match extension.as_str() {
+            "exe" | "ico" | "dll" => return Ok(candidate),
+            "png" => {
+                #[cfg(target_os = "windows")]
+                {
+                    // ICO conteneur PNG (Windows Vista+) : l'icône 256×256 est
+                    // lue directement — aucune conversion de décodage nécessaire.
+                    let directory = game_resource_directory(app, game_id)?;
+                    let ico = directory.join("shortcut.ico");
+                    write_png_ico_container(&candidate, &ico)?;
+                    return Ok(ico);
+                }
+                #[cfg(not(target_os = "windows"))]
+                return Ok(candidate);
+            }
+            // JPG/WebP/AVIF/GIF/SVG : pas de conversion sans décodeur → on
+            // tente l'exécutable du jeu, puis ZAILON.
+            _ => {}
+        }
+    }
+    if let Some(candidate) = exec_path.map(PathBuf::from).filter(|path| path.is_file()) {
+        #[cfg(target_os = "windows")]
+        {
+            // Windows extrait nativement l'icône de l'exécutable (IconLocation).
+            return Ok(candidate);
+        }
+        #[cfg(not(target_os = "windows"))]
+        return Ok(candidate);
+    }
+    std::env::current_exe().map_err(to_error)
+}
+
+/// Enveloppe un PNG dans un conteneur .ico (une image 256×256, format PNG
+/// accepté par Windows Vista+) : pas de décodeur, pas de redimensionnement.
+fn write_png_ico_container(png: &Path, ico: &Path) -> Result<(), String> {
+    let bytes = fs::read(png).map_err(to_error)?;
+    if bytes.is_empty() || bytes.len() > 0x7fff_ffff {
+        return Err("The shortcut icon PNG is invalid or too large.".into());
+    }
+    let mut output = Vec::with_capacity(22 + bytes.len());
+    output.extend_from_slice(&0u16.to_le_bytes()); // réservé
+    output.extend_from_slice(&1u16.to_le_bytes()); // type : icône
+    output.extend_from_slice(&1u16.to_le_bytes()); // nombre d'images
+    output.extend_from_slice(&[0, 0]); // largeur 256 (0 = 256)
+    output.extend_from_slice(&[0, 0]); // hauteur 256
+    output.extend_from_slice(&[0]); // palette : aucune
+    output.extend_from_slice(&[0]); // réservé
+    output.extend_from_slice(&1u16.to_le_bytes()); // plans
+    output.extend_from_slice(&32u16.to_le_bytes()); // bits/pixel
+    output.extend_from_slice(&(bytes.len() as u32).to_le_bytes()); // taille PNG
+    output.extend_from_slice(&22u32.to_le_bytes()); // offset de l'image
+    output.extend_from_slice(&bytes);
+    fs::write(ico, output).map_err(to_error)
+}
+
+/// Écrit un raccourci Windows `.lnk` au format binaire MS-OSH (sans COM, sans
+/// dépendance) : en-tête ShellLink + LinkInfo (VolumeID + chemin local) +
+/// StringData Unicode (nom, répertoire, arguments, emplacement d'icône).
+/// `target` = ZAILON, `arguments` = URI zailon:// — le lancement conserve
+/// profil, mods, session, clavier et visuel.
+#[cfg(target_os = "windows")]
+fn write_windows_shortcut_lnk(
+    path: &Path,
+    target: &Path,
+    arguments: &str,
+    working_dir: &Path,
+    icon_location: &Path,
+    description: &str,
+) -> Result<(), String> {
+    // LinkInfo : VolumeID (disque fixe) + LocalBasePath (ANSI).
+    let target_ansi: Vec<u8> = target
+        .to_string_lossy()
+        .chars()
+        .map(|character| character as u8)
+        .collect();
+    let volume_id_size: u32 = 16 + 1; // en-tête VolumeID + étiquette vide (1 octet nul)
+    let local_base_offset: u32 = 28 + volume_id_size; // 28 = en-tête LinkInfo
+    let common_suffix_offset: u32 = local_base_offset + target_ansi.len() as u32 + 1;
+    let link_info_size: u32 = common_suffix_offset; // suffixe commun vide
+
+    let mut header = Vec::with_capacity(76);
+    header.extend_from_slice(&0x4Cu32.to_le_bytes()); // HeaderSize
+    header.extend_from_slice(&[
+        0x01, 0x14, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ]); // LinkCLSID {00021401-…}
+    let flags: u32 = 0x2 | 0x4 | 0x10 | 0x20 | 0x40 | 0x80; // LinkInfo|Name|WorkingDir|Arguments|IconLocation|Unicode
+    header.extend_from_slice(&flags.to_le_bytes());
+    header.extend_from_slice(&0x20u32.to_le_bytes()); // FILE_ATTRIBUTE_ARCHIVE
+    header.extend_from_slice(&0u64.to_le_bytes()); // CreationTime
+    header.extend_from_slice(&0u64.to_le_bytes()); // AccessTime
+    header.extend_from_slice(&0u64.to_le_bytes()); // WriteTime
+    header.extend_from_slice(&0u32.to_le_bytes()); // FileSize
+    header.extend_from_slice(&0u32.to_le_bytes()); // IconIndex (0 → icône par défaut)
+    header.extend_from_slice(&1u32.to_le_bytes()); // ShowCommand : SW_SHOWNORMAL
+    header.extend_from_slice(&0u16.to_le_bytes()); // HotKey
+    header.extend_from_slice(&0u16.to_le_bytes()); // Reserved1
+    header.extend_from_slice(&0u32.to_le_bytes()); // Reserved2
+    header.extend_from_slice(&0u32.to_le_bytes()); // Reserved3
+    debug_assert_eq!(header.len(), 76);
+
+    let mut link_info = Vec::new();
+    link_info.extend_from_slice(&link_info_size.to_le_bytes());
+    link_info.extend_from_slice(&0x1Cu32.to_le_bytes()); // LinkInfoHeaderSize
+    link_info.extend_from_slice(&0u32.to_le_bytes()); // Flags : VolumeIDAndLocalBasePath
+    link_info.extend_from_slice(&28u32.to_le_bytes()); // VolumeIDOffset
+    link_info.extend_from_slice(&local_base_offset.to_le_bytes());
+    link_info.extend_from_slice(&0u32.to_le_bytes()); // CommonNetworkRelativeLinkOffset
+    link_info.extend_from_slice(&common_suffix_offset.to_le_bytes());
+    link_info.extend_from_slice(&volume_id_size.to_le_bytes());
+    link_info.extend_from_slice(&3u32.to_le_bytes()); // DriveType : DRIVE_FIXED
+    link_info.extend_from_slice(&0u32.to_le_bytes()); // DriveSerialNumber
+    link_info.extend_from_slice(&16u32.to_le_bytes()); // VolumeLabelOffset
+    link_info.push(0); // étiquette de volume vide
+    link_info.extend_from_slice(&target_ansi); // LocalBasePath
+    link_info.push(0);
+    debug_assert_eq!(link_info.len(), link_info_size as usize);
+
+    let mut data = Vec::new();
+    let mut push_string = |value: &str, output: &mut Vec<u8>| {
+        let utf16: Vec<u16> = value.encode_utf16().collect();
+        output.extend_from_slice(&((utf16.len() + 1) as u16).to_le_bytes());
+        for unit in utf16 {
+            output.extend_from_slice(&unit.to_le_bytes());
+        }
+        output.extend_from_slice(&0u16.to_le_bytes());
+    };
+    push_string(description, &mut data);
+    push_string(&working_dir.to_string_lossy(), &mut data);
+    push_string(arguments, &mut data);
+    push_string(&icon_location.to_string_lossy(), &mut data);
+
+    let mut bytes = Vec::with_capacity(header.len() + link_info.len() + data.len());
+    bytes.extend_from_slice(&header);
+    bytes.extend_from_slice(&link_info);
+    bytes.extend_from_slice(&data);
+    fs::write(path, bytes).map_err(to_error)
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod shortcut_lnk_tests {
+    use super::*;
+
+    #[test]
+    fn windows_shortcut_lnk_structure_is_valid() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-lnk-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).expect("lnk directory");
+        let target = root.join("ZAILON.exe");
+        let icon = root.join("game.ico");
+        fs::write(&target, b"pe").expect("target fixture");
+        fs::write(&icon, b"ico").expect("icon fixture");
+        let lnk = root.join("shortcut.lnk");
+        write_windows_shortcut_lnk(
+            &lnk,
+            &target,
+            "zailon://launch/game/g-1?profile=p-1",
+            &root,
+            &icon,
+            "ZAILON - Test",
+        )
+        .expect("write lnk");
+        let bytes = fs::read(&lnk).expect("read lnk");
+
+        // En-tête ShellLink : 76 octets, CLSID standard.
+        assert!(bytes.len() > 76);
+        assert_eq!(
+            &bytes[4..20],
+            &[
+                0x01, 0x14, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x46
+            ]
+        );
+        let flags = u32::from_le_bytes(bytes[20..24].try_into().unwrap());
+        assert_ne!(flags & 0x80, 0, "IsUnicode");
+        assert_ne!(flags & 0x20, 0, "HasArguments");
+        assert_ne!(flags & 0x40, 0, "HasIconLocation");
+        assert_ne!(flags & 0x2, 0, "HasLinkInfo");
+
+        // LinkInfo démarre à 76 ; LocalBasePath pointe vers ZAILON.exe.
+        let link_info_size = u32::from_le_bytes(bytes[76..80].try_into().unwrap()) as usize;
+        assert!(link_info_size > 28);
+        let base_offset = u32::from_le_bytes(bytes[92..96].try_into().unwrap()) as usize;
+        let base_start = 76 + base_offset;
+        let base_end = base_start
+            + bytes[base_start..]
+                .iter()
+                .position(|&byte| byte == 0)
+                .unwrap();
+        assert!(String::from_utf8_lossy(&bytes[base_start..base_end]).ends_with("ZAILON.exe"));
+
+        // StringData (UTF-16, première chaîne = nom) présent juste après LinkInfo.
+        let data_start = 76 + link_info_size;
+        assert!(bytes.len() > data_start + 4);
+        let first_string_count =
+            u16::from_le_bytes(bytes[data_start..data_start + 2].try_into().unwrap());
+        assert!(
+            first_string_count > 8,
+            "le nom du raccourci est encodé en UTF-16"
+        );
+
+        fs::remove_dir_all(&root).expect("cleanup lnk test");
+    }
 }
 
 fn parse_nxm_url(raw: &str) -> Result<NxmRequest, String> {

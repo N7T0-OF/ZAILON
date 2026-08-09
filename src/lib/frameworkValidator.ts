@@ -49,6 +49,66 @@ function suppliedUnder(mods: FrameworkCheckInput[], prefix: string): boolean {
   return mods.some(mod => mod.enabled && (mod.files || []).some(file => normalizeFile(file).startsWith(normalized)))
 }
 
+/**
+ * Capacités frameworks Cyberpunk (spec §28-31) : une capacité est fournie par
+ * un paquet actif via un dossier canonique OU une signature de fichier — le
+ * nom du dossier n'est jamais une partie du chemin de jeu et ne fait pas foi
+ * (un dossier « core_01 » contenant `red4ext/plugins/TweakXL/…` fournit
+ * `cyberpunk.tweakxl` grâce au dossier ; un `tweakxl.dll` mal placé la fournit
+ * grâce à la signature de fichier).
+ */
+export type CyberpunkFrameworkCapability =
+  | 'cyberpunk.red4ext'
+  | 'cyberpunk.redscript'
+  | 'cyberpunk.tweakxl'
+  | 'cyberpunk.archivexl'
+  | 'cyberpunk.codeware'
+  | 'cyberpunk.cet'
+
+interface FrameworkSignature {
+  /** Tout fichier sous ce préfixe de dossier fournit la capacité. */
+  folderPrefix?: string
+  /** Un fichier portant ce nom (n'importe où) fournit la capacité. */
+  fileSignatures?: string[]
+  /** Tous ces fichiers exacts doivent être présents (cores compilés). */
+  exactFiles?: string[]
+}
+
+export const CYBERPUNK_FRAMEWORK_SIGNATURES: Record<CyberpunkFrameworkCapability, FrameworkSignature> = {
+  'cyberpunk.red4ext': { exactFiles: ['red4ext/red4ext.dll'] },
+  'cyberpunk.redscript': { exactFiles: ['engine/tools/scc.exe'] },
+  'cyberpunk.tweakxl': { folderPrefix: 'red4ext/plugins/TweakXL/', fileSignatures: ['tweakxl.dll', 'tweak_xl.dll'] },
+  'cyberpunk.archivexl': { folderPrefix: 'red4ext/plugins/ArchiveXL/', fileSignatures: ['archivexl.dll'] },
+  'cyberpunk.codeware': { folderPrefix: 'red4ext/plugins/Codeware/', fileSignatures: ['codeware.dll'] },
+  'cyberpunk.cet': { exactFiles: ['bin/x64/plugins/cyber_engine_tweaks.asi'] },
+}
+
+/** Capacités fournies par un paquet actif (spec §28, §31). */
+export function detectFrameworkCapabilities(mod: FrameworkCheckInput): CyberpunkFrameworkCapability[] {
+  if (!mod.enabled) return []
+  const files = (mod.files ?? []).map(normalizeFile)
+  const found: CyberpunkFrameworkCapability[] = []
+  for (const [capability, signature] of Object.entries(CYBERPUNK_FRAMEWORK_SIGNATURES)) {
+    const byFolder = signature.folderPrefix
+      ? files.some(file => file.startsWith(normalizeFile(signature.folderPrefix!)))
+      : false
+    const bySignature = signature.fileSignatures?.some(name => {
+      const normalized = normalizeFile(name)
+      return files.some(file => file === normalized || file.endsWith('/' + normalized))
+    }) ?? false
+    const byExact = signature.exactFiles?.every(exact => files.includes(normalizeFile(exact))) ?? false
+    if (byFolder || bySignature || byExact) found.push(capability as CyberpunkFrameworkCapability)
+  }
+  return found
+}
+
+/** Union des capacités fournies par les mods actifs (graphe global, spec §29-30). */
+export function providedFrameworkCapabilities(mods: FrameworkCheckInput[]): Set<CyberpunkFrameworkCapability> {
+  const provided = new Set<CyberpunkFrameworkCapability>()
+  mods.forEach(mod => detectFrameworkCapabilities(mod).forEach(capability => provided.add(capability)))
+  return provided
+}
+
 export function validateCyberpunkFrameworkDeps(
   mods: FrameworkCheckInput[],
   onDisk?: (relative: string) => boolean,
@@ -61,25 +121,30 @@ export function validateCyberpunkFrameworkDeps(
   const hasTweaks = suppliedUnder(enabled, 'r6/tweaks/')
   const hasXl = enabled.some(mod => (mod.files || []).some(file => normalizeFile(file).endsWith('.xl')))
 
-  const coreAvailable = (relative: string) =>
-    suppliedBy(enabled, relative) || Boolean(onDisk?.(relative))
+  // Graphe de dépendances : les besoins sont satisfaits par des CAPACITÉS
+  // (dossier canonique OU signature de fichier), jamais par un chemin exact de
+  // dossier — « TweakXL est requis » alors que TweakXL est stagé sous
+  // red4ext/plugins/TweakXL/… ne doit plus se produire.
+  const provided = providedFrameworkCapabilities(enabled)
+  const coreAvailable = (capability: CyberpunkFrameworkCapability, onDiskFile: string) =>
+    provided.has(capability) || Boolean(onDisk?.(onDiskFile))
 
-  if (hasPlugin && !coreAvailable('red4ext/red4ext.dll')) {
+  if (hasPlugin && !coreAvailable('cyberpunk.red4ext', 'red4ext/red4ext.dll')) {
     blockers.push(
       'RED4ext est requis par au moins un plugin sous red4ext/plugins/ mais son loader (red4ext/red4ext.dll) n’est pas dans le déploiement. Activez le mod du framework RED4ext ou désactivez les plugins concernés.',
     )
   }
-  if (hasScripts && !coreAvailable('engine/tools/scc.exe')) {
+  if (hasScripts && !coreAvailable('cyberpunk.redscript', 'engine/tools/scc.exe')) {
     blockers.push(
       'redscript est requis par un ou plusieurs fichiers sous r6/scripts/ mais son compilateur (engine/tools/scc.exe) n’est pas dans le déploiement.',
     )
   }
-  if (hasTweaks && !coreAvailable('red4ext/plugins/TweakXL')) {
+  if (hasTweaks && !coreAvailable('cyberpunk.tweakxl', 'red4ext/plugins/TweakXL')) {
     blockers.push(
       'TweakXL est requis par un ou plusieurs fichiers sous r6/tweaks/ mais n’est pas dans le déploiement.',
     )
   }
-  if (hasXl && !coreAvailable('red4ext/plugins/ArchiveXL')) {
+  if (hasXl && !coreAvailable('cyberpunk.archivexl', 'red4ext/plugins/ArchiveXL')) {
     blockers.push(
       'ArchiveXL est requis par au moins une ressource .xl mais n’est pas dans le déploiement.',
     )

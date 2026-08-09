@@ -684,7 +684,7 @@ function VirtualFilesPanel({ game, profile, mods }: { game: Game; profile: Profi
           {compareRows.providers.length === 0
             ? <p className="mt-2 text-[11px] text-white/30">Aucun fournisseur de framework détecté dans ce profil.</p>
             : <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{compareRows.providers.map(provider => (
-              <div key={provider.packageId} className="rounded-lg border border-white/[0.06] bg-black/15 p-2.5">
+              <div key={`${provider.packageId}:${provider.frameworkId}`} className="rounded-lg border border-white/[0.06] bg-black/15 p-2.5">
                 <div className="flex items-center justify-between gap-2"><p className="text-[11px] font-semibold text-white/72">{provider.frameworkId}</p><span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${provider.enabled && provider.runtimeVisible ? 'bg-emerald-300/10 text-emerald-200' : 'bg-amber-300/10 text-amber-100/80'}`}>{provider.enabled && provider.runtimeVisible ? 'Runtime ✓' : 'Prévu'}</span></div>
                 <p className="mt-0.5 truncate font-mono text-[10px] text-white/30">{provider.packageId}</p>
                 <p className="mt-1.5 text-[10px] text-white/38">Projeté vers : {provider.roots.length ? provider.roots.join(' › ') : '—'}</p>

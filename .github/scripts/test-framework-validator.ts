@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { evaluateRed4extRepair, isRed4extActive, validateCyberpunkFrameworkDeps } from '../../src/lib/frameworkValidator.ts'
+import { detectFrameworkCapabilities, evaluateRed4extRepair, isRed4extActive, validateCyberpunkFrameworkDeps } from '../../src/lib/frameworkValidator.ts'
 import { mergeModCatalogs, reconcileModStates } from '../../src/lib/profileState.ts'
 
 const mod = (name: string, files: string[], enabled = true) => ({ name, enabled, files })
@@ -52,6 +52,60 @@ test('mods désactivés ne comptent pas comme fournisseurs', () => {
     mod('plugin', ['red4ext/plugins/foo/main.js']),
   ])
   assert.equal(result.valid, false)
+})
+
+// --- Graphe de capabilities (spec §28-31) : dossier canonique OU signature ---
+
+test('TweakXL correctement stagé (dossier canonique) + r6/tweaks → valide', () => {
+  // Régression du faux « TweakXL requis » : la vérification par chemin exact de
+  // dossier échouait toujours, même avec TweakXL stagé sous
+  // red4ext/plugins/TweakXL/…
+  const result = validateCyberpunkFrameworkDeps([
+    mod('RED4ext', ['red4ext/red4ext.dll', 'bin/x64/winmm.dll']),
+    mod('TweakXL', ['red4ext/plugins/TweakXL/init.lua', 'red4ext/plugins/TweakXL/TweakXL.dll']),
+    mod('mod tweak', ['r6/tweaks/foo.yaml']),
+  ])
+  assert.equal(result.valid, true)
+  assert.deepEqual(result.blockers, [])
+})
+
+test('ArchiveXL via signature de fichier (dossier mal nommé) + .xl → valide', () => {
+  const result = validateCyberpunkFrameworkDeps([
+    mod('RED4ext', ['red4ext/red4ext.dll', 'bin/x64/winmm.dll']),
+    mod('ArchiveXL (layout ancien)', ['red4ext/plugins/archivexl.dll']),
+    mod('mod archive', ['archive/pc/mod/foo.archive.xl']),
+  ])
+  assert.equal(result.valid, true)
+  assert.deepEqual(result.blockers, [])
+})
+
+test('TweakXL absent → blocage maintenu (r6/tweaks sans fournisseur)', () => {
+  const result = validateCyberpunkFrameworkDeps([
+    mod('RED4ext', ['red4ext/red4ext.dll', 'bin/x64/winmm.dll']),
+    mod('mod tweak', ['r6/tweaks/foo.yaml']),
+  ])
+  assert.equal(result.valid, false)
+  assert.ok(result.blockers.some(blocker => blocker.includes('TweakXL')))
+})
+
+test('fournisseur désactivé ne satisfait pas la dépendance', () => {
+  const result = validateCyberpunkFrameworkDeps([
+    mod('RED4ext', ['red4ext/red4ext.dll', 'bin/x64/winmm.dll']),
+    mod('TweakXL (désactivé)', ['red4ext/plugins/TweakXL/init.lua'], false),
+    mod('mod tweak', ['r6/tweaks/foo.yaml']),
+  ])
+  assert.equal(result.valid, false)
+})
+
+test('detectFrameworkCapabilities : dossier canonique, signature et cores', () => {
+  assert.deepEqual(detectFrameworkCapabilities(mod('T', ['red4ext/plugins/TweakXL/init.lua'])), ['cyberpunk.tweakxl'])
+  assert.deepEqual(detectFrameworkCapabilities(mod('A', ['red4ext/plugins/core_01/archivexl.dll'])), ['cyberpunk.archivexl'])
+  assert.deepEqual(detectFrameworkCapabilities(mod('C', ['red4ext/plugins/Codeware/Codeware.dll'])), ['cyberpunk.codeware'])
+  assert.deepEqual(detectFrameworkCapabilities(mod('R', ['red4ext/red4ext.dll'])), ['cyberpunk.red4ext'])
+  assert.deepEqual(detectFrameworkCapabilities(mod('S', ['engine/tools/scc.exe'])), ['cyberpunk.redscript'])
+  assert.deepEqual(detectFrameworkCapabilities(mod('CET', ['bin/x64/plugins/cyber_engine_tweaks.asi'])), ['cyberpunk.cet'])
+  assert.deepEqual(detectFrameworkCapabilities(mod('M', ['archive/pc/mod/foo.archive'])), [])
+  assert.deepEqual(detectFrameworkCapabilities(mod('désactivé', ['red4ext/plugins/TweakXL/init.lua'], false)), [])
 })
 
 // --- Réconciliation du compteur (resolveProfileMods) ---

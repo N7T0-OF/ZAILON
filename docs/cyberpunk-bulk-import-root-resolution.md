@@ -82,9 +82,32 @@ Validation : `tsc` ✅, build ✅, 78/78 tests, **Verify native ✅ + Verify
 ZAILON ✅** (la commande réutilise `stage_content`/`package_manifest_entries`
 déjà couverts par les tests natifs).
 
+## Capabilities frameworks + graphe de dépendances (spec §28-31) — livré
+
+**Frontend** (`src/lib/frameworkValidator.ts`) : chaque capacité
+(`cyberpunk.red4ext`, `cyberpunk.redscript`, `cyberpunk.tweakxl`,
+`cyberpunk.archivexl`, `cyberpunk.codeware`, `cyberpunk.cet`) est fournie par
+un paquet actif via **dossier canonique OU signature de fichier** — le nom du
+dossier ne fait jamais foi (spec §31) :
+
+- `red4ext/plugins/TweakXL/…` ou `tweakxl.dll`/`tweak_xl.dll` → `cyberpunk.tweakxl` ;
+- `red4ext/plugins/ArchiveXL/…` ou `archivexl.dll` → `cyberpunk.archivexl` ;
+- `red4ext/plugins/Codeware/…` ou `codeware.dll` → `cyberpunk.codeware` ;
+- cores exacts pour RED4ext / redscript / CET.
+
+Le validateur pré-lancement agrège les capacités sur **tous les mods actifs**
+(graphe global, spec §29-30) avant de résoudre les besoins
+(`r6/tweaks/` → TweakXL, `.xl` → ArchiveXL, plugins → RED4ext, `r6/scripts/` →
+redscript). **Correctif du faux « TweakXL requis »** : l'ancien contrôle
+comparait le chemin de dossier `red4ext/plugins/TweakXL` par égalité exacte de
+fichier — toujours faux même quand TweakXL était stagé correctement.
+
+**Rust** (`framework_providers_from_entries`) : TweakXL, ArchiveXL et Codeware
+sont désormais détectés (dossier canonique OU signature) et apparaissent dans
+l'audit, le manifeste et le « Comparer avec la racine attendue » — les 6
+frameworks y figurent.
+
 ## Limites / prochaines étapes
 
-- Graphe de dépendances global (spec §29-30) et capabilities frameworks
-  (`cyberpunk.tweakxl`…) dans le manifeste (spec §28).
 - Validators RED4ext/redscript hiérarchiques (spec §36-43) : cause primaire
-  affichée en premier.
+  affichée en premier (RED4ext avant TweakXL/ArchiveXL).

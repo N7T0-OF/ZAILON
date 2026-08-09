@@ -1224,7 +1224,7 @@
 - **Carte « Diagnostic hiérarchique · frameworks »** dans État & Diagnostic > Frameworks : les 6 frameworks dans l'ordre, cause primaire en bannière rouge, conséquences grisées, avertissements Last Known Good.
 - **Verrou pré-lancement hiérarchique** : le lancement bloqué affiche la cause primaire puis ses conséquences (« Framework principal non chargé : RED4ext — … Conséquences : TweakXL, ArchiveXL ») au lieu de messages indépendants.
 
-## [Unreleased]
+## 1.45.0 — Library Polish : fallback automatique + parallaxe subtil
 
 ### Added
 
@@ -1233,6 +1233,10 @@
 - **Parallaxe 3D subtil des couvertures** (spec §4-9, §48, §58-59) : la souris incline la carte (max 4°, scale 1.012 — pas un zoom), `perspective: 900px`, retour au repos 220 ms, `will-change` uniquement au survol, mouvement appliqué directement au style (zéro rerender React par déplacement — un hover ne re-rend jamais la grille).
 - **Réglages Apparence** (spec §11-12) : mode « Animations » (Automatique / Activées / Réduites, défaut Automatique — suit « Réduire les animations » du système) + ligne compacte « Effet 3D des couvertures » avec bulle d'aide.
 - **Parallaxe respectueux des contraintes** (spec §10, §13) : désactivé sur écrans tactiles, quand les animations sont réduites ou que le toggle est éteint ; aucun calcul hors survol.
+
+## [Unreleased]
+
+### Added
 
 ### Changed
 

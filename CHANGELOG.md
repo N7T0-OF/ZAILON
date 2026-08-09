@@ -942,7 +942,7 @@
 
 - Suppression de la colonne latérale « Bibliothèque » (liste des jeux) dans GamesView — remplacée par la vitrine plein écran.
 
-## [Unreleased]
+## [1.37.0] — 2026-08-09
 
 ### Added
 
@@ -956,6 +956,24 @@
 ### Fixed
 
 - **Popover de profil plus jamais coupé** par le hero (`overflow-hidden`) de la page du jeu : le menu s'affiche au-dessus de toute l'interface et reste entièrement visible même avec un long changelog ou une petite fenêtre.
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Fixed
 
 ### Performance
 

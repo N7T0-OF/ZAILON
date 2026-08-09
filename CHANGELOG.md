@@ -1154,7 +1154,7 @@
 
 ### Known Issues
 
-## [Unreleased]
+## [1.40.0] — 2026-08-09
 
 ### Added
 
@@ -1164,6 +1164,24 @@
 ### Changed
 
 - **`quick-panel-state` enrichi** : la fenêtre principale transmet `connected`, `inputActive`, `visualActive`, `runtimeActive` en plus du résumé adaptatif (jeu, profil, mods, layout, bypass, RED4ext).
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+## [Unreleased]
+
+### Added
+
+### Changed
 
 ### Fixed
 

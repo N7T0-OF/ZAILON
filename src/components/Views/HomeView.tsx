@@ -175,7 +175,14 @@ export function HomeView() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="font-mono text-[11px] uppercase tracking-widest text-emerald-200/90">Session en cours</p>
-                  <p className="mt-1 text-[11px] text-white/52">Profil <span className="font-semibold text-white/75">{selectedProfile.name}</span> · <span className="text-emerald-200/85">{formatSeconds(sessionTime)}</span>{effectiveInputProfile(selectedGame, selectedProfile.id) ? <span> · <span className="text-emerald-200/70">{LAYOUT_LABELS[effectiveLayout(selectedGame, selectedProfile.id)]}</span></span> : null}</p>
+                  <p className="mt-1 text-[11px] text-white/52">Profil <span className="font-semibold text-white/75">{selectedProfile.name}</span> · <span className="text-emerald-200/85">{formatSeconds(sessionTime)}</span></p>
+                  {/* Spec RuntimeSessionV3 §48 : les badges reflètent l'état RÉEL
+                      d'activation de la session, pas seulement la configuration. */}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold ${activeSession.inputProfileActive ? 'bg-emerald-300/10 text-emerald-200/85' : 'bg-amber-300/10 text-amber-100/80'}`}>{activeSession.inputProfileActive ? '✓' : '⚠'} {effectiveInputProfile(selectedGame, selectedProfile.id) ? LAYOUT_LABELS[effectiveLayout(selectedGame, selectedProfile.id)] : 'Clavier'}</span>
+                    <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold ${activeSession.visualProfileActive ? 'bg-emerald-300/10 text-emerald-200/85' : 'bg-amber-300/10 text-amber-100/80'}`}>{activeSession.visualProfileActive ? '✓' : '⚠'} Visuel</span>
+                    <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold ${activeSession.runtimeToolsActive ? 'bg-emerald-300/10 text-emerald-200/85' : 'bg-amber-300/10 text-amber-100/80'}`}>{activeSession.runtimeToolsActive ? '✓' : '⚠'} ZAILON</span>
+                  </div>
                 </div>
                 <span className="flex items-center gap-1.5 rounded-full border border-emerald-300/25 bg-emerald-300/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-100/85"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-300" />En jeu</span>
                 <button type="button" onClick={() => { setQuitConfirm(false); setQuitOpen(true) }} title="Quitter le jeu" aria-label="Quitter le jeu" className="rounded-lg p-1.5 text-white/30 hover:bg-red-400/10 hover:text-red-300"><X size={13} /></button>

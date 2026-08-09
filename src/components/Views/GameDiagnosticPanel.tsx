@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, CheckCircle2, ClipboardList, FileClock, FolderCheck, Gauge, Keyboard, Layers3, Loader2, RefreshCw, Rocket, Search, ShieldAlert, Wrench } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, ClipboardList, FileClock, FolderCheck, Gauge, Keyboard, Layers3, Loader2, RefreshCw, Rocket, Scale, Search, ShieldAlert, Wrench } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { inputDiagnosticRows } from '../../lib/inputBackends'
 import { effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
@@ -575,14 +575,77 @@ function VirtualFilesPanel({ game, profile, mods }: { game: Game; profile: Profi
   })
   const rendered = filtered.slice(0, 500)
 
+  // Spec RuntimeSessionV3 §45 : « Comparer avec la racine attendue ». Pour chaque
+  // fournisseur de framework (RED4ext, redscript, TweakXL, ArchiveXL…), le
+  // nombre de fichiers PHYSIQUEMENT présents (provider.files) est comparé au
+  // nombre de fichiers réellement PROJETÉS dans la racine du jeu (virtualFiles)
+  // — un framework existant mais mal exposé apparaît ici, pas comme « absent ».
+  const [compareOpen, setCompareOpen] = useState(false)
+  const compareRows = useMemo(() => {
+    if (!audit) return { providers: [] as Array<{ frameworkId: string; packageId: string; enabled: boolean; runtimeVisible: boolean; expected: number; projected: number; missing: number; roots: string[] }>, roots: [] as Array<{ root: string; files: number; packages: number }> }
+    const providers = (audit.providers || [])
+      .map(provider => {
+        const projectedFiles = audit.virtualFiles.filter(file => file.packageId === provider.packageId)
+        const roots = [...new Set(projectedFiles
+          .map(file => file.gameRelativePath.replace(/\\/g, '/').replace(/^\/+/, '').split('/')[0])
+          .filter(Boolean))].sort()
+        return {
+          frameworkId: provider.frameworkId,
+          packageId: provider.packageId,
+          enabled: provider.enabled,
+          runtimeVisible: provider.runtimeVisible,
+          expected: provider.files.length,
+          projected: projectedFiles.length,
+          missing: Math.max(0, provider.files.length - projectedFiles.length),
+          roots,
+        }
+      })
+      .sort((left, right) => left.frameworkId.localeCompare(right.frameworkId))
+    const rootsMap = new Map<string, { files: number; packages: Set<string> }>()
+    for (const file of audit.virtualFiles) {
+      const root = file.gameRelativePath.replace(/\\/g, '/').replace(/^\/+/, '').split('/')[0] || '?'
+      const entry = rootsMap.get(root) ?? { files: 0, packages: new Set<string>() }
+      entry.files += 1
+      entry.packages.add(file.packageId)
+      rootsMap.set(root, entry)
+    }
+    const roots = [...rootsMap.entries()]
+      .map(([root, entry]) => ({ root, files: entry.files, packages: entry.packages.size }))
+      .sort((left, right) => left.root.localeCompare(right.root))
+    return { providers, roots }
+  }, [audit])
+
   return <div className="flex min-h-0 flex-1 flex-col">
     <header className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] p-3">
       <div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-white/78">Ce que le jeu voit réellement</h2><p className="mt-1 text-[11px] text-white/38">Carte finale calculée depuis les paquets immuables, l’ordre et les règles du profil « {profile.name} ».</p></div>
       <label className="flex items-center gap-2 rounded-lg border border-white/[0.08] bg-black/15 px-2.5"><Search size={12} className="text-white/30" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Chemin, mod ou paquet" className="w-52 bg-transparent py-2 text-xs text-white/68 outline-none" /></label>
       <button onClick={() => void load()} disabled={loading} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-white/55 disabled:opacity-35"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} />Actualiser</button>
+      <button onClick={() => setCompareOpen(open => !open)} disabled={!audit} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-xs text-white/55 hover:border-gold/25 hover:text-gold disabled:opacity-35"><Scale size={13} />{compareOpen ? 'Masquer la comparaison' : 'Comparer avec la racine attendue'}</button>
     </header>
     {loading && !audit ? <div className="flex flex-1 items-center justify-center text-xs text-white/38">Construction de la carte virtuelle…</div> : error ? <div className="m-4 rounded-xl border border-red-300/15 bg-red-300/[0.04] p-4 text-xs text-red-100/70">{error}</div> : audit && <div className="min-h-0 flex-1 overflow-y-auto p-4">
       <div className="mb-3 grid gap-2 sm:grid-cols-4"><Metric label="Paquets actifs" value={String(audit.referencedPackages)} /><Metric label="Fichiers gagnants" value={String(audit.virtualFileCount)} /><Metric label="Conflits résolus" value={String(audit.conflicts)} /><Metric label="Références cassées" value={String(audit.brokenReferences)} /></div>
+      {compareOpen && <div className="mb-3 space-y-3">
+        <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+          <p className="text-[11px] font-semibold text-white/68">Frameworks — attendu vs projeté</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-white/34">Un framework physiquement présent mais mal exposé (racine virtuelle incorrecte) apparaît ici en « manquant », jamais comme « absent ».</p>
+          {compareRows.providers.length === 0
+            ? <p className="mt-2 text-[11px] text-white/30">Aucun fournisseur de framework détecté dans ce profil.</p>
+            : <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{compareRows.providers.map(provider => (
+              <div key={provider.packageId} className="rounded-lg border border-white/[0.06] bg-black/15 p-2.5">
+                <div className="flex items-center justify-between gap-2"><p className="text-[11px] font-semibold text-white/72">{provider.frameworkId}</p><span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${provider.enabled && provider.runtimeVisible ? 'bg-emerald-300/10 text-emerald-200' : 'bg-amber-300/10 text-amber-100/80'}`}>{provider.enabled && provider.runtimeVisible ? 'Runtime ✓' : 'Prévu'}</span></div>
+                <p className="mt-0.5 truncate font-mono text-[10px] text-white/30">{provider.packageId}</p>
+                <p className="mt-1.5 text-[10px] text-white/38">Projeté vers : {provider.roots.length ? provider.roots.join(' › ') : '—'}</p>
+                <p className={`mt-1 text-[11px] font-semibold ${provider.missing === 0 ? 'text-emerald-200/85' : 'text-amber-100/85'}`}>{provider.projected} / {provider.expected} fichiers visibles{provider.missing > 0 ? ` · ${provider.missing} non exposés` : ''}</p>
+              </div>
+            ))}</div>}
+        </div>
+        <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+          <p className="text-[11px] font-semibold text-white/68">Racines projetées du jeu</p>
+          {compareRows.roots.length === 0
+            ? <p className="mt-2 text-[11px] text-white/30">Aucun fichier projeté.</p>
+            : <div className="mt-2 flex flex-wrap gap-2">{compareRows.roots.map(root => <span key={root.root} className="flex items-center gap-1.5 rounded-full border border-white/[0.07] bg-black/15 px-2.5 py-1 text-[11px]"><span className="font-mono text-white/62">{root.root}/</span><span className="text-white/34">{root.files} fichier(s) · {root.packages} paquet(s)</span></span>)}</div>}
+        </div>
+      </div>}
       <div className={`mb-3 rounded-xl border p-3 text-xs ${audit.deployable ? 'border-emerald-300/15 bg-emerald-300/[0.04] text-emerald-100/68' : 'border-amber-300/18 bg-amber-300/[0.04] text-amber-100/70'}`}>{audit.deployable ? 'Le profil est cohérent et peut être préparé. La colonne « runtime » devient confirmée seulement pendant un lancement réel.' : 'Le profil contient une anomalie bloquante. Consultez les preuves ci-dessous avant de jouer.'}</div>
       {audit.packages.some(item => !item.deployable) && <div className="mb-3 space-y-1">{audit.packages.filter(item => !item.deployable).map(item => <div key={item.packageId} className="rounded-lg border border-red-300/12 bg-red-300/[0.035] px-3 py-2 text-[11px] text-red-100/65"><strong>{byPackageId.get(item.packageId)?.name || item.packageId}</strong> — {item.errors.join(' · ') || 'Paquet non déployable.'}</div>)}</div>}
       <div className="overflow-x-auto rounded-xl border border-white/[0.07]"><table className="w-full min-w-[900px] text-left text-xs"><thead className="sticky top-0 bg-[#121515] text-white/42"><tr><th className="px-3 py-2">Chemin exposé</th><th className="px-3 py-2">Mod gagnant</th><th className="px-3 py-2">Remplace</th><th className="px-3 py-2">Décision</th><th className="px-3 py-2">État</th></tr></thead><tbody>{rendered.map(file => {

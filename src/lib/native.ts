@@ -674,6 +674,10 @@ export interface GamePresence {
   processPath: string
   score: number
   matchedExecutable?: string
+  /** Vrai si le processus est un launcher intermédiaire connu (jamais le jeu
+   * final). Utilisé pour la fin de session : un launcher encore ouvert ne doit
+   * pas maintenir « En cours » (spec RuntimeSessionV3 §2). */
+  isLauncherProcess?: boolean
 }
 
 export interface SteamRunningState {

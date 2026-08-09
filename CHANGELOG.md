@@ -998,9 +998,20 @@
 
 ### Added
 
+- **Fin de session réelle (Runtime Session V3)** : `sessionPresenceReport` + période **PossibleExit** (5 s) — quand le processus final et la fenêtre du jeu disparaissent sans relaunch, la session se termine (déploiement restauré, timer arrêté, remapping rétabli). Un launcher encore ouvert ne maintient jamais « En cours » (drapeau natif `isLauncherProcess`).
+- **Badges runtime vérifiés** sur l’Accueil pendant une session : QWERTY / Visuel / ZAILON en **✓ / ⚠** selon l’état réel d’activation de la session (spec §48), plus la configuration.
+- **Toast « Session terminée »** avec durée (spec §52) et ligne de détail sur les toasts de session (spec §51).
+- **Paramètres > Panneau rapide en jeu > « Tester le panneau »** : ouvre la vraie fenêtre native même sans jeu (spec Quick Panel §21).
+- **État & Diagnostic > Fichiers > « Comparer avec la racine attendue »** (spec §45) : pour chaque framework (RED4ext, redscript, TweakXL, ArchiveXL…), fichiers physiques vs fichiers projetés + racines exposées — un framework mal exposé n’est plus présenté comme « absent ».
+
 ### Changed
 
+- **Détection de fin de session** : le watcher scanne aussi la présence du **processus final** des sessions en cours (pas seulement fenêtres) ; la cadence repasse à 3 s pendant une PossibleExit pour terminer vite. Steam compte comme preuve, mais la session ne reste jamais zombie sans processus ni fenêtre.
+- **Ré-attachement** : les preuves d’une session déjà « En cours » alimentent la fin de session, plus jamais un ré-attachement (fini le toast/timeline répétés à chaque scan).
+
 ### Fixed
+
+- **Session bloquée « En cours » après fermeture du jeu** (NTE et autres launchers) : la disparition du processus final n’était jamais détectée (seul le PID lancé par ZAILON — le launcher — était surveillé). Désormais le jeu fermé met fin à la session sous ~6-11 s.
 
 ### Performance
 

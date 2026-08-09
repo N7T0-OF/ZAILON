@@ -49,6 +49,9 @@ export default function App() {
   // source, mais il déclenche la recherche du processus final au lieu de
   // terminer la session.
   const steamAppIdsRef = useRef<number[]>([])
+  // Pendant une PossibleExit (jeu disparu, vérification de fermeture), le scan
+  // repasse à 3 s pour terminer la session vite (spec RuntimeSessionV3 §3).
+  const exitCheckRef = useRef(false)
   useEffect(() => {
     let scanning = false
     let lastScan = 0
@@ -73,6 +76,10 @@ export default function App() {
       const attach = (results: Array<{ gameId: string; score: number; processName?: string; evidence: string[] }>) => {
         const storeNow = useStore.getState()
         for (const result of results) {
+          // Sessions déjà En cours : leur preuve alimente la fin de session
+          // (sessionPresenceReport), jamais un ré-attachement — sinon le toast
+          // et la timeline seraient répétés à chaque scan.
+          if (storeNow.gameSessions.some(session => session.gameId === result.gameId && session.state === 'GameRunning')) continue
           // Spec UAC §5-6, §10 : quand Steam confirme que l'AppID tourne, le
           // seuil baisse (60) — un processus élevé qui refuse son chemin reste
           // rattachable via nom + contexte + Steam (65 ≥ 60). Sinon : 80.
@@ -140,7 +147,7 @@ export default function App() {
           .catch(() => undefined)
       }
       state.sessionWatchdog(steamAppIdsRef.current)
-      if (scanning || now - lastScan < (gameModeActive ? 6000 : 3000)) return
+      if (scanning || now - lastScan < (gameModeActive && !exitCheckRef.current ? 6000 : 3000)) return
       const waiters = state.gameSessions.filter(session => session.state === 'WaitingForGame' || session.state === 'GameLost' || session.state === 'WaitingForElevation')
       const activeIds = state.gameSessions.filter(session => session.state !== 'Ended' && session.state !== 'Failed').map(session => session.gameId)
       const external = installed.filter(game => shouldScanExternalGame(game, steamAppIdsRef.current, state.autoAttachGames ?? [], activeIds))
@@ -158,10 +165,19 @@ export default function App() {
         const game = state.games.find(item => item.id === session.gameId)
         return game ? [{ game, reattachContext: false }] : []
       })
-      if (!attachTargets.length && !foregroundTargets.length) return
+      const runningTargets = runningSessions.flatMap(session => {
+        const game = state.games.find(item => item.id === session.gameId)
+        return game ? [{ game, reattachContext: false }] : []
+      })
+      if (!attachTargets.length && !foregroundTargets.length && !runningTargets.length) return
       scanning = true
       lastScan = now
       const targets = [...attachTargets, ...foregroundTargets]
+      // Preuves du PROCESSUS FINAL par session en cours — alimentent la fin de
+      // session (PossibleExit) : un launcher encore ouvert ne compte jamais
+      // (isLauncherProcess, spec RuntimeSessionV3 §2).
+      const runningPresence = new Map<string, { score: number; evidence: string[] }>()
+      const windowPresence = new Map<string, { score: number; evidence: string[] }>()
       // Deux preuves complémentaires scannées en parallèle : processus (chemin +
       // exécutable, +20 si Steam Running) et fenêtre principale (visible /
       // premier plan) — la fenêtre survit aux launchers, UAC et relances internes.
@@ -170,6 +186,17 @@ export default function App() {
           .then(results => {
             attach(results.map(result => ({ gameId: result.gameId, score: result.score, processName: result.processName, evidence: ['processus', 'installation'] })))
             learnFromPresence(results)
+          }),
+        native.scanGamePresence(runningTargets.map(({ game, reattachContext }) => presenceRequestFor(game, reattachContext, learnedSignaturesFor(game.id), steamRunningForGame(game.id))))
+          .then(results => {
+            for (const result of results) {
+              if (result.isLauncherProcess) continue
+              const threshold = steamRunningForGame(result.gameId) ? STEAM_BACKED_ATTACH_THRESHOLD : AUTO_ATTACH_THRESHOLD
+              if (result.score >= threshold) {
+                const current = runningPresence.get(result.gameId)
+                if (!current || result.score > current.score) runningPresence.set(result.gameId, { score: result.score, evidence: ['processus', 'installation'] })
+              }
+            }
           }),
         native.scanGameWindows(targets.map(({ game, reattachContext }) => windowRequestFor(game, reattachContext)))
           .then(results => {
@@ -181,10 +208,32 @@ export default function App() {
               return result.foreground && Boolean(session)
             })
             if (foreground) useStore.getState().setForegroundGame(foreground.gameId)
+            for (const result of results) {
+              if (result.score < AUTO_ATTACH_THRESHOLD) continue
+              const current = windowPresence.get(result.gameId)
+              if (!current || result.score > current.score) windowPresence.set(result.gameId, { score: result.score, evidence: ['fenêtre', 'processus'] })
+            }
           }),
       ])
         .catch(() => undefined)
-        .finally(() => { scanning = false })
+        .finally(() => {
+          // Fin de session (spec RuntimeSessionV3 §1-5) : la présence du jeu
+          // final combine processus (hors launcher) + fenêtre + Steam. Sans
+          // preuve, la période PossibleExit s'ouvre, puis la session se termine
+          // réellement (déploiement restauré, timer arrêté, remapping rétabli).
+          let anyPossibleExit = false
+          for (const session of runningSessions) {
+            const sessionNow = useStore.getState().gameSessions.find(item => item.id === session.id)
+            if (!sessionNow || sessionNow.state !== 'GameRunning') continue
+            const hit = runningPresence.get(session.gameId)
+            const windowHit = windowPresence.get(session.gameId)
+            const present = Boolean(hit) || Boolean(windowHit) || steamRunningForGame(session.gameId)
+            useStore.getState().sessionPresenceReport(session.gameId, present, hit?.evidence ?? windowHit?.evidence)
+            if (!present) anyPossibleExit = true
+          }
+          exitCheckRef.current = anyPossibleExit
+          scanning = false
+        })
     }, 1000)
     return () => clearInterval(id)
   }, [tick])
@@ -451,6 +500,7 @@ const SESSION_TOAST_TITLES = {
   started: 'En cours via ZAILON',
   detected: 'Jeu détecté par ZAILON',
   recovered: 'Session récupérée',
+  ended: 'Session terminée',
 } as const
 
 function SessionToast({ toast, onDismiss }: { toast: ReturnType<typeof useStore.getState>['sessionToast']; onDismiss: () => void }) {
@@ -460,11 +510,13 @@ function SessionToast({ toast, onDismiss }: { toast: ReturnType<typeof useStore.
     return () => window.clearTimeout(timeout)
   }, [toast, onDismiss])
   if (!toast) return null
-  return <div className="fixed right-4 top-4 z-[240] flex w-[min(340px,calc(100vw-2rem))] items-start gap-3 rounded-xl border border-emerald-300/25 bg-[#0e1212]/95 p-3 shadow-2xl backdrop-blur-xl">
-    <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-300/15 text-emerald-200"><CheckCircle2 size={14} /></span>
+  const ended = toast.kind === 'ended'
+  return <div className={`fixed right-4 top-4 z-[240] flex w-[min(340px,calc(100vw-2rem))] items-start gap-3 rounded-xl border bg-[#0e1212]/95 p-3 shadow-2xl backdrop-blur-xl ${ended ? 'border-white/[0.09]' : 'border-emerald-300/25'}`}>
+    <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${ended ? 'bg-white/[0.06] text-white/55' : 'bg-emerald-300/15 text-emerald-200'}`}>{ended ? <Info size={14} /> : <CheckCircle2 size={14} />}</span>
     <div className="min-w-0 flex-1">
-      <p className="font-mono text-[10px] uppercase tracking-widest text-emerald-200/85">{SESSION_TOAST_TITLES[toast.kind]}</p>
+      <p className={`font-mono text-[10px] uppercase tracking-widest ${ended ? 'text-white/45' : 'text-emerald-200/85'}`}>{SESSION_TOAST_TITLES[toast.kind]}</p>
       <p className="mt-0.5 truncate text-xs font-semibold text-white/85">{toast.gameName}</p>
+      {toast.detail && <p className="mt-0.5 text-[11px] text-white/40">{toast.detail}</p>}
     </div>
     <button type="button" onClick={onDismiss} aria-label="Fermer" className="rounded p-1 text-white/40 hover:bg-white/10 hover:text-white"><X size={13} /></button>
   </div>

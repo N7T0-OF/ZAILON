@@ -376,6 +376,10 @@ export interface GameSession {
   source: SessionSource
   reattachUntil?: number
   graceUntil?: number
+  /** Dernière preuve de présence du PROCESSUS FINAL observée (fin de session). */
+  lastSeenAt?: number
+  /** Début de la période PossibleExit — le jeu a disparu, vérification en cours. */
+  possibleExitSince?: number
   timeline: GameLaunchChainStep[]
   confidence?: number
   finalProcess?: string

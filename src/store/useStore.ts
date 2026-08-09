@@ -9,6 +9,7 @@ import { validateCyberpunkFrameworkDeps } from '../lib/frameworkValidator'
 import { mergeModCatalogs, reconcileModStates } from '../lib/profileState'
 import { arbitrateInputProfiles, pickPrioritySession, recoveryKind } from '../lib/sessionPriority'
 import { compareFrameworkSets, fingerprintFrameworkSet, hasFrameworkChanges, type FrameworkSnapshot } from '../lib/lastKnownGood'
+import { evaluateSessionEnd } from '../lib/sessionEnd'
 
 const APP_VERSION = '1.38.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
@@ -450,9 +451,15 @@ export interface Store {
   /** Toast « jeu en cours » (spec « Correctif NTE » §21-24) : affiché quand le
    * processus final est détecté — jamais au lancement du launcher intermédiaire.
    * `started` = lancé par ZAILON · `detected` = récupéré hors ZAILON ·
-   * `recovered` = session reprise après redémarrage de ZAILON. */
-  sessionToast?: { kind: 'started' | 'detected' | 'recovered'; gameName: string; at: number }
-  setSessionToast: (toast?: { kind: 'started' | 'detected' | 'recovered'; gameName: string; at: number }) => void
+   * `recovered` = session reprise après redémarrage de ZAILON ·
+   * `ended` = session terminée (spec RuntimeSessionV3 §52). */
+  sessionToast?: { kind: 'started' | 'detected' | 'recovered' | 'ended'; gameName: string; at: number; detail?: string }
+  setSessionToast: (toast?: { kind: 'started' | 'detected' | 'recovered' | 'ended'; gameName: string; at: number; detail?: string }) => void
+  /** Rapport de présence du PROCESSUS FINAL pour une session en cours (spec
+   * RuntimeSessionV3 §1-5). `present=false` ouvre la période PossibleExit ; si
+   * elle expire sans preuve, la session se termine réellement. Le launcher
+   * seul ne compte JAMAIS comme présence du jeu. */
+  sessionPresenceReport: (gameId: string, present: boolean, evidence?: string[]) => void
   /** Empreinte des frameworks au dernier lancement réussi, par jeu (spec
    * « Last Known Good » §41) — `undefined` = aucune référence encore. */
   lastKnownGoodFrameworks?: Record<string, FrameworkSnapshot | undefined>
@@ -1492,6 +1499,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
         inputProfileActive: true,
         visualProfileActive: true,
         reattachUntil: undefined,
+        lastSeenAt: now,
+        possibleExitSince: undefined,
         timeline: [...item.timeline, { at: now, stage: 'GameAttached', detail: processName ? `${processName} (confiance ${confidence ?? '—'}%)` : 'Jeu détecté — session reconnectée' }],
       } : item),
     }))
@@ -1537,6 +1546,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
       finalProcess: processName,
       confidence,
       presenceEvidence: evidence,
+      lastSeenAt: now,
+      possibleExitSince: undefined,
       timeline: [{ at: now, stage: 'GameAttached', detail: `${processName || 'Processus'} détecté hors ZAILON (${evidence?.join(', ') || 'présence'}) — confiance ${confidence ?? '—'}%` }],
     }
     set(current => ({
@@ -1725,6 +1736,48 @@ export const useStore = create<Store>()(persist((set, get) => ({
         } : item),
       }))
     }
+  },
+  /** Spec RuntimeSessionV3 §1-5 : rapport de présence du PROCESSUS FINAL pour
+   * les sessions GameRunning. Un launcher encore ouvert ou un Steam bloqué ne
+   * maintiennent jamais « En cours » : sans preuve du jeu final pendant la
+   * période PossibleExit, la session se termine réellement (restauration du
+   * déploiement, arrêt du timer, remapping restauré). */
+  sessionPresenceReport: (gameId, present, evidence) => {
+    const state = get()
+    const session = state.gameSessions.find(item => item.gameId === gameId && item.state === 'GameRunning')
+    if (!session) return
+    const now = Date.now()
+    const evaluation = evaluateSessionEnd({
+      running: true,
+      present,
+      possibleExitSince: session.possibleExitSince,
+      now,
+    })
+    if (evaluation.shouldEnd) {
+      const game = state.games.find(item => item.id === gameId)
+      const totalSeconds = Math.max(0, Math.floor((now - session.startedAt) / 1000))
+      state.endSession(gameId, evaluation.reason)
+      const minutes = Math.floor(totalSeconds / 60)
+      const hours = Math.floor(minutes / 60)
+      const duration = hours > 0
+        ? `${hours} h ${minutes % 60} min`
+        : minutes > 0
+          ? `${minutes} min`
+          : `${totalSeconds} s`
+      // Toast « Session terminée » (spec §52) : bref, aucune action requise.
+      get().setSessionToast({ kind: 'ended', gameName: game?.name || session.gameId, at: now, detail: `Session terminée · ${duration}` })
+      return
+    }
+    const firstAbsence = evaluation.possibleExitSince !== undefined && session.possibleExitSince === undefined
+    set(current => ({
+      gameSessions: current.gameSessions.map(item => item.id === session.id ? {
+        ...item,
+        lastSeenAt: evaluation.present ? now : item.lastSeenAt,
+        possibleExitSince: evaluation.present ? undefined : (evaluation.possibleExitSince ?? item.possibleExitSince),
+        ...(evaluation.present && evidence && evidence.length ? { presenceEvidence: evidence } : {}),
+        timeline: firstAbsence ? [...item.timeline, { at: now, stage: 'PossibleExit', detail: 'Plus aucun processus final ni fenêtre du jeu détecté — vérification de fermeture en cours' }] : item.timeline,
+      } : item),
+    }))
   },
   setExplorePlatform: explorePlatform => set({ explorePlatform, exploreMods: [], explorePage: 1, exploreError: undefined }),
   setExploreGame: exploreGameId => set(state => {

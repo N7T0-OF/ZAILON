@@ -5,6 +5,9 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { appVersion, getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
 import { BackgroundTaskSnapshot, CollectionInstallPlan, Mo2ImportOptions, Mo2ImportPreview, Mo2ImportResult, ProfileDeploymentAudit, native, pickExecutable, pickFolder, pickFolders, pickProfileArchive, resourceUrl, saveProfileArchive } from '../../lib/native'
 import { ModCard } from '../UI/ModCard'
+import { FallbackArtwork } from '../UI/FallbackArtwork'
+import { ParallaxCover } from '../UI/ParallaxCover'
+import { isTouchDevice, motionReduced, parallaxActive, systemReducedMotion } from '../../lib/motion'
 import { pickPrioritySession } from '../../lib/sessionPriority'
 import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { formatTime, timeAgo } from '../../utils'
@@ -96,7 +99,6 @@ export function GamesView() {
   const [modsVisible, setModsVisible] = useState(120)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const [librarySearch, setLibrarySearch] = useState('')
-  const [onlyWithoutCover, setOnlyWithoutCover] = useState(false)
   const [libraryFilter, setLibraryFilter] = useState<'all' | 'games' | 'apps' | 'favorites' | 'recent'>('all')
   const libraryScrollRef = useRef<HTMLDivElement>(null)
   const [profileName, setProfileName] = useState('')
@@ -151,7 +153,7 @@ export function GamesView() {
         || (libraryFilter === 'apps' && isApp)
         || (libraryFilter === 'favorites' && game.favorite)
         || (libraryFilter === 'recent' && game.lastPlayed !== undefined)
-      return (!onlyWithoutCover || !cover) && matchesQuery && matchesFilter
+      return matchesQuery && matchesFilter
     })
     .sort((left, right) => {
       if (libraryFilter === 'recent') return (right.lastPlayed || 0) - (left.lastPlayed || 0)
@@ -448,8 +450,6 @@ export function GamesView() {
       onFilter={setLibraryFilter}
       viewMode={libraryViewMode}
       onViewMode={setLibraryViewMode}
-      onlyWithoutCover={onlyWithoutCover}
-      onOnlyWithoutCover={setOnlyWithoutCover}
       scrollRef={libraryScrollRef}
       onOpen={gameId => { setSelectedGame(gameId); setGamesBrowsing(false) }}
       onAddGame={() => void addGameFromExecutable()}
@@ -550,7 +550,7 @@ export function GamesView() {
   </div>
 }
 
-function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, filter, onFilter, viewMode, onViewMode, onlyWithoutCover, onOnlyWithoutCover, scrollRef, onOpen, onAddGame, onDetect }: {
+function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, filter, onFilter, viewMode, onViewMode, scrollRef, onOpen, onAddGame, onDetect }: {
   games: Game[]
   visibleGames: Game[]
   summaries: ReturnType<typeof useWorkspaceCache>
@@ -560,8 +560,6 @@ function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, fil
   onFilter: (value: typeof filter) => void
   viewMode: 'grid' | 'illustrated' | 'compact'
   onViewMode: (mode: typeof viewMode) => void
-  onlyWithoutCover: boolean
-  onOnlyWithoutCover: (value: boolean) => void
   scrollRef: React.RefObject<HTMLDivElement>
   onOpen: (gameId: string) => void
   onAddGame: () => void
@@ -636,7 +634,6 @@ function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, fil
     <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.05] px-4 py-2">
       <div className="flex gap-1">{filters.map(item => <button key={item.id} type="button" onClick={() => onFilter(item.id)} className={`rounded-full px-3 py-1.5 text-[11px] ${filter === item.id ? 'bg-gold text-ink-400' : 'text-white/42 hover:bg-white/[0.04] hover:text-white/70'}`}>{item.label} <span className={filter === item.id ? 'text-ink-400/55' : 'text-white/22'}>{counts[item.id]}</span></button>)}</div>
       <div className="ml-auto flex items-center gap-2">
-        <label className="flex items-center gap-1.5 text-[11px] text-white/38"><input type="checkbox" checked={onlyWithoutCover} onChange={event => onOnlyWithoutCover(event.target.checked)} className="accent-gold" />Sans couverture</label>
         <div className="flex gap-1 rounded-lg border border-white/[0.07] p-0.5">{densities.map(item => <button key={item.id} type="button" onClick={() => onViewMode(item.id)} className={`rounded-md px-2.5 py-1 text-[11px] ${viewMode === item.id ? 'bg-white/[0.09] text-white/80' : 'text-white/35 hover:text-white/60'}`}>{item.label}</button>)}</div>
       </div>
     </div>
@@ -667,11 +664,23 @@ function LibraryCard({ game, active, priority, activeMods, onOpen, onFavorite, o
   onContextMenu: (x: number, y: number) => void
 }) {
   const cover = resourceUrl(game.resources?.coverPath || game.resources?.bannerPath || game.resources?.backgroundPath || game.backgroundArt)
+  // Parallaxe 3D subtil (spec §4-13) : uniquement si le toggle Apparence est
+  // actif, les animations ne sont pas réduites et l'appareil n'est pas tactile.
+  const coverParallax = useStore(state => state.coverParallax)
+  const motionMode = useStore(state => state.motionMode)
+  const parallax = useMemo(
+    () => parallaxActive(coverParallax, motionReduced(motionMode, systemReducedMotion())) && !isTouchDevice(),
+    [coverParallax, motionMode],
+  )
   return <div onContextMenu={event => { event.preventDefault(); onContextMenu(event.clientX, event.clientY) }} className="group relative overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.02] transition-colors hover:border-gold/25 hover:bg-white/[0.04]">
     <button type="button" onClick={onOpen} className="block w-full text-left">
       <span className="relative block aspect-[3/4] w-full overflow-hidden bg-black/30">
-        {cover ? <img src={cover} alt="" loading="lazy" className="h-full w-full object-cover" /> : <span className="flex h-full items-center justify-center text-3xl font-bold text-white/15">{game.name[0]}</span>}
-        <span className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100"><span className="mb-3 flex items-center gap-1.5 rounded-full bg-gold px-3 py-1.5 text-[11px] font-semibold text-ink-400"><Play size={11} />Ouvrir</span></span>
+        <ParallaxCover active={parallax} className="h-full w-full">
+          {cover
+            ? <img src={cover} alt="" loading="lazy" className="h-full w-full object-cover" />
+            : <FallbackArtwork name={game.name} kind={game.itemKind} />}
+        </ParallaxCover>
+        <span className="pointer-events-none absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100"><span className="mb-3 flex items-center gap-1.5 rounded-full bg-gold px-3 py-1.5 text-[11px] font-semibold text-ink-400"><Play size={11} />Ouvrir</span></span>
         {active && <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-emerald-400/95 px-2 py-0.5 text-[9px] font-bold text-emerald-950"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-950" />En cours</span>}
         {priority && <span className="absolute left-2 top-8 flex items-center gap-1 rounded-full bg-gold/95 px-2 py-0.5 text-[9px] font-bold text-ink-400"><Star size={8} className="fill-ink-400" />Prioritaire</span>}
       </span>

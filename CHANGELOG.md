@@ -1228,6 +1228,12 @@
 
 ### Added
 
+- **« Sans couverture » supprimé définitivement** (spec §1) : le filtre et la case à cocher disparaissent — chaque jeu/app possède désormais une représentation visuelle.
+- **Couverture automatique `FallbackArtwork`** (spec §2-3) : sans artwork, ZAILON génère une carte propre — teinte déterministe du nom (accent), dégradé léger, icône centrée, titre — jamais un rectangle gris. Appliqué à la Bibliothèque ET aux cartes rapides de l'Accueil.
+- **Parallaxe 3D subtil des couvertures** (spec §4-9, §48, §58-59) : la souris incline la carte (max 4°, scale 1.012 — pas un zoom), `perspective: 900px`, retour au repos 220 ms, `will-change` uniquement au survol, mouvement appliqué directement au style (zéro rerender React par déplacement — un hover ne re-rend jamais la grille).
+- **Réglages Apparence** (spec §11-12) : mode « Animations » (Automatique / Activées / Réduites, défaut Automatique — suit « Réduire les animations » du système) + ligne compacte « Effet 3D des couvertures » avec bulle d'aide.
+- **Parallaxe respectueux des contraintes** (spec §10, §13) : désactivé sur écrans tactiles, quand les animations sont réduites ou que le toggle est éteint ; aucun calcul hors survol.
+
 ### Changed
 
 ### Fixed

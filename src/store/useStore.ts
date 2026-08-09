@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, Game, GameInputProfile, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, SessionSource, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
+import { BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, Game, GameInputProfile, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, SessionSource, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
 import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { adapterFor, FALLBACK_ADAPTER, isLauncherBased } from '../lib/launchAdapters'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
@@ -288,6 +288,10 @@ export interface Store {
   language: string
   textSize: TextSize
   uiDensity: UiDensity
+  /** Mode d'animation global : auto (suit le système) / activées / réduites. */
+  motionMode: MotionMode
+  /** Effet 3D des couvertures (parallaxe subtil, spec §12). */
+  coverParallax: boolean
   autoArtwork: boolean
   /** Clé API SteamGridDB (illustrations). Stockée localement, transmise
    * uniquement à SteamGridDB — jamais à un autre fournisseur. */
@@ -416,6 +420,8 @@ export interface Store {
   setLanguage: (language: string) => void
   setTextSize: (size: TextSize) => void
   setUiDensity: (density: UiDensity) => void
+  setMotionMode: (mode: MotionMode) => void
+  setCoverParallax: (enabled: boolean) => void
   setAutoArtwork: (enabled: boolean) => void
   setArtworkSteamGridDbKey: (value: string) => void
   setArtworkIgdbClientId: (value: string) => void
@@ -634,6 +640,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
   language: 'fr',
   textSize: 'normal',
   uiDensity: 'comfortable',
+  motionMode: 'auto',
+  coverParallax: true,
   autoArtwork: false,
   artworkSteamGridDbKey: '',
   artworkIgdbClientId: '',
@@ -1290,6 +1298,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setLanguage: language => set({ language }),
   setTextSize: textSize => set({ textSize }),
   setUiDensity: uiDensity => set({ uiDensity }),
+  setMotionMode: motionMode => set({ motionMode }),
+  setCoverParallax: coverParallax => set({ coverParallax }),
   setAutoArtwork: autoArtwork => set({ autoArtwork }),
   setArtworkSteamGridDbKey: artworkSteamGridDbKey => set({ artworkSteamGridDbKey }),
   setArtworkIgdbClientId: artworkIgdbClientId => set({ artworkIgdbClientId }),
@@ -2444,6 +2454,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
     language: state.language,
     textSize: state.textSize,
     uiDensity: state.uiDensity,
+    motionMode: state.motionMode,
+    coverParallax: state.coverParallax,
     autoArtwork: state.autoArtwork,
     artworkSteamGridDbKey: state.artworkSteamGridDbKey,
     artworkIgdbClientId: state.artworkIgdbClientId,

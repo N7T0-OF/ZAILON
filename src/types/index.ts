@@ -26,6 +26,9 @@ export interface GamePreset {
 }
 export type TextSize = 'small' | 'normal' | 'large' | 'very-large'
 export type UiDensity = 'compact' | 'comfortable'
+/** Mode d'animation global (spec « Library Polish » §11) :
+ * `auto` suit le réglage système « Réduire les animations ». */
+export type MotionMode = 'auto' | 'enabled' | 'reduced'
 export type ExploreColumns = '2' | '3'
 export type ModCategorySource = 'detected' | 'metadata' | 'user'
 export type ModCategoryConfidence = 'high' | 'medium' | 'low'

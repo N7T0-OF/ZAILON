@@ -53,6 +53,16 @@ pub struct GamePresenceRequest {
     /// nom appris (+ chemin relatif) donne un score fort au processus final,
     /// même après une mise à jour qui change l'exécutable.
     pub learned_signatures: Vec<LearnedProcessSignature>,
+    /// Steam indique que l'AppID du jeu est « En cours » (registre RunningAppID,
+    /// spec UAC §5-6) → +20 au score. Preuve indépendante du chemin : fonctionne
+    /// même quand un processus élevé refuse de révéler son chemin.
+    #[serde(default)]
+    pub steam_running: bool,
+    /// Emplacements profonds connus du processus final sous l'installation (ex.
+    /// `Client/WindowsNoEditor/HT/Binaries/Win64` pour NTE) → +50 : le nom de
+    /// l'exécutable n'est plus requis (spec UAC §6).
+    #[serde(default)]
+    pub game_path_patterns: Vec<String>,
 }
 
 /// Processus candidat observé sur le système.
@@ -156,6 +166,50 @@ pub fn score_process(candidate: &ProcessCandidate, request: &GamePresenceRequest
                     score += 15;
                 }
             }
+        }
+    }
+
+    // +20 : Steam confirme que l'AppID du jeu est « En cours » (spec UAC §5-6).
+    // Preuve indépendante du chemin : un processus élevé peut refuser de révéler
+    // son chemin — Steam, le contexte et le nom suffisent alors (65 ≥ 60, seuil
+    // Steam-backé côté frontend).
+    if request.steam_running {
+        score += 20;
+    }
+
+    // +50 : le chemin relatif (sous l'installation) tombe dans un emplacement
+    // profond connu du processus final (ex. NTE Client\WindowsNoEditor\HT\
+    // Binaries\Win64). Le nom de l'exécutable n'est plus obligatoire (spec §6).
+    if !request.game_path_patterns.is_empty() {
+        if let Some(root) = &request.install_root {
+            let root = normalize(root);
+            if !root.is_empty() {
+                let normalized_path = normalize(&candidate.executable_path);
+                if let Some(relative) = normalized_path.strip_prefix(&format!("{root}/")) {
+                    if request.game_path_patterns.iter().any(|pattern| {
+                        let pattern = pattern
+                            .replace('\\', "/")
+                            .to_lowercase()
+                            .trim_end_matches('/')
+                            .to_string();
+                        relative.starts_with(&pattern)
+                    }) {
+                        score += 50;
+                    }
+                }
+            }
+        }
+    }
+
+    // -50 : le processus est HORS installation ET son chemin est accessible.
+    // Si le chemin n'est pas accessible (processus élevé), on ne conclut rien —
+    // les autres preuves (Steam, contexte, fenêtre) restent valables (spec §8).
+    if let Some(root) = &request.install_root {
+        if !root.is_empty()
+            && !candidate.executable_path.is_empty()
+            && !path_under(root, &candidate.executable_path)
+        {
+            score = score.saturating_sub(50);
         }
     }
 
@@ -305,7 +359,16 @@ mod tests {
             ],
             reattach_context,
             learned_signatures: Vec::new(),
+            steam_running: false,
+            game_path_patterns: vec![],
         }
+    }
+
+    fn nte_request_with(reattach_context: bool, steam_running: bool) -> GamePresenceRequest {
+        let mut request = nte_request(reattach_context);
+        request.steam_running = steam_running;
+        request.game_path_patterns = vec!["Client/WindowsNoEditor/HT/Binaries/Win64".to_string()];
+        request
     }
 
     #[test]
@@ -333,8 +396,8 @@ mod tests {
             "C:\\Users\\kai\\AppData\\Local\\Discord\\Discord.exe",
         );
         let score = score_process(&process, &nte_request(true));
-        // Seul le contexte de rattachement contribue (+20) : jamais ≥ 50 → ignoré.
-        assert_eq!(score, 20);
+        // Hors installation avec chemin accessible → -50 : 20 (contexte) - 50 = 0.
+        assert_eq!(score, 0);
         assert!(detect_games(&[process], &[nte_request(true)]).is_empty());
     }
 
@@ -381,8 +444,44 @@ mod tests {
     #[test]
     fn name_alone_never_matches() {
         let process = candidate("nte-helper.exe", "C:\\Temp\\nte-helper.exe");
+        // Hors installation → -50 : 20 (contexte) - 50 = 0.
         let score = score_process(&process, &nte_request(true));
-        assert_eq!(score, 20); // uniquement le contexte de rattachement
+        assert_eq!(score, 0);
+    }
+
+    #[test]
+    fn steam_backed_reattach_detects_final_process_without_accessible_path() {
+        // Spec UAC §5-6, §8 : le processus final est ÉLEVÉ et refuse de révéler
+        // son chemin (chemin vide). Steam confirme l'AppID « En cours ».
+        let process = candidate("HT-Win64-Shipping.exe", "");
+        let score = score_process(&process, &nte_request_with(true, true));
+        // 25 (candidat) + 20 (contexte) + 20 (Steam) = 65 ≥ 60 (seuil Steam-backé
+        // côté frontend) → la session sort de l'élévation et passe En cours.
+        assert_eq!(score, 65);
+        let results = detect_games(&[process], &[nte_request_with(true, true)]);
+        // Le seuil natif d'auto-attachement reste 80 ; c'est le frontend qui
+        // applique le seuil Steam-backé (60) — le score est renvoyé tel quel.
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].score, 65);
+    }
+
+    #[test]
+    fn deep_path_pattern_detects_final_process_without_name_match() {
+        // Spec UAC §6 : le nom de l'exécutable n'est plus obligatoire. Un
+        // processus sous Client\WindowsNoEditor\HT\Binaries\Win64\ reçoit
+        // +50 même s'il n'est dans aucun candidat connu.
+        let process = candidate(
+            "NTE-Game-Win64-Shipping.exe",
+            "X:\\Games\\Neverness To Everness\\Client\\WindowsNoEditor\\HT\\Binaries\\Win64\\NTE-Game-Win64-Shipping.exe",
+        );
+        let request = nte_request_with(true, true);
+        let score = score_process(&process, &request);
+        // 40 (installation) + 50 (motif profond) + 20 (contexte) + 20 (Steam)
+        // = 130 → plafonné à 100 ≥ 80 : auto-attaché SANS connaître le nom.
+        assert_eq!(score, 100);
+        let results = detect_games(&[process], &[request]);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].score, 100);
     }
 
     #[test]

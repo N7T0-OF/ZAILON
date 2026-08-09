@@ -7032,27 +7032,37 @@ fn framework_providers_from_entries(
         .map(|entry| entry.game_relative_path.to_ascii_lowercase())
         .collect::<HashSet<_>>();
     let mut providers = Vec::new();
-    let mut add = |framework_id: &str, required: &[&str]| {
-        if required.iter().all(|path| paths.contains(*path)) {
-            providers.push(FrameworkProviderStatus {
-                framework_id: framework_id.into(),
-                package_id: package_id.into(),
-                files: required.iter().map(|path| (*path).to_string()).collect(),
-                enabled,
-                runtime_visible,
-            });
-        }
+    let mut push = |framework_id: String, files: Vec<String>| {
+        providers.push(FrameworkProviderStatus {
+            framework_id,
+            package_id: package_id.into(),
+            files,
+            enabled,
+            runtime_visible,
+        });
     };
-    add(
-        "redscript",
-        &[
-            "engine/tools/scc.exe",
-            "engine/tools/scc_lib.dll",
-            "engine/config/base/scripts.ini",
-            "r6/config/cybercmd/scc.toml",
-        ],
-    );
-    add("RED4ext", &["red4ext/red4ext.dll", "bin/x64/winmm.dll"]);
+    // Cores compilés : présence exacte des fichiers attendus (spec §38-39).
+    let redscript_core = [
+        "engine/tools/scc.exe",
+        "engine/tools/scc_lib.dll",
+        "engine/config/base/scripts.ini",
+        "r6/config/cybercmd/scc.toml",
+    ];
+    if redscript_core.iter().all(|path| paths.contains(*path)) {
+        push(
+            "redscript".into(),
+            redscript_core
+                .iter()
+                .map(|path| (*path).to_string())
+                .collect(),
+        );
+    }
+    if paths.contains("red4ext/red4ext.dll") && paths.contains("bin/x64/winmm.dll") {
+        push(
+            "RED4ext".into(),
+            vec!["red4ext/red4ext.dll".into(), "bin/x64/winmm.dll".into()],
+        );
+    }
     if paths.contains("bin/x64/plugins/cyber_engine_tweaks.asi")
         && (paths.contains("bin/x64/version.dll") || paths.contains("bin/x64/winmm.dll"))
     {
@@ -7061,16 +7071,55 @@ fn framework_providers_from_entries(
         } else {
             "bin/x64/winmm.dll"
         };
-        providers.push(FrameworkProviderStatus {
-            framework_id: "Cyber Engine Tweaks".into(),
-            package_id: package_id.into(),
-            files: vec![
+        push(
+            "Cyber Engine Tweaks".into(),
+            vec![
                 "bin/x64/plugins/cyber_engine_tweaks.asi".into(),
                 loader.into(),
             ],
-            enabled,
-            runtime_visible,
-        });
+        );
+    }
+    // Frameworks RED4ext natifs (spec §28) : dossier canonique OU signature de
+    // fichier — jamais par nom de dossier seul (spec §31).
+    for (framework_id, prefix, signatures) in [
+        (
+            "TweakXL",
+            "red4ext/plugins/tweakxl/",
+            &["tweakxl.dll", "tweak_xl.dll"] as &[&str],
+        ),
+        (
+            "ArchiveXL",
+            "red4ext/plugins/archivexl/",
+            &["archivexl.dll"] as &[&str],
+        ),
+        (
+            "Codeware",
+            "red4ext/plugins/codeware/",
+            &["codeware.dll"] as &[&str],
+        ),
+    ] {
+        let mut files: Vec<String> = paths
+            .iter()
+            .filter(|path| path.starts_with(prefix))
+            .cloned()
+            .collect();
+        let has_folder = !files.is_empty();
+        let mut signature_hits: Vec<String> = paths
+            .iter()
+            .filter(|path| {
+                signatures
+                    .iter()
+                    .any(|signature| path.ends_with(&format!("/{signature}")) || path == signature)
+            })
+            .cloned()
+            .collect();
+        if !has_folder && signature_hits.is_empty() {
+            continue;
+        }
+        files.append(&mut signature_hits);
+        files.sort();
+        files.dedup();
+        push(framework_id.into(), files);
     }
     providers
 }
@@ -15674,6 +15723,56 @@ mod tests {
     fn cyberpunk_map_file_unknown_files_return_none() {
         assert_eq!(map_path("README.txt"), None);
         assert_eq!(map_path("TweakXL/docs/readme.md"), None);
+    }
+
+    fn provider_entry(game_relative_path: &str) -> PackageFileEntry {
+        PackageFileEntry {
+            source_physical_path: game_relative_path.to_string(),
+            package_relative_path: game_relative_path.to_string(),
+            game_relative_path: game_relative_path.to_string(),
+            hash: "deadbeef".to_string(),
+            size: 1,
+            deployable: true,
+        }
+    }
+
+    fn provider_ids(entries: &[PackageFileEntry]) -> Vec<String> {
+        framework_providers_from_entries("pkg", entries, true, false)
+            .iter()
+            .map(|provider| provider.framework_id.clone())
+            .collect()
+    }
+
+    #[test]
+    fn framework_providers_detect_tweakxl_archivexl_codeware_by_folder() {
+        // spec §28 : dossier canonique → capability, même si le paquet porte un
+        // autre nom (le nom du dossier n'est jamais une partie du chemin jeu).
+        let entries = vec![
+            provider_entry("red4ext/plugins/TweakXL/init.lua"),
+            provider_entry("red4ext/plugins/ArchiveXL/ArchiveXL.xl"),
+            provider_entry("red4ext/plugins/Codeware/Codeware.dll"),
+        ];
+        let ids = provider_ids(&entries);
+        assert!(ids.contains(&"TweakXL".to_string()), "{ids:?}");
+        assert!(ids.contains(&"ArchiveXL".to_string()), "{ids:?}");
+        assert!(ids.contains(&"Codeware".to_string()), "{ids:?}");
+    }
+
+    #[test]
+    fn framework_providers_detect_by_file_signature_only() {
+        // spec §31 : ne pas dépendre du nom du dossier — un `tweakxl.dll` mal
+        // placé (dossier « core_01 ») fournit quand même cyberpunk.tweakxl.
+        let entries = vec![provider_entry("red4ext/plugins/core_01/tweakxl.dll")];
+        assert!(provider_ids(&entries).contains(&"TweakXL".to_string()));
+        let archive = vec![provider_entry("archivexl.dll")];
+        assert!(provider_ids(&archive).contains(&"ArchiveXL".to_string()));
+    }
+
+    #[test]
+    fn framework_providers_no_false_positive_for_plain_plugins() {
+        // Un plugin ordinaire sous red4ext/plugins/ n'est PAS un framework.
+        let entries = vec![provider_entry("red4ext/plugins/SomeMod/main.js")];
+        assert_eq!(provider_ids(&entries), Vec::<String>::new());
     }
 }
 

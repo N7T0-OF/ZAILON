@@ -946,15 +946,9 @@
 
 ### Added
 
-- **Connecteurs IGDB et GameBanana** dans le moteur d'illustrations : IGDB (covers / artworks / screenshots via une application Twitch gratuite, échange Client Credentials) couvre les jeux absents de Steam ; GameBanana fonctionne **sans aucune clé** (API publique, couvertures et images de jeux).
-- **Priorités réordonnées** selon la recommandation d'intégration : SteamGridDB n°1, Steam officiel n°2, IGDB n°3, GameBanana n°4 — Nexus et CurseForge restent honnêtement « connecteur non disponible » (pas d'API de jaquettes de jeux par nom).
-- **Paramètres > Illustrations** : rangée IGDB (Client ID + Client Secret, Enregistrer / Remplacer / Tester la connexion / Supprimer) et bouton « Tester GameBanana (public) » ; l'état des sources reflète la configuration réelle.
-- L'auto-artwork des nouveaux jeux privilégie toujours l'art officiel Steam, puis complète avec les sources configurées.
-
 ### Changed
 
 ### Fixed
-
 
 ### Performance
 
@@ -967,6 +961,36 @@
 ### Removed
 
 ### Known Issues
+
+## 1.34.0 — Connecteurs IGDB et GameBanana
+
+### Added
+
+- **Connecteurs IGDB et GameBanana** dans le moteur d'illustrations : IGDB (covers / artworks / screenshots via une application Twitch gratuite, échange Client Credentials) couvre les jeux absents de Steam ; GameBanana fonctionne **sans aucune clé** (API publique, couvertures et images de jeux).
+- **Priorités réordonnées** selon la recommandation d'intégration : SteamGridDB n°1, Steam officiel n°2, IGDB n°3, GameBanana n°4 — Nexus et CurseForge restent honnêtement « connecteur non disponible » (pas d'API de jaquettes de jeux par nom).
+- **Paramètres > Illustrations** : rangée IGDB (Client ID + Client Secret, Enregistrer / Remplacer / Tester la connexion / Supprimer) et bouton « Tester GameBanana (public) » ; l'état des sources reflète la configuration réelle.
+- L'auto-artwork des nouveaux jeux privilégie toujours l'art officiel Steam, puis complète avec les sources configurées.
+
+### Changed
+
+- Ordre des résultats d'une recherche « Toutes les sources » : SteamGridDB en tête (recommandation n°1 pour les personnalisations), puis Steam officiel, IGDB, GameBanana.
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+- Les connecteurs réseau (SteamGridDB, IGDB, GameBanana) ne sont pas couverts par la CI locale : la validation réelle nécessite une clé valide ou une machine avec le jeu.
+- Le format des champs `screenshots` de GameBanana est tolérant mais non garanti : en cas de changement, le connecteur renvoie zéro image (jamais d'erreur ni de résultat fictif).
 
 ## 1.33.0 — Moteur d'illustrations unifié
 

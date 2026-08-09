@@ -1243,7 +1243,7 @@ pub fn delete_visual_profile_version(
     let path = visual_root(&app)?
         .join("history")
         .join(&profile_id)
-        .join(file_name);
+        .join(&file_name);
     if !path.is_file() {
         return Err("Version introuvable.".into());
     }

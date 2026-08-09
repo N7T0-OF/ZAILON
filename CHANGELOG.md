@@ -1219,6 +1219,11 @@
 
 ### Added
 
+- **Diagnostic hiérarchique des frameworks Cyberpunk** (spec §36-43) : ordre de vérification RED4ext → redscript → ArchiveXL → TweakXL → Codeware → CET. RED4ext est la cause primaire — quand il échoue, TweakXL/ArchiveXL/Codeware s'affichent en **conséquences**, jamais en erreurs indépendantes.
+- **États distingués** (spec §40) : prêt / manquant / **non requis** (absent mais rien n'en dépend — jamais un blocage) / **mal placé** (fourni par signature mais hors emplacement canonique) / **non exposé** (dans le profil mais absent de la table virtuelle) / **compatibilité** (empreinte changée depuis le Last Known Good).
+- **Carte « Diagnostic hiérarchique · frameworks »** dans État & Diagnostic > Frameworks : les 6 frameworks dans l'ordre, cause primaire en bannière rouge, conséquences grisées, avertissements Last Known Good.
+- **Verrou pré-lancement hiérarchique** : le lancement bloqué affiche la cause primaire puis ses conséquences (« Framework principal non chargé : RED4ext — … Conséquences : TweakXL, ArchiveXL ») au lieu de messages indépendants.
+
 ### Changed
 
 ### Fixed

@@ -4,6 +4,7 @@ import { inputDiagnosticRows } from '../../lib/inputBackends'
 import { effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
 import { compareFrameworkSets, fingerprintFrameworkSet } from '../../lib/lastKnownGood'
 import { evaluateRed4extRepair, type Red4extRepairSummary } from '../../lib/frameworkValidator'
+import { validateFrameworkHierarchy, type FrameworkDiagnosisKind } from '../../lib/frameworkHierarchy'
 import { adapterFor, LAUNCH_BEHAVIOR_LABELS, SESSION_STATE_LABELS } from '../../lib/launchAdapters'
 import { native, type ProfileDeploymentAudit, type QuickPanelStatus } from '../../lib/native'
 import { pickPrioritySession } from '../../lib/sessionPriority'
@@ -259,6 +260,7 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
             <span key={provider.frameworkId} className="flex items-center gap-1.5 rounded-full bg-white/[0.035] px-2.5 py-1 font-mono text-[11px] text-white/55">{provider.frameworkId}<span className={`h-1.5 w-1.5 rounded-full ${provider.enabled && provider.runtimeVisible ? 'bg-emerald-300' : 'bg-amber-300'}`} /></span>
           ))}</div>
         </div>}
+        <FrameworkHierarchyCard gameId={game.id} profileMods={profileMods} virtualFiles={audit?.virtualFiles.map(file => file.gameRelativePath)} />
         <FrameworkLastKnownGood gameId={game.id} profile={profile} profileMods={profileMods} />
         <Red4extRepairCard summary={repair} audit={audit} busy={repairing} onRepair={() => void repairRed4ext()} onRepairMo2={onRepairMo2} />
       </div>}
@@ -487,6 +489,47 @@ function QuickPanelDiagnostic() {
       </div>)}
     </div>
     <p className="mt-2 text-[10px] leading-relaxed text-white/28">Mode avancé — état natif interrogé à l'instant. Le panneau cible la session prioritaire (spec §15) ; il se ferme à la perte de focus et est indisponible en plein écran exclusif (aucune injection).</p>
+  </div>
+}
+
+const FRAMEWORK_KIND_LABEL: Record<FrameworkDiagnosisKind, { label: string; tone: string }> = {
+  ready: { label: 'Prêt', tone: 'border-emerald-300/15 bg-emerald-300/[0.03] text-emerald-200/85' },
+  missing: { label: 'Manquant', tone: 'border-red-300/15 bg-red-300/[0.03] text-red-200/80' },
+  absent: { label: 'Non requis', tone: 'border-white/[0.06] bg-white/[0.02] text-white/38' },
+  misplaced: { label: 'Mal placé', tone: 'border-red-300/15 bg-red-300/[0.03] text-red-200/80' },
+  'not-deployed': { label: 'Non exposé', tone: 'border-amber-300/15 bg-amber-300/[0.04] text-amber-100/80' },
+  incompatible: { label: 'Compatibilité', tone: 'border-amber-300/15 bg-amber-300/[0.04] text-amber-100/80' },
+  consequence: { label: 'Conséquence', tone: 'border-white/[0.06] bg-white/[0.02] text-white/38' },
+}
+
+/** Diagnostic hiérarchique des frameworks (spec §36-43) : RED4ext vérifié en
+ * premier ; la cause primaire s'affiche avant ses conséquences — TweakXL et
+ * ArchiveXL ne sont jamais accusés indépendamment quand RED4ext est la cause. */
+function FrameworkHierarchyCard({ gameId, profileMods, virtualFiles }: { gameId: string; profileMods: Mod[]; virtualFiles?: string[] }) {
+  const lastKnownGoodFrameworks = useStore(state => state.lastKnownGoodFrameworks?.[gameId])
+  const validation = useMemo(() => validateFrameworkHierarchy(
+    profileMods.map(mod => ({ name: mod.name, enabled: mod.enabled, files: mod.files, framework: mod.framework })),
+    { virtualFiles, previousSnapshot: lastKnownGoodFrameworks },
+  ), [profileMods, virtualFiles, lastKnownGoodFrameworks])
+  return <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="text-[11px] font-semibold text-white/68">Diagnostic hiérarchique · frameworks</p>
+      <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest ${validation.valid ? 'bg-emerald-300/10 text-emerald-200/70' : 'bg-red-300/10 text-red-200/75'}`}>{validation.valid ? 'Prêt' : 'Cause primaire détectée'}</span>
+    </div>
+    <p className="mt-1.5 text-[11px] leading-relaxed text-white/40">Ordre de vérification : RED4ext → redscript → ArchiveXL → TweakXL → Codeware → CET. Si un framework principal échoue, ses dépendants sont affichés comme conséquences — jamais comme erreurs indépendantes.</p>
+    {!validation.valid && validation.primaryCause && <div className="mt-3 rounded-xl border border-red-300/20 bg-red-300/[0.04] p-3">
+      <p className="flex items-center gap-2 text-xs font-semibold text-red-200/90"><AlertTriangle size={14} />Framework principal non chargé : {validation.primaryCause.label}</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-red-100/70">{validation.primaryCause.detail}</p>
+      {validation.consequences.length > 0 && <p className="mt-1.5 text-[11px] leading-relaxed text-white/50">Conséquences : {validation.consequences.map(item => item.label).join(', ')} — corrigez {validation.primaryCause.label} en premier.</p>}
+    </div>}
+    <div className="mt-2 grid gap-1.5 sm:grid-cols-2">{validation.ordered.map(diagnosis => {
+      const tone = FRAMEWORK_KIND_LABEL[diagnosis.kind]
+      return <div key={diagnosis.capability} title={diagnosis.detail} className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 ${tone.tone}`}>
+        <span className="text-[11px] font-semibold">{diagnosis.label}</span>
+        <span className="ml-auto rounded-full bg-black/20 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider">{tone.label}</span>
+      </div>
+    })}</div>
+    {validation.warnings.length > 0 && <ul className="mt-2 space-y-1 text-[11px] text-amber-100/75">{validation.warnings.map((warning, index) => <li key={index}>• {warning}</li>)}</ul>}
   </div>
 }
 

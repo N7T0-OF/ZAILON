@@ -606,6 +606,10 @@ export interface DiscordPresenceConfig {
   showProfile: boolean
   showModCount: boolean
   showElapsed: boolean
+  /** State pré-construit par le frontend (spec Discord §25, §60) — prioritaire
+   * sur le template natif : variantes de wording, anti-« 0 mods » incertain,
+   * apps non-jeux, mode minimal. */
+  stateOverride?: string
 }
 
 export interface DiscordConnectionStatus {
@@ -837,11 +841,11 @@ export const native = {
     status: () => desktopOnly<QuickPanelStatus>('quick_panel_status', {}),
   },
 
-  launchGame: (execPath: string, gameId: string, gameName: string, gameRoot: string, profileId: string, profileName: string, activeMods: number, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, discord: DiscordPresenceConfig | undefined, launcherBased: boolean, onProgress: (event: DeploymentProgressEvent) => void) => {
+  launchGame: (execPath: string, gameId: string, gameName: string, gameRoot: string, profileId: string, profileName: string, activeMods: number, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, launcherBased: boolean, onProgress: (event: DeploymentProgressEvent) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Le lancement est uniquement disponible dans l’application ZAILON.'))
     const channel = new Channel<DeploymentProgressEvent>()
     channel.onmessage = onProgress
-    return invoke<LaunchGameResult>('launch_game', { execPath, gameId, gameName, gameRoot, profileId, profileName, activeMods, enabledModIds, conflictRules, discord, launcherBased, onEvent: channel })
+    return invoke<LaunchGameResult>('launch_game', { execPath, gameId, gameName, gameRoot, profileId, profileName, activeMods, enabledModIds, conflictRules, launcherBased, onEvent: channel })
   },
   /** Restaure tout déploiement temporaire restant d'un jeu (fin de session
    * explicite). Pour un jeu lancé via un launcher intermédiaire, le déploiement

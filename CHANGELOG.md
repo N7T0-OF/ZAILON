@@ -1340,6 +1340,21 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.56.0 — Discord Rich Presence : Application ID centralisé + présence honnête
+
+### Added
+
+- **Application ID ZAILON centralisé** (spec Discord §5) : `1509971526987022497` défini une seule fois dans `src/lib/discordPresence.ts` — le champ Paramètres est **prérempli**, aucun OAuth, bot ou clé n'est demandé pour la présence locale (spec §6).
+- **Présence honnête construite depuis la session** (spec §2, §8, §28) : `buildDiscordActivity` génère `details`/`state` depuis la session prioritaire réelle — variantes de wording (spec §25), apps non-jeux « Session créative » (spec §9-11, §48), mode minimal « Via ZAILON » (spec §36), **jamais l'exemple recopié** (pas de party/joinSecret factices, spec §27-28).
+- **Anti-« 0 mods » incertain** (spec §23, §60) : si le profil référence des mods mais que le compteur n'en résout aucun (cache vide, recovery en attente), la présence affiche « Profil X » au lieu de mentir avec « 0 mod(s) actif(s) ».
+- **Anti-flap Alt+Tab** (spec §15) : un simple changement de premier plan ne remplace plus l'activité toutes les 2 secondes — bascule différée 3,5 s (annulée si la priorité revient) ; la session publiée terminée bascule immédiatement (spec §13).
+- **Fallback asset `zailon`** (spec §50) : sans clé d'asset spécifique, la grande image retombe sur le logo ZAILON — la présence ne rate jamais à cause d'une image.
+- **Toggle « Mode minimal »** dans Paramètres > Discord (spec §35-36).
+
+### Fixed
+
+- **La présence ne démarre plus au lancement** (spec §9, critère bloquant §63) : le chemin natif `launch_game → set_discord_activity` est supprimé — la présence n'est publiée qu'au vrai `GameRunning` via `syncDiscordPresence` (session prioritaire). Pour NTE, plus aucune activité pendant le launcher / l'UAC ; le timer Discord commence au vrai jeu (spec §12).
+
 ## [Unreleased]
 
 ### Added

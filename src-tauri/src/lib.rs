@@ -484,6 +484,11 @@ struct DiscordPresenceConfig {
     show_profile: bool,
     show_mod_count: bool,
     show_elapsed: bool,
+    /// State pré-construit par le frontend (spec Discord §25, §60) : variantes
+    /// de wording, anti-« 0 mods » incertain, apps non-jeux. Prioritaire sur le
+    /// template composé quand présent et non vide.
+    #[serde(default)]
+    state_override: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -4574,11 +4579,19 @@ fn set_discord_activity(
     active_mods: usize,
 ) -> Result<(), String> {
     let mut stream = discord_handshake(config.client_id.trim())?;
-    let state = match (config.show_profile, config.show_mod_count) {
-        (true, true) => format!("Profil {profile_name} · {active_mods} mod(s) actif(s)"),
-        (true, false) => format!("Profil {profile_name}"),
-        (false, true) => format!("{active_mods} mod(s) actif(s)"),
-        (false, false) => "Lancé avec ZAILON".into(),
+    let state = match config
+        .state_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => value.to_string(),
+        None => match (config.show_profile, config.show_mod_count) {
+            (true, true) => format!("Profil {profile_name} · {active_mods} mod(s) actif(s)"),
+            (true, false) => format!("Profil {profile_name}"),
+            (false, true) => format!("{active_mods} mod(s) actif(s)"),
+            (false, false) => "Lancé avec ZAILON".into(),
+        },
     };
     let mut activity = serde_json::json!({
         "details": clean_discord_text(game_name),
@@ -5634,7 +5647,6 @@ async fn launch_game(
     active_mods: usize,
     enabled_mod_ids: Vec<String>,
     conflict_rules: Vec<LaunchConflictRule>,
-    discord: Option<DiscordPresenceConfig>,
     launcher_based: bool,
     on_event: Channel<DeploymentProgressEvent>,
 ) -> Result<LaunchGameResult, String> {
@@ -5752,22 +5764,11 @@ async fn launch_game(
             });
         }
     }
-    let (discord_connected, discord_message) =
-        match discord.as_ref().filter(|config| config.enabled) {
-            Some(config) => {
-                match set_discord_activity(&runtime, config, &game_name, &profile_name, active_mods)
-                {
-                    Ok(()) => (true, "Discord Rich Presence actif.".to_string()),
-                    Err(error) => (false, error),
-                }
-            }
-            None => (false, "Discord Rich Presence désactivé.".into()),
-        };
-    let discord_status = DiscordConnectionStatus {
-        connected: discord_connected,
-        message: discord_message.clone(),
-    };
-    let _ = app.emit("discord-status-changed", discord_status);
+    // Présence Discord gérée par `syncDiscordPresence` côté frontend : publiée
+    // uniquement quand la session atteint le vrai `GameRunning` (spec Discord
+    // §9) — jamais au lancement, sinon la présence démarrerait au launcher ou à
+    // l'UAC (cas NTE, critère bloquant §63).
+    let (discord_connected, discord_message) = (false, String::new());
     let _ = app.emit(
         "game-process-started",
         GameProcessEvent {

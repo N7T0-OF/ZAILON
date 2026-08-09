@@ -12,6 +12,7 @@ import { compareFrameworkSets, fingerprintFrameworkSet, hasFrameworkChanges, typ
 import { effectivePerformance, type DownloadPolicy, type PerformanceMode, type ScanPolicy, type ZailonPerformancePolicies } from '../lib/performanceProfiles'
 import { enabledCountFromState, isSilentClear, repairReport } from '../lib/profileConsistency'
 import { createDebouncer } from '../lib/persistDebounce'
+import { buildDiscordActivity, DISCORD_APPLICATION_ID, DISCORD_PRIORITY_DEBOUNCE_MS, shouldDelayPrioritySwitch, type DiscordActivityInput } from '../lib/discordPresence'
 
 // Sauvegarde debounced des réglages continus (spec §17) : le color picker
 // d'accent n'écrit pas sur disque à chaque pixel — coalescence 250 ms, flush
@@ -19,6 +20,11 @@ import { createDebouncer } from '../lib/persistDebounce'
 const accentDebouncer = createDebouncer((value: string) => {
   useStore.setState({ accentColor: value })
 }, 250)
+// Anti-flap Rich Presence (spec Discord §15) : un simple Alt+Tab ne remplace
+// pas l'activité publiée — la bascule est différée si la session publiée tourne
+// encore ; le timer est annulé si la priorité revient avant l'échéance.
+let discordPublishedGameId: string | undefined
+let discordSwitchTimer: ReturnType<typeof setTimeout> | undefined
 import { evaluateSessionEnd } from '../lib/sessionEnd'
 
 const APP_VERSION = '1.55.0'
@@ -344,6 +350,8 @@ export interface Store {
   discordShowProfile: boolean
   discordShowModCount: boolean
   discordShowElapsed: boolean
+  /** Mode présence minimal (spec Discord §36) : seulement le jeu + « Via ZAILON ». */
+  discordMinimalPresence: boolean
   autoCheckUpdates: boolean
   autoInstallUpdates: boolean
   modUpdateFrequency: 'never' | 'startup' | 'daily' | 'weekly'
@@ -491,6 +499,7 @@ export interface Store {
   setDiscordShowProfile: (enabled: boolean) => void
   setDiscordShowModCount: (enabled: boolean) => void
   setDiscordShowElapsed: (enabled: boolean) => void
+  setDiscordMinimalPresence: (enabled: boolean) => void
   setAutoCheckUpdates: (enabled: boolean) => void
   setAutoInstallUpdates: (enabled: boolean) => void
   setModUpdateFrequency: (frequency: Store['modUpdateFrequency']) => void
@@ -666,11 +675,12 @@ export function migratePersistedState(persisted: unknown) {
     textSize: state.textSize || 'normal',
     uiDensity: state.uiDensity || 'comfortable',
     autoArtwork: state.autoArtwork ?? false,
-    discordClientId: state.discordClientId || '',
+    discordClientId: state.discordClientId || DISCORD_APPLICATION_ID,
     discordLargeImageKey: state.discordLargeImageKey || '',
     discordShowProfile: state.discordShowProfile ?? true,
     discordShowModCount: state.discordShowModCount ?? true,
     discordShowElapsed: state.discordShowElapsed ?? true,
+    discordMinimalPresence: state.discordMinimalPresence ?? false,
     taskToastsEnabled: state.taskToastsEnabled ?? true,
     taskAutoReduceImports: state.taskAutoReduceImports ?? true,
     libraryViewMode: state.libraryViewMode || 'grid',
@@ -730,12 +740,13 @@ export const useStore = create<Store>()(persist((set, get) => ({
   artworkIgdbClientId: '',
   artworkIgdbClientSecret: '',
   artworkSourceMode: 'automatic',
-  discordPresence: false,
-  discordClientId: '',
+  discordPresence: true,
+  discordClientId: DISCORD_APPLICATION_ID,
   discordLargeImageKey: '',
   discordShowProfile: true,
   discordShowModCount: true,
   discordShowElapsed: true,
+  discordMinimalPresence: false,
   autoCheckUpdates: true,
   autoInstallUpdates: false,
   modUpdateFrequency: 'weekly',
@@ -1462,6 +1473,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setDiscordShowProfile: discordShowProfile => set({ discordShowProfile }),
   setDiscordShowModCount: discordShowModCount => set({ discordShowModCount }),
   setDiscordShowElapsed: discordShowElapsed => set({ discordShowElapsed }),
+  setDiscordMinimalPresence: discordMinimalPresence => set({ discordMinimalPresence }),
   setAutoCheckUpdates: autoCheckUpdates => set({ autoCheckUpdates }),
   setAutoInstallUpdates: autoInstallUpdates => set(state => ({ autoInstallUpdates, autoCheckUpdates: autoInstallUpdates ? true : state.autoCheckUpdates })),
   setModUpdateFrequency: modUpdateFrequency => set({ modUpdateFrequency }),
@@ -1528,14 +1540,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
         launchProgress: { phase: 'starting', current: 0, total: 0, message: 'Préparation du jeu…' },
         notice: 'Préparation du jeu en arrière-plan…',
       })
-      const result = await native.launchGame(game.execPath, game.id, game.name, game.installDirectory || knownRoot, profile.id, profile.name, enabledMods.length, stagedModIds, profile.conflictRules || [], state.discordPresence ? {
-        enabled: true,
-        clientId: state.discordClientId,
-        largeImageKey: state.discordLargeImageKey || undefined,
-        showProfile: state.discordShowProfile,
-        showModCount: state.discordShowModCount,
-        showElapsed: state.discordShowElapsed,
-      } : undefined, isLauncherBased(adapterFor(game)), progress => set({ launchProgress: progress }))
+      // Présence Discord gérée par `syncDiscordPresence` au vrai `GameRunning`
+      // (spec Discord §9) — jamais transmise au lancement, sinon la présence
+      // démarrerait au launcher / à l'UAC (cas NTE, critère bloquant §63).
+      const result = await native.launchGame(game.execPath, game.id, game.name, game.installDirectory || knownRoot, profile.id, profile.name, enabledMods.length, stagedModIds, profile.conflictRules || [], isLauncherBased(adapterFor(game)), progress => set({ launchProgress: progress }))
       set(current => ({
         isLaunching: false,
         launchProgress: undefined,
@@ -1543,7 +1551,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
         playStartTime: Date.now(),
         sessionTime: 0,
         games: current.games.map(item => item.id !== game.id ? item : { ...item, installedMods: item.installedMods.map(mod => enabledMods.some(enabled => enabled.id === mod.id) && mod.storage === 'staged' ? { ...mod, deploymentStatus: 'runtime-visible' } : mod) }),
-        notice: `${game.name} lancé${options?.withoutMods ? ' sans mods' : ''} (PID ${result.pid}) après vérification de ${result.deployedFiles} fichier(s) via ${result.deploymentBackend}. ${result.discordMessage}`,
+        notice: `${game.name} lancé${options?.withoutMods ? ' sans mods' : ''} (PID ${result.pid}) après vérification de ${result.deployedFiles} fichier(s) via ${result.deploymentBackend}.`,
       }))
       get().beginSession(game.id, profile.id)
     } catch (error) {
@@ -2119,28 +2127,73 @@ export const useStore = create<Store>()(persist((set, get) => ({
    * priorité) et par `toggleDiscord`. */
   syncDiscordPresence: () => {
     const state = get()
-    const stop = () => void native.clearDiscordActivity().catch(() => undefined)
+    const stop = () => {
+      if (discordSwitchTimer) { clearTimeout(discordSwitchTimer); discordSwitchTimer = undefined }
+      discordPublishedGameId = undefined
+      void native.clearDiscordActivity().catch(() => undefined)
+    }
     if (!state.discordPresence) { stop(); return }
     const priorityGameId = pickPrioritySession(state.gameSessions, state.pinnedPriorityGameId, state.foregroundGameId)
     const session = state.gameSessions.find(item => item.gameId === priorityGameId && item.state === 'GameRunning')
-    if (!session) { stop(); return }
+    if (!session || !priorityGameId) { stop(); return }
     const game = state.games.find(item => item.id === session.gameId)
     const profile = game?.profiles.find(item => item.id === session.profileId)
     if (!game || !profile) { stop(); return }
-    const activeMods = resolveProfileMods(game, profile).filter(mod => mod.enabled).length
-    void native.setDiscordActivityFor({
-      gameName: game.name,
-      profileName: profile.name,
-      activeMods,
-      config: {
-        enabled: true,
-        clientId: state.discordClientId,
-        largeImageKey: state.discordLargeImageKey || undefined,
-        showProfile: state.discordShowProfile,
-        showModCount: state.discordShowModCount,
-        showElapsed: state.discordShowElapsed,
-      },
-    }).catch(() => undefined)
+    // Publication (spec §2, §8) : relit l'état au moment réel de l'envoi — la
+    // présence est construite depuis la session prioritaire et le compteur
+    // canonique, jamais depuis un exemple recopié (spec §28).
+    const publish = (gameId: string) => {
+      const current = get()
+      const currentSession = current.gameSessions.find(item => item.gameId === gameId && item.state === 'GameRunning')
+      const currentGame = currentSession ? current.games.find(item => item.id === gameId) : undefined
+      const currentProfile = currentSession && currentGame ? currentGame.profiles.find(item => item.id === currentSession.profileId) : undefined
+      if (!currentSession || !currentGame || !currentProfile) return
+      const resolved = resolveProfileMods(currentGame, currentProfile)
+      const enabledMods = resolved.filter(mod => mod.enabled).length
+      const activity = buildDiscordActivity({
+        gameName: currentGame.name,
+        gameKind: currentGame.itemKind,
+        profileName: currentProfile.name,
+        enabledModCount: enabledMods,
+        referencedModCount: (currentProfile.mods || []).length,
+        showProfile: current.discordShowProfile,
+        showModCount: current.discordShowModCount,
+        showElapsed: current.discordShowElapsed,
+        minimal: current.discordMinimalPresence,
+        largeImageKey: current.discordLargeImageKey || undefined,
+      })
+      discordPublishedGameId = gameId
+      void native.setDiscordActivityFor({
+        gameName: activity.details,
+        profileName: currentProfile.name,
+        activeMods: enabledMods,
+        config: {
+          enabled: true,
+          clientId: current.discordClientId,
+          largeImageKey: activity.largeImage,
+          showProfile: current.discordShowProfile,
+          showModCount: current.discordShowModCount,
+          showElapsed: current.discordShowElapsed,
+          stateOverride: activity.state,
+        },
+      }).catch(() => undefined)
+    }
+    // Anti-flap (spec §15) : un simple Alt+Tab (session publiée encore active)
+    // diffère la bascule ; la session publiée terminée (spec §13) bascule tout
+    // de suite. Si la priorité revient avant l'échéance, le timer est annulé.
+    const publishedSession = state.gameSessions.find(item => item.gameId === discordPublishedGameId && item.state === 'GameRunning')
+    if (discordSwitchTimer) { clearTimeout(discordSwitchTimer); discordSwitchTimer = undefined }
+    if (shouldDelayPrioritySwitch(discordPublishedGameId, priorityGameId, Boolean(publishedSession))) {
+      const scheduled = priorityGameId
+      discordSwitchTimer = setTimeout(() => {
+        discordSwitchTimer = undefined
+        const now = get()
+        const nowPriority = pickPrioritySession(now.gameSessions, now.pinnedPriorityGameId, now.foregroundGameId)
+        if (nowPriority === scheduled) publish(scheduled)
+      }, DISCORD_PRIORITY_DEBOUNCE_MS)
+      return
+    }
+    publish(priorityGameId)
   },
   /** Visual Profiles multi-apps (§9) : seule la session au premier plan applique
    * son profil — l'association du jeu/profil est appliquée à l'Alt+Tab (la

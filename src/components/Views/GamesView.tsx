@@ -8,6 +8,7 @@ import { ModCard } from '../UI/ModCard'
 import { FallbackArtwork } from '../UI/FallbackArtwork'
 import { ParallaxCover } from '../UI/ParallaxCover'
 import { isTouchDevice, motionReduced, parallaxActive, systemReducedMotion } from '../../lib/motion'
+import { animationsReducedDuringGame, effectivePerformance } from '../../lib/performanceProfiles'
 import { pickPrioritySession } from '../../lib/sessionPriority'
 import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { formatTime, timeAgo } from '../../utils'
@@ -668,10 +669,19 @@ function LibraryCard({ game, active, priority, activeMods, onOpen, onFavorite, o
   // actif, les animations ne sont pas réduites et l'appareil n'est pas tactile.
   const coverParallax = useStore(state => state.coverParallax)
   const motionMode = useStore(state => state.motionMode)
-  const parallax = useMemo(
-    () => parallaxActive(coverParallax, motionReduced(motionMode, systemReducedMotion())) && !isTouchDevice(),
-    [coverParallax, motionMode],
-  )
+  const gameSessions = useStore(state => state.gameSessions)
+  const performanceModes = useStore(state => state.performanceModes)
+  const performanceCustom = useStore(state => state.performanceCustom)
+  const pinnedPriorityGameId = useStore(state => state.pinnedPriorityGameId)
+  const foregroundGameId = useStore(state => state.foregroundGameId)
+  // Parallaxe coupé pendant le jeu quand un profil Performance/Équilibré réduit
+  // les animations (spec §14, §36) — les bibliothèques restent statiques.
+  const parallax = useMemo(() => {
+    if (isTouchDevice()) return false
+    if (!parallaxActive(coverParallax, motionReduced(motionMode, systemReducedMotion()))) return false
+    const effective = effectivePerformance(performanceModes, performanceCustom, gameSessions, pickPrioritySession(gameSessions, pinnedPriorityGameId, foregroundGameId))
+    return !animationsReducedDuringGame(effective.animations)
+  }, [coverParallax, motionMode, gameSessions, performanceModes, performanceCustom, pinnedPriorityGameId, foregroundGameId])
   return <div onContextMenu={event => { event.preventDefault(); onContextMenu(event.clientX, event.clientY) }} className="group relative overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.02] transition-colors hover:border-gold/25 hover:bg-white/[0.04]">
     <button type="button" onClick={onOpen} className="block w-full text-left">
       <span className="relative block aspect-[3/4] w-full overflow-hidden bg-black/30">

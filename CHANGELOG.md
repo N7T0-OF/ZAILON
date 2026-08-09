@@ -1247,6 +1247,13 @@
 
 ### Added
 
+- **Profils Performance par jeu** (spec §5-10, §23-24, §27, §40) : Bibliothèque > Jeu > Configuration > Performances — modes **Automatique / Équilibré / Performance / Qualité / Personnalisé**, avec la distinction claire **Performance ZAILON** (téléchargements, scans, animations, Quick Panel, priorité ZAILON) vs **Performance du jeu** (priorité du processus — jamais « Temps réel » ; contrôle FPS natif à venir).
+- **Presets conformes spec §24** : Performance = pause téléchargements/scans + animations coupées + Quick Panel minimal + priorité ZAILON basse ; Équilibré = limité/réduit ; Qualité = pause mais animations normales. Mode Personnalisé = 5 politiques éditables.
+- **Résolution effective multi-session** (spec §37-39) : une session active qui demande la pause → pause globale ; à la fermeture du jeu prioritaire, le niveau se recalcule automatiquement — aucune optimisation ne reste bloquée (spec §36).
+- **Parallaxe coupé pendant le jeu** (spec §14) : les profils Équilibré/Performance réduisent les animations → les couvertures restent statiques.
+- **Bannière « En pause — jeu actif »** dans Téléchargements (spec §11) quand un jeu actif impose la pause.
+- **Paramètres globaux minimaux** (spec §40) : « Mode Performance par défaut » (Automatique) + « Sur batterie » (Économie).
+
 ### Changed
 
 ### Fixed

@@ -3,6 +3,27 @@ import { useEffect, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
 import { adapterFor, isLauncherBased, LAUNCH_BEHAVIOR_LABELS } from '../../lib/launchAdapters'
+import { pickPrioritySession } from '../../lib/sessionPriority'
+import {
+  ANIMATION_POLICY_LABELS,
+  DOWNLOAD_POLICY_LABELS,
+  effectivePerformance,
+  GAME_PROCESS_PRIORITIES,
+  GAME_PROCESS_PRIORITY_LABELS,
+  PERFORMANCE_PRESETS,
+  policiesForMode,
+  QUICK_PANEL_POLICY_LABELS,
+  SCAN_POLICY_LABELS,
+  ZAILON_PRIORITY_LABELS,
+  type AnimationPolicy,
+  type DownloadPolicy,
+  type GameProcessPriority,
+  type PerformanceMode,
+  type QuickPanelPolicy,
+  type ScanPolicy,
+  type ZailonPerformancePolicies,
+  type ZailonPriorityPolicy,
+} from '../../lib/performanceProfiles'
 import { native, pickFolder } from '../../lib/native'
 import { resolveProfileMods, useStore } from '../../store/useStore'
 import type { Game, GamePreset, GameResources, ModRuntimePathType, Profile } from '../../types'
@@ -44,6 +65,13 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
   const setModsPath = useStore(state => state.setModsPath)
   const reduceExplanations = useStore(state => state.reduceExplanations)
   const advancedMode = useStore(state => state.advancedMode)
+  const performanceMode = useStore(state => state.performanceModes[game.id] ?? state.globalPerformanceMode)
+  const performanceCustom = useStore(state => state.performanceCustom[game.id])
+  const setPerformanceMode = useStore(state => state.setPerformanceMode)
+  const setPerformanceCustom = useStore(state => state.setPerformanceCustom)
+  const gameSessions = useStore(state => state.gameSessions)
+  const pinnedPriorityGameId = useStore(state => state.pinnedPriorityGameId)
+  const foregroundGameId = useStore(state => state.foregroundGameId)
   const setGameBypassPath = useStore(state => state.setGameBypassPath)
   const addGameRuntimePath = useStore(state => state.addGameRuntimePath)
   const updateGameRuntimePath = useStore(state => state.updateGameRuntimePath)
@@ -284,8 +312,16 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
         <p className="mt-3 text-[11px] leading-relaxed text-white/34">Détection d’overlays, de gestionnaires concurrents (ex. MO2) et de configuration particulière : à venir (Phase 2 de la refonte UX).</p>
       </ConfigCard>
 
-      <ConfigCard id="performances" title="Performances" icon={Gamepad2} badge="À venir" open={open.includes('performances')} onToggle={() => toggle('performances')}>
-        <p className="text-[11px] leading-relaxed text-white/38">Profils de performance par jeu (Équilibré / Performance / Qualité), pause des téléchargements et scans pendant le jeu, priorité du processus : prévus aux phases 2-4 de la refonte UX.</p>
+      <ConfigCard id="performances" title="Performances" icon={Gamepad2} badge={modeLabel(performanceMode)} open={open.includes('performances')} onToggle={() => toggle('performances')}>
+        <PerformanceSettings
+          game={game}
+          mode={performanceMode}
+          custom={performanceCustom}
+          sessions={gameSessions}
+          priorityGameId={pickPrioritySession(gameSessions, pinnedPriorityGameId, foregroundGameId)}
+          onMode={mode => setPerformanceMode(game.id, mode)}
+          onCustom={policies => setPerformanceCustom(game.id, policies)}
+        />
       </ConfigCard>
     </div>
   </div>
@@ -335,6 +371,113 @@ function LaunchChainTest({ game }: { game: Game }) {
 
 function SummaryPill({ label, value }: { label: string; value: string }) {
   return <span className="flex items-center gap-1.5 rounded-full border border-white/[0.07] bg-black/15 px-2.5 py-1 text-white/45"><span className="text-white/30">{label}</span><span className="font-semibold text-gold">{value}</span></span>
+}
+
+const MODE_OPTIONS: Array<{ id: PerformanceMode; label: string }> = [
+  { id: 'auto', label: 'Automatique' },
+  { id: 'balanced', label: 'Équilibré' },
+  { id: 'performance', label: 'Performance' },
+  { id: 'quality', label: 'Qualité' },
+  { id: 'custom', label: 'Personnalisé' },
+]
+
+const modeLabel = (mode: PerformanceMode) => mode === 'custom' ? 'Personnalisé' : PERFORMANCE_PRESETS[mode].label
+
+const DOWNLOAD_OPTIONS: Array<{ id: DownloadPolicy; label: string }> = [
+  { id: 'normal', label: 'Normaux' }, { id: 'limited', label: 'Limités' }, { id: 'paused', label: 'En pause' },
+]
+const SCAN_OPTIONS: Array<{ id: ScanPolicy; label: string }> = [
+  { id: 'normal', label: 'Normaux' }, { id: 'reduced', label: 'Réduits' }, { id: 'paused', label: 'En pause' },
+]
+const ANIMATION_OPTIONS: Array<{ id: AnimationPolicy; label: string }> = [
+  { id: 'normal', label: 'Normales' }, { id: 'reduced', label: 'Réduites' }, { id: 'off', label: 'Désactivées' },
+]
+const QUICK_PANEL_OPTIONS: Array<{ id: QuickPanelPolicy; label: string }> = [
+  { id: 'normal', label: 'Normal' }, { id: 'minimal', label: 'Minimal' },
+]
+const ZAILON_PRIORITY_OPTIONS: Array<{ id: ZailonPriorityPolicy; label: string }> = [
+  { id: 'normal', label: 'Normale' }, { id: 'low', label: 'Basse' },
+]
+
+/** Réglages Performance par jeu (spec §5-10, §23-24, §27) — distinction
+ * claire Performance ZAILON vs Performance du jeu. */
+function PerformanceSettings({ game, mode, custom, sessions, priorityGameId, onMode, onCustom }: {
+  game: Game
+  mode: PerformanceMode
+  custom?: Partial<ZailonPerformancePolicies>
+  sessions: Array<{ gameId: string; state: string }>
+  priorityGameId?: string
+  onMode: (mode: PerformanceMode) => void
+  onCustom: (policies: Partial<ZailonPerformancePolicies>) => void
+}) {
+  const preset = mode === 'custom' ? undefined : PERFORMANCE_PRESETS[mode]
+  const zailon = policiesForMode(mode, custom)
+  const effective = effectivePerformance(
+    { [game.id]: mode },
+    { [game.id]: custom },
+    sessions,
+    priorityGameId,
+  )
+  const isActive = sessions.some(session => session.gameId === game.id && session.state !== 'Ended' && session.state !== 'Failed' && session.state !== 'GameLost')
+
+  const customSelect = <T extends string>(label: string, value: T, options: Array<{ id: T; label: string }>, onChange: (value: T) => void) => (
+    <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] text-white/55">
+      <span>{label}</span>
+      <select value={value} onChange={event => onChange(event.target.value as T)} className="rounded border border-white/[0.08] bg-[#111515] px-2 py-1.5 text-[11px] text-white/70">{options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select>
+    </label>
+  )
+
+  return <div className="space-y-3">
+    <label className="flex items-center justify-between gap-3">
+      <span className="flex items-center gap-2 text-[11px] text-white/60"><strong className="text-white/76">Mode de performance</strong><InfoBubble text="La manière dont ZAILON se comporte autour du jeu : téléchargements, scans, animations, priorité. Ne modifie jamais les réglages graphiques du jeu sans adaptateur spécifique." /></span>
+      <select value={mode} onChange={event => onMode(event.target.value as PerformanceMode)} className="rounded-lg border border-white/[0.08] bg-[#111515] px-2.5 py-2 text-[11px] text-white/72">{MODE_OPTIONS.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select>
+    </label>
+    {preset && <p className="rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-white/40">{preset.description}</p>}
+    {isActive && <p className="rounded-lg border border-emerald-300/15 bg-emerald-300/[0.04] px-3 py-2 text-[11px] text-emerald-100/70">Session en cours : {modeLabel(mode)} appliqué — les politiques effectives ci-dessous sont actives.</p>}
+
+    <div className="rounded-xl border border-white/[0.07] bg-white/[0.015] p-3">
+      <p className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-white/68"><Settings2 size={12} className="text-gold/70" />Performance ZAILON</p>
+      <div className="space-y-1.5">
+        {mode === 'custom'
+          ? <>
+            {customSelect<DownloadPolicy>('Téléchargements pendant le jeu', zailon.downloads, DOWNLOAD_OPTIONS, value => onCustom({ downloads: value }))}
+            {customSelect<ScanPolicy>('Scans', zailon.scans, SCAN_OPTIONS, value => onCustom({ scans: value }))}
+            {customSelect<AnimationPolicy>('Animations ZAILON', zailon.animations, ANIMATION_OPTIONS, value => onCustom({ animations: value }))}
+            {customSelect<QuickPanelPolicy>('Quick Panel', zailon.quickPanel, QUICK_PANEL_OPTIONS, value => onCustom({ quickPanel: value }))}
+            {customSelect<ZailonPriorityPolicy>('Priorité ZAILON', zailon.zailonPriority, ZAILON_PRIORITY_OPTIONS, value => onCustom({ zailonPriority: value }))}
+          </>
+          : <div className="grid gap-1.5 sm:grid-cols-2">
+            <span className="flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] text-white/55">Téléchargements<span className="font-semibold text-white/72">{DOWNLOAD_POLICY_LABELS[zailon.downloads]}</span></span>
+            <span className="flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] text-white/55">Scans<span className="font-semibold text-white/72">{SCAN_POLICY_LABELS[zailon.scans]}</span></span>
+            <span className="flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] text-white/55">Animations ZAILON<span className="font-semibold text-white/72">{ANIMATION_POLICY_LABELS[zailon.animations]}</span></span>
+            <span className="flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] text-white/55">Quick Panel<span className="font-semibold text-white/72">{QUICK_PANEL_POLICY_LABELS[zailon.quickPanel]}</span></span>
+            <span className="flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] text-white/55">Priorité ZAILON<span className="font-semibold text-white/72">{ZAILON_PRIORITY_LABELS[zailon.zailonPriority]}</span></span>
+          </div>}
+      </div>
+    </div>
+
+    <div className="rounded-xl border border-white/[0.07] bg-white/[0.015] p-3">
+      <p className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-white/68"><Gamepad2 size={12} className="text-gold/70" />Performance du jeu</p>
+      <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] text-white/55">
+        <span className="flex items-center gap-2"><span>Priorité du processus</span><InfoBubble text="Automatique : Windows gère normalement. Jamais « Temps réel » — il peut rendre Windows instable. La priorité revient à l’état précédent à la fermeture du jeu." /></span>
+        <select value={mode === 'custom' ? 'auto' : PERFORMANCE_PRESETS[mode].game.processPriority} disabled className="rounded border border-white/[0.08] bg-[#111515] px-2 py-1.5 text-[11px] text-white/70">{GAME_PROCESS_PRIORITIES.map(priority => <option key={priority} value={priority}>{GAME_PROCESS_PRIORITY_LABELS[priority]}</option>)}</select>
+      </label>
+      <p className="mt-2 flex items-center justify-between gap-3 rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] text-white/45">
+        <span>Limite d’images par seconde</span><span className="font-semibold text-white/60">Backends natifs à venir <InfoBubble text="Le contrôle FPS utilisera uniquement des méthodes officielles (paramètre natif du jeu, API du pilote) — jamais d’injection. Les jeux protégés (anti-cheat) resteront limités aux réglages officiels." /></span>
+      </p>
+    </div>
+
+    <div className="rounded-xl border border-gold/15 bg-gold/[0.03] p-3">
+      <p className="text-[11px] font-semibold text-white/70">Configuration effective</p>
+      <div className="mt-1.5 grid gap-1 sm:grid-cols-2">
+        <span className="flex items-center justify-between text-[11px] text-white/48">Mode<span className="font-semibold text-gold">{MODE_OPTIONS.find(option => option.id === mode)?.label}</span></span>
+        <span className="flex items-center justify-between text-[11px] text-white/48">Téléchargements<span className="font-semibold text-white/70">{DOWNLOAD_POLICY_LABELS[effective.downloads]}</span></span>
+        <span className="flex items-center justify-between text-[11px] text-white/48">Scans<span className="font-semibold text-white/70">{SCAN_POLICY_LABELS[effective.scans]}</span></span>
+        <span className="flex items-center justify-between text-[11px] text-white/48">Animations<span className="font-semibold text-white/70">{ANIMATION_POLICY_LABELS[effective.animations]}</span></span>
+        <span className="flex items-center justify-between text-[11px] text-white/48">Priorité du jeu<span className="font-semibold text-white/70">{GAME_PROCESS_PRIORITY_LABELS[effective.gameProcessPriority]}</span></span>
+      </div>
+    </div>
+  </div>
 }
 
 function ConfigCard({ id, title, icon: Icon, badge, open, onToggle, children }: { id: string; title: string; icon: LucideIcon; badge?: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {

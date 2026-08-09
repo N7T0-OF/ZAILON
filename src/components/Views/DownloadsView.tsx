@@ -1,6 +1,8 @@
-import { Activity, AlertTriangle, CheckCircle2, Clock3, Download, Loader2, Search, Trash2, XCircle } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, Clock3, Download, Loader2, PauseCircle, Search, Trash2, XCircle } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { native, type BackgroundTaskSnapshot } from '../../lib/native'
+import { effectivePerformance } from '../../lib/performanceProfiles'
+import { pickPrioritySession } from '../../lib/sessionPriority'
 import { useStore } from '../../store/useStore'
 import type { DownloadRetention } from '../../types'
 
@@ -31,6 +33,19 @@ export function DownloadsView() {
       && (!normalized || `${task.title} ${task.message} ${task.error || ''}`.toLocaleLowerCase().includes(normalized))
   }), [kind, query, status, tasks])
   const running = tasks.filter(task => task.status === 'running').length
+  // Politique de téléchargements effective (spec §11, §37-39) : un jeu actif
+  // avec un profil Performance/Qualité met les téléchargements « en pause ».
+  const gameSessions = useStore(state => state.gameSessions)
+  const performanceModes = useStore(state => state.performanceModes)
+  const performanceCustom = useStore(state => state.performanceCustom)
+  const pinnedPriorityGameId = useStore(state => state.pinnedPriorityGameId)
+  const foregroundGameId = useStore(state => state.foregroundGameId)
+  const downloadsPaused = useMemo(() => effectivePerformance(
+    performanceModes,
+    performanceCustom,
+    gameSessions,
+    pickPrioritySession(gameSessions, pinnedPriorityGameId, foregroundGameId),
+  ).downloads === 'paused', [gameSessions, performanceModes, performanceCustom, pinnedPriorityGameId, foregroundGameId])
 
   return <div className="h-full overflow-y-auto p-5 sm:p-7">
     <header><p className="font-mono text-[11px] uppercase tracking-[0.24em] text-gold/58">Centre des tâches et de l’activité</p><h1 className="mt-1 font-display text-2xl font-bold text-white">Téléchargements et activité</h1><p className="mt-1 max-w-2xl text-xs text-white/42">Les transferts, analyses, imports, installations et déploiements réellement lancés par ZAILON restent consultables ici après leur fin.</p></header>
@@ -38,6 +53,7 @@ export function DownloadsView() {
       <label className="flex min-w-56 flex-1 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3"><Search size={14} className="text-white/30" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Rechercher dans l’historique…" className="min-w-0 flex-1 bg-transparent py-2 text-xs text-white/72 outline-none" /></label>
       <select value={kind} onChange={event => setKind(event.target.value)} className="rounded-lg border border-white/[0.08] bg-[#101313] px-3 py-2 text-xs text-white/68"><option value="all">Tous les types</option>{kinds.map(value => <option key={value} value={value}>{value}</option>)}</select>
       {running > 0 && <span className="flex items-center gap-1.5 rounded-full border border-gold/20 bg-gold/[0.05] px-3 py-1.5 text-[11px] font-semibold text-gold"><Loader2 size={11} className="animate-spin" />{running} en cours</span>}
+      {downloadsPaused && <span className="flex items-center gap-1.5 rounded-full border border-amber-300/20 bg-amber-300/[0.05] px-3 py-1.5 text-[11px] font-semibold text-amber-100/75"><PauseCircle size={11} />En pause — jeu actif</span>}
     </section>
     <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
       <label className="flex items-center gap-2 text-[11px] text-white/38">Nettoyage des téléchargements

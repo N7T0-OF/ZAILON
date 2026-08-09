@@ -9,6 +9,7 @@ import { validateFrameworkHierarchy } from '../lib/frameworkHierarchy'
 import { mergeModCatalogs, reconcileModStates } from '../lib/profileState'
 import { arbitrateInputProfiles, pickPrioritySession, recoveryKind } from '../lib/sessionPriority'
 import { compareFrameworkSets, fingerprintFrameworkSet, hasFrameworkChanges, type FrameworkSnapshot } from '../lib/lastKnownGood'
+import type { PerformanceMode, ZailonPerformancePolicies } from '../lib/performanceProfiles'
 import { evaluateSessionEnd } from '../lib/sessionEnd'
 
 const APP_VERSION = '1.46.0'
@@ -292,6 +293,14 @@ export interface Store {
   motionMode: MotionMode
   /** Effet 3D des couvertures (parallaxe subtil, spec §12). */
   coverParallax: boolean
+  /** Profil Performance par jeu (spec §5-10, §23) : id du jeu → mode. */
+  performanceModes: Record<string, PerformanceMode>
+  /** Personnalisation du mode custom par jeu (spec §10, §23). */
+  performanceCustom: Record<string, Partial<ZailonPerformancePolicies>>
+  /** Mode Performance global par défaut (spec §40). */
+  globalPerformanceMode: PerformanceMode
+  /** Comportement sur batterie (spec §40, §34). */
+  batteryPerformanceBehavior: 'economy' | 'balanced'
   autoArtwork: boolean
   /** Clé API SteamGridDB (illustrations). Stockée localement, transmise
    * uniquement à SteamGridDB — jamais à un autre fournisseur. */
@@ -422,6 +431,10 @@ export interface Store {
   setUiDensity: (density: UiDensity) => void
   setMotionMode: (mode: MotionMode) => void
   setCoverParallax: (enabled: boolean) => void
+  setPerformanceMode: (gameId: string, mode: PerformanceMode) => void
+  setPerformanceCustom: (gameId: string, policies: Partial<ZailonPerformancePolicies>) => void
+  setGlobalPerformanceMode: (mode: PerformanceMode) => void
+  setBatteryPerformanceBehavior: (behavior: 'economy' | 'balanced') => void
   setAutoArtwork: (enabled: boolean) => void
   setArtworkSteamGridDbKey: (value: string) => void
   setArtworkIgdbClientId: (value: string) => void
@@ -642,6 +655,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
   uiDensity: 'comfortable',
   motionMode: 'auto',
   coverParallax: true,
+  performanceModes: {},
+  performanceCustom: {},
+  globalPerformanceMode: 'auto',
+  batteryPerformanceBehavior: 'economy',
   autoArtwork: false,
   artworkSteamGridDbKey: '',
   artworkIgdbClientId: '',
@@ -1300,6 +1317,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setUiDensity: uiDensity => set({ uiDensity }),
   setMotionMode: motionMode => set({ motionMode }),
   setCoverParallax: coverParallax => set({ coverParallax }),
+  setPerformanceMode: (gameId, mode) => set(state => ({ performanceModes: { ...state.performanceModes, [gameId]: mode } })),
+  setPerformanceCustom: (gameId, policies) => set(state => ({ performanceCustom: { ...state.performanceCustom, [gameId]: { ...state.performanceCustom[gameId], ...policies } } })),
+  setGlobalPerformanceMode: globalPerformanceMode => set({ globalPerformanceMode }),
+  setBatteryPerformanceBehavior: batteryPerformanceBehavior => set({ batteryPerformanceBehavior }),
   setAutoArtwork: autoArtwork => set({ autoArtwork }),
   setArtworkSteamGridDbKey: artworkSteamGridDbKey => set({ artworkSteamGridDbKey }),
   setArtworkIgdbClientId: artworkIgdbClientId => set({ artworkIgdbClientId }),
@@ -2456,6 +2477,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
     uiDensity: state.uiDensity,
     motionMode: state.motionMode,
     coverParallax: state.coverParallax,
+    performanceModes: state.performanceModes,
+    performanceCustom: state.performanceCustom,
+    globalPerformanceMode: state.globalPerformanceMode,
+    batteryPerformanceBehavior: state.batteryPerformanceBehavior,
     autoArtwork: state.autoArtwork,
     artworkSteamGridDbKey: state.artworkSteamGridDbKey,
     artworkIgdbClientId: state.artworkIgdbClientId,

@@ -9,7 +9,7 @@ import { validateFrameworkHierarchy } from '../lib/frameworkHierarchy'
 import { mergeModCatalogs, reconcileModStates } from '../lib/profileState'
 import { arbitrateInputProfiles, pickPrioritySession, recoveryKind } from '../lib/sessionPriority'
 import { compareFrameworkSets, fingerprintFrameworkSet, hasFrameworkChanges, type FrameworkSnapshot } from '../lib/lastKnownGood'
-import type { PerformanceMode, ZailonPerformancePolicies } from '../lib/performanceProfiles'
+import { effectivePerformance, type DownloadPolicy, type PerformanceMode, type ScanPolicy, type ZailonPerformancePolicies } from '../lib/performanceProfiles'
 import { evaluateSessionEnd } from '../lib/sessionEnd'
 
 const APP_VERSION = '1.47.0'
@@ -301,6 +301,10 @@ export interface Store {
   globalPerformanceMode: PerformanceMode
   /** Comportement sur batterie (spec §40, §34). */
   batteryPerformanceBehavior: 'economy' | 'balanced'
+  /** Activité runtime dérivée des sessions (spec §11-13, §36) : les politiques
+   * effectives des profils Performance — recalculée à chaque changement de
+   * session ; jamais persistée, rien ne reste bloqué à la fermeture. */
+  runtimeActivity: { downloads: DownloadPolicy; scans: ScanPolicy }
   autoArtwork: boolean
   /** Clé API SteamGridDB (illustrations). Stockée localement, transmise
    * uniquement à SteamGridDB — jamais à un autre fournisseur. */
@@ -435,6 +439,7 @@ export interface Store {
   setPerformanceCustom: (gameId: string, policies: Partial<ZailonPerformancePolicies>) => void
   setGlobalPerformanceMode: (mode: PerformanceMode) => void
   setBatteryPerformanceBehavior: (behavior: 'economy' | 'balanced') => void
+  reconcileRuntimeActivity: () => void
   setAutoArtwork: (enabled: boolean) => void
   setArtworkSteamGridDbKey: (value: string) => void
   setArtworkIgdbClientId: (value: string) => void
@@ -659,6 +664,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   performanceCustom: {},
   globalPerformanceMode: 'auto',
   batteryPerformanceBehavior: 'economy',
+  runtimeActivity: { downloads: 'normal', scans: 'normal' },
   autoArtwork: false,
   artworkSteamGridDbKey: '',
   artworkIgdbClientId: '',
@@ -812,7 +818,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
           }
         })
       }
-      if (get().autoArtwork) {
+      // Spec Performance §12 : quand un jeu actif met les scans en pause, la
+      // recherche d'artwork automatique est suspendue (reprise au prochain
+      // ajout — aucune file orpheline).
+      if (get().autoArtwork && get().runtimeActivity.scans === 'normal') {
         fresh.forEach(game => {
           void automaticArtworkForGame(game, { steamGridDbKey: get().artworkSteamGridDbKey, igdbClientId: get().artworkIgdbClientId, igdbClientSecret: get().artworkIgdbClientSecret }).then(resources => {
             if (!Object.keys(resources).length) return
@@ -1321,6 +1330,27 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setPerformanceCustom: (gameId, policies) => set(state => ({ performanceCustom: { ...state.performanceCustom, [gameId]: { ...state.performanceCustom[gameId], ...policies } } })),
   setGlobalPerformanceMode: globalPerformanceMode => set({ globalPerformanceMode }),
   setBatteryPerformanceBehavior: batteryPerformanceBehavior => set({ batteryPerformanceBehavior }),
+  /** Recalcule les politiques effectives (spec §37-39, §36) à chaque
+   * changement de session / de profil : dérivé des sessions vivantes, il
+   * revient automatiquement à « normal » quand le jeu ferme. */
+  reconcileRuntimeActivity: () => {
+    const state = get()
+    // Le mode global (spec §40) s'applique aux jeux sans mode explicite.
+    const modes: Record<string, PerformanceMode> = { ...state.performanceModes }
+    for (const session of state.gameSessions) {
+      if (!modes[session.gameId]) modes[session.gameId] = state.globalPerformanceMode
+    }
+    const effective = effectivePerformance(
+      modes,
+      state.performanceCustom,
+      state.gameSessions,
+      pickPrioritySession(state.gameSessions, state.pinnedPriorityGameId, state.foregroundGameId),
+    )
+    const next = { downloads: effective.downloads, scans: effective.scans }
+    if (state.runtimeActivity.downloads !== next.downloads || state.runtimeActivity.scans !== next.scans) {
+      set({ runtimeActivity: next })
+    }
+  },
   setAutoArtwork: autoArtwork => set({ autoArtwork }),
   setArtworkSteamGridDbKey: artworkSteamGridDbKey => set({ artworkSteamGridDbKey }),
   setArtworkIgdbClientId: artworkIgdbClientId => set({ artworkIgdbClientId }),

@@ -1254,6 +1254,15 @@
 - **Bannière « En pause — jeu actif »** dans Téléchargements (spec §11) quand un jeu actif impose la pause.
 - **Paramètres globaux minimaux** (spec §40) : « Mode Performance par défaut » (Automatique) + « Sur batterie » (Économie).
 
+## 1.48.0 — Game Mode : suspension automatique des tâches de fond pendant le jeu
+
+### Added
+
+- **GameModeTaskScheduler côté runtime** (spec §13) : les politiques effectives des profils Performance (téléchargements / scans) sont désormais **dérivées des sessions vivantes** (`runtimeActivity` dans le store) et recalculées à chaque changement de session ou de profil — `reconcileRuntimeActivity()` — sans rien persister : à la fermeture du jeu, tout revient automatiquement à « normal » (spec §36).
+- **Watcher de présence ralenti en mode jeu** : la cadence du GamePresenceEngine passe de 3 s à 6 s quand un jeu tourne **ou** que la politique effective impose la pause — la présence Steam/runtime reste suivie sans activité lourde (spec §8).
+- **Artwork automatique suspendu** (spec §12) : quand un jeu actif met les scans en pause, la recherche d'illustrations automatique est suspendue (reprise au prochain ajout de jeu — aucune file orpheline).
+- **Gating des actions lourdes** (spec §8, §12) : les boutons **Analyser** (onglet Mods) et **Détecter** (Bibliothèque) sont désactivés pendant le jeu avec une infobulle « En pause — jeu actif (profil Performance). Reprenez après la fermeture du jeu. »
+
 ## [Unreleased]
 
 ### Added

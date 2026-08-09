@@ -38,10 +38,23 @@ export default function App() {
   const quickPanelShortcut = useStore(s => s.quickPanelShortcut)
   const gameSessions = useStore(s => s.gameSessions)
   const reduceActivityDuringGame = useStore(s => s.reduceActivityDuringGame)
+  const performanceModes = useStore(s => s.performanceModes)
+  const performanceCustom = useStore(s => s.performanceCustom)
+  const globalPerformanceMode = useStore(s => s.globalPerformanceMode)
+  const batteryPerformanceBehavior = useStore(s => s.batteryPerformanceBehavior)
+  const reconcileRuntimeActivity = useStore(s => s.reconcileRuntimeActivity)
   const autoMinimizeOnGameStart = useStore(s => s.autoMinimizeOnGameStart)
   const restoreAfterGame = useStore(s => s.restoreAfterGame)
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
   const [exclusiveNoticeOpen, setExclusiveNoticeOpen] = useState(false)
+
+  // Game Mode (spec §11-13, §36) : à chaque changement de session ou de profil
+  // Performance, les politiques effectives (téléchargements/scans) sont
+  // recalculées — dérivées des sessions vivantes, elles reviennent à « normal »
+  // automatiquement quand le jeu ferme (aucune restauration nécessaire).
+  useEffect(() => {
+    reconcileRuntimeActivity()
+  }, [gameSessions, performanceModes, performanceCustom, globalPerformanceMode, batteryPerformanceBehavior, reconcileRuntimeActivity])
 
   // GamePresenceEngine : un seul watcher léger suit (a) les sessions en attente
   // de leur processus final, (b) les jeux configurés lancés hors ZAILON, et
@@ -62,9 +75,12 @@ export default function App() {
       tick()
       if (!native.isDesktop()) return
       const now = Date.now()
-      // Mode jeu (spec #50-51) : quand un jeu tourne, le watcher ralentit
-      // (6 s au lieu de 3 s) — la présence reste suivie sans activité lourde.
-      const gameModeActive = state.reduceActivityDuringGame && state.gameSessions.some(session => session.state === 'GameRunning')
+      // Mode jeu (spec #50-51, Performance §8) : quand un jeu tourne, le
+      // watcher ralentit (6 s au lieu de 3 s) — la présence reste suivie sans
+      // activité lourde. La politique effective des profils Performance (scans
+      // en pause/réduits) pilote aussi cette cadence.
+      const gameModeActive = (state.reduceActivityDuringGame || state.runtimeActivity.scans !== 'normal' || state.runtimeActivity.downloads === 'paused')
+        && state.gameSessions.some(session => session.state === 'GameRunning')
       const installed = state.games.filter(game => game.installDirectory)
       const appIds = [...new Set(installed.map(game => adapterFor(game).steamAppId).filter((id): id is number => id !== undefined))]
       // Preuve Steam (registre RunningAppID) : le jeu est-il « En cours » ?

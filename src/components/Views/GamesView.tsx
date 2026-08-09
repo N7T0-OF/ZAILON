@@ -61,6 +61,7 @@ export function GamesView() {
   const setGamesBrowsing = useStore(state => state.setGamesBrowsing)
   const backgroundTasks = useStore(state => state.backgroundTasks)
   const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
+  const runtimeActivity = useStore(state => state.runtimeActivity)
   const launchSelectedGame = useStore(state => state.launchSelectedGame)
   const isLaunching = useStore(state => state.isLaunching)
   const launchProgress = useStore(state => state.launchProgress)
@@ -511,7 +512,7 @@ export function GamesView() {
       {tab === 'mods' && <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.05] p-3">
           <button onClick={() => setImportOpen(true)} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-ink-400"><FolderInput size={13} /> Importer des dossiers</button>
-          <button onClick={() => void scanMods(selectedGame.id)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05]"><RefreshCw size={13} /> Analyser</button>
+          <button onClick={() => void scanMods(selectedGame.id)} disabled={!!activeSession && runtimeActivity.scans !== 'normal'} title={activeSession && runtimeActivity.scans !== 'normal' ? 'En pause — jeu actif (profil Performance). Reprenez après la fermeture du jeu.' : 'Analyser le dossier Mods'} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-40"><RefreshCw size={13} /> Analyser</button>
           <button onClick={() => void deduplicateStagedMods(selectedGame.id)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05]"><Boxes size={13} /> Nettoyer les doublons</button>
           <button onClick={() => void purgeUnreferencedStagedMods(selectedGame.id)} className="flex items-center gap-1.5 rounded-lg border border-red-300/12 px-3 py-2 text-[11px] text-red-100/58 hover:bg-red-300/[0.05]"><Trash2 size={13} /> Purger les paquets retirés</button>
           <button onClick={() => void repairStagedImports()} title="Re-stager chaque paquet importé depuis sa source enregistrée (racines de jeu corrigées)" className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05]"><RotateCcw size={13} />Réparer les racines des imports</button>
@@ -567,6 +568,8 @@ function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, fil
   onDetect: () => void
 }) {
   const sessions = useStore(state => state.gameSessions)
+  const anyGameRunning = useStore(state => state.gameSessions.some(session => session.state === 'GameRunning'))
+  const runtimeActivity = useStore(state => state.runtimeActivity)
   const pinnedPriorityGameId = useStore(state => state.pinnedPriorityGameId)
   const foregroundGameId = useStore(state => state.foregroundGameId)
   const setGameFavorite = useStore(state => state.setGameFavorite)
@@ -628,7 +631,7 @@ function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, fil
       <div className="min-w-0"><h1 className="font-display text-lg font-bold text-white">Bibliothèque</h1><p className="mt-0.5 text-[11px] text-white/34">{counts.all} élément(s) · {counts.games} jeu(x) · {counts.apps} application(s)</p></div>
       <div className="relative ml-auto w-full max-w-md"><Search size={13} className="absolute left-3 top-2.5 text-white/30" /><input ref={searchRef} value={search} onChange={event => onSearch(event.target.value)} placeholder="Rechercher un jeu ou une application" className="w-full rounded-lg border border-white/[0.08] bg-white/[0.03] py-2 pl-8 pr-2 text-[11px] text-white/70 outline-none focus:border-gold/30" /></div>
       <div className="flex items-center gap-1.5">
-        <button type="button" onClick={onDetect} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]"><Radar size={12} />Détecter</button>
+        <button type="button" onClick={onDetect} disabled={anyGameRunning && runtimeActivity.scans !== 'normal'} title={anyGameRunning && runtimeActivity.scans !== 'normal' ? 'En pause — jeu actif (profil Performance). Reprenez après la fermeture du jeu.' : 'Détecter les jeux installés'} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-40"><Radar size={12} />Détecter</button>
         <button type="button" onClick={onAddGame} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-ink-400"><Plus size={12} />Ajouter un jeu</button>
       </div>
     </header>

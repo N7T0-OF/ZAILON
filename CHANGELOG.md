@@ -1177,7 +1177,7 @@
 
 ### Removed
 
-## [Unreleased]
+## [1.41.0] — 2026-08-09
 
 ### Added
 
@@ -1190,6 +1190,24 @@
 ### Fixed
 
 - **« TweakXL requis » / « ArchiveXL requis » alors que les fichiers existent** : la cause était une destination unique par paquet — le contenu restant (ex. `red4ext/plugins/…`) était empilé sous la première racine détectée (ex. `r6/tweaks/…`) ou sous `mods/`. Le mapping par fichier projette chaque fichier à la bonne racine.
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Fixed
 
 ### Performance
 

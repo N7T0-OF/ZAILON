@@ -83,6 +83,10 @@ pub struct GamePresence {
     pub process_path: String,
     pub score: u8,
     pub matched_executable: Option<String>,
+    /// Vrai si le processus correspond à un launcher intermédiaire connu (jamais
+    /// le jeu final). Utilisé pour la fin de session : un launcher encore ouvert
+    /// ne doit pas maintenir « En cours » (spec RuntimeSessionV3 §2).
+    pub is_launcher_process: bool,
 }
 
 /// Normalise un chemin pour la comparaison (minuscules, séparateurs uniformes).
@@ -97,6 +101,30 @@ fn path_under(root: &str, candidate: &str) -> bool {
     let root = normalize(root);
     let candidate = normalize(candidate);
     candidate == root || candidate.starts_with(&format!("{root}/"))
+}
+
+/// Vrai si le nom correspond à un launcher intermédiaire connu ET pas à un
+/// exécutable final (candidat jeu ou signature apprise) — un processus peut
+/// théoriquement correspondre aux deux ; le jeu l'emporte alors.
+pub fn is_launcher_process(candidate: &ProcessCandidate, request: &GamePresenceRequest) -> bool {
+    let name = candidate.executable_name.to_lowercase();
+    let game_name = request
+        .game_executable_candidates
+        .iter()
+        .any(|candidate| candidate.to_lowercase() == name)
+        || request
+            .learned_signatures
+            .iter()
+            .any(|signature| signature.filename.to_lowercase() == name);
+    if game_name {
+        return false;
+    }
+    request
+        .launcher_executable_candidates
+        .iter()
+        .chain(request.launcher_executable.iter())
+        .filter(|candidate| !candidate.is_empty())
+        .any(|launcher| name == launcher.to_lowercase())
 }
 
 /// Score 0-100 d'un processus candidat pour une demande de jeu.
@@ -223,13 +251,14 @@ pub fn detect_games(
 ) -> Vec<GamePresence> {
     let mut results = Vec::new();
     for request in requests {
-        let mut best: Option<(u8, &ProcessCandidate, Option<String>)> = None;
+        let mut best: Option<(u8, &ProcessCandidate, Option<String>, bool)> = None;
         for candidate in candidates {
             let score = score_process(candidate, request);
             if score >= 50 {
+                let launcher = is_launcher_process(candidate, request);
                 let better = match best {
                     None => true,
-                    Some((current_score, _, _)) => score > current_score,
+                    Some((current_score, _, _, _)) => score > current_score,
                 };
                 if better {
                     best = Some((
@@ -240,11 +269,12 @@ pub fn detect_games(
                         } else {
                             None
                         },
+                        launcher,
                     ));
                 }
             }
         }
-        if let Some((score, candidate, matched)) = best {
+        if let Some((score, candidate, matched, launcher)) = best {
             results.push(GamePresence {
                 game_id: request.game_id.clone(),
                 pid: candidate.pid,
@@ -252,6 +282,7 @@ pub fn detect_games(
                 process_path: candidate.executable_path.clone(),
                 score,
                 matched_executable: matched,
+                is_launcher_process: launcher,
             });
         }
     }
@@ -428,6 +459,36 @@ mod tests {
         let results = detect_games(&[process], &[nte_request(true)]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].score, 75);
+        // Spec RuntimeSessionV3 §2 : un launcher ne maintient JAMAIS « En cours ».
+        assert!(results[0].is_launcher_process);
+    }
+
+    #[test]
+    fn final_process_is_not_a_launcher_even_inside_install() {
+        let process = candidate(
+            "HT-Win64-Shipping.exe",
+            "X:\\Games\\Neverness To Everness\\Client\\WindowsNoEditor\\HT\\Binaries\\Win64\\HT-Win64-Shipping.exe",
+        );
+        let results = detect_games(&[process], &[nte_request(false)]);
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].is_launcher_process);
+    }
+
+    #[test]
+    fn game_name_wins_over_launcher_name_match() {
+        // Un exécutable listé à la fois comme candidat jeu et launcher est un
+        // processus final (le jeu l'emporte — spec §2).
+        let mut request = nte_request(false);
+        request
+            .game_executable_candidates
+            .push("ntegloballauncher.exe".to_string());
+        let process = candidate(
+            "ntegloballauncher.exe",
+            "X:\\Games\\Neverness To Everness\\NTEGlobal\\ntegloballauncher.exe",
+        );
+        let results = detect_games(&[process], &[request]);
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].is_launcher_process);
     }
 
     #[test]

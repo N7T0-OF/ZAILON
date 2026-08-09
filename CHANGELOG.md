@@ -1158,7 +1158,12 @@
 
 ### Added
 
+- **Quick Panel — état réel (spec RuntimeSessionV3 §49)** : le panneau affiche désormais les statuts RÉELS de la session (Connexion ZAILON / Clavier / Visuel / Runtime en ✓/⚠) transmis par la fenêtre principale — plus jamais un état local optimiste ; l'interrupteur clavier se synchronise sur l'activation réelle.
+- **Diagnostic fenêtre du Quick Panel (spec §22, §50)** : nouvelle commande native `quick_panel_status` (créée, visible, focus, always-on-top, taille, position) ; carte « Quick Panel — diagnostic fenêtre » dans État & Diagnostic > Lancement (mode avancé) avec session cible, jeu au premier plan et état du rendu — jamais de fausse activation.
+
 ### Changed
+
+- **`quick-panel-state` enrichi** : la fenêtre principale transmet `connected`, `inputActive`, `visualActive`, `runtimeActive` en plus du résumé adaptatif (jeu, profil, mods, layout, bypass, RED4ext).
 
 ### Fixed
 

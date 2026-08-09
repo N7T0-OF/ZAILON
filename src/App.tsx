@@ -348,6 +348,12 @@ export default function App() {
         layoutLabel: effectiveInputProfile(game, profile?.id) ? LAYOUT_LABELS[effectiveLayout(game, profile?.id)] : undefined,
         bypassActive: Boolean(game.bypassPath),
         red4extActive: isRed4extActive(profileMods),
+        // Spec RuntimeSessionV3 §49 : le panneau affiche l'état RÉEL d'activation
+        // de la session (source de confiance), pas seulement la configuration.
+        connected: true,
+        inputActive: session.inputProfileActive,
+        visualActive: session.visualProfileActive,
+        runtimeActive: session.runtimeToolsActive,
       }).catch(() => undefined)
     }).then(dispose => { unlisten = dispose })
     return () => unlisten?.()

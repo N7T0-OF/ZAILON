@@ -5,7 +5,8 @@ import { effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
 import { compareFrameworkSets, fingerprintFrameworkSet } from '../../lib/lastKnownGood'
 import { evaluateRed4extRepair, type Red4extRepairSummary } from '../../lib/frameworkValidator'
 import { adapterFor, LAUNCH_BEHAVIOR_LABELS, SESSION_STATE_LABELS } from '../../lib/launchAdapters'
-import { native, type ProfileDeploymentAudit } from '../../lib/native'
+import { native, type ProfileDeploymentAudit, type QuickPanelStatus } from '../../lib/native'
+import { pickPrioritySession } from '../../lib/sessionPriority'
 import { useStore } from '../../store/useStore'
 import type { Game, GameTestRun, Mod, Profile } from '../../types'
 import { Toggle } from '../UI/Toggle'
@@ -381,6 +382,7 @@ function LaunchSessionPanel({ game }: { game: Game }) {
   const selectedProfileId = useStore(state => state.selectedProfileId)
   const autoAttachGames = useStore(state => state.autoAttachGames || [])
   const setGameAutoAttach = useStore(state => state.setGameAutoAttach)
+  const advancedMode = useStore(state => state.advancedMode)
   const profileId = selectedProfileId || game.profiles[0]?.id || ''
   const adapter = adapterFor(game)
   const now = Date.now()
@@ -428,6 +430,8 @@ function LaunchSessionPanel({ game }: { game: Game }) {
         </div>}
     </div>
 
+    {advancedMode && <QuickPanelDiagnostic />}
+
     {pastSessions.length > 0 && <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
       <p className="text-[11px] font-semibold text-white/68">Sessions récentes</p>
       <ul className="mt-2 divide-y divide-white/[0.05]">{pastSessions.map(item => <li key={item.id} className="flex flex-wrap items-center gap-2 py-2 text-[11px]"><span className={`h-1.5 w-1.5 rounded-full ${item.state === 'Ended' ? 'bg-white/30' : 'bg-red-300/80'}`} /><span className="text-white/55">{SESSION_STATE_LABELS[item.state]}</span><span className="text-white/28">Profil {game.profiles.find(profile => profile.id === item.profileId)?.name || item.profileId}</span><span className="ml-auto text-white/26">{formatClock(item.startedAt)}</span></li>)}</ul>
@@ -437,6 +441,55 @@ function LaunchSessionPanel({ game }: { game: Game }) {
 
 /** Last Known Good des frameworks (spec §41-42) : référence du dernier
  * lancement réussi, différences détectées, verrou anti-remplacement silencieux. */
+/** Spec Quick Panel §22, §50 : diagnostic de la fenêtre native — affiché en
+ * mode avancé uniquement. Chaque ligne reflète l'état NATIF interrogé à
+ * l'instant (jamais une fausse activation) ; la session cible est la session
+ * prioritaire (spec §15). */
+function QuickPanelDiagnostic() {
+  const [status, setStatus] = useState<QuickPanelStatus>()
+  const sessions = useStore(state => state.gameSessions)
+  const pinnedPriorityGameId = useStore(state => state.pinnedPriorityGameId)
+  const foregroundGameId = useStore(state => state.foregroundGameId)
+  const refresh = useCallback(() => {
+    void native.quickPanel.status().then(setStatus).catch(() => undefined)
+  }, [])
+  useEffect(() => { refresh() }, [refresh])
+  const priorityGameId = pickPrioritySession(sessions, pinnedPriorityGameId)
+  const priorityGame = useStore(state => state.games.find(item => item.id === priorityGameId))
+  const foregroundGame = useStore(state => state.games.find(item => item.id === foregroundGameId))
+  const rendererState = !status
+    ? 'Inconnu'
+    : !status.created
+      ? 'Non créée'
+      : status.visible && status.focused
+        ? 'Prêt'
+        : status.visible
+          ? 'Visible (focus ailleurs)'
+          : 'Créée (masquée)'
+  const rows: Array<{ label: string; value: string; ok?: boolean }> = [
+    { label: 'Window created', value: status?.created ? 'Oui' : 'Non', ok: status?.created },
+    { label: 'Visible', value: status?.visible ? 'Oui' : 'Non', ok: status?.visible },
+    { label: 'AlwaysOnTop', value: status?.alwaysOnTop ? 'Oui' : 'Non', ok: status?.alwaysOnTop },
+    { label: 'Focused', value: status?.focused ? 'Oui' : 'Non' },
+    { label: 'Target session', value: priorityGame?.name || '—' },
+    { label: 'Foreground game', value: foregroundGame?.name || '—' },
+    { label: 'Renderer state', value: rendererState },
+  ]
+  return <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="text-[11px] font-semibold text-white/68">Quick Panel — diagnostic fenêtre</p>
+      <button type="button" onClick={refresh} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-2.5 py-1.5 text-[11px] text-white/55 hover:border-gold/25 hover:text-gold"><RefreshCw size={12} />Actualiser</button>
+    </div>
+    <div className="mt-2 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+      {rows.map(row => <div key={row.label} className="flex items-baseline justify-between gap-3 border-b border-white/[0.04] pb-1">
+        <span className="font-mono text-[11px] text-white/34">{row.label}</span>
+        <span className={`text-[11px] ${row.ok === undefined ? 'text-white/58' : row.ok ? 'text-emerald-200/75' : 'text-amber-100/80'}`}>{row.value}</span>
+      </div>)}
+    </div>
+    <p className="mt-2 text-[10px] leading-relaxed text-white/28">Mode avancé — état natif interrogé à l'instant. Le panneau cible la session prioritaire (spec §15) ; il se ferme à la perte de focus et est indisponible en plein écran exclusif (aucune injection).</p>
+  </div>
+}
+
 function FrameworkLastKnownGood({ gameId, profile, profileMods }: { gameId: string; profile: Profile; profileMods: Mod[] }) {
   const lastKnownGoodFrameworks = useStore(state => state.lastKnownGoodFrameworks?.[gameId])
   const recordLastKnownGoodFrameworks = useStore(state => state.recordLastKnownGoodFrameworks)

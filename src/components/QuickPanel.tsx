@@ -13,6 +13,12 @@ interface QuickPanelSessionState {
   layoutLabel?: string
   bypassActive?: boolean
   red4extActive?: boolean
+  /** Spec RuntimeSessionV3 §49 : état RÉEL d'activation de la session (source
+   * de confiance) — jamais déduit de la configuration seule. */
+  connected?: boolean
+  inputActive?: boolean
+  visualActive?: boolean
+  runtimeActive?: boolean
 }
 
 /**
@@ -31,7 +37,11 @@ export function QuickPanel() {
   // principale (le panneau est une WebView séparée, sans accès au store).
   useEffect(() => {
     let unlisten: UnlistenFn | undefined
-    void listen<QuickPanelSessionState>('quick-panel-state', event => setSession(event.payload)).then(dispose => { unlisten = dispose })
+    void listen<QuickPanelSessionState>('quick-panel-state', event => {
+      setSession(event.payload)
+      // Synchronise l'état réel de la session (pas un état local optimiste).
+      if (event.payload.inputActive !== undefined) setKeyboardOn(event.payload.inputActive)
+    }).then(dispose => { unlisten = dispose })
     void emit('quick-panel-ready')
     return () => unlisten?.()
   }, [])
@@ -102,6 +112,13 @@ export function QuickPanel() {
               {session.layoutLabel && <span className="rounded-md bg-white/[0.05] px-1.5 py-0.5">{session.layoutLabel}</span>}
               {session.bypassActive && <span className="rounded-md bg-white/[0.05] px-1.5 py-0.5">Bypass</span>}
               {session.red4extActive && <span className="rounded-md bg-amber-300/10 px-1.5 py-0.5 text-amber-100/80" title="Loader actif — chargement à confirmer après lancement">RED4ext ⚠</span>}
+            </div>
+            {/* Spec §49 : statuts RÉELS de la session — source de confiance. */}
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[9px] font-semibold">
+              <span className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 ${session.connected ? 'bg-emerald-300/10 text-emerald-200/85' : 'bg-amber-300/10 text-amber-100/80'}`}>{session.connected ? '✓' : '⚠'} Connexion ZAILON</span>
+              <span className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 ${session.inputActive ? 'bg-emerald-300/10 text-emerald-200/85' : 'bg-amber-300/10 text-amber-100/80'}`}>{session.inputActive ? '✓' : '⚠'} Clavier</span>
+              <span className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 ${session.visualActive ? 'bg-emerald-300/10 text-emerald-200/85' : 'bg-amber-300/10 text-amber-100/80'}`}>{session.visualActive ? '✓' : '⚠'} Visuel</span>
+              <span className={`flex items-center gap-1 rounded-full px-1.5 py-0.5 ${session.runtimeActive ? 'bg-emerald-300/10 text-emerald-200/85' : 'bg-amber-300/10 text-amber-100/80'}`}>{session.runtimeActive ? '✓' : '⚠'} Runtime</span>
             </div>
           </section>
         )}

@@ -680,6 +680,18 @@ export interface GamePresence {
   isLauncherProcess?: boolean
 }
 
+/** État réel de la fenêtre du panneau rapide (spec Quick Panel §22, §50) —
+ * jamais une fausse activation : chaque champ est interrogé côté natif. */
+export interface QuickPanelStatus {
+  created: boolean
+  visible: boolean
+  focused: boolean
+  alwaysOnTop: boolean
+  width: number
+  height: number
+  position?: [number, number]
+}
+
 export interface SteamRunningState {
   steam_running: boolean
   running_app_ids: number[]
@@ -803,6 +815,9 @@ export const native = {
     open: () => desktopOnly<void>('open_quick_panel', {}),
     close: () => desktopOnly<void>('close_quick_panel', {}),
     toggle: () => desktopOnly<boolean>('toggle_quick_panel', {}),
+    /** État réel de la fenêtre (spec §22, §50) : créée, visible, focus,
+     * always-on-top, taille, position — jamais une fausse activation. */
+    status: () => desktopOnly<QuickPanelStatus>('quick_panel_status', {}),
   },
 
   launchGame: (execPath: string, gameId: string, gameName: string, gameRoot: string, profileId: string, profileName: string, activeMods: number, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, discord: DiscordPresenceConfig | undefined, launcherBased: boolean, onProgress: (event: DeploymentProgressEvent) => void) => {

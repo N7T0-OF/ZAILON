@@ -15914,6 +15914,8 @@ pub fn run() {
             visual_profiles::delete_visual_profile,
             visual_profiles::visual_profile_history,
             visual_profiles::restore_visual_profile_version,
+            visual_profiles::read_visual_profile_version,
+            visual_profiles::delete_visual_profile_version,
             visual_profiles::export_visual_profile,
             visual_profiles::import_visual_profile,
             visual_profiles::apply_visual_profile,

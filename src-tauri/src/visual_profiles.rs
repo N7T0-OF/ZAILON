@@ -1161,10 +1161,106 @@ pub fn save_visual_profile(app: AppHandle, mut profile: VisualProfile) -> Result
         fs::create_dir_all(&history_root).map_err(|error| error.to_string())?;
         let history = history_root.join(format!("{}.json", unique_token("version")));
         fs::copy(&path, history).map_err(|error| error.to_string())?;
+        // Spec « Visual Profiles compact » §4 : l'historique est limité à 50
+        // versions — on ne conserve jamais des milliers de copies.
+        prune_visual_history(&app, &history_root, 50)?;
     }
     profile.updated_at = timestamp();
     write_json_atomic(&path, &profile)?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// Conserve uniquement les `keep` versions les plus récentes du dossier
+/// d'historique (les plus anciennes partent dans la corbeille ZAILON).
+fn prune_visual_history(
+    app: &AppHandle,
+    root: &std::path::Path,
+    keep: usize,
+) -> Result<(), String> {
+    let mut entries: Vec<(std::path::PathBuf, u64)> = fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let modified = entry
+                .metadata()
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs())
+                .unwrap_or_default();
+            Some((entry.path(), modified))
+        })
+        .collect();
+    entries.sort_by(|left, right| right.1.cmp(&left.1));
+    if entries.len() <= keep {
+        return Ok(());
+    }
+    let trash = visual_root(app)?.join("trash");
+    for (path, _) in entries.into_iter().skip(keep) {
+        let file_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("version.json");
+        if fs::rename(
+            &path,
+            trash.join(format!("{}-{}", unique_token("pruned"), file_name)),
+        )
+        .is_err()
+        {
+            let _ = fs::remove_file(&path);
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn read_visual_profile_version(
+    app: AppHandle,
+    profile_id: String,
+    file_name: String,
+) -> Result<VisualProfile, String> {
+    safe_identifier(&profile_id)?;
+    validate_history_file_name(&file_name)?;
+    let path = visual_root(&app)?
+        .join("history")
+        .join(&profile_id)
+        .join(file_name);
+    let payload = fs::read(path).map_err(|error| error.to_string())?;
+    let profile: VisualProfile =
+        serde_json::from_slice(&payload).map_err(|error| format!("Version illisible : {error}"))?;
+    Ok(profile)
+}
+
+#[tauri::command]
+pub fn delete_visual_profile_version(
+    app: AppHandle,
+    profile_id: String,
+    file_name: String,
+) -> Result<(), String> {
+    safe_identifier(&profile_id)?;
+    validate_history_file_name(&file_name)?;
+    let path = visual_root(&app)?
+        .join("history")
+        .join(&profile_id)
+        .join(file_name);
+    if !path.is_file() {
+        return Err("Version introuvable.".into());
+    }
+    let trash = visual_root(&app)?.join("trash");
+    fs::create_dir_all(&trash).map_err(|error| error.to_string())?;
+    fs::rename(
+        &path,
+        trash.join(format!("{}-{}", unique_token("version-deleted"), file_name)),
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn validate_history_file_name(file_name: &str) -> Result<(), String> {
+    if file_name.contains('/') || file_name.contains('\\') || !file_name.ends_with(".json") {
+        return Err("Version de profil invalide.".into());
+    }
+    Ok(())
 }
 
 #[tauri::command]

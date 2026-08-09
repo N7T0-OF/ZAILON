@@ -1243,7 +1243,7 @@
 - **Historique plafonné à 50 versions** côté natif (spec §4) : les plus anciennes partent en corbeille — plus jamais des milliers de copies.
 - **Nouvelles commandes natives** : `read_visual_profile_version` (lecture seule pour comparer) et `delete_visual_profile_version`.
 
-## [Unreleased]
+## 1.47.0 — Profils Performance par jeu
 
 ### Added
 
@@ -1253,6 +1253,10 @@
 - **Parallaxe coupé pendant le jeu** (spec §14) : les profils Équilibré/Performance réduisent les animations → les couvertures restent statiques.
 - **Bannière « En pause — jeu actif »** dans Téléchargements (spec §11) quand un jeu actif impose la pause.
 - **Paramètres globaux minimaux** (spec §40) : « Mode Performance par défaut » (Automatique) + « Sur batterie » (Économie).
+
+## [Unreleased]
+
+### Added
 
 ### Changed
 

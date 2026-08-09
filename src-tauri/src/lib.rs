@@ -1773,6 +1773,7 @@ async fn search_game_artwork(
     provider: Option<String>,
     provider_game_id: Option<String>,
     kind: String,
+    api_keys: Option<HashMap<String, String>>,
 ) -> Result<Vec<ArtworkCandidate>, String> {
     if !matches!(
         kind.as_str(),
@@ -1969,10 +1970,125 @@ async fn search_game_artwork(
         }
         _ => {}
     }
+    if let Some(api_keys) = api_keys {
+        if let Some(api_key) = api_keys
+            .iter()
+            .find(|(provider, _)| provider.eq_ignore_ascii_case("steamgriddb"))
+            .map(|(_, key)| key)
+        {
+            let sgdb_endpoint = match kind.as_str() {
+                "cover" => Some(("grids", "600x900")),
+                "banner" | "background" => Some(("heroes", "1920x620")),
+                "logo" => Some(("logos", "")),
+                "icon" => Some(("icons", "")),
+                _ => None,
+            };
+            if let Some((endpoint, dimensions)) = sgdb_endpoint {
+                let mut sgdb_url =
+                    url::Url::parse(&format!("https://www.steamgriddb.com/api/v2/{endpoint}/{app_id}"))
+                        .map_err(to_error)?;
+                if !dimensions.is_empty() {
+                    sgdb_url.query_pairs_mut().append_pair("dimensions", dimensions);
+                }
+                let request = client.get(sgdb_url).header(
+                    reqwest::header::AUTHORIZATION,
+                    format!("Bearer {api_key}"),
+                );
+                if let Ok(response) = request.send().await {
+                    if response.status().is_success() {
+                        if let Ok(payload) = response.json::<serde_json::Value>().await {
+                            if let Some(items) = payload.get("data").and_then(|value| value.as_array())
+                            {
+                                for item in items {
+                                    if let Some(url) = item
+                                        .get("url")
+                                        .and_then(|value| value.as_str())
+                                        .map(str::to_string)
+                                    {
+                                        push_steamgriddb_candidate(
+                                            &mut candidates,
+                                            &mut seen,
+                                            &matched_name,
+                                            &kind,
+                                            url,
+                                            item.get("width").and_then(|value| value.as_u64()),
+                                            item.get("height").and_then(|value| value.as_u64()),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     if candidates.is_empty() {
-        return Err("Steam n'a fourni aucune image pour cet emplacement.".into());
+        return Err("Aucune source n'a fourni d'image pour cet emplacement.".into());
     }
     Ok(candidates)
+}
+
+fn push_steamgriddb_candidate(
+    candidates: &mut Vec<ArtworkCandidate>,
+    seen: &mut HashSet<String>,
+    game_name: &str,
+    kind: &str,
+    url: String,
+    width: Option<u64>,
+    height: Option<u64>,
+) {
+    let url = safe_remote_image(url);
+    if url.is_empty() || !seen.insert(url.clone()) {
+        return;
+    }
+    candidates.push(ArtworkCandidate {
+        id: format!("steamgriddb-{}", candidates.len() + 1),
+        provider: "steamgriddb".into(),
+        source_label: "SteamGridDB".into(),
+        game_name: game_name.into(),
+        kind: kind.into(),
+        url,
+        width,
+        height,
+        attribution: "Image fournie par SteamGridDB. Vérifiez l'aperçu avant utilisation.".into(),
+    });
+}
+
+#[tauri::command]
+async fn test_artwork_provider(provider: String, api_key: String) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .user_agent(format!("ZAILON/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|_| "Unable to initialize the artwork connection test.".to_string())?;
+    match provider.to_ascii_lowercase().as_str() {
+        "steamgriddb" => {
+            let response = client
+                .get("https://www.steamgriddb.com/api/v2/grids/1?type=grid&dimensions=600x900")
+                .header(reqwest::header::AUTHORIZATION, format!("Bearer {api_key}"))
+                .send()
+                .await
+                .map_err(|error| {
+                    if error.is_timeout() {
+                        "SteamGridDB a expiré.".to_string()
+                    } else {
+                        "SteamGridDB est actuellement inaccessible.".to_string()
+                    }
+                })?;
+            if response.status().is_success() {
+                Ok("Connexion OK : la clé SteamGridDB est acceptée.".into())
+            } else if response.status().as_u16() == 401 || response.status().as_u16() == 403 {
+                Err("Clé SteamGridDB invalide ou révoquée.".into())
+            } else {
+                Err(format!(
+                    "Réponse inattendue de SteamGridDB (code {}).",
+                    response.status().as_u16()
+                ))
+            }
+        }
+        _ => Err("Ce fournisseur d'illustrations ne propose pas de test de clé.".into()),
+    }
 }
 
 #[tauri::command]
@@ -14799,6 +14915,7 @@ pub fn run() {
             store_game_resource,
             cache_remote_game_resource,
             search_game_artwork,
+            test_artwork_provider,
             remove_game_resource,
             open_path,
             open_external_url,

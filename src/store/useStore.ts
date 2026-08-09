@@ -12,7 +12,7 @@ import { compareFrameworkSets, fingerprintFrameworkSet, hasFrameworkChanges, typ
 import { effectivePerformance, type DownloadPolicy, type PerformanceMode, type ScanPolicy, type ZailonPerformancePolicies } from '../lib/performanceProfiles'
 import { evaluateSessionEnd } from '../lib/sessionEnd'
 
-const APP_VERSION = '1.47.0'
+const APP_VERSION = '1.48.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 /** Instant du démarrage du store : sert à distinguer « Jeu détecté par ZAILON »

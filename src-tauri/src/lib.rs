@@ -10213,6 +10213,180 @@ async fn import_mod_candidates_background(
     })
 }
 
+/// Spec « Import Cyberpunk façon MO2 » §33, §47 — « Réparer cet import » :
+/// re-stage le CONTENU des paquets déjà importés depuis leur source enregistrée
+/// (`sourcePath` du manifeste) avec la résolution de racines par fichier. Le
+/// contenu existant est RENOMMÉ en backup (jamais supprimé) ; en cas d'échec,
+/// le contenu d'origine est restauré (rollback). Les fichiers sensibles sont
+/// traités avec la décision « quarantine » (jamais exécutés).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StagedImportRepairReport {
+    stage_id: String,
+    name: String,
+    repaired: bool,
+    files_before: usize,
+    files_after: usize,
+    layout: String,
+    backup_path: Option<String>,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn repair_staged_imports(
+    app: AppHandle,
+    game_id: String,
+    game_name: String,
+    stage_ids: Vec<String>,
+) -> Result<Vec<StagedImportRepairReport>, String> {
+    let game_id = safe_game_id(&game_id)?;
+    let staging_root = staged_mods_root(&app, game_id)?;
+    let mut reports = Vec::new();
+    for raw in stage_ids {
+        let stage_id = safe_archive_component(&raw);
+        let stage = staging_root.join(&stage_id);
+        let manifest_path = stage.join("manifest.json");
+        let manifest: serde_json::Value = match fs::read(&manifest_path) {
+            Ok(bytes) => match serde_json::from_slice(&bytes) {
+                Ok(value) => value,
+                Err(error) => {
+                    reports.push(StagedImportRepairReport {
+                        stage_id: stage_id.clone(),
+                        name: stage_id.clone(),
+                        repaired: false,
+                        files_before: 0,
+                        files_after: 0,
+                        layout: String::new(),
+                        backup_path: None,
+                        error: Some(format!("Manifeste illisible : {error}")),
+                    });
+                    continue;
+                }
+            },
+            Err(_) => {
+                reports.push(StagedImportRepairReport {
+                    stage_id: stage_id.clone(),
+                    name: stage_id.clone(),
+                    repaired: false,
+                    files_before: 0,
+                    files_after: 0,
+                    layout: String::new(),
+                    backup_path: None,
+                    error: Some("Manifeste introuvable — paquet staged absent.".into()),
+                });
+                continue;
+            }
+        };
+        let name = manifest
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or(&stage_id)
+            .to_string();
+        let source_path = match manifest.get("sourcePath").and_then(|value| value.as_str()) {
+            Some(path) => path.to_string(),
+            None => {
+                reports.push(StagedImportRepairReport {
+                    stage_id: stage_id.clone(),
+                    name,
+                    repaired: false,
+                    files_before: 0,
+                    files_after: 0,
+                    layout: String::new(),
+                    backup_path: None,
+                    error: Some(
+                        "Aucune source enregistrée (sourcePath absent). Réimportez ce mod.".into(),
+                    ),
+                });
+                continue;
+            }
+        };
+        let source = PathBuf::from(source_path);
+        if !source.exists() {
+            reports.push(StagedImportRepairReport {
+                stage_id: stage_id.clone(),
+                name,
+                repaired: false,
+                files_before: 0,
+                files_after: 0,
+                layout: String::new(),
+                backup_path: None,
+                error: Some("Source introuvable — le contenu n'a pas pu être re-stagé.".into()),
+            });
+            continue;
+        }
+        let content = stage.join("content");
+        let files_before = staged_file_count(&content);
+        let backup = stage.join(format!("content.repair-backup-{}", unix_timestamp()));
+        if content.exists() {
+            fs::rename(&content, &backup).map_err(to_error)?;
+        }
+        fs::create_dir_all(&content).map_err(to_error)?;
+        let cancel = AtomicBool::new(false);
+        let mut security = SensitiveImportContext {
+            action: "quarantine".into(),
+            game_name: game_name.clone(),
+            framework_providers: HashSet::new(),
+            content_root: content.clone(),
+            inactive_root: stage.join("inactive-sensitive"),
+            quarantine_root: stage.join("quarantine-repair"),
+            assessments: Vec::new(),
+            quarantine_paths: Vec::new(),
+        };
+        let staged = stage_content(&source, &content, &game_name, &cancel, &mut security);
+        let (layout, repaired, files_after, error) = match staged {
+            Ok((layout, _)) => match package_manifest_entries(&stage, game_id, true) {
+                Ok(_) => (layout, true, staged_file_count(&content), None),
+                Err(error) => (
+                    layout,
+                    false,
+                    0,
+                    Some(format!("Manifeste non reconstruit : {error}")),
+                ),
+            },
+            Err(error) => (
+                String::new(),
+                false,
+                0,
+                Some(format!("Re-staging impossible : {error}")),
+            ),
+        };
+        if !repaired {
+            // Rollback : restaure le contenu d'origine, jamais perdu.
+            let _ = fs::remove_dir_all(&content);
+            if backup.exists() {
+                let _ = fs::rename(&backup, &content);
+            }
+        }
+        reports.push(StagedImportRepairReport {
+            stage_id,
+            name,
+            repaired,
+            files_before,
+            files_after,
+            layout,
+            backup_path: if repaired {
+                Some(backup.to_string_lossy().to_string())
+            } else {
+                None
+            },
+            error,
+        });
+    }
+    Ok(reports)
+}
+
+fn staged_file_count(path: &Path) -> usize {
+    if !path.exists() {
+        return 0;
+    }
+    WalkDir::new(path)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+        .count()
+}
+
 fn zip_options() -> zip::write::SimpleFileOptions {
     zip::write::SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
@@ -15577,6 +15751,7 @@ pub fn run() {
             import_mo2_instance,
             audit_profile_deployment,
             repair_mo2_profile_deployment,
+            repair_staged_imports,
             sync_profile_state,
             apply_profile_transaction,
             profile_integrity,

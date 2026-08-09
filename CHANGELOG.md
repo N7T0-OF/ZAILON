@@ -967,7 +967,7 @@
 
 ### Removed
 
-## [Unreleased]
+## [1.38.0] — 2026-08-09
 
 ### Added
 
@@ -993,6 +993,24 @@
 ### Removed
 
 - **Page et onglet « Outils » supprimés** (`ToolsView.tsx`, onglet de la page jeu, entrées de navigation, types `ViewType`/`GameTab`). Aucune fonction utile perdue — chaque action a une destination documentée dans la carte de redistribution.
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
 
 ### Known Issues
 

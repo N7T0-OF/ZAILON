@@ -1970,7 +1970,7 @@ async fn search_game_artwork(
         }
         _ => {}
     }
-    if let Some(api_keys) = api_keys {
+    if let Some(api_keys) = api_keys.as_ref() {
         if let Some(api_key) = api_keys
             .iter()
             .find(|(provider, _)| provider.eq_ignore_ascii_case("steamgriddb"))
@@ -1984,20 +1984,23 @@ async fn search_game_artwork(
                 _ => None,
             };
             if let Some((endpoint, dimensions)) = sgdb_endpoint {
-                let mut sgdb_url =
-                    url::Url::parse(&format!("https://www.steamgriddb.com/api/v2/{endpoint}/{app_id}"))
-                        .map_err(to_error)?;
+                let mut sgdb_url = url::Url::parse(&format!(
+                    "https://www.steamgriddb.com/api/v2/{endpoint}/{app_id}"
+                ))
+                .map_err(to_error)?;
                 if !dimensions.is_empty() {
-                    sgdb_url.query_pairs_mut().append_pair("dimensions", dimensions);
+                    sgdb_url
+                        .query_pairs_mut()
+                        .append_pair("dimensions", dimensions);
                 }
-                let request = client.get(sgdb_url).header(
-                    reqwest::header::AUTHORIZATION,
-                    format!("Bearer {api_key}"),
-                );
+                let request = client
+                    .get(sgdb_url)
+                    .header(reqwest::header::AUTHORIZATION, format!("Bearer {api_key}"));
                 if let Ok(response) = request.send().await {
                     if response.status().is_success() {
                         if let Ok(payload) = response.json::<serde_json::Value>().await {
-                            if let Some(items) = payload.get("data").and_then(|value| value.as_array())
+                            if let Some(items) =
+                                payload.get("data").and_then(|value| value.as_array())
                             {
                                 for item in items {
                                     if let Some(url) = item

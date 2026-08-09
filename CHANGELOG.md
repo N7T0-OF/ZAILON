@@ -942,6 +942,135 @@
 
 - Suppression de la colonne latérale « Bibliothèque » (liste des jeux) dans GamesView — remplacée par la vitrine plein écran.
 
+## 1.33.0 — Moteur d'illustrations unifié
+
+### Added
+
+- **Moteur d'illustrations unifié** (`artworkRegistry.ts`) : registre unique des six fournisseurs (Steam officiel, SteamGridDB, IGDB, Nexus, GameBanana, CurseForge) avec priorité, capacités par type d'image et **état honnête** — jamais de fournisseur affiché comme fonctionnel sans connecteur réel.
+- **Recherche d'illustrations multi-source** : « Source de recherche » (Automatique / Toutes les sources) dans l'éditeur d'apparence ; en automatique, Steam officiel est essayé d'abord puis SteamGridDB en secours ; les résultats des sources sont **fusionnés en une seule grille** (l'utilisateur choisit une image, pas un fournisseur) et **dédupliqués** (URL normalisée, paramètres de cache CDN ignorés).
+- **Connecteur SteamGridDB natif** : `search_game_artwork` accepte des clés API (`api_keys`) et interroge SteamGridDB (grids / heroes / logos / icons) quand une clé est enregistrée ; nouvelle commande `test_artwork_provider` pour vérifier une clé.
+- **Paramètres > Illustrations** : liste compacte de l'état des six sources (✓ disponible / Non configuré / Connecteur non disponible avec bulle ⓘ), clé SteamGridDB (Enregistrer / Remplacer / Tester la connexion / Supprimer, stockée localement, transmise uniquement à SteamGridDB) et mode de source.
+- **« Changer l'apparence… » activé** dans le menu contextuel de la Bibliothèque : ouvre directement l'éditeur d'apparence avec la recherche automatique.
+- **Auto-artwork** : la recherche automatique pour les nouveaux jeux passe aussi la clé SteamGridDB si elle est enregistrée.
+
+### Changed
+
+- Le mode de recherche d'illustrations choisit désormais la source par jeu (Steam officiel d'abord), au lieu d'une seule section « Images Steam » fixe dans les Paramètres.
+
+### Fixed
+
+- Le menu contextuel de la Bibliothèque proposait « Changer l'apparence… » désactivé : il ouvre maintenant l'éditeur d'apparence directement.
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+- Les connecteurs IGDB, Nexus, GameBanana et CurseForge restent honnêtement marqués « connecteur non disponible » (aucun résultat fictif) ; le branchement réel est hors périmètre de cette version.
+- La recherche et le test SteamGridDB réels nécessitent une clé API valide (validation réseau non couverte par la CI locale).
+
+### Data
+
+### Technical
+
+## 1.34.0 — Connecteurs IGDB et GameBanana
+
+### Added
+
+- **Connecteurs IGDB et GameBanana** dans le moteur d'illustrations : IGDB (covers / artworks / screenshots via une application Twitch gratuite, échange Client Credentials) couvre les jeux absents de Steam ; GameBanana fonctionne **sans aucune clé** (API publique, couvertures et images de jeux).
+- **Priorités réordonnées** selon la recommandation d'intégration : SteamGridDB n°1, Steam officiel n°2, IGDB n°3, GameBanana n°4 — Nexus et CurseForge restent honnêtement « connecteur non disponible » (pas d'API de jaquettes de jeux par nom).
+- **Paramètres > Illustrations** : rangée IGDB (Client ID + Client Secret, Enregistrer / Remplacer / Tester la connexion / Supprimer) et bouton « Tester GameBanana (public) » ; l'état des sources reflète la configuration réelle.
+- L'auto-artwork des nouveaux jeux privilégie toujours l'art officiel Steam, puis complète avec les sources configurées.
+
+### Changed
+
+- Ordre des résultats d'une recherche « Toutes les sources » : SteamGridDB en tête (recommandation n°1 pour les personnalisations), puis Steam officiel, IGDB, GameBanana.
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+- Les connecteurs réseau (SteamGridDB, IGDB, GameBanana) ne sont pas couverts par la CI locale : la validation réelle nécessite une clé valide ou une machine avec le jeu.
+- Le format des champs `screenshots` de GameBanana est tolérant mais non garanti : en cas de changement, le connecteur renvoie zéro image (jamais d'erreur ni de résultat fictif).
+
+## 1.35.0 — Correctif NTE après UAC
+
+### Added
+
+- **Récupération de présence immédiate quand Steam passe « En cours »** (spec UAC §5, §16) : dès que le registre RunningAppID confirme l'AppID d'une session en attente, ZAILON rescanne immédiatement processus + fenêtres — sans attendre le tick suivant, sans aucune confirmation UAC.
+- **Seuil Steam-backé** (60 au lieu de 80) : quand Steam confirme le jeu en cours, un processus final élevé qui refuse son chemin est rattaché via nom + contexte + Steam (65 ≥ 60) — fin du blocage « attente de confirmation Windows ».
+- **Scoring natif renforcé** : +20 si Steam Running (preuve indépendante du chemin), +50 si le processus est sous un emplacement profond connu (`Client\WindowsNoEditor\HT\Binaries\Win64` pour NTE — le nom de l'EXE n'est plus obligatoire), -50 si le processus est hors installation avec chemin accessible (processus élevé : aucune conclusion négative).
+
+### Changed
+
+- L'élévation UAC n'est plus un état bloquant : `WaitingForElevation` est un sous-état informatif, la machine continue `Lancement… → Recherche du jeu… → En cours` ; le bouton affiche « Lancement… » et le bandeau « Élévation Windows en cours » (fini « Autorisation requise… » / « Acceptez la fenêtre UAC »).
+- `ntegloballauncher.exe` reste un stage launcher valide : la session continue sans attendre qu'il reste vivant (il peut démarrer, s'élever, se fermer et être remplacé).
+
+### Fixed
+
+- ZAILON restait bloqué sur « attente de confirmation Windows » alors que le vrai jeu tournait déjà après l'UAC : la réconciliation est désormais pilotée par les preuves (Steam Running, processus final, fenêtre), jamais par une confirmation API inexistante.
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+- Les tests NTE Steam/UAC réels (spec §18, §52) exigent la machine avec le jeu : non couverts par la CI. Les deux cas (UAC accepté → En cours ; UAC refusé → « Le lancement a été annulé ») restent à valider matériellement.
+
+## 1.36.0 — Raccourcis bureau avec icône réelle
+
+### Added
+
+- **Vrais raccourcis bureau Windows `.lnk`** (format binaire MS-OSH, sans dépendance) : `TargetPath` = ZAILON, `Arguments` = URI `zailon://` (profil, mods, session, clavier, visuel conservés), `WorkingDirectory`, `IconLocation` et `Description` explicites — fini l'icône blanche des anciens `.url`.
+- **Résolution d'icône en cascade** (spec §20) : icône personnalisée/Apparence (`.ico`/`.exe`/`.dll` utilisés tels quels, `.png` enveloppée automatiquement dans un conteneur `.ico` Vista+ dans `resources/games/<id>/shortcut.ico`) → **icône native extraite par Windows de l'exécutable du jeu** → icône générique ZAILON en dernier recours. Jamais de raccourci sans `IconLocation` valide.
+- **Linux `.desktop`** : `Icon=` pointe désormais vers l'image locale résolue.
+
+### Changed
+
+- `createDesktopShortcut` reçoit `iconPath` et `execPath` séparément : l'exécutable du jeu n'est plus confondu avec l'icône personnalisée dans la résolution.
+
+### Fixed
+
+- Le raccourci bureau affichait une icône de fichier blanc : les `.url` sont remplacés par de vrais `.lnk` avec `IconLocation` résolue et exploitable par Windows.
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+- La conversion multi-taille (16→256 px) d'un PNG en `.ico` nécessiterait un décodeur d'images : la version actuelle enveloppe le PNG tel quel (256×256, format PNG accepté par Windows Vista+) — suffisant pour éliminer l'icône blanche.
+
 ## [1.37.0] — 2026-08-09
 
 ### Added
@@ -994,7 +1123,7 @@
 
 - **Page et onglet « Outils » supprimés** (`ToolsView.tsx`, onglet de la page jeu, entrées de navigation, types `ViewType`/`GameTab`). Aucune fonction utile perdue — chaque action a une destination documentée dans la carte de redistribution.
 
-## [Unreleased]
+## [1.39.0] — 2026-08-09
 
 ### Added
 
@@ -1025,79 +1154,11 @@
 
 ### Known Issues
 
-## 1.36.0 — Raccourcis bureau avec icône réelle
+## [Unreleased]
 
 ### Added
 
-- **Vrais raccourcis bureau Windows `.lnk`** (format binaire MS-OSH, sans dépendance) : `TargetPath` = ZAILON, `Arguments` = URI `zailon://` (profil, mods, session, clavier, visuel conservés), `WorkingDirectory`, `IconLocation` et `Description` explicites — fini l'icône blanche des anciens `.url`.
-- **Résolution d'icône en cascade** (spec §20) : icône personnalisée/Apparence (`.ico`/`.exe`/`.dll` utilisés tels quels, `.png` enveloppée automatiquement dans un conteneur `.ico` Vista+ dans `resources/games/<id>/shortcut.ico`) → **icône native extraite par Windows de l'exécutable du jeu** → icône générique ZAILON en dernier recours. Jamais de raccourci sans `IconLocation` valide.
-- **Linux `.desktop`** : `Icon=` pointe désormais vers l'image locale résolue.
-
 ### Changed
-
-- `createDesktopShortcut` reçoit `iconPath` et `execPath` séparément : l'exécutable du jeu n'est plus confondu avec l'icône personnalisée dans la résolution.
-
-### Fixed
-
-- Le raccourci bureau affichait une icône de fichier blanc : les `.url` sont remplacés par de vrais `.lnk` avec `IconLocation` résolue et exploitable par Windows.
-
-### Performance
-
-### Security
-
-### Compatibility
-
-### Experimental
-
-### Removed
-
-### Known Issues
-
-- La conversion multi-taille (16→256 px) d'un PNG en `.ico` nécessiterait un décodeur d'images : la version actuelle enveloppe le PNG tel quel (256×256, format PNG accepté par Windows Vista+) — suffisant pour éliminer l'icône blanche.
-
-## 1.35.0 — Correctif NTE après UAC
-
-### Added
-
-- **Récupération de présence immédiate quand Steam passe « En cours »** (spec UAC §5, §16) : dès que le registre RunningAppID confirme l'AppID d'une session en attente, ZAILON rescanne immédiatement processus + fenêtres — sans attendre le tick suivant, sans aucune confirmation UAC.
-- **Seuil Steam-backé** (60 au lieu de 80) : quand Steam confirme le jeu en cours, un processus final élevé qui refuse son chemin est rattaché via nom + contexte + Steam (65 ≥ 60) — fin du blocage « attente de confirmation Windows ».
-- **Scoring natif renforcé** : +20 si Steam Running (preuve indépendante du chemin), +50 si le processus est sous un emplacement profond connu (`Client\WindowsNoEditor\HT\Binaries\Win64` pour NTE — le nom de l'EXE n'est plus obligatoire), -50 si le processus est hors installation avec chemin accessible (processus élevé : aucune conclusion négative).
-
-### Changed
-
-- L'élévation UAC n'est plus un état bloquant : `WaitingForElevation` est un sous-état informatif, la machine continue `Lancement… → Recherche du jeu… → En cours` ; le bouton affiche « Lancement… » et le bandeau « Élévation Windows en cours » (fini « Autorisation requise… » / « Acceptez la fenêtre UAC »).
-- `ntegloballauncher.exe` reste un stage launcher valide : la session continue sans attendre qu'il reste vivant (il peut démarrer, s'élever, se fermer et être remplacé).
-
-### Fixed
-
-- ZAILON restait bloqué sur « attente de confirmation Windows » alors que le vrai jeu tournait déjà après l'UAC : la réconciliation est désormais pilotée par les preuves (Steam Running, processus final, fenêtre), jamais par une confirmation API inexistante.
-
-### Performance
-
-### Security
-
-### Compatibility
-
-### Experimental
-
-### Removed
-
-### Known Issues
-
-- Les tests NTE Steam/UAC réels (spec §18, §52) exigent la machine avec le jeu : non couverts par la CI. Les deux cas (UAC accepté → En cours ; UAC refusé → « Le lancement a été annulé ») restent à valider matériellement.
-
-## 1.34.0 — Connecteurs IGDB et GameBanana
-
-### Added
-
-- **Connecteurs IGDB et GameBanana** dans le moteur d'illustrations : IGDB (covers / artworks / screenshots via une application Twitch gratuite, échange Client Credentials) couvre les jeux absents de Steam ; GameBanana fonctionne **sans aucune clé** (API publique, couvertures et images de jeux).
-- **Priorités réordonnées** selon la recommandation d'intégration : SteamGridDB n°1, Steam officiel n°2, IGDB n°3, GameBanana n°4 — Nexus et CurseForge restent honnêtement « connecteur non disponible » (pas d'API de jaquettes de jeux par nom).
-- **Paramètres > Illustrations** : rangée IGDB (Client ID + Client Secret, Enregistrer / Remplacer / Tester la connexion / Supprimer) et bouton « Tester GameBanana (public) » ; l'état des sources reflète la configuration réelle.
-- L'auto-artwork des nouveaux jeux privilégie toujours l'art officiel Steam, puis complète avec les sources configurées.
-
-### Changed
-
-- Ordre des résultats d'une recherche « Toutes les sources » : SteamGridDB en tête (recommandation n°1 pour les personnalisations), puis Steam officiel, IGDB, GameBanana.
 
 ### Fixed
 
@@ -1110,49 +1171,6 @@
 ### Experimental
 
 ### Removed
-
-### Known Issues
-
-- Les connecteurs réseau (SteamGridDB, IGDB, GameBanana) ne sont pas couverts par la CI locale : la validation réelle nécessite une clé valide ou une machine avec le jeu.
-- Le format des champs `screenshots` de GameBanana est tolérant mais non garanti : en cas de changement, le connecteur renvoie zéro image (jamais d'erreur ni de résultat fictif).
-
-## 1.33.0 — Moteur d'illustrations unifié
-
-### Added
-
-- **Moteur d'illustrations unifié** (`artworkRegistry.ts`) : registre unique des six fournisseurs (Steam officiel, SteamGridDB, IGDB, Nexus, GameBanana, CurseForge) avec priorité, capacités par type d'image et **état honnête** — jamais de fournisseur affiché comme fonctionnel sans connecteur réel.
-- **Recherche d'illustrations multi-source** : « Source de recherche » (Automatique / Toutes les sources) dans l'éditeur d'apparence ; en automatique, Steam officiel est essayé d'abord puis SteamGridDB en secours ; les résultats des sources sont **fusionnés en une seule grille** (l'utilisateur choisit une image, pas un fournisseur) et **dédupliqués** (URL normalisée, paramètres de cache CDN ignorés).
-- **Connecteur SteamGridDB natif** : `search_game_artwork` accepte des clés API (`api_keys`) et interroge SteamGridDB (grids / heroes / logos / icons) quand une clé est enregistrée ; nouvelle commande `test_artwork_provider` pour vérifier une clé.
-- **Paramètres > Illustrations** : liste compacte de l'état des six sources (✓ disponible / Non configuré / Connecteur non disponible avec bulle ⓘ), clé SteamGridDB (Enregistrer / Remplacer / Tester la connexion / Supprimer, stockée localement, transmise uniquement à SteamGridDB) et mode de source.
-- **« Changer l'apparence… » activé** dans le menu contextuel de la Bibliothèque : ouvre directement l'éditeur d'apparence avec la recherche automatique.
-- **Auto-artwork** : la recherche automatique pour les nouveaux jeux passe aussi la clé SteamGridDB si elle est enregistrée.
-
-### Changed
-
-- Le mode de recherche d'illustrations choisit désormais la source par jeu (Steam officiel d'abord), au lieu d'une seule section « Images Steam » fixe dans les Paramètres.
-
-### Fixed
-
-- Le menu contextuel de la Bibliothèque proposait « Changer l'apparence… » désactivé : il ouvre maintenant l'éditeur d'apparence directement.
-
-### Performance
-
-### Security
-
-### Compatibility
-
-### Experimental
-
-### Removed
-
-### Known Issues
-
-- Les connecteurs IGDB, Nexus, GameBanana et CurseForge restent honnêtement marqués « connecteur non disponible » (aucun résultat fictif) ; le branchement réel est hors périmètre de cette version.
-- La recherche et le test SteamGridDB réels nécessitent une clé API valide (validation réseau non couverte par la CI locale).
-
-### Data
-
-### Technical
 
 ## 1.9.0 — Profils immuables et diagnostic transparent
 

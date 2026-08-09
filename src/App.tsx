@@ -7,6 +7,8 @@ import { GuidedTour } from './components/GuidedTour'
 import { UpdateProvider } from './components/UpdateProvider'
 import { resolveProfileMods, useStore } from './store/useStore'
 import { buildRuntimeToastContent } from './lib/runtimeToast'
+import type { PerformanceMode } from './lib/performanceProfiles'
+import { modsPreparedFor, quickPanelPerformanceState } from './lib/quickPanelState'
 import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type LearnedProcessSignature, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
 import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, STEAM_BACKED_ATTACH_THRESHOLD, windowRequestFor } from './lib/gamePresence'
@@ -364,13 +366,19 @@ export default function App() {
   useEffect(() => {
     if (!native.isDesktop()) return
     let unlisten: UnlistenFn | undefined
-    void listen<{ action: 'toggle-keyboard' | 'focus-main' }>('quick-panel-action', event => {
+    void listen<{ action: 'toggle-keyboard' | 'focus-main' | 'set-performance'; mode?: string }>('quick-panel-action', event => {
       const store = useStore.getState()
+      const priorityGameId = pickPrioritySession(store.gameSessions, store.pinnedPriorityGameId)
       if (event.payload.action === 'toggle-keyboard') {
         // Spec multi-sessions : le panneau rapide cible la session PRIORITAIRE.
-        const priorityGameId = pickPrioritySession(store.gameSessions, store.pinnedPriorityGameId)
         const session = store.gameSessions.find(item => item.gameId === priorityGameId && item.state === 'GameRunning')
         if (session) store.setSessionInputActive(session.gameId, !session.inputProfileActive)
+      } else if (event.payload.action === 'set-performance' && event.payload.mode) {
+        // Spec §24 : le mode Performance se change depuis le panneau — appliqué
+        // à la session prioritaire, répercuté dans la fenêtre principale.
+        const mode = event.payload.mode as PerformanceMode
+        if (priorityGameId) store.setPerformanceMode(priorityGameId, mode)
+        void emit('quick-panel-refresh')
       } else if (event.payload.action === 'focus-main') {
         store.setView('home')
         const window = getCurrentWindow()
@@ -397,6 +405,7 @@ export default function App() {
       const profile = game.profiles.find(item => item.id === session.profileId)
       const profileMods = profile ? resolveProfileMods(game, profile) : []
       const activeMods = profileMods.filter(mod => mod.enabled).length
+      const performance = quickPanelPerformanceState(store.performanceModes, store.globalPerformanceMode, store.runtimeActivity, game.id)
       void emit('quick-panel-state', {
         gameName: game.name,
         profileName: profile?.name ?? 'Défaut',
@@ -404,6 +413,13 @@ export default function App() {
         layoutLabel: effectiveInputProfile(game, profile?.id) ? LAYOUT_LABELS[effectiveLayout(game, profile?.id)] : undefined,
         bypassActive: Boolean(game.bypassPath),
         red4extActive: isRed4extActive(profileMods),
+        // Spec §69 : les mods ont été préparés seulement si ZAILON a lancé le
+        // jeu avec le déploiement actif — sinon le panneau dit la vérité.
+        modsPrepared: modsPreparedFor(session),
+        // Spec §24 : mode Performance effectif + politiques de pause réelles.
+        performanceMode: performance.mode,
+        downloadsPaused: performance.downloadsPaused,
+        scansPaused: performance.scansPaused,
         // Spec RuntimeSessionV3 §49 : le panneau affiche l'état RÉEL d'activation
         // de la session (source de confiance), pas seulement la configuration.
         connected: true,

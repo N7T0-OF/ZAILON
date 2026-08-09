@@ -1309,6 +1309,15 @@
 
 - Le toast « En cours via ZAILON » reste déclenché au **premier vrai `sessionGameDetected`** (processus final détecté, jamais au clic Jouer / Steam / launcher / UAC — spec §4), confirmé par audit du code.
 
+## 1.53.0 — Quick Panel : contenu contextuel enrichi
+
+### Added
+
+- **Section Performance dans le panneau** (spec Quick Panel §24) : mode rapide (Automatique / Équilibré / Performance / Qualité — Personnalisé reste dans Configuration) appliqué à la session prioritaire et répercuté dans la fenêtre principale, avec badges « Téléchargements : en pause » / « Scans : en pause » issus de la politique effective réelle.
+- **« Mods ⚠ Non préparés »** (spec §69) : si la session a été détectée après coup (Steam, launcher externe, UAC) ou sans déploiement actif, le panneau le dit honnêtement avec la bulle « Le jeu a été lancé avant la préparation du profil » — jamais un faux ✓.
+- **Payload `quick-panel-state` enrichi** : `modsPrepared`, `performanceMode`, `downloadsPaused`, `scansPaused` — calculés par la logique pure `src/lib/quickPanelState.ts` (6 tests) et rafraîchis après changement de Performance (`quick-panel-refresh`).
+- Le contenu reste compact : profil, connexion, statuts réels, visuel, clavier, performance — pas de mini-launcher (spec §16).
+
 ## [Unreleased]
 
 ### Added

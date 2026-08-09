@@ -1,8 +1,17 @@
 import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { Check, Gamepad2, Keyboard, MonitorDown, Palette, RefreshCw, X } from 'lucide-react'
+import { Check, Gamepad2, Gauge, Keyboard, MonitorDown, Palette, RefreshCw, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { native } from '../lib/native'
+import type { PerformanceMode } from '../lib/performanceProfiles'
+
+const PERFORMANCE_LABELS: Record<PerformanceMode, string> = {
+  auto: 'Automatique',
+  balanced: 'Équilibré',
+  performance: 'Performance',
+  quality: 'Qualité',
+  custom: 'Personnalisé',
+}
 
 /** Résumé de session reçu de la fenêtre principale (spec « Quick Overlay »
  * §24-25) : contenu adaptatif selon le jeu en cours (prioritaire). */
@@ -19,6 +28,13 @@ interface QuickPanelSessionState {
   inputActive?: boolean
   visualActive?: boolean
   runtimeActive?: boolean
+  /** Spec §69 : les mods ont été préparés seulement si ZAILON a lancé le jeu
+   * avec le déploiement actif — sinon « Mods ⚠ Non préparés ». */
+  modsPrepared?: boolean
+  /** Spec §24 : mode Performance effectif + politiques de pause réelles. */
+  performanceMode?: PerformanceMode
+  downloadsPaused?: boolean
+  scansPaused?: boolean
 }
 
 /**
@@ -42,8 +58,17 @@ export function QuickPanel() {
       // Synchronise l'état réel de la session (pas un état local optimiste).
       if (event.payload.inputActive !== undefined) setKeyboardOn(event.payload.inputActive)
     }).then(dispose => { unlisten = dispose })
+    // Spec §24 : après un changement de Performance, la fenêtre principale
+    // demande un rafraîchissement (re-émission de l'état actualisé).
+    let refreshUnlisten: UnlistenFn | undefined
+    void listen('quick-panel-refresh', () => {
+      void emit('quick-panel-ready')
+    }).then(dispose => { refreshUnlisten = dispose })
     void emit('quick-panel-ready')
-    return () => unlisten?.()
+    return () => {
+      unlisten?.()
+      refreshUnlisten?.()
+    }
   }, [])
 
   const flash = (message: string) => {
@@ -65,6 +90,11 @@ export function QuickPanel() {
     setKeyboardOn(next)
     void emit('quick-panel-action', { action: 'toggle-keyboard' })
     flash(next ? 'Clavier ZAILON actif' : 'Clavier ZAILON désactivé')
+  }
+
+  const setPerformance = (mode: PerformanceMode) => {
+    void emit('quick-panel-action', { action: 'set-performance', mode })
+    flash(`Mode Performance : ${PERFORMANCE_LABELS[mode]}`)
   }
 
   const focusMain = () => {
@@ -112,6 +142,7 @@ export function QuickPanel() {
               {session.layoutLabel && <span className="rounded-md bg-white/[0.05] px-1.5 py-0.5">{session.layoutLabel}</span>}
               {session.bypassActive && <span className="rounded-md bg-white/[0.05] px-1.5 py-0.5">Bypass</span>}
               {session.red4extActive && <span className="rounded-md bg-amber-300/10 px-1.5 py-0.5 text-amber-100/80" title="Loader actif — chargement à confirmer après lancement">RED4ext ⚠</span>}
+              {session.modsPrepared === false && <span className="rounded-md bg-amber-300/12 px-1.5 py-0.5 text-amber-100/80" title="Le jeu a été lancé avant la préparation du profil (Steam, launcher externe ou UAC) — les mods n'ont pas été préparés par ZAILON.">Mods ⚠ Non préparés</span>}
             </div>
             {/* Spec §49 : statuts RÉELS de la session — source de confiance. */}
             <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[9px] font-semibold">
@@ -141,6 +172,18 @@ export function QuickPanel() {
             <span className="flex items-center gap-1.5">{keyboardOn ? <Check size={11} className="text-emerald-300/80" /> : <MonitorDown size={11} />}Disposition ZAILON</span>
             <span className={`font-mono text-[10px] uppercase tracking-widest ${keyboardOn ? 'text-emerald-200/70' : 'text-white/30'}`}>{keyboardOn ? 'Actif' : 'Inactif'}</span>
           </button>
+        </section>
+
+        {/* Performance (spec §24) : mode rapide + politiques de pause réelles. */}
+        <section className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-2.5">
+          <p className="mb-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-white/35"><Gauge size={10} />Performance</p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <select value={session?.performanceMode ?? 'auto'} onChange={event => setPerformance(event.target.value as PerformanceMode)} className="rounded-lg border border-white/[0.08] bg-[#141919] px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-gold/35">
+              {(Object.keys(PERFORMANCE_LABELS) as PerformanceMode[]).map(mode => <option key={mode} value={mode}>{PERFORMANCE_LABELS[mode]}</option>)}
+            </select>
+            {session?.downloadsPaused && <span className="rounded-md bg-amber-300/10 px-1.5 py-0.5 text-[10px] text-amber-100/80">Téléchargements : en pause</span>}
+            {session?.scansPaused && <span className="rounded-md bg-amber-300/10 px-1.5 py-0.5 text-[10px] text-amber-100/80">Scans : en pause</span>}
+          </div>
         </section>
 
         {/* Actions */}

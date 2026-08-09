@@ -1205,6 +1205,8 @@
 
 ### Added
 
+- **« Réparer les racines des imports »** (onglet Mods) : re-stage chaque paquet importé depuis sa source enregistrée (`sourcePath`) avec la résolution de racine par fichier — les imports créés avant la 1.41.0 (racines empilées, frameworks mal exposés) sont corrigés sans réimporter. Backup automatique du contenu précédent dans chaque paquet, restauration en cas d'échec, comptage fichiers avant/après et détail des échecs (source absente / manifeste illisible).
+
 ### Changed
 
 ### Fixed

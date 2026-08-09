@@ -172,6 +172,17 @@ export interface ProfileDeploymentAudit {
   diagnostics: string[]
 }
 
+export interface StagedImportRepairReport {
+  stage_id: string;
+  name: string;
+  repaired: boolean;
+  files_before: number;
+  files_after: number;
+  layout: string;
+  backup_path: string | null;
+  error: string | null;
+}
+
 export interface Mo2DeploymentRepairResult {
   repairId: string
   packagesAudited: number
@@ -790,6 +801,8 @@ export const native = {
     desktopOnly<ProfileDeploymentAudit>('audit_profile_deployment', { gameId, profileId, enabledModIds, conflictRules, gameRoot }),
   repairMo2ProfileDeployment: (gameId: string, profileId: string, sourcePath: string, gameName: string, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, gameRoot?: string) =>
     desktopOnly<Mo2DeploymentRepairResult>('repair_mo2_profile_deployment', { gameId, profileId, sourcePath, gameName, enabledModIds, conflictRules, gameRoot }),
+  repairStagedImports: (gameId: string, gameName: string, stageIds: string[]) =>
+    desktopOnly<StagedImportRepairReport[]>('repair_staged_imports', { gameId, gameName, stageIds }),
   syncProfileState: (gameId: string, profile: Profile) => desktopOnly<ProfilePaths>('sync_profile_state', { gameId, profileId: profile.id, profile }),
   applyProfileTransaction: (gameId: string, operationId: string, beforeProfiles: Profile[], afterProfiles: Profile[]) =>
     desktopOnly<ProfileTransactionResult>('apply_profile_transaction', { gameId, operationId, beforeProfiles, afterProfiles }),

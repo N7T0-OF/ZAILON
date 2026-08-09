@@ -376,6 +376,32 @@ export function GamesView() {
     }
   }
 
+  const repairStagedImports = async () => {
+    try {
+      const staged = profileMods.filter(mod => mod.storage === 'staged' && mod.stageId)
+      if (!staged.length) {
+        window.alert('Aucun paquet importé (staged) à réparer.')
+        return
+      }
+      const reports = await native.repairStagedImports(selectedGame.id, selectedGame.name, staged.map(mod => mod.stageId as string))
+      const repaired = reports.filter(report => report.repaired)
+      const failed = reports.filter(report => !report.repaired)
+      const moved = repaired.reduce((sum, report) => sum + Math.max(0, report.files_after - report.files_before), 0)
+      const lines = [`${repaired.length}/${reports.length} paquet(s) re-stagé(s) depuis leur source.`]
+      if (moved > 0) lines.push(`${moved} fichier(s) replacé(s) selon leur vraie racine de jeu.`)
+      if (failed.length) {
+        lines.push('', 'Échecs (source absente ou manifeste illisible) :')
+        failed.slice(0, 5).forEach(report => lines.push(`- ${report.name} : ${report.error ?? 'erreur inconnue'}`))
+        if (failed.length > 5) lines.push(`- … ${failed.length - 5} autre(s)`)
+      }
+      lines.push('', 'Un backup du contenu précédent est conservé dans chaque paquet.')
+      await scanMods(selectedGame.id)
+      window.alert(lines.join('\n'))
+    } catch (error) {
+      window.alert(`Réparation des imports annulée : ${String(error)}`)
+    }
+  }
+
   const repairCyberpunkStructure = async () => {
     try {
       const preview = await native.previewCyberpunkStructureRepair(selectedGame.id)
@@ -487,6 +513,7 @@ export function GamesView() {
           <button onClick={() => void scanMods(selectedGame.id)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05]"><RefreshCw size={13} /> Analyser</button>
           <button onClick={() => void deduplicateStagedMods(selectedGame.id)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05]"><Boxes size={13} /> Nettoyer les doublons</button>
           <button onClick={() => void purgeUnreferencedStagedMods(selectedGame.id)} className="flex items-center gap-1.5 rounded-lg border border-red-300/12 px-3 py-2 text-[11px] text-red-100/58 hover:bg-red-300/[0.05]"><Trash2 size={13} /> Purger les paquets retirés</button>
+          <button onClick={() => void repairStagedImports()} title="Re-stager chaque paquet importé depuis sa source enregistrée (racines de jeu corrigées)" className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05]"><RotateCcw size={13} />Réparer les racines des imports</button>
           {selectedGame.name.toLocaleLowerCase().includes('cyberpunk') && <button onClick={() => void repairCyberpunkStructure()} className="flex items-center gap-1.5 rounded-lg border border-amber-300/18 bg-amber-300/[0.035] px-3 py-2 text-[11px] text-amber-100/68 hover:bg-amber-300/[0.07]"><Wrench size={13} />Réparer les racines Cyberpunk</button>}
           {bulkHistory.some(operation => operation.gameId === selectedGame.id && operation.undoable) && <button onClick={() => void undoLastBulkOperation()} title="Annuler la dernière opération groupée" className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]"><RotateCcw size={13} />Annuler</button>}
           <label className="flex items-center gap-2 rounded-lg border border-white/[0.08] px-2.5 text-[11px] text-white/55"><input ref={selectAllRef} type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedModIds(current => { const next = new Set(current); if (allVisibleSelected) filteredMods.forEach(mod => next.delete(mod.id)); else filteredMods.forEach(mod => next.add(mod.id)); return next })} className="accent-gold" />Tout visible <span className="text-white/30">{selectedVisible}/{filteredMods.length}</span></label>

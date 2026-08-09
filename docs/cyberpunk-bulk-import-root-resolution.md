@@ -61,11 +61,29 @@ destination calculée (conteneurs supprimés), avec la copie sécurisée
   projetés — avec le mapping corrigé, TweakXL/ArchiveXL sont projetés à la
   bonne racine.
 
-## Limites / prochaines étapes (spec §33, §47)
+## Réparer les imports existants (spec §33, §47) — livré
 
-- **Paquets déjà importés avec une racine incorrecte** : le re-staging
-  automatique des anciens imports (bouton « Réparer cet import » dans
-  Profils > Maintenance, avec snapshot) fera l'objet de la prochaine release.
+Commande native `repair_staged_imports` + bouton **« Réparer les racines des
+imports »** dans l'onglet Mods :
+
+1. Pour chaque paquet staged disposant d'un `sourcePath` enregistré :
+   backup du contenu actuel (`content.repair-backup-<timestamp>`),
+   **re-staging depuis la source** avec la résolution par fichier
+   (`stage_content` → `CyberpunkMappedByFile` pour les multi-racines),
+   reconstruction du manifeste (`package_manifest_entries`).
+2. En cas d'échec à mi-chemin : **rollback** — le contenu d'origine est
+   restauré, jamais perdu.
+3. Rapport par paquet : fichiers avant/après, layout retenu, chemin de backup,
+   erreur éventuelle (source absente → inviter à réimporter ; manifeste
+   illisible → paquet staged corrompu).
+4. Le store est rafraîchi (`scanMods`) après la réparation.
+
+Validation : `tsc` ✅, build ✅, 78/78 tests, **Verify native ✅ + Verify
+ZAILON ✅** (la commande réutilise `stage_content`/`package_manifest_entries`
+déjà couverts par les tests natifs).
+
+## Limites / prochaines étapes
+
 - Graphe de dépendances global (spec §29-30) et capabilities frameworks
   (`cyberpunk.tweakxl`…) dans le manifeste (spec §28).
 - Validators RED4ext/redscript hiérarchiques (spec §36-43) : cause primaire

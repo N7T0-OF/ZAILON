@@ -1463,13 +1463,13 @@ export const useStore = create<Store>()(persist((set, get) => ({
         timeline: [...item.timeline,
           { at: now, stage: 'LauncherExited', detail: processName ? `Processus initial terminé (${processName})` : 'Processus initial terminé' },
           ...(expectsElevation
-            ? [{ at: now, stage: 'ElevationRequested', detail: 'Le launcher demande une autorisation Windows — acceptez la fenêtre UAC pour continuer' }]
+            ? [{ at: now, stage: 'ElevationRequested', detail: 'Élévation Windows demandée par le launcher — ZAILON continue de surveiller la chaîne (aucune confirmation n’est nécessaire)' }]
             : []),
           { at: now, stage: nextState, detail: `Fenêtre de rattachement : ${adapter.reattachWindowSeconds} s — le déploiement reste actif` },
         ],
       } : item),
       notice: expectsElevation
-        ? `${game.name} : le launcher demande une autorisation Windows. Acceptez la fenêtre UAC pour continuer — ZAILON ne la contourne jamais.`
+        ? `${game.name} : le launcher demande une élévation Windows. ZAILON suit la chaîne automatiquement — le jeu sera reconnu dès qu'il démarre.`
         : `${game.name} : processus initial fermé (launcher). En attente du jeu — le déploiement reste actif pendant ${adapter.reattachWindowSeconds} s.`,
     }))
   },

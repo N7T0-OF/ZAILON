@@ -187,9 +187,9 @@ export function HomeView() {
             <div className={`mt-4 max-w-md rounded-xl border p-3 backdrop-blur-md ${activeSession.state === 'WaitingForElevation' ? 'border-sky-300/20 bg-sky-300/[0.05]' : 'border-amber-300/20 bg-amber-300/[0.05]'}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className={`font-mono text-[11px] uppercase tracking-widest ${activeSession.state === 'WaitingForElevation' ? 'text-sky-200/90' : 'text-amber-100/90'}`}>{activeSession.state === 'WaitingForElevation' ? 'Autorisation Windows requise' : 'En attente du jeu'}</p>
+                  <p className={`font-mono text-[11px] uppercase tracking-widest ${activeSession.state === 'WaitingForElevation' ? 'text-sky-200/90' : 'text-amber-100/90'}`}>{activeSession.state === 'WaitingForElevation' ? 'Élévation Windows en cours' : 'En attente du jeu'}</p>
                   <p className="mt-1 text-[11px] text-white/52">{activeSession.state === 'WaitingForElevation'
-                    ? 'Le launcher demande une élévation. Acceptez la fenêtre UAC pour continuer — ZAILON ne la contourne jamais.'
+                    ? 'Le launcher officiel demande une élévation Windows. ZAILON continue de surveiller la chaîne — le jeu sera reconnu automatiquement dès qu’il démarre, aucune confirmation n’est nécessaire.'
                     : 'Le launcher a pris le relais (Steam / launcher officiel). Le déploiement et le remapping restent prêts.'}</p>
                 </div>
                 {activeSession.reattachUntil
@@ -209,7 +209,7 @@ export function HomeView() {
             <div className="relative flex items-center">
               <button type="button" disabled={playBusy} title={sessionRunning ? 'Le jeu est en cours. Cliquez pour le quitter.' : playBusy ? 'En attente du jeu…' : 'Préparer les mods et lancer le jeu'} onClick={sessionRunning ? () => { setQuitConfirm(false); setQuitOpen(true) } : () => void launchSelectedGame()} className={`flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full px-5 py-2.5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all min-w-[168px] ${playBusy ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : sessionRunning ? 'bg-emerald-300/90 text-[#0c1212] hover:-translate-y-0.5 hover:bg-emerald-200' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
                 {playBusy ? <Loader2 size={12} className="animate-spin" /> : sessionRunning ? <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-900/60" /> : <Play size={10} fill="currentColor" />}
-                {isLaunching ? `Préparation${launchPercent === undefined ? '…' : ` ${launchPercent}%`}` : sessionRunning ? 'En cours' : sessionWaiting ? (activeSession?.state === 'WaitingForElevation' ? 'Autorisation requise…' : activeSession?.state === 'LauncherStarted' ? 'Lancement…' : 'Recherche du jeu…') : sessionFailed ? 'Réessayer' : 'Jouer'}
+                {isLaunching ? `Préparation${launchPercent === undefined ? '…' : ` ${launchPercent}%`}` : sessionRunning ? 'En cours' : sessionWaiting ? (activeSession?.state === 'WaitingForGame' ? 'Recherche du jeu…' : 'Lancement…') : sessionFailed ? 'Réessayer' : 'Jouer'}
               </button>
             </div>
             <button type="button" onClick={() => setActiveGameTab('mods')} aria-label="Gérer les mods" title="Gérer les mods" className="flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.12] bg-black/25 text-white/50 backdrop-blur hover:bg-white/[0.08] hover:text-white"><Settings2 size={12} /></button>

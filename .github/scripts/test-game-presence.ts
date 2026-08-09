@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, windowRequestFor } from '../../src/lib/gamePresence.ts'
+import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, STEAM_BACKED_ATTACH_THRESHOLD, windowRequestFor } from '../../src/lib/gamePresence.ts'
 import { adapterFor } from '../../src/lib/launchAdapters.ts'
 import type { Game } from '../../src/types.ts'
 
@@ -59,6 +59,23 @@ test('la requête de présence embarque la chaîne de l\'adaptateur', () => {
   assert.equal(request.reattachContext, true)
   assert.ok(request.gameExecutableCandidates.includes('HT-Win64-Shipping.exe'))
   assert.equal(request.launcherExecutable, 'NTELauncher.exe')
+})
+
+test('requête de présence : preuve Steam et motif profond NTE (spec UAC §5-6)', () => {
+  const g = game('Neverness to Everness', 'X:\\Games\\Neverness To Everness')
+  const withoutSteam = presenceRequestFor(g, true)
+  assert.equal(withoutSteam.steamRunning, false)
+  // Le motif profond du processus final vient de l'adaptateur NTE.
+  assert.deepEqual(withoutSteam.gamePathPatterns, ['Client/WindowsNoEditor/HT/Binaries/Win64'])
+  const withSteam = presenceRequestFor(g, true, undefined, true)
+  assert.equal(withSteam.steamRunning, true)
+})
+
+test('seuil Steam-backé : Steam Running abaisse l\'auto-attachement à 60', () => {
+  // Spec UAC §5-6, §10 : nom (+25) + contexte (+20) + Steam (+20) = 65 ≥ 60
+  // rattache le processus final même si son chemin est inaccessible (élevé).
+  assert.equal(STEAM_BACKED_ATTACH_THRESHOLD, 60)
+  assert.ok(STEAM_BACKED_ATTACH_THRESHOLD < AUTO_ATTACH_THRESHOLD)
 })
 
 test('signatures apprises incluses dans la requête (spec NTE §7 / #36)', () => {

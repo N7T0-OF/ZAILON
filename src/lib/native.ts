@@ -650,6 +650,14 @@ export interface GamePresenceRequest {
   /** Signatures apprises (spec NTE §7 / #36) : nom + chemin relatif du
    * processus final confirmé lors d'un lancement précédent. */
   learnedSignatures?: LearnedProcessSignature[]
+  /** Steam indique que l'AppID du jeu est « En cours » (registre RunningAppID,
+   * spec UAC §5-6) → +20 au score. Preuve indépendante du chemin : fonctionne
+   * même quand un processus élevé refuse de révéler son chemin. */
+  steamRunning?: boolean
+  /** Emplacements profonds connus du processus final sous l'installation (ex.
+   * `Client/WindowsNoEditor/HT/Binaries/Win64` pour NTE) → +50 : le nom de
+   * l'exécutable n'est plus requis (spec UAC §6). */
+  gamePathPatterns?: string[]
 }
 
 /** Signature de processus apprise par installation (cache versionné). */

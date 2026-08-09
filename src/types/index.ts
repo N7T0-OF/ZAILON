@@ -339,6 +339,10 @@ export interface GameLaunchAdapter {
   /** AppID Steam du jeu : preuve de présence supplémentaire (Steam n'est pas le
    * seul critère, mais il déclenche la recherche du processus final). */
   steamAppId?: number
+  /** Emplacements profonds connus du processus final sous l'installation (ex.
+   * `Client/WindowsNoEditor/HT/Binaries/Win64` pour NTE) : un processus à cet
+   * emplacement reçoit un score fort — le nom de l'exécutable n'est plus requis. */
+  relativePathPatterns?: string[]
   /** Motifs de titre de fenêtre (sous-chaîne, insensible à la casse) appris lors
    * des tests réels — jamais devinés (watcher de fenêtres). */
   windowTitlePatterns?: string[]

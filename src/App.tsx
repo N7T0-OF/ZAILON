@@ -7,7 +7,7 @@ import { UpdateProvider } from './components/UpdateProvider'
 import { resolveProfileMods, useStore } from './store/useStore'
 import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type LearnedProcessSignature, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
-import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, windowRequestFor } from './lib/gamePresence'
+import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, STEAM_BACKED_ATTACH_THRESHOLD, windowRequestFor } from './lib/gamePresence'
 import { pickPrioritySession } from './lib/sessionPriority'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from './lib/keyboardPresets'
 import { isRed4extActive } from './lib/frameworkValidator'
@@ -53,6 +53,7 @@ export default function App() {
     let scanning = false
     let lastScan = 0
     let lastSteamCheck = 0
+    let recovering = false
     const id = setInterval(() => {
       const state = useStore.getState()
       tick()
@@ -63,10 +64,79 @@ export default function App() {
       const gameModeActive = state.reduceActivityDuringGame && state.gameSessions.some(session => session.state === 'GameRunning')
       const installed = state.games.filter(game => game.installDirectory)
       const appIds = [...new Set(installed.map(game => adapterFor(game).steamAppId).filter((id): id is number => id !== undefined))]
+      // Preuve Steam (registre RunningAppID) : le jeu est-il « En cours » ?
+      const steamRunningForGame = (gameId: string) => {
+        const game = useStore.getState().games.find(item => item.id === gameId)
+        const appId = game ? adapterFor(game).steamAppId : undefined
+        return appId !== undefined && steamAppIdsRef.current.includes(appId)
+      }
+      const attach = (results: Array<{ gameId: string; score: number; processName?: string; evidence: string[] }>) => {
+        const storeNow = useStore.getState()
+        for (const result of results) {
+          // Spec UAC §5-6, §10 : quand Steam confirme que l'AppID tourne, le
+          // seuil baisse (60) — un processus élevé qui refuse son chemin reste
+          // rattachable via nom + contexte + Steam (65 ≥ 60). Sinon : 80.
+          const threshold = steamRunningForGame(result.gameId) ? STEAM_BACKED_ATTACH_THRESHOLD : AUTO_ATTACH_THRESHOLD
+          if (result.score < threshold) continue
+          const waiting = storeNow.gameSessions.some(session => session.gameId === result.gameId && (session.state === 'WaitingForGame' || session.state === 'WaitingForElevation' || session.state === 'GameLost'))
+          if (waiting) {
+            storeNow.sessionGameDetected(result.gameId, result.processName ?? '', result.score, result.evidence)
+          } else {
+            storeNow.attachDetectedGame(result.gameId, result.processName ?? '', result.score, result.evidence)
+          }
+        }
+      }
+      // Apprentissage des signatures (spec NTE §7 / #36) : un processus final
+      // confirmé (score ≥ 80) devient la référence de détection — au prochain
+      // lancement, même exe renommé par une mise à jour du jeu.
+      const learnFromPresence = (results: Array<{ gameId: string; score: number; processName?: string; processPath?: string }>) => {
+        for (const result of results) {
+          if (result.score < AUTO_ATTACH_THRESHOLD || !result.processName) continue
+          const game = useStore.getState().games.find(item => item.id === result.gameId)
+          const root = game?.installDirectory
+          const relative = root && result.processPath?.toLowerCase().startsWith(root.toLowerCase())
+            ? result.processPath.slice(root.length).replace(/^[\\/]+/, '').replace(/\\/g, '/')
+            : undefined
+          useStore.getState().learnGameProcessSignature(result.gameId, result.processName, relative || undefined)
+        }
+      }
+      // Spec UAC §5, §16 : récupération de présence IMMÉDIATE. ZAILON n'attend
+      // jamais de confirmation UAC explicite — dès que Steam passe « En cours »,
+      // les sessions en attente sont rescannées tout de suite (processus +
+      // fenêtre), sans attendre le tick suivant.
+      const recoverWaitingSessions = (runningAppIds: number[]) => {
+        if (recovering) return
+        recovering = true
+        void (async () => {
+          try {
+            const storeNow = useStore.getState()
+            const targets = storeNow.gameSessions
+              .filter(session => session.state === 'WaitingForGame' || session.state === 'WaitingForElevation' || session.state === 'GameLost')
+              .map(session => ({ session, game: storeNow.games.find(item => item.id === session.gameId) }))
+              .filter((entry): entry is { session: (typeof entry.session) & {}; game: NonNullable<typeof entry.game> } => {
+                if (!entry.game) return false
+                const appId = adapterFor(entry.game).steamAppId
+                return appId !== undefined && runningAppIds.includes(appId)
+              })
+            if (!targets.length) return
+            const [presence, windows] = await Promise.all([
+              native.scanGamePresence(targets.map(({ game }) => presenceRequestFor(game, true, learnedSignaturesFor(game.id), true))),
+              native.scanGameWindows(targets.map(({ game }) => windowRequestFor(game, true))),
+            ])
+            attach(presence.map(result => ({ gameId: result.gameId, score: result.score, processName: result.processName, evidence: ['processus', 'installation'] })))
+            attach(windows.map(result => ({ gameId: result.gameId, score: result.score, evidence: ['fenêtre', 'processus'] })))
+            learnFromPresence(presence)
+          } catch { /* la récupération échoue silencieusement — le tick périodique reprendra */ }
+          finally { recovering = false }
+        })()
+      }
       if (appIds.length > 0 && now - lastSteamCheck >= 3000) {
         lastSteamCheck = now
         void native.steamRunningState(appIds)
-          .then(result => { steamAppIdsRef.current = result.running_app_ids ?? [] })
+          .then(result => {
+            steamAppIdsRef.current = result.running_app_ids ?? []
+            recoverWaitingSessions(steamAppIdsRef.current)
+          })
           .catch(() => undefined)
       }
       state.sessionWatchdog(steamAppIdsRef.current)
@@ -92,36 +162,14 @@ export default function App() {
       scanning = true
       lastScan = now
       const targets = [...attachTargets, ...foregroundTargets]
-      const attach = (results: Array<{ gameId: string; score: number; processName?: string; evidence: string[] }>) => {
-        const storeNow = useStore.getState()
-        for (const result of results) {
-          if (result.score < AUTO_ATTACH_THRESHOLD) continue
-          if (waiters.some(session => session.gameId === result.gameId)) {
-            storeNow.sessionGameDetected(result.gameId, result.processName ?? '', result.score, result.evidence)
-          } else {
-            storeNow.attachDetectedGame(result.gameId, result.processName ?? '', result.score, result.evidence)
-          }
-        }
-      }
       // Deux preuves complémentaires scannées en parallèle : processus (chemin +
-      // exécutable) et fenêtre principale (visible / premier plan) — la fenêtre
-      // survit aux launchers, UAC et relances internes.
+      // exécutable, +20 si Steam Running) et fenêtre principale (visible /
+      // premier plan) — la fenêtre survit aux launchers, UAC et relances internes.
       void Promise.all([
-        native.scanGamePresence(attachTargets.map(({ game, reattachContext }) => presenceRequestFor(game, reattachContext, learnedSignaturesFor(game.id))))
+        native.scanGamePresence(attachTargets.map(({ game, reattachContext }) => presenceRequestFor(game, reattachContext, learnedSignaturesFor(game.id), steamRunningForGame(game.id))))
           .then(results => {
             attach(results.map(result => ({ gameId: result.gameId, score: result.score, processName: result.processName, evidence: ['processus', 'installation'] })))
-            // Apprentissage des signatures (spec NTE §7 / #36) : un processus
-            // final confirmé (score ≥ 80) devient la référence de détection —
-            // au prochain lancement, même exe renommé par une mise à jour du jeu.
-            for (const result of results) {
-              if (result.score < AUTO_ATTACH_THRESHOLD || !result.processName) continue
-              const game = useStore.getState().games.find(item => item.id === result.gameId)
-              const root = game?.installDirectory
-              const relative = root && result.processPath?.toLowerCase().startsWith(root.toLowerCase())
-                ? result.processPath.slice(root.length).replace(/^[\\/]+/, '').replace(/\\/g, '/')
-                : undefined
-              useStore.getState().learnGameProcessSignature(result.gameId, result.processName, relative || undefined)
-            }
+            learnFromPresence(results)
           }),
         native.scanGameWindows(targets.map(({ game, reattachContext }) => windowRequestFor(game, reattachContext)))
           .then(results => {

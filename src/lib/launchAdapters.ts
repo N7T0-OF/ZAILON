@@ -36,6 +36,9 @@ const NTE_ADAPTER: GameLaunchAdapter = {
   endGraceSeconds: 10,
   launchChainStages: ['Steam', 'NTELauncher', 'UAC', 'ElevatedLauncher', 'Game'],
   steamAppId: 4508340,
+  // Emplacement profond du vrai processus final : +50 au score, le nom de
+  // l'exécutable n'est plus obligatoire (spec UAC §6).
+  relativePathPatterns: ['Client/WindowsNoEditor/HT/Binaries/Win64'],
 }
 
 const CYBERPUNK_ADAPTER: GameLaunchAdapter = {
@@ -86,7 +89,7 @@ export const LAUNCH_BEHAVIOR_LABELS: Record<GameLaunchAdapter['launchBehavior'],
 export const SESSION_STATE_LABELS: Record<string, string> = {
   Preparing: 'Préparation',
   LauncherStarted: 'Launcher ouvert',
-  WaitingForElevation: 'Autorisation UAC',
+  WaitingForElevation: 'Élévation Windows en cours',
   WaitingForGame: 'En attente du jeu',
   GameDetected: 'Jeu détecté',
   GameRunning: 'En cours',

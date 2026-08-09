@@ -946,9 +946,18 @@
 
 ### Added
 
+- **Récupération de présence immédiate quand Steam passe « En cours »** (spec UAC §5, §16) : dès que le registre RunningAppID confirme l'AppID d'une session en attente, ZAILON rescanne immédiatement processus + fenêtres — sans attendre le tick suivant, sans aucune confirmation UAC.
+- **Seuil Steam-backé** (60 au lieu de 80) : quand Steam confirme le jeu en cours, un processus final élevé qui refuse son chemin est rattaché via nom + contexte + Steam (65 ≥ 60) — fin du blocage « attente de confirmation Windows ».
+- **Scoring natif renforcé** : +20 si Steam Running (preuve indépendante du chemin), +50 si le processus est sous un emplacement profond connu (`Client\WindowsNoEditor\HT\Binaries\Win64` pour NTE — le nom de l'EXE n'est plus obligatoire), -50 si le processus est hors installation avec chemin accessible (processus élevé : aucune conclusion négative).
+
 ### Changed
 
+- L'élévation UAC n'est plus un état bloquant : `WaitingForElevation` est un sous-état informatif, la machine continue `Lancement… → Recherche du jeu… → En cours` ; le bouton affiche « Lancement… » et le bandeau « Élévation Windows en cours » (fini « Autorisation requise… » / « Acceptez la fenêtre UAC »).
+- `ntegloballauncher.exe` reste un stage launcher valide : la session continue sans attendre qu'il reste vivant (il peut démarrer, s'élever, se fermer et être remplacé).
+
 ### Fixed
+
+- ZAILON restait bloqué sur « attente de confirmation Windows » alors que le vrai jeu tournait déjà après l'UAC : la réconciliation est désormais pilotée par les preuves (Steam Running, processus final, fenêtre), jamais par une confirmation API inexistante.
 
 ### Performance
 

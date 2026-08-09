@@ -77,22 +77,45 @@ Le state pré-construit est transmis au natif via `stateOverride`
 
 ## Validation
 
-- `src/lib/discordPresence.ts` — logique pure, **15 tests**.
-- `tsc` ✅, build ✅, **162/162 tests**.
-- **Verify native ✅ + Verify ZAILON ✅** (release 1.56.0).
+- `src/lib/discordPresence.ts` — logique pure, **15 tests** ;
+  `src/lib/discordAssets.ts` — **5 tests**.
+- `tsc` ✅, build ✅, **167/167 tests**.
+- **Verify native ✅ + Verify ZAILON ✅** (release 1.57.0).
 - Cas couverts par les tests : ID centralisé, variantes de state, anti-0-mods,
   0 mods réel, app non-jeu, mode minimal, fallback asset, asset spécifique,
   décision anti-flap (première publication, même session, session terminée,
   Alt+Tab).
 
+## Assets par jeu (release 1.57.0, spec §17-21, §49-50)
+
+`src/lib/discordAssets.ts` : mapping static (`DISCORD_ASSETS` : Cyberpunk →
+`cyberpunk2077`, NTE → `nte`, Photoshop, Blender) + chaîne de résolution
+`resolveDiscordAsset` :
+
+1. asset Discord spécifique au jeu (mapping) ;
+2. clé globale configurée par l'utilisateur ;
+3. asset générique du type (`generic-game` / `generic-app`) ;
+4. logo ZAILON (fallback absolu de `buildDiscordActivity`).
+
+Jamais d'upload automatique d'images locales vers Discord (spec §18) : les clés
+sont des identifiants d'assets déjà présents dans le Developer Portal de
+l'application ZAILON.
+
+## Timestamp préservé après recovery (release 1.57.0, spec §14, §95)
+
+`startTimestampOverride` (natif `DiscordPresenceConfig`) : le frontend passe
+`session.startedAt / 1000` — après un redémarrage de ZAILON pendant un jeu, le
+timer Discord part du **vrai début de session**, pas de la republication.
+
+## Diagnostic Discord (release 1.57.0, spec §40)
+
+Bloc compact dans Paramètres > Discord : Application ID, Discord détecté, RPC
+connecté, session publiée, asset utilisé, dernière mise à jour — alimenté par
+la trace `lastDiscordPublished` du store (remise à zéro au clear).
+
 ## Limites / prochaines étapes
 
-- **Assets spécifiques par jeu** (spec §17-21) : `discord-assets.json` +
-  `DiscordAssetResolver` (ordre : asset jeu → artwork externe supporté →
-  générique → logo ZAILON). Aujourd'hui : fallback `zailon` uniquement.
 - **Boutons Discord** (spec §26) : URL publique ZAILON — facultatif, non activé.
-- **Diagnostic Discord** dans Paramètres (spec §40) : Application ID, RPC
-  connecté, session publiée, asset — mode développeur.
 - **Quick Panel** : toggle « Présence Discord » (spec §38).
-- Timestamp de session sur recovery : le natif le pose à la republication
-  (l'élapsed repart à zéro après un redémarrage de ZAILON pendant un jeu).
+- Artwork externe (spec §17.2) : non utilisé tant que le SDK Discord choisi ne
+  l'expose pas de façon fiable.

@@ -13,6 +13,7 @@ import { effectivePerformance, type DownloadPolicy, type PerformanceMode, type S
 import { enabledCountFromState, isSilentClear, repairReport } from '../lib/profileConsistency'
 import { createDebouncer } from '../lib/persistDebounce'
 import { buildDiscordActivity, DISCORD_APPLICATION_ID, DISCORD_PRIORITY_DEBOUNCE_MS, shouldDelayPrioritySwitch, type DiscordActivityInput } from '../lib/discordPresence'
+import { resolveDiscordAsset } from '../lib/discordAssets'
 
 // Sauvegarde debounced des réglages continus (spec §17) : le color picker
 // d'accent n'écrit pas sur disque à chaque pixel — coalescence 250 ms, flush
@@ -352,6 +353,8 @@ export interface Store {
   discordShowElapsed: boolean
   /** Mode présence minimal (spec Discord §36) : seulement le jeu + « Via ZAILON ». */
   discordMinimalPresence: boolean
+  /** Dernière présence publiée (diagnostic spec §40) : jeu, asset, moment. */
+  lastDiscordPublished?: { gameId: string; gameName: string; asset: string; at: number }
   autoCheckUpdates: boolean
   autoInstallUpdates: boolean
   modUpdateFrequency: 'never' | 'startup' | 'daily' | 'weekly'
@@ -747,6 +750,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   discordShowModCount: true,
   discordShowElapsed: true,
   discordMinimalPresence: false,
+  lastDiscordPublished: undefined,
   autoCheckUpdates: true,
   autoInstallUpdates: false,
   modUpdateFrequency: 'weekly',
@@ -2130,6 +2134,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const stop = () => {
       if (discordSwitchTimer) { clearTimeout(discordSwitchTimer); discordSwitchTimer = undefined }
       discordPublishedGameId = undefined
+      set({ lastDiscordPublished: undefined })
       void native.clearDiscordActivity().catch(() => undefined)
     }
     if (!state.discordPresence) { stop(); return }
@@ -2150,6 +2155,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       if (!currentSession || !currentGame || !currentProfile) return
       const resolved = resolveProfileMods(currentGame, currentProfile)
       const enabledMods = resolved.filter(mod => mod.enabled).length
+      const asset = resolveDiscordAsset(gameId, current.discordLargeImageKey || undefined, currentGame.itemKind)
       const activity = buildDiscordActivity({
         gameName: currentGame.name,
         gameKind: currentGame.itemKind,
@@ -2160,9 +2166,13 @@ export const useStore = create<Store>()(persist((set, get) => ({
         showModCount: current.discordShowModCount,
         showElapsed: current.discordShowElapsed,
         minimal: current.discordMinimalPresence,
-        largeImageKey: current.discordLargeImageKey || undefined,
+        largeImageKey: asset,
       })
       discordPublishedGameId = gameId
+      // Trace pour le diagnostic (spec §40) + timestamp préservé après recovery
+      // (spec §14) : le timer Discord part du vrai début de session, pas de la
+      // republication.
+      set({ lastDiscordPublished: { gameId, gameName: activity.details, asset, at: Date.now() } })
       void native.setDiscordActivityFor({
         gameName: activity.details,
         profileName: currentProfile.name,
@@ -2175,6 +2185,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
           showModCount: current.discordShowModCount,
           showElapsed: current.discordShowElapsed,
           stateOverride: activity.state,
+          startTimestampOverride: Math.floor(currentSession.startedAt / 1000),
         },
       }).catch(() => undefined)
     }

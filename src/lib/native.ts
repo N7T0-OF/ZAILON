@@ -610,6 +610,10 @@ export interface DiscordPresenceConfig {
    * sur le template natif : variantes de wording, anti-« 0 mods » incertain,
    * apps non-jeux, mode minimal. */
   stateOverride?: string
+  /** Début réel de session (epoch secondes) — préservé après un redémarrage de
+   * ZAILON pendant un jeu (spec §14, §95) : le timer Discord ne repart pas à
+   * zéro après recovery. */
+  startTimestampOverride?: number
 }
 
 export interface DiscordConnectionStatus {

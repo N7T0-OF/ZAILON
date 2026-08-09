@@ -489,6 +489,11 @@ struct DiscordPresenceConfig {
     /// template composé quand présent et non vide.
     #[serde(default)]
     state_override: Option<String>,
+    /// Début réel de session (epoch secondes) — préservé à travers un
+    /// redémarrage de ZAILON pendant un jeu (spec §14, §95) : le timer Discord
+    /// ne repart pas de zéro après recovery.
+    #[serde(default)]
+    start_timestamp_override: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -4599,7 +4604,10 @@ fn set_discord_activity(
         "instance": false
     });
     if config.show_elapsed {
-        activity["timestamps"] = serde_json::json!({ "start": unix_timestamp() });
+        let start = config
+            .start_timestamp_override
+            .unwrap_or_else(unix_timestamp);
+        activity["timestamps"] = serde_json::json!({ "start": start });
     }
     if let Some(image_key) = config
         .large_image_key

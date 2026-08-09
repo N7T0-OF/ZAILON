@@ -1340,6 +1340,18 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.57.0 — Discord Rich Presence : assets par jeu + diagnostic + timestamp préservé
+
+### Added
+
+- **Assets Discord par jeu** (spec §17-21, §49-50) : `discord-assets` (`src/lib/discordAssets.ts`) — mapping static des jeux connus (Cyberpunk → `cyberpunk2077`, NTE → `nte`, Photoshop, Blender) + chaîne de résolution **asset jeu → clé globale → générique du type (`generic-game` / `generic-app`) → logo ZAILON**. Jamais d'upload d'images locales (spec §18).
+- **Timestamp préservé après recovery** (spec §14, §95) : `startTimestampOverride` (natif) — après un redémarrage de ZAILON pendant un jeu, le timer Discord part du **vrai début de session** (`session.startedAt`) au lieu de repartir de zéro.
+- **Diagnostic Discord compact** dans Paramètres (spec §40) : Application ID, Discord détecté, RPC connecté, session publiée, asset utilisé, dernière mise à jour — alimenté par la trace `lastDiscordPublished` du store.
+
+### Changed
+
+- La grande image utilise désormais le résolveur par jeu (`resolveDiscordAsset`) au lieu de la seule clé globale.
+
 ## 1.56.0 — Discord Rich Presence : Application ID centralisé + présence honnête
 
 ### Added

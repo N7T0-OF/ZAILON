@@ -749,6 +749,10 @@ export const native = {
     history: (profileId: string) => desktopOnly<VisualProfileHistoryItem[]>('visual_profile_history', { profileId }),
     restoreVersion: (profileId: string, fileName: string) =>
       desktopOnly<VisualProfile>('restore_visual_profile_version', { profileId, fileName }),
+    readVersion: (profileId: string, fileName: string) =>
+      desktopOnly<VisualProfile>('read_visual_profile_version', { profileId, fileName }),
+    deleteVersion: (profileId: string, fileName: string) =>
+      desktopOnly<void>('delete_visual_profile_version', { profileId, fileName }),
     export: (profileId: string, destination: string) =>
       desktopOnly<string>('export_visual_profile', { profileId, destination }),
     import: (source: string) => desktopOnly<VisualProfile>('import_visual_profile', { source }),

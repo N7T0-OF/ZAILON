@@ -1238,6 +1238,11 @@
 
 ### Added
 
+- **Diagnostic Visual Profiles compact** (spec §1-3) : grille d'états immédiatement lisibles (Backend, HDR, ICC, Restauration ⚠, Historique, Profil actif) + boutons Tester / Restaurer — la documentation technique (limitations Microsoft, comportement pilote, HDR, multi-écran, absence d'injection, ICC, DDC/CI) est déplacée dans une **bulle ⓘ** (hover + clic + clavier, contenu déroulant si long).
+- **Historique cliquable** (spec §4) : « N version(s) » ouvre une fenêtre avec toutes les versions — actions **Restaurer / Comparer / Supprimer** (corbeille ZAILON). Le comparateur affiche les 12 réglages version vs actuel, différences surlignées.
+- **Historique plafonné à 50 versions** côté natif (spec §4) : les plus anciennes partent en corbeille — plus jamais des milliers de copies.
+- **Nouvelles commandes natives** : `read_visual_profile_version` (lecture seule pour comparer) et `delete_visual_profile_version`.
+
 ### Changed
 
 ### Fixed

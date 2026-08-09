@@ -1860,6 +1860,62 @@ async fn search_game_artwork(
     }
     let mut candidates = Vec::new();
     let mut seen = HashSet::new();
+    if let Some(api_keys) = api_keys.as_ref() {
+        if let Some(api_key) = api_keys
+            .iter()
+            .find(|(provider, _)| provider.eq_ignore_ascii_case("steamgriddb"))
+            .map(|(_, key)| key)
+        {
+            let sgdb_endpoint = match kind.as_str() {
+                "cover" => Some(("grids", "600x900")),
+                "banner" | "background" => Some(("heroes", "1920x620")),
+                "logo" => Some(("logos", "")),
+                "icon" => Some(("icons", "")),
+                _ => None,
+            };
+            if let Some((endpoint, dimensions)) = sgdb_endpoint {
+                let mut sgdb_url = url::Url::parse(&format!(
+                    "https://www.steamgriddb.com/api/v2/{endpoint}/{app_id}"
+                ))
+                .map_err(to_error)?;
+                if !dimensions.is_empty() {
+                    sgdb_url
+                        .query_pairs_mut()
+                        .append_pair("dimensions", dimensions);
+                }
+                let request = client
+                    .get(sgdb_url)
+                    .header(reqwest::header::AUTHORIZATION, format!("Bearer {api_key}"));
+                if let Ok(response) = request.send().await {
+                    if response.status().is_success() {
+                        if let Ok(payload) = response.json::<serde_json::Value>().await {
+                            if let Some(items) =
+                                payload.get("data").and_then(|value| value.as_array())
+                            {
+                                for item in items {
+                                    if let Some(url) = item
+                                        .get("url")
+                                        .and_then(|value| value.as_str())
+                                        .map(str::to_string)
+                                    {
+                                        push_steamgriddb_candidate(
+                                            &mut candidates,
+                                            &mut seen,
+                                            &matched_name,
+                                            &kind,
+                                            url,
+                                            item.get("width").and_then(|value| value.as_u64()),
+                                            item.get("height").and_then(|value| value.as_u64()),
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     match kind.as_str() {
         "cover" => {
             push_artwork_candidate(&mut candidates, &mut seen, &matched_name, &kind, format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/library_600x900_2x.jpg"), Some(1200), Some(1800));
@@ -1971,52 +2027,161 @@ async fn search_game_artwork(
         _ => {}
     }
     if let Some(api_keys) = api_keys.as_ref() {
-        if let Some(api_key) = api_keys
-            .iter()
-            .find(|(provider, _)| provider.eq_ignore_ascii_case("steamgriddb"))
-            .map(|(_, key)| key)
-        {
-            let sgdb_endpoint = match kind.as_str() {
-                "cover" => Some(("grids", "600x900")),
-                "banner" | "background" => Some(("heroes", "1920x620")),
-                "logo" => Some(("logos", "")),
-                "icon" => Some(("icons", "")),
+        let igdb_client_id = api_keys.get("igdbClientId");
+        let igdb_client_secret = api_keys.get("igdbClientSecret");
+        if let (Some(client_id), Some(client_secret)) = (igdb_client_id, igdb_client_secret) {
+            let igdb_endpoint = match kind.as_str() {
+                "cover" => Some(("cover", "t_cover_big", 264, 352)),
+                "banner" | "background" => Some(("artworks", "t_1080p", 1920, 1080)),
                 _ => None,
             };
-            if let Some((endpoint, dimensions)) = sgdb_endpoint {
-                let mut sgdb_url = url::Url::parse(&format!(
-                    "https://www.steamgriddb.com/api/v2/{endpoint}/{app_id}"
-                ))
-                .map_err(to_error)?;
-                if !dimensions.is_empty() {
-                    sgdb_url
-                        .query_pairs_mut()
-                        .append_pair("dimensions", dimensions);
-                }
-                let request = client
-                    .get(sgdb_url)
-                    .header(reqwest::header::AUTHORIZATION, format!("Bearer {api_key}"));
-                if let Ok(response) = request.send().await {
-                    if response.status().is_success() {
-                        if let Ok(payload) = response.json::<serde_json::Value>().await {
-                            if let Some(items) =
-                                payload.get("data").and_then(|value| value.as_array())
+            if let Some((field, size, width, height)) = igdb_endpoint {
+                let token_response = client
+                    .post("https://id.twitch.tv/oauth2/token")
+                    .form(&[
+                        ("client_id", client_id.as_str()),
+                        ("client_secret", client_secret.as_str()),
+                        ("grant_type", "client_credentials"),
+                    ])
+                    .send()
+                    .await;
+                if let Ok(token_response) = token_response {
+                    if token_response.status().is_success() {
+                        if let Ok(token_payload) = token_response.json::<serde_json::Value>().await
+                        {
+                            if let Some(access_token) = token_payload
+                                .get("access_token")
+                                .and_then(|value| value.as_str())
                             {
-                                for item in items {
-                                    if let Some(url) = item
-                                        .get("url")
-                                        .and_then(|value| value.as_str())
-                                        .map(str::to_string)
-                                    {
-                                        push_steamgriddb_candidate(
-                                            &mut candidates,
-                                            &mut seen,
-                                            &matched_name,
-                                            &kind,
-                                            url,
-                                            item.get("width").and_then(|value| value.as_u64()),
-                                            item.get("height").and_then(|value| value.as_u64()),
-                                        );
+                                let query = format!(
+                                    "search \"{}\"; fields name,{field}.image_id; limit 4;",
+                                    game_name.trim().replace('"', "")
+                                );
+                                let search = client
+                                    .post("https://api.igdb.com/v4/games")
+                                    .header("Client-ID", client_id.as_str())
+                                    .header(
+                                        reqwest::header::AUTHORIZATION,
+                                        format!("Bearer {access_token}"),
+                                    )
+                                    .body(query)
+                                    .send()
+                                    .await;
+                                if let Ok(search) = search {
+                                    if search.status().is_success() {
+                                        if let Ok(games) = search.json::<serde_json::Value>().await
+                                        {
+                                            if let Some(games) = games.as_array() {
+                                                for game in games.iter().take(3) {
+                                                    let mut image_ids: Vec<&str> = Vec::new();
+                                                    if field == "cover" {
+                                                        if let Some(image_id) = game
+                                                            .get("cover")
+                                                            .and_then(|value| value.get("image_id"))
+                                                            .and_then(|value| value.as_str())
+                                                        {
+                                                            image_ids.push(image_id);
+                                                        }
+                                                    } else if let Some(items) = game
+                                                        .get(field)
+                                                        .and_then(|value| value.as_array())
+                                                    {
+                                                        for item in items {
+                                                            if let Some(image_id) = item
+                                                                .get("image_id")
+                                                                .and_then(|value| value.as_str())
+                                                            {
+                                                                image_ids.push(image_id);
+                                                            }
+                                                        }
+                                                    }
+                                                    for image_id in image_ids.iter().take(4) {
+                                                        push_igdb_candidate(
+                                                            &mut candidates,
+                                                            &mut seen,
+                                                            &matched_name,
+                                                            &kind,
+                                                            format!(
+                                                                "https://images.igdb.com/igdb/image/upload/{size}/{image_id}.jpg"
+                                                            ),
+                                                            Some(width),
+                                                            Some(height),
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if matches!(kind.as_str(), "cover" | "banner" | "background") {
+        let mut search_url =
+            url::Url::parse("https://api.gamebanana.com/Core/List/Like").map_err(to_error)?;
+        search_url
+            .query_pairs_mut()
+            .append_pair("itemtype", "Game")
+            .append_pair("field", "name")
+            .append_pair("like", game_name.trim())
+            .append_pair("limit", "4");
+        if let Ok(response) = client.get(search_url).send().await {
+            if response.status().is_success() {
+                if let Ok(ids) = response.json::<serde_json::Value>().await {
+                    if let Some(ids) = ids.as_array() {
+                        for id in ids.iter().take(2) {
+                            if let Some(id) = id
+                                .as_u64()
+                                .or_else(|| id.as_str().and_then(|value| value.parse().ok()))
+                            {
+                                let mut item_url =
+                                    url::Url::parse("https://api.gamebanana.com/Core/Item/Data")
+                                        .map_err(to_error)?;
+                                item_url
+                                    .query_pairs_mut()
+                                    .append_pair("itemtype", "Game")
+                                    .append_pair("id", &id.to_string())
+                                    .append_pair("fields", "name,screenshots");
+                                if let Ok(item_response) = client.get(item_url).send().await {
+                                    if item_response.status().is_success() {
+                                        if let Ok(item) =
+                                            item_response.json::<serde_json::Value>().await
+                                        {
+                                            if let Some(screenshots) = item
+                                                .get("screenshots")
+                                                .and_then(|value| value.as_array())
+                                            {
+                                                for screenshot in screenshots.iter().take(4) {
+                                                    let url = screenshot
+                                                        .get("sUrl")
+                                                        .and_then(|value| value.as_str())
+                                                        .map(str::to_string)
+                                                        .or_else(|| {
+                                                            screenshot
+                                                                .get("iFilename")
+                                                                .and_then(|value| value.as_str())
+                                                                .map(|name| {
+                                                                    format!(
+                                                                        "https://images.gamebanana.com/img/ss/games/{name}"
+                                                                    )
+                                                                })
+                                                        });
+                                                    if let Some(url) = url {
+                                                        push_gamebanana_candidate(
+                                                            &mut candidates,
+                                                            &mut seen,
+                                                            &matched_name,
+                                                            &kind,
+                                                            url,
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -2058,8 +2223,63 @@ fn push_steamgriddb_candidate(
     });
 }
 
+fn push_igdb_candidate(
+    candidates: &mut Vec<ArtworkCandidate>,
+    seen: &mut HashSet<String>,
+    game_name: &str,
+    kind: &str,
+    url: String,
+    width: Option<u64>,
+    height: Option<u64>,
+) {
+    let url = safe_remote_image(url);
+    if url.is_empty() || !seen.insert(url.clone()) {
+        return;
+    }
+    candidates.push(ArtworkCandidate {
+        id: format!("igdb-{}", candidates.len() + 1),
+        provider: "igdb".into(),
+        source_label: "IGDB".into(),
+        game_name: game_name.into(),
+        kind: kind.into(),
+        url,
+        width,
+        height,
+        attribution: "Image fournie par IGDB. Vérifiez l'aperçu avant utilisation.".into(),
+    });
+}
+
+fn push_gamebanana_candidate(
+    candidates: &mut Vec<ArtworkCandidate>,
+    seen: &mut HashSet<String>,
+    game_name: &str,
+    kind: &str,
+    url: String,
+) {
+    let url = safe_remote_image(url);
+    if url.is_empty() || !seen.insert(url.clone()) {
+        return;
+    }
+    candidates.push(ArtworkCandidate {
+        id: format!("gamebanana-{}", candidates.len() + 1),
+        provider: "gamebanana".into(),
+        source_label: "GameBanana".into(),
+        game_name: game_name.into(),
+        kind: kind.into(),
+        url,
+        width: None,
+        height: None,
+        attribution:
+            "Image fournie par GameBanana (API publique). Vérifiez l'aperçu avant utilisation."
+                .into(),
+    });
+}
+
 #[tauri::command]
-async fn test_artwork_provider(provider: String, api_key: String) -> Result<String, String> {
+async fn test_artwork_provider(
+    provider: String,
+    api_keys: HashMap<String, String>,
+) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .user_agent(format!("ZAILON/{}", env!("CARGO_PKG_VERSION")))
@@ -2067,6 +2287,9 @@ async fn test_artwork_provider(provider: String, api_key: String) -> Result<Stri
         .map_err(|_| "Unable to initialize the artwork connection test.".to_string())?;
     match provider.to_ascii_lowercase().as_str() {
         "steamgriddb" => {
+            let api_key = api_keys
+                .get("steamgriddb")
+                .ok_or_else(|| "Aucune clé SteamGridDB n'est enregistrée.".to_string())?;
             let response = client
                 .get("https://www.steamgriddb.com/api/v2/grids/1?type=grid&dimensions=600x900")
                 .header(reqwest::header::AUTHORIZATION, format!("Bearer {api_key}"))
@@ -2090,7 +2313,60 @@ async fn test_artwork_provider(provider: String, api_key: String) -> Result<Stri
                 ))
             }
         }
-        _ => Err("Ce fournisseur d'illustrations ne propose pas de test de clé.".into()),
+        "igdb" => {
+            let client_id = api_keys
+                .get("igdbClientId")
+                .ok_or_else(|| "Aucun Client ID Twitch n'est enregistré.".to_string())?;
+            let client_secret = api_keys
+                .get("igdbClientSecret")
+                .ok_or_else(|| "Aucun Client Secret Twitch n'est enregistré.".to_string())?;
+            let response = client
+                .post("https://id.twitch.tv/oauth2/token")
+                .form(&[
+                    ("client_id", client_id.as_str()),
+                    ("client_secret", client_secret.as_str()),
+                    ("grant_type", "client_credentials"),
+                ])
+                .send()
+                .await
+                .map_err(|error| {
+                    if error.is_timeout() {
+                        "Twitch a expiré.".to_string()
+                    } else {
+                        "Twitch est actuellement inaccessible.".to_string()
+                    }
+                })?;
+            if response.status().is_success() {
+                Ok("Connexion OK : le Client Twitch est accepté (IGDB).".into())
+            } else {
+                Err(format!(
+                    "Client Twitch refusé par IGDB (code {}). Vérifiez le Client ID et le Client Secret.",
+                    response.status().as_u16()
+                ))
+            }
+        }
+        "gamebanana" => {
+            let response = client
+                .get("https://api.gamebanana.com/Core/List/Like?itemtype=Game&field=name&like=test&limit=1")
+                .send()
+                .await
+                .map_err(|error| {
+                    if error.is_timeout() {
+                        "GameBanana a expiré.".to_string()
+                    } else {
+                        "GameBanana est actuellement inaccessible.".to_string()
+                    }
+                })?;
+            if response.status().is_success() {
+                Ok("Connexion OK : l'API publique GameBanana répond sans clé.".into())
+            } else {
+                Err(format!(
+                    "Réponse inattendue de GameBanana (code {}).",
+                    response.status().as_u16()
+                ))
+            }
+        }
+        _ => Err("Ce fournisseur d'illustrations ne propose pas de test de connexion.".into()),
     }
 }
 

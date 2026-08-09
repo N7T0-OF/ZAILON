@@ -946,6 +946,26 @@
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Performance
+
+### Security
+
+### Compatibility
+
+### Experimental
+
+### Removed
+
+### Known Issues
+
+## 1.35.0 — Correctif NTE après UAC
+
+### Added
+
 - **Récupération de présence immédiate quand Steam passe « En cours »** (spec UAC §5, §16) : dès que le registre RunningAppID confirme l'AppID d'une session en attente, ZAILON rescanne immédiatement processus + fenêtres — sans attendre le tick suivant, sans aucune confirmation UAC.
 - **Seuil Steam-backé** (60 au lieu de 80) : quand Steam confirme le jeu en cours, un processus final élevé qui refuse son chemin est rattaché via nom + contexte + Steam (65 ≥ 60) — fin du blocage « attente de confirmation Windows ».
 - **Scoring natif renforcé** : +20 si Steam Running (preuve indépendante du chemin), +50 si le processus est sous un emplacement profond connu (`Client\WindowsNoEditor\HT\Binaries\Win64` pour NTE — le nom de l'EXE n'est plus obligatoire), -50 si le processus est hors installation avec chemin accessible (processus élevé : aucune conclusion négative).
@@ -970,6 +990,8 @@
 ### Removed
 
 ### Known Issues
+
+- Les tests NTE Steam/UAC réels (spec §18, §52) exigent la machine avec le jeu : non couverts par la CI. Les deux cas (UAC accepté → En cours ; UAC refusé → « Le lancement a été annulé ») restent à valider matériellement.
 
 ## 1.34.0 — Connecteurs IGDB et GameBanana
 

@@ -890,8 +890,12 @@ export const native = {
   consumeExternalInstall: (requestId: string) => desktopOnly<void>('consume_external_install', { requestId }),
   pendingShortcutLaunches: () => desktopOnly<ShortcutLaunchRequest[]>('pending_shortcut_launches'),
   consumeShortcutLaunch: (rawUrl: string) => desktopOnly<void>('consume_shortcut_launch', { rawUrl }),
-  createDesktopShortcut: (gameId: string, profileId: string, gameName: string, iconPath?: string) =>
-    desktopOnly<string>('create_desktop_shortcut', { gameId, profileId, gameName, iconPath }),
+  /** Crée un raccourci bureau .lnk/.desktop/.webloc qui lance ZAILON avec l'URI
+   * zailon:// (profil, mods, session, clavier, visuel conservés). L'icône est
+   * résolue côté natif : personnalisée (ico/exe/dll/png) → exécutable du jeu
+   * (icône native) → icône ZAILON en dernier recours. */
+  createDesktopShortcut: (gameId: string, profileId: string, gameName: string, iconPath?: string, execPath?: string) =>
+    desktopOnly<string>('create_desktop_shortcut', { gameId, profileId, gameName, iconPath, execPath }),
   storeGameResource: (gameId: string, kind: GameResourceKind, sourcePath: string) =>
     desktopOnly<string>('store_game_resource', { gameId, kind, sourcePath }),
   cacheRemoteGameResource: (gameId: string, kind: Exclude<GameResourceKind, 'video'>, sourceUrl: string) =>

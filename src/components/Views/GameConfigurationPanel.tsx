@@ -172,7 +172,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
               <p className="text-[11px] font-semibold text-white/68">Raccourci de lancement sécurisé</p>
               <p className="mt-1 text-[11px] leading-relaxed text-white/34">Crée un raccourci bureau ZAILON lié à ce jeu et au profil « {profile.name} ». Le lien contient uniquement leurs identifiants internes.</p>
             </div>
-            <button type="button" onClick={() => void native.createDesktopShortcut(game.id, profile.id, game.name, game.resources?.iconPath || game.execPath).then(path => window.alert(`Raccourci créé :\n${path}`)).catch(error => window.alert(String(error)))} className="flex items-center gap-2 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313]"><MonitorDown size={14} />Créer sur le bureau</button>
+            <button type="button" onClick={() => void native.createDesktopShortcut(game.id, profile.id, game.name, game.resources?.iconPath, game.execPath).then(path => window.alert(`Raccourci créé :\n${path}`)).catch(error => window.alert(String(error)))} className="flex items-center gap-2 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313]"><MonitorDown size={14} />Créer sur le bureau</button>
           </div>
         </div>
         <LaunchChainTest game={game} />

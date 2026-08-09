@@ -946,9 +946,17 @@
 
 ### Added
 
+- **Vrais raccourcis bureau Windows `.lnk`** (format binaire MS-OSH, sans dépendance) : `TargetPath` = ZAILON, `Arguments` = URI `zailon://` (profil, mods, session, clavier, visuel conservés), `WorkingDirectory`, `IconLocation` et `Description` explicites — fini l'icône blanche des anciens `.url`.
+- **Résolution d'icône en cascade** (spec §20) : icône personnalisée/Apparence (`.ico`/`.exe`/`.dll` utilisés tels quels, `.png` enveloppée automatiquement dans un conteneur `.ico` Vista+ dans `resources/games/<id>/shortcut.ico`) → **icône native extraite par Windows de l'exécutable du jeu** → icône générique ZAILON en dernier recours. Jamais de raccourci sans `IconLocation` valide.
+- **Linux `.desktop`** : `Icon=` pointe désormais vers l'image locale résolue.
+
 ### Changed
 
+- `createDesktopShortcut` reçoit `iconPath` et `execPath` séparément : l'exécutable du jeu n'est plus confondu avec l'icône personnalisée dans la résolution.
+
 ### Fixed
+
+- Le raccourci bureau affichait une icône de fichier blanc : les `.url` sont remplacés par de vrais `.lnk` avec `IconLocation` résolue et exploitable par Windows.
 
 ### Performance
 
@@ -961,6 +969,8 @@
 ### Removed
 
 ### Known Issues
+
+- La conversion multi-taille (16→256 px) d'un PNG en `.ico` nécessiterait un décodeur d'images : la version actuelle enveloppe le PNG tel quel (256×256, format PNG accepté par Windows Vista+) — suffisant pour éliminer l'icône blanche.
 
 ## 1.35.0 — Correctif NTE après UAC
 

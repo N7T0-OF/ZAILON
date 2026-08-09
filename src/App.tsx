@@ -3,6 +3,7 @@ import { AlertTriangle, Bell, CheckCircle2, Download, ExternalLink, Info, Monito
 import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { AppWindow } from './components/Layout/AppWindow'
 import { CommandPalette } from './components/CommandPalette'
+import { GuidedTour } from './components/GuidedTour'
 import { UpdateProvider } from './components/UpdateProvider'
 import { resolveProfileMods, useStore } from './store/useStore'
 import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type LearnedProcessSignature, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
@@ -45,6 +46,8 @@ export default function App() {
   const reconcileRuntimeActivity = useStore(s => s.reconcileRuntimeActivity)
   const refreshStagedCatalogs = useStore(s => s.refreshStagedCatalogs)
   const flushPendingSettings = useStore(s => s.flushPendingSettings)
+  const tourCompleted = useStore(s => s.tourCompleted)
+  const tourSkipped = useStore(s => s.tourSkipped)
   const autoMinimizeOnGameStart = useStore(s => s.autoMinimizeOnGameStart)
   const restoreAfterGame = useStore(s => s.restoreAfterGame)
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
@@ -76,6 +79,17 @@ export default function App() {
       flush()
     }
   }, [flushPendingSettings])
+
+  // Tutoriel première visite (spec §18, §54) : affiché au premier lancement
+  // (jamais vu, jamais passé), après un court délai pour laisser l'interface
+  // se charger — « Passer » est respecté et persisté, « Revoir la visite
+  // guidée » (Paramètres) le relance.
+  const [showTour, setShowTour] = useState(false)
+  useEffect(() => {
+    if (tourCompleted || tourSkipped) return
+    const timer = window.setTimeout(() => setShowTour(true), 1200)
+    return () => window.clearTimeout(timer)
+  }, [tourCompleted, tourSkipped])
 
   // GamePresenceEngine : un seul watcher léger suit (a) les sessions en attente
   // de leur processus final, (b) les jeux configurés lancés hors ZAILON, et
@@ -516,6 +530,7 @@ export default function App() {
       }}>
       <UpdateProvider>
         <AppWindow />
+        {showTour && <GuidedTour />}
       </UpdateProvider>
       <CommandPalette />
       <SessionToast toast={sessionToast} onDismiss={() => setSessionToast(undefined)} />

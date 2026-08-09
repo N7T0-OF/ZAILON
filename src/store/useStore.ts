@@ -396,6 +396,14 @@ export interface Store {
   autoMinimizeOnGameStart: boolean
   restoreAfterGame: boolean
   reduceExplanations: boolean
+  /** Tutoriel de première visite (spec §18-24, §54) : état persisté du tour
+   * guidé — « Passer » est respecté, « Revoir la visite guidée » le relance
+   * depuis Paramètres, les conseils déjà vus ne réapparaissent jamais. */
+  tourCompleted: boolean
+  tourSkipped: boolean
+  tourVersion: number
+  tourCompletedSteps: string[]
+  hintsSeen: string[]
   advancedMode: boolean
   showSupportButton: boolean
   autoAttachGames: string[]
@@ -571,6 +579,12 @@ export interface Store {
   setRestoreAfterGame: (enabled: boolean) => void
   setSessionInputActive: (gameId: string, active: boolean) => void
   setReduceExplanations: (enabled: boolean) => void
+  completeTourStep: (stepId: string) => void
+  finishTour: () => void
+  skipTour: () => void
+  restartTour: () => void
+  resetTour: () => void
+  markHintSeen: (hintId: string) => void
   setAdvancedMode: (enabled: boolean) => void
   cleanupBackgroundTasks: () => void
   clearBackgroundTasks: () => void
@@ -660,6 +674,11 @@ export function migratePersistedState(persisted: unknown) {
     autoMinimizeOnGameStart: state.autoMinimizeOnGameStart ?? true,
     restoreAfterGame: state.restoreAfterGame ?? true,
     reduceExplanations: state.reduceExplanations ?? false,
+    tourCompleted: state.tourCompleted ?? false,
+    tourSkipped: state.tourSkipped ?? false,
+    tourVersion: state.tourVersion ?? 1,
+    tourCompletedSteps: Array.isArray(state.tourCompletedSteps) ? state.tourCompletedSteps : [],
+    hintsSeen: Array.isArray(state.hintsSeen) ? state.hintsSeen : [],
     advancedMode: state.advancedMode ?? false,
     showSupportButton: state.showSupportButton ?? true,
     autoAttachGames: state.autoAttachGames || [],
@@ -746,6 +765,11 @@ export const useStore = create<Store>()(persist((set, get) => ({
   autoMinimizeOnGameStart: true,
   restoreAfterGame: true,
   reduceExplanations: false,
+  tourCompleted: false,
+  tourSkipped: false,
+  tourVersion: 1,
+  tourCompletedSteps: [],
+  hintsSeen: [],
   advancedMode: false,
   showSupportButton: true,
   autoAttachGames: [],
@@ -2187,6 +2211,12 @@ export const useStore = create<Store>()(persist((set, get) => ({
     void get().syncVisualProfiles()
   },
   setReduceExplanations: reduceExplanations => set({ reduceExplanations }),
+  completeTourStep: stepId => set(state => ({ tourCompletedSteps: [...new Set([...state.tourCompletedSteps, stepId])] })),
+  finishTour: () => set({ tourCompleted: true, tourSkipped: false }),
+  skipTour: () => set({ tourSkipped: true, tourCompleted: false }),
+  restartTour: () => set({ tourCompleted: false, tourSkipped: false, tourCompletedSteps: [] }),
+  resetTour: () => set({ tourCompleted: false, tourSkipped: false, tourVersion: 1, tourCompletedSteps: [], hintsSeen: [] }),
+  markHintSeen: hintId => set(state => ({ hintsSeen: [...new Set([...state.hintsSeen, hintId])] })),
   setAdvancedMode: advancedMode => set({ advancedMode }),
   cleanupBackgroundTasks: () => set(state => {
     if (state.downloadRetention === 'never') return {}
@@ -2621,6 +2651,11 @@ export const useStore = create<Store>()(persist((set, get) => ({
     autoMinimizeOnGameStart: state.autoMinimizeOnGameStart,
     restoreAfterGame: state.restoreAfterGame,
     reduceExplanations: state.reduceExplanations,
+    tourCompleted: state.tourCompleted,
+    tourSkipped: state.tourSkipped,
+    tourVersion: state.tourVersion,
+    tourCompletedSteps: state.tourCompletedSteps,
+    hintsSeen: state.hintsSeen,
     advancedMode: state.advancedMode,
     showSupportButton: state.showSupportButton,
     autoAttachGames: state.autoAttachGames,

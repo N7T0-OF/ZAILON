@@ -1286,6 +1286,15 @@
 
 - **Bloc « Gratuit en permanence » supprimé** de Visual Profiles (spec §35, critère bloquant §71) : texte permanent inutile, n'apportait rien à l'utilisation courante.
 
+## 1.51.0 — Tutoriel de première visite (visite guidée)
+
+### Added
+
+- **Visite guidée au premier lancement** (spec §18-21) : petite fenêtre flottante **non bloquante** (l'application reste utilisable derrière), 6 étapes — Bibliothèque, Jeu, Profils, Explorer, Jouer, Quick Panel — avec navigation **automatique vers la bonne page** à chaque étape (spec §21). Boutons Suivant / Précédent / Passer / Terminer, indicateur d'étape.
+- **État persisté** (spec §54) : « Passer » est respecté et ne réapparaît jamais ; `OnboardingState` (`tourCompleted`, `tourSkipped`, `tourVersion`, `tourCompletedSteps`, `hintsSeen`) persisté.
+- **Revoir la visite guidée** depuis Paramètres > À propos (spec §22) : bouton « Revoir la visite guidée » (relance le tour) + « Réinitialiser les conseils » (remet tout à zéro, avec confirmation).
+- **Étapes versionnées** (spec §23) : `CURRENT_TOUR_VERSION` centralisé dans `src/lib/tourSteps.ts` (module pur, 7 tests) — une refonte majeure pourra proposer « Découvrir la nouvelle interface » sans relancer le tour complet.
+
 ## [Unreleased]
 
 ### Added

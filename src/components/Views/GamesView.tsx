@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, Boxes, Check, CheckSquare2, ChevronDown, ChevronLeft, Copy, Download, ExternalLink, FolderInput, FolderOpen, FolderPlus, Gamepad2, Image as ImageIcon, Loader2, Lock, Monitor, Pause, Play, Plus, Radar, RefreshCw, RotateCcw, Search, ShieldAlert, Star, Tag, Trash2, Unlock, Wrench, X } from 'lucide-react'
+import { AlertTriangle, Archive, Boxes, CheckSquare2, ChevronDown, ChevronLeft, Copy, Download, ExternalLink, FolderInput, FolderOpen, FolderPlus, Gamepad2, Image as ImageIcon, Loader2, Lock, Monitor, Pause, Play, Plus, Radar, RefreshCw, RotateCcw, Search, ShieldAlert, Star, Tag, Trash2, Unlock, Wrench, X } from 'lucide-react'
 import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -14,6 +14,7 @@ import { VisualGamePanel } from '../../visual-profiles/ui/VisualGamePanel'
 import { GameConfigurationPanel } from './GameConfigurationPanel'
 import { GameDiagnosticPanel, GameHealthBar, type SubSection } from './GameDiagnosticPanel'
 import { GameResourcesDialog } from '../GameResourcesDialog'
+import { ProfileSwitcherPopover } from '../UI/ProfileSwitcherPopover'
 
 const TABS: Array<{ id: GameTab; label: string }> = [
   { id: 'overview', label: 'Aperçu' },
@@ -103,7 +104,7 @@ export function GamesView() {
   const [steamDialogOpen, setSteamDialogOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
-  const [newProfileName, setNewProfileName] = useState('')
+  const profileButtonRef = useRef<HTMLButtonElement>(null)
   const [mo2ImportOpen, setMo2ImportOpen] = useState(false)
   const [selectedModIds, setSelectedModIds] = useState<Set<string>>(new Set())
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number>()
@@ -477,26 +478,20 @@ export function GamesView() {
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className="text-[11px] text-white/34">Profil actif :</span>
           <div className="relative">
-            <button type="button" onClick={() => setProfileMenuOpen(open => !open)} className="flex items-center gap-1.5 rounded-full bg-gold/15 px-3 py-1.5 text-[11px] font-semibold text-gold hover:bg-gold/20">{selectedProfile.name}<ChevronDown size={12} className={`transition-transform ${profileMenuOpen ? 'rotate-180' : ''}`} /></button>
-            {profileMenuOpen && <>
-              <div className="fixed inset-0 z-30" onClick={() => setProfileMenuOpen(false)} />
-              <div className="absolute left-0 top-full z-40 mt-2 w-80 rounded-xl border border-white/[0.1] bg-[#111414]/98 p-2 shadow-2xl backdrop-blur-xl">
-                <div className="max-h-72 overflow-y-auto">{selectedGame.profiles.map(profile => {
-                  const count = summaries[selectedGame.id]?.profileCounts[profile.id]?.active ?? resolveProfileMods(selectedGame, profile).filter(mod => mod.enabled).length
-                  return <button key={profile.id} type="button" onClick={() => { void setSelectedProfile(profile.id); setProfileMenuOpen(false) }} className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-white/[0.05] ${profile.id === selectedProfile.id ? 'bg-gold/[0.07]' : ''}`}>
-                    <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-white/78">{profile.name}</span><span className="mt-0.5 block text-[10px] text-white/34">{count} mod(s) actif(s){profile.lastPlayed ? ` · joué ${timeAgo(profile.lastPlayed)}` : ''}</span></span>
-                    {profile.locked && <span className="rounded-full border border-emerald-300/20 bg-emerald-300/[0.05] px-2 py-0.5 text-[9px] text-emerald-200">Stable</span>}
-                    {profile.id === selectedProfile.id && <Check size={12} className="text-gold" />}
-                  </button>
-                })}</div>
-                <div className="mt-2 flex gap-2 border-t border-white/[0.06] pt-2">
-                  <input value={newProfileName} onChange={event => setNewProfileName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && newProfileName.trim()) { addProfile(newProfileName); setNewProfileName(''); setProfileMenuOpen(false) } }} placeholder="Nouveau profil vide…" className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-black/20 px-2.5 py-1.5 text-[11px] text-white/70 outline-none focus:border-gold/30" />
-                  <button type="button" onClick={() => { if (newProfileName.trim()) { addProfile(newProfileName); setNewProfileName(''); setProfileMenuOpen(false) } }} className="flex items-center gap-1 rounded-lg bg-gold px-2.5 py-1.5 text-[11px] font-semibold text-[#101313]"><Plus size={12} />Créer</button>
-                </div>
-                <button type="button" onClick={() => { setTab('profiles'); setProfileMenuOpen(false) }} className="mt-1 w-full rounded-lg px-2.5 py-1.5 text-left text-[11px] text-white/45 hover:bg-white/[0.05] hover:text-white/75">Gérer les profils…</button>
-              </div>
-            </>}
+            <button ref={profileButtonRef} type="button" onClick={() => setProfileMenuOpen(open => !open)} className="flex items-center gap-1.5 rounded-full bg-gold/15 px-3 py-1.5 text-[11px] font-semibold text-gold hover:bg-gold/20">{selectedProfile.name}<ChevronDown size={12} className={`transition-transform ${profileMenuOpen ? 'rotate-180' : ''}`} /></button>
           </div>
+          <ProfileSwitcherPopover
+            open={profileMenuOpen}
+            anchorRef={profileButtonRef}
+            profiles={selectedGame.profiles}
+            selectedProfileId={selectedProfile.id}
+            running={sessionRunning}
+            countFor={profile => summaries[selectedGame.id]?.profileCounts[profile.id]?.active ?? resolveProfileMods(selectedGame, profile).filter(mod => mod.enabled).length}
+            onSelect={profileId => void setSelectedProfile(profileId)}
+            onCreate={name => addProfile(name)}
+            onManage={() => setTab('profiles')}
+            onClose={() => setProfileMenuOpen(false)}
+          />
           {selectedProfile.locked && <span className="rounded-full border border-emerald-300/20 bg-emerald-300/[0.05] px-2.5 py-1 text-[10px] text-emerald-200">● Stable</span>}
           <span className="rounded-full border border-white/[0.07] px-2.5 py-1 text-[10px] text-white/45">{profileMods.filter(mod => mod.enabled).length} mods actifs</span>
           {profileMods.some(mod => mod.updateStatus === 'available') && <span className="rounded-full border border-amber-300/15 bg-amber-300/[0.04] px-2.5 py-1 text-[10px] text-amber-100/80">{profileMods.filter(mod => mod.updateStatus === 'available').length} mise(s) à jour</span>}

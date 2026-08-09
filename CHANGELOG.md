@@ -946,9 +946,16 @@
 
 ### Added
 
+- **Échelle de z-index centralisée** (`src/lib/zIndex.ts`) : couches nommées content/sticky/dropdown/popover/modal/toast — fini les valeurs arbitraires.
+- **ProfileSwitcherPopover en portal** : le sélecteur de profil est rendu dans `document.body` (plus aucun `overflow-hidden` ni stacking context de page ne peut le couper) ; position calculée sur le bouton déclencheur, ouverture vers le haut si l'espace manque en bas, repositionné au scroll/resize, fermeture par Échap.
+
 ### Changed
 
+- **Sélecteur de profil Bibliothèque** : liste compacte (max ~6 profils visibles puis scroll interne), recherche de profil dès 8 profils, badge « Jeu en cours », pas de changement de mods à chaud — un profil non actif est marqué « Disponible après fermeture du jeu » tant qu'une session tourne.
+
 ### Fixed
+
+- **Popover de profil plus jamais coupé** par le hero (`overflow-hidden`) de la page du jeu : le menu s'affiche au-dessus de toute l'interface et reste entièrement visible même avec un long changelog ou une petite fenêtre.
 
 ### Performance
 

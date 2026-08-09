@@ -6,6 +6,7 @@ import { CommandPalette } from './components/CommandPalette'
 import { GuidedTour } from './components/GuidedTour'
 import { UpdateProvider } from './components/UpdateProvider'
 import { resolveProfileMods, useStore } from './store/useStore'
+import { buildRuntimeToastContent } from './lib/runtimeToast'
 import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type LearnedProcessSignature, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
 import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, STEAM_BACKED_ATTACH_THRESHOLD, windowRequestFor } from './lib/gamePresence'
@@ -48,6 +49,10 @@ export default function App() {
   const flushPendingSettings = useStore(s => s.flushPendingSettings)
   const tourCompleted = useStore(s => s.tourCompleted)
   const tourSkipped = useStore(s => s.tourSkipped)
+  const toastRuntimeConnected = useStore(s => s.toastRuntimeConnected)
+  const toastSessionEnded = useStore(s => s.toastSessionEnded)
+  const shortcutHintCount = useStore(s => s.shortcutHintCount)
+  const markShortcutHintShown = useStore(s => s.markShortcutHintShown)
   const autoMinimizeOnGameStart = useStore(s => s.autoMinimizeOnGameStart)
   const restoreAfterGame = useStore(s => s.restoreAfterGame)
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
@@ -533,7 +538,7 @@ export default function App() {
         {showTour && <GuidedTour />}
       </UpdateProvider>
       <CommandPalette />
-      <SessionToast toast={sessionToast} onDismiss={() => setSessionToast(undefined)} />
+      <SessionToast toast={sessionToast} games={games} shortcutLabel={quickPanelShortcut} shortcutHintCount={shortcutHintCount} toastRuntimeConnected={toastRuntimeConnected} toastSessionEnded={toastSessionEnded} onShortcutHintShown={markShortcutHintShown} onDismiss={() => setSessionToast(undefined)} />
       <NotificationCenter history={notificationHistory} onDismiss={dismissNotification} onClear={clearCompletedNotifications} onClearAll={clearNotificationHistory} />
       {externalInstalls[0] && <ExternalInstallDialog request={externalInstalls[0]} games={games} onCancel={() => void native.consumeExternalInstall(externalInstalls[0].requestId).finally(() => setExternalInstalls(current => current.slice(1)))} onContinue={(gameId, profileId) => void resolveExternalInstall(externalInstalls[0], gameId, profileId)} />}
       {exclusiveNoticeOpen && <QuickPanelExclusiveNotice onClose={() => setExclusiveNoticeOpen(false)} />}
@@ -561,19 +566,45 @@ const SESSION_TOAST_TITLES = {
   ended: 'Session terminée',
 } as const
 
-function SessionToast({ toast, onDismiss }: { toast: ReturnType<typeof useStore.getState>['sessionToast']; onDismiss: () => void }) {
+function SessionToast({ toast, games, shortcutLabel, shortcutHintCount, toastRuntimeConnected, toastSessionEnded, onShortcutHintShown, onDismiss }: {
+  toast: ReturnType<typeof useStore.getState>['sessionToast']
+  games: ReturnType<typeof useStore.getState>['games']
+  shortcutLabel: string
+  shortcutHintCount: number
+  toastRuntimeConnected: boolean
+  toastSessionEnded: boolean
+  onShortcutHintShown: () => void
+  onDismiss: () => void
+}) {
+  const sessions = useStore(state => state.gameSessions)
   useEffect(() => {
     if (!toast) return
     const timeout = window.setTimeout(onDismiss, 2500)
     return () => window.clearTimeout(timeout)
   }, [toast, onDismiss])
+  // Rappel du raccourci (spec §42, §63) : compté une fois par toast de
+  // connexion affiché — après 3 sessions, plus jamais.
+  useEffect(() => {
+    if (!toast || toast.kind === 'ended' || !toastRuntimeConnected) return
+    const game = games.find(item => item.name === toast.gameName)
+    const session = sessions.find(item => item.gameId === game?.id && item.state === 'GameRunning')
+    if (session && shortcutHintCount < 3) onShortcutHintShown()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toast?.at, toast?.kind])
   if (!toast) return null
   const ended = toast.kind === 'ended'
-  return <div className={`fixed right-4 top-4 z-[240] flex w-[min(340px,calc(100vw-2rem))] items-start gap-3 rounded-xl border bg-[#0e1212]/95 p-3 shadow-2xl backdrop-blur-xl ${ended ? 'border-white/[0.09]' : 'border-emerald-300/25'}`}>
-    <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${ended ? 'bg-white/[0.06] text-white/55' : 'bg-emerald-300/15 text-emerald-200'}`}>{ended ? <Info size={14} /> : <CheckCircle2 size={14} />}</span>
+  if (ended && !toastSessionEnded) return null
+  if (!ended && !toastRuntimeConnected) return null
+  const game = games.find(item => item.name === toast.gameName)
+  const session = sessions.find(item => item.gameId === game?.id && item.state === 'GameRunning')
+  const content = !ended && session ? buildRuntimeToastContent(session, game, shortcutHintCount, shortcutLabel) : undefined
+  return <div className={`fixed right-4 top-4 z-[240] flex w-[min(340px,calc(100vw-2rem))] items-start gap-3 rounded-xl border bg-[#0e1212]/95 p-3 shadow-2xl backdrop-blur-xl ${ended ? 'border-white/[0.09]' : content?.warning ? 'border-amber-300/30' : 'border-emerald-300/25'}`}>
+    <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${ended ? 'bg-white/[0.06] text-white/55' : content?.warning ? 'bg-amber-300/15 text-amber-200' : 'bg-emerald-300/15 text-emerald-200'}`}>{ended ? <Info size={14} /> : <CheckCircle2 size={14} />}</span>
     <div className="min-w-0 flex-1">
-      <p className={`font-mono text-[10px] uppercase tracking-widest ${ended ? 'text-white/45' : 'text-emerald-200/85'}`}>{SESSION_TOAST_TITLES[toast.kind]}</p>
+      <p className={`font-mono text-[10px] uppercase tracking-widest ${ended ? 'text-white/45' : content?.warning ? 'text-amber-200/85' : 'text-emerald-200/85'}`}>{SESSION_TOAST_TITLES[toast.kind]}</p>
       <p className="mt-0.5 truncate text-xs font-semibold text-white/85">{toast.gameName}</p>
+      {content?.badges.length ? <p className="mt-0.5 text-[11px] text-white/62">{content.badges.map(badge => `${badge.label} ✓`).join(' · ')}{content.warning && <span className="ml-1.5 text-amber-200/75">· connexion partielle</span>}</p> : null}
+      {content?.shortcutHint && <p className="mt-0.5 text-[10px] text-white/35">{content.shortcutHint}</p>}
       {toast.detail && <p className="mt-0.5 text-[11px] text-white/40">{toast.detail}</p>}
     </div>
     <button type="button" onClick={onDismiss} aria-label="Fermer" className="rounded p-1 text-white/40 hover:bg-white/10 hover:text-white"><X size={13} /></button>

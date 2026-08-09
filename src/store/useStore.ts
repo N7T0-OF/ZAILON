@@ -404,6 +404,11 @@ export interface Store {
   tourVersion: number
   tourCompletedSteps: string[]
   hintsSeen: string[]
+  /** Runtime Toast (spec §62-63) : notifications de connexion activables,
+   * compteur des rappels de raccourci (3 premières sessions puis plus jamais). */
+  toastRuntimeConnected: boolean
+  toastSessionEnded: boolean
+  shortcutHintCount: number
   advancedMode: boolean
   showSupportButton: boolean
   autoAttachGames: string[]
@@ -585,6 +590,9 @@ export interface Store {
   restartTour: () => void
   resetTour: () => void
   markHintSeen: (hintId: string) => void
+  setToastRuntimeConnected: (enabled: boolean) => void
+  setToastSessionEnded: (enabled: boolean) => void
+  markShortcutHintShown: () => void
   setAdvancedMode: (enabled: boolean) => void
   cleanupBackgroundTasks: () => void
   clearBackgroundTasks: () => void
@@ -679,6 +687,9 @@ export function migratePersistedState(persisted: unknown) {
     tourVersion: state.tourVersion ?? 1,
     tourCompletedSteps: Array.isArray(state.tourCompletedSteps) ? state.tourCompletedSteps : [],
     hintsSeen: Array.isArray(state.hintsSeen) ? state.hintsSeen : [],
+    toastRuntimeConnected: state.toastRuntimeConnected ?? true,
+    toastSessionEnded: state.toastSessionEnded ?? true,
+    shortcutHintCount: state.shortcutHintCount ?? 0,
     advancedMode: state.advancedMode ?? false,
     showSupportButton: state.showSupportButton ?? true,
     autoAttachGames: state.autoAttachGames || [],
@@ -770,6 +781,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
   tourVersion: 1,
   tourCompletedSteps: [],
   hintsSeen: [],
+  toastRuntimeConnected: true,
+  toastSessionEnded: true,
+  shortcutHintCount: 0,
   advancedMode: false,
   showSupportButton: true,
   autoAttachGames: [],
@@ -2217,6 +2231,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
   restartTour: () => set({ tourCompleted: false, tourSkipped: false, tourCompletedSteps: [] }),
   resetTour: () => set({ tourCompleted: false, tourSkipped: false, tourVersion: 1, tourCompletedSteps: [], hintsSeen: [] }),
   markHintSeen: hintId => set(state => ({ hintsSeen: [...new Set([...state.hintsSeen, hintId])] })),
+  setToastRuntimeConnected: toastRuntimeConnected => set({ toastRuntimeConnected }),
+  setToastSessionEnded: toastSessionEnded => set({ toastSessionEnded }),
+  markShortcutHintShown: () => set(state => ({ shortcutHintCount: state.shortcutHintCount + 1 })),
   setAdvancedMode: advancedMode => set({ advancedMode }),
   cleanupBackgroundTasks: () => set(state => {
     if (state.downloadRetention === 'never') return {}
@@ -2656,6 +2673,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
     tourVersion: state.tourVersion,
     tourCompletedSteps: state.tourCompletedSteps,
     hintsSeen: state.hintsSeen,
+    toastRuntimeConnected: state.toastRuntimeConnected,
+    toastSessionEnded: state.toastSessionEnded,
+    shortcutHintCount: state.shortcutHintCount,
     advancedMode: state.advancedMode,
     showSupportButton: state.showSupportButton,
     autoAttachGames: state.autoAttachGames,

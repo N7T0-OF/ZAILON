@@ -1295,6 +1295,20 @@
 - **Revoir la visite guidée** depuis Paramètres > À propos (spec §22) : bouton « Revoir la visite guidée » (relance le tour) + « Réinitialiser les conseils » (remet tout à zéro, avec confirmation).
 - **Étapes versionnées** (spec §23) : `CURRENT_TOUR_VERSION` centralisé dans `src/lib/tourSteps.ts` (module pur, 7 tests) — une refonte majeure pourra proposer « Découvrir la nouvelle interface » sans relancer le tour complet.
 
+## 1.52.0 — Runtime Toast : preuve de connexion réelle
+
+### Added
+
+- **Runtime Toast contextuel** (spec Quick Panel §1-7, §19) : la bulle « En cours via ZAILON » affiche désormais les **fonctions runtime réellement actives** (QWERTY ✓ · Visuel ✓ · Mods ✓ · Déploiement ✓) — alimentées par l'état RÉEL de la session (`inputProfileActive`, `visualProfileActive`, `runtimeToolsActive`), jamais par la configuration : une fonction configurée mais non active n'affiche jamais ✓ (spec §19).
+- **Connexion partielle honnête** (spec §5) : si une partie des fonctions runtime a échoué, la bulle passe en ton ambre avec « connexion partielle » — pas de gros popup d'erreur.
+- **Rappel du raccourci limité** (spec §42, §63) : « Ctrl+Alt+Z · Panneau rapide » s'affiche sous la bulle **seulement les 3 premières sessions** puis plus jamais (`shortcutHintCount` persisté).
+- **Notifications activables** (spec §62) : Paramètres > Tâches et notifications — toggles « En cours via ZAILON » et « Session terminée ».
+- **`src/lib/runtimeToast.ts`** (logique pure, 10 tests) : `buildRuntimeToastContent`, `runtimeBadges`, `isPartialConnection`, `SHORTCUT_HINT_LIMIT`.
+
+### Fixed
+
+- Le toast « En cours via ZAILON » reste déclenché au **premier vrai `sessionGameDetected`** (processus final détecté, jamais au clic Jouer / Steam / launcher / UAC — spec §4), confirmé par audit du code.
+
 ## [Unreleased]
 
 ### Added

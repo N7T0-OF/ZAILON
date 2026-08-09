@@ -1207,13 +1207,17 @@
 
 - **« Réparer les racines des imports »** (onglet Mods) : re-stage chaque paquet importé depuis sa source enregistrée (`sourcePath`) avec la résolution de racine par fichier — les imports créés avant la 1.41.0 (racines empilées, frameworks mal exposés) sont corrigés sans réimporter. Backup automatique du contenu précédent dans chaque paquet, restauration en cas d'échec, comptage fichiers avant/après et détail des échecs (source absente / manifeste illisible).
 
-## [Unreleased]
+## 1.43.0 — Graphe de capabilities frameworks Cyberpunk
 
 ### Added
 
 - **Graphe de capabilities frameworks Cyberpunk** (spec §28-31) : un framework est reconnu par dossier canonique **ou** signature de fichier (`tweakxl.dll`/`archivexl.dll`/`codeware.dll`), jamais par le nom du dossier — un paquet « core_01 » mal nommé fournit quand même `cyberpunk.tweakxl`.
 - **Correctif du faux « TweakXL requis »** : la vérification pré-lancement comparait un chemin de dossier par égalité exacte de fichier → échouait toujours, même avec TweakXL correctement stagé sous `red4ext/plugins/TweakXL/…`. Les besoins sont désormais satisfaits par des capacités (dossier canonique OU signature), agrégées sur l'ensemble des mods actifs (graphe global).
 - **TweakXL, ArchiveXL et Codeware ajoutés aux fournisseurs détectés** (audit + manifeste + « Comparer avec la racine attendue ») : les 6 frameworks (RED4ext, redscript, TweakXL, ArchiveXL, Codeware, CET) apparaissent désormais dans le comparateur.
+
+## [Unreleased]
+
+### Added
 
 ### Changed
 

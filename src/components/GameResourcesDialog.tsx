@@ -56,6 +56,8 @@ export function GameAppearanceEditor({ game, onSave, onCancel, embedded = false,
   const [selectedArtwork, setSelectedArtwork] = useState<ArtworkCandidate>()
   const [unavailableSources, setUnavailableSources] = useState<Array<{ id: string; label: string; reason: string }>>([])
   const artworkSteamGridDbKey = useStore(state => state.artworkSteamGridDbKey)
+  const artworkIgdbClientId = useStore(state => state.artworkIgdbClientId)
+  const artworkIgdbClientSecret = useStore(state => state.artworkIgdbClientSecret)
   const artworkSourceMode = useStore(state => state.artworkSourceMode)
   const setArtworkSourceMode = useStore(state => state.setArtworkSourceMode)
   const activePath = draft[activeSlot.key]
@@ -107,7 +109,7 @@ export function GameAppearanceEditor({ game, onSave, onCancel, embedded = false,
     setArtworkCandidates([])
     setUnavailableSources([])
     try {
-      const config = { steamgriddbApiKey: artworkSteamGridDbKey }
+      const config = { steamgriddbApiKey: artworkSteamGridDbKey, igdbClientId: artworkIgdbClientId, igdbClientSecret: artworkIgdbClientSecret }
       const plan = artworkSearchPlan(artworkSourceMode, config, activeSlot.kind)
       let merged: ArtworkCandidate[] = []
       let lastError: string | undefined
@@ -245,7 +247,7 @@ export function GameAppearanceEditor({ game, onSave, onCancel, embedded = false,
         <div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold text-white/80">{activeSlot.label}</h3><p className="mt-0.5 text-[11px] text-white/32">{activeSlot.hint}</p></div><span className="rounded border border-white/[0.07] px-1.5 py-0.5 font-mono text-[11px] uppercase text-white/25">{activeSlot.kind === 'video' ? 'MP4 · WEBM' : 'PNG · JPG · WEBP · AVIF · SVG'}</span></div>
         {activeSlot.kind !== 'video' && <div className="mt-3 space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-[11px] text-white/38">Source de recherche</span><div className="flex gap-0.5 rounded-lg border border-white/[0.07] p-0.5">{(['automatic', 'all'] as const).map(mode => <button key={mode} type="button" onClick={() => setArtworkSourceMode(mode)} className={`rounded-md px-2.5 py-1 text-[11px] ${artworkSourceMode === mode ? 'bg-white/[0.09] text-white/80' : 'text-white/35 hover:text-white/60'}`}>{mode === 'automatic' ? 'Automatique' : 'Toutes les sources'}</button>)}</div></div>
-          <div className="flex flex-wrap gap-1.5" aria-label="Sources d’illustrations">{artworkProvidersWithState({ steamgriddbApiKey: artworkSteamGridDbKey }).map(provider => { const available = provider.state === 'available'; return <span key={provider.id} title={`${provider.label} — ${provider.reason({ steamgriddbApiKey: artworkSteamGridDbKey })}`} className={`rounded-full border px-2.5 py-1 text-[11px] ${available ? 'border-gold/28 bg-gold/[0.07] font-semibold text-gold/78' : 'cursor-not-allowed border-white/[0.06] text-white/22'}`}>{provider.label}{!available && ' ⓘ'}</span> })}</div>
+          <div className="flex flex-wrap gap-1.5" aria-label="Sources d’illustrations">{artworkProvidersWithState({ steamgriddbApiKey: artworkSteamGridDbKey, igdbClientId: artworkIgdbClientId, igdbClientSecret: artworkIgdbClientSecret }).map(provider => { const available = provider.state === 'available'; return <span key={provider.id} title={`${provider.label} — ${provider.reason({ steamgriddbApiKey: artworkSteamGridDbKey, igdbClientId: artworkIgdbClientId, igdbClientSecret: artworkIgdbClientSecret })}`} className={`rounded-full border px-2.5 py-1 text-[11px] ${available ? 'border-gold/28 bg-gold/[0.07] font-semibold text-gold/78' : 'cursor-not-allowed border-white/[0.06] text-white/22'}`}>{provider.label}{!available && ' ⓘ'}</span> })}</div>
         </div>}
         <div className="relative mt-3 flex min-h-52 flex-1 items-center justify-center overflow-hidden rounded-xl border border-white/[0.075] bg-[linear-gradient(45deg,rgba(255,255,255,.022)_25%,transparent_25%,transparent_75%,rgba(255,255,255,.022)_75%),linear-gradient(45deg,rgba(255,255,255,.022)_25%,transparent_25%,transparent_75%,rgba(255,255,255,.022)_75%)] bg-[length:18px_18px] bg-[position:0_0,9px_9px]" style={{ aspectRatio: activeSlot.ratio }}>
           {previewSource ? activeSlot.kind === 'video' ? <video src={previewSource} controls muted loop className="h-full w-full object-cover" /> : <img src={previewSource} alt={`Aperçu ${activeSlot.label}`} className="h-full w-full" style={previewStyle} /> : <div className="text-center text-white/24"><ImagePlus size={27} className="mx-auto" /><p className="mt-2 text-[11px]">Aucune ressource locale</p><p className="mt-1 text-[11px] text-white/18">Déposez un fichier ou utilisez Parcourir</p></div>}

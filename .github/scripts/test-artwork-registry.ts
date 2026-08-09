@@ -37,29 +37,41 @@ test('SteamGridDB est non configuré sans clé, disponible avec', () => {
   assert.equal(artworkProviderState('steamgriddb', { steamgriddbApiKey: 'abc123' }), 'available')
 })
 
-test('les connecteurs non branchés sont honnêtement « non disponibles »', () => {
-  for (const id of ['igdb', 'nexus', 'gamebanana', 'curseforge'] as const) {
+test('IGDB est non configuré sans Client Twitch, disponible avec les deux', () => {
+  assert.equal(artworkProviderState('igdb', {}), 'not-configured')
+  assert.equal(artworkProviderState('igdb', { igdbClientId: 'id' }), 'not-configured')
+  assert.equal(artworkProviderState('igdb', { igdbClientId: 'id', igdbClientSecret: 'secret' }), 'available')
+})
+
+test('GameBanana est disponible sans aucune clé (API publique)', () => {
+  assert.equal(artworkProviderState('gamebanana', {}), 'available')
+  assert.equal(artworkProviderState('gamebanana', { steamgriddbApiKey: 'abc' }), 'available')
+})
+
+test('les connecteurs sans API de jaquettes restent honnêtement « non disponibles »', () => {
+  for (const id of ['nexus', 'curseforge'] as const) {
     assert.equal(artworkProviderState(id, {}), 'not-implemented', id)
-    assert.equal(artworkProviderState(id, { steamgriddbApiKey: 'abc' }), 'not-implemented', id)
+    assert.equal(artworkProviderState(id, { steamgriddbApiKey: 'abc', igdbClientId: 'id', igdbClientSecret: 'secret' }), 'not-implemented', id)
   }
 })
 
-test('la liste triée par priorité expose l’état calculé', () => {
-  const list = artworkProvidersWithState({ steamgriddbApiKey: 'abc' })
-  assert.deepEqual(list.map(provider => provider.id), ['steam', 'steamgriddb', 'igdb', 'nexus', 'gamebanana', 'curseforge'])
+test('la liste triée suit la priorité recommandée (SGDB 1, Steam 2, IGDB 3, GameBanana 4)', () => {
+  const list = artworkProvidersWithState({ steamgriddbApiKey: 'abc', igdbClientId: 'id', igdbClientSecret: 'secret' })
+  assert.deepEqual(list.map(provider => provider.id), ['steamgriddb', 'steam', 'igdb', 'gamebanana', 'nexus', 'curseforge'])
   assert.equal(list[0].state, 'available')
   assert.equal(list[1].state, 'available')
-  assert.equal(list[2].state, 'not-implemented')
+  assert.equal(list[2].state, 'available')
+  assert.equal(list[3].state, 'available')
 })
 
 test('seuls les fournisseurs disponibles et capables répondent pour un type', () => {
-  const covers = availableArtworkProviders({ steamgriddbApiKey: 'abc' }, 'cover')
-  assert.deepEqual(covers.map(provider => provider.id), ['steam', 'steamgriddb'])
-  // Sans clé, SteamGridDB disparaît de la liste des sources actives.
+  const covers = availableArtworkProviders({ steamgriddbApiKey: 'abc', igdbClientId: 'id', igdbClientSecret: 'secret' }, 'cover')
+  assert.deepEqual(covers.map(provider => provider.id), ['steamgriddb', 'steam', 'igdb', 'gamebanana'])
+  // Sans clé, SteamGridDB et IGDB disparaissent ; GameBanana reste (public).
   const coversNoKey = availableArtworkProviders({}, 'cover')
-  assert.deepEqual(coversNoKey.map(provider => provider.id), ['steam'])
+  assert.deepEqual(coversNoKey.map(provider => provider.id), ['steam', 'gamebanana'])
   // Un connecteur non branché ne peut jamais apparaître comme actif.
-  assert.equal(availableArtworkProviders({}, 'background').some(provider => provider.id === 'igdb'), false)
+  assert.equal(availableArtworkProviders({}, 'background').some(provider => provider.id === 'curseforge'), false)
 })
 
 test('la déduplication élimine la même image venue de deux sources', () => {
@@ -82,29 +94,32 @@ test('la déduplication garde deux images réellement différentes', () => {
   assert.equal(dedupeArtworkCandidates([a, b]).length, 2)
 })
 
-test('mode automatique : Steam d’abord, SteamGridDB en secours uniquement si configuré', () => {
+test('mode automatique : Steam d’abord, toutes les sources configurées en secours', () => {
   const noKey = artworkSearchPlan('automatic', {}, 'cover')
   assert.deepEqual(noKey.attempts.map(attempt => attempt.label), ['Steam officiel'])
   assert.deepEqual(noKey.attempts[0].apiKeys, {})
 
-  const withKey = artworkSearchPlan('automatic', { steamgriddbApiKey: 'abc' }, 'cover')
-  assert.deepEqual(withKey.attempts.map(attempt => attempt.label), ['Steam officiel', 'Steam officiel + SteamGridDB'])
-  assert.deepEqual(withKey.attempts[1].apiKeys, { steamgriddb: 'abc' })
+  const withSgdb = artworkSearchPlan('automatic', { steamgriddbApiKey: 'abc' }, 'cover')
+  assert.deepEqual(withSgdb.attempts.map(attempt => attempt.label), ['Steam officiel', 'Toutes les sources configurées'])
+  assert.deepEqual(withSgdb.attempts[1].apiKeys, { steamgriddb: 'abc' })
+
+  const full = artworkSearchPlan('automatic', { steamgriddbApiKey: 'abc', igdbClientId: 'id', igdbClientSecret: 'secret' }, 'cover')
+  assert.deepEqual(full.attempts[1].apiKeys, { steamgriddb: 'abc', igdbClientId: 'id', igdbClientSecret: 'secret' })
 })
 
 test('mode toutes les sources : une recherche fusionnée avec les clés configurées', () => {
-  const plan = artworkSearchPlan('all', { steamgriddbApiKey: 'abc' }, 'cover')
+  const plan = artworkSearchPlan('all', { steamgriddbApiKey: 'abc', igdbClientId: 'id', igdbClientSecret: 'secret' }, 'cover')
   assert.equal(plan.attempts.length, 1)
-  assert.deepEqual(plan.attempts[0].apiKeys, { steamgriddb: 'abc' })
+  assert.deepEqual(plan.attempts[0].apiKeys, { steamgriddb: 'abc', igdbClientId: 'id', igdbClientSecret: 'secret' })
 })
 
 test('les sources indisponibles sont listées sans bloquer la recherche', () => {
   const plan = artworkSearchPlan('all', {}, 'cover')
   const skippedIds = plan.skipped.map(source => source.id)
-  assert.ok(skippedIds.includes('steamgriddb'))
-  assert.ok(skippedIds.includes('igdb'))
-  assert.ok(!skippedIds.includes('steam'))
-  // Le plan contient quand même une tentative utilisable (fusion sans clé = Steam officiel).
+  // Sans config : SteamGridDB et IGDB sont « non configurés » ; Nexus/CurseForge
+  // n'ont pas la capacité cover ; Steam et GameBanana restent actifs.
+  assert.deepEqual(skippedIds, ['steamgriddb', 'igdb'])
+  // Le plan contient quand même une tentative utilisable (Steam officiel + GameBanana).
   assert.equal(plan.attempts.length, 1)
   assert.equal(plan.attempts[0].label, 'Toutes les sources disponibles')
   assert.deepEqual(plan.attempts[0].apiKeys, {})
@@ -112,7 +127,7 @@ test('les sources indisponibles sont listées sans bloquer la recherche', () => 
 
 test('les types non supportés par un fournisseur ne le listent pas en secours', () => {
   // Seuls les fournisseurs capables de fournir un logo sont pertinents : avec la clé,
-  // Steam officiel + SteamGridDB couvrent le type, aucune source de secours.
+  // SteamGridDB + Steam officiel couvrent le type, aucune source de secours.
   const withKey = artworkSearchPlan('automatic', { steamgriddbApiKey: 'abc' }, 'logo')
   assert.deepEqual(withKey.skipped, [])
   // Sans clé, SteamGridDB devient la seule source de secours pour ce type.

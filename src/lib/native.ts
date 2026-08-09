@@ -893,10 +893,11 @@ export const native = {
    * sont fusionnés et dédupliqués côté natif dans une seule liste. */
   searchGameArtwork: (gameName: string, provider: string | undefined, providerGameId: string | undefined, kind: Exclude<GameResourceKind, 'video'>, apiKeys?: Record<string, string>) =>
     desktopOnly<ArtworkCandidate[]>('search_game_artwork', { gameName, provider, providerGameId, kind, apiKeys }),
-  /** Teste une clé API d'un fournisseur d'illustrations (ex. SteamGridDB).
-   * Retourne un message lisible ; rejette en cas de clé invalide. */
-  testArtworkProvider: (provider: 'steamgriddb', apiKey: string) =>
-    desktopOnly<string>('test_artwork_provider', { provider, apiKey }),
+  /** Teste la connexion d'un fournisseur d'illustrations (SteamGridDB : clé ;
+   * IGDB : Client ID + Secret Twitch ; GameBanana : API publique).
+   * Retourne un message lisible ; rejette en cas de connexion invalide. */
+  testArtworkProvider: (provider: 'steamgriddb' | 'igdb' | 'gamebanana', apiKeys: Record<string, string>) =>
+    desktopOnly<string>('test_artwork_provider', { provider, apiKeys }),
   removeGameResource: (gameId: string, resourcePath: string) =>
     desktopOnly<void>('remove_game_resource', { gameId, resourcePath }),
   openPath: (path: string) => desktopOnly<void>('open_path', { path }),

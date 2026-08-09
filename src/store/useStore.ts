@@ -245,7 +245,7 @@ function makeGame({ name, execPath, modsPath, platform = 'standalone', provider,
   }
 }
 
-async function automaticArtworkForGame(game: Game, steamGridDbKey: string): Promise<Partial<GameResources>> {
+async function automaticArtworkForGame(game: Game, artworkKeys: { steamGridDbKey: string; igdbClientId: string; igdbClientSecret: string }): Promise<Partial<GameResources>> {
   if (!native.isDesktop()) return {}
   const assignments: Array<{ kind: 'cover' | 'background' | 'banner' | 'logo' | 'icon'; key: 'coverPath' | 'backgroundPath' | 'bannerPath' | 'logoPath' | 'iconPath' }> = [
     { kind: 'cover', key: 'coverPath' },
@@ -254,16 +254,22 @@ async function automaticArtworkForGame(game: Game, steamGridDbKey: string): Prom
     { kind: 'logo', key: 'logoPath' },
     { kind: 'icon', key: 'iconPath' },
   ]
-  const apiKeys: Record<string, string> = steamGridDbKey.trim() ? { steamgriddb: steamGridDbKey.trim() } : {}
+  const apiKeys: Record<string, string> = {}
+  if (artworkKeys.steamGridDbKey.trim()) apiKeys.steamgriddb = artworkKeys.steamGridDbKey.trim()
+  if (artworkKeys.igdbClientId.trim()) apiKeys.igdbClientId = artworkKeys.igdbClientId.trim()
+  if (artworkKeys.igdbClientSecret.trim()) apiKeys.igdbClientSecret = artworkKeys.igdbClientSecret.trim()
   const resources: Partial<GameResources> = {}
   for (const assignment of assignments) {
     try {
       const candidates = await native.searchGameArtwork(game.name, game.provider || game.platform, game.providerGameId, assignment.kind, apiKeys)
-      for (const candidate of candidates) {
+      // L'auto-artwork privilégie l'art officiel Steam ; les autres sources
+      // ne servent que si Steam ne fournit rien pour cet emplacement.
+      const ordered = candidates.filter(candidate => candidate.provider === 'steam').concat(candidates.filter(candidate => candidate.provider !== 'steam'))
+      for (const candidate of ordered) {
         try {
           resources[assignment.key] = await native.cacheRemoteGameResource(game.id, assignment.kind, candidate.url)
           break
-        } catch { /* essayer le candidat officiel suivant */ }
+        } catch { /* essayer le candidat suivant */ }
       }
     } catch { /* aucun résultat fiable pour cet emplacement */ }
   }
@@ -285,6 +291,10 @@ export interface Store {
   /** Clé API SteamGridDB (illustrations). Stockée localement, transmise
    * uniquement à SteamGridDB — jamais à un autre fournisseur. */
   artworkSteamGridDbKey: string
+  /** Client ID de l'application Twitch pour IGDB (illustrations). */
+  artworkIgdbClientId: string
+  /** Client Secret de l'application Twitch pour IGDB — jamais affiché. */
+  artworkIgdbClientSecret: string
   /** Mode de recherche d'illustrations : première source fiable ou toutes les
    * sources disponibles (spec « Refonte Apparence » §1-2). */
   artworkSourceMode: 'automatic' | 'all'
@@ -407,6 +417,8 @@ export interface Store {
   setUiDensity: (density: UiDensity) => void
   setAutoArtwork: (enabled: boolean) => void
   setArtworkSteamGridDbKey: (value: string) => void
+  setArtworkIgdbClientId: (value: string) => void
+  setArtworkIgdbClientSecret: (value: string) => void
   setArtworkSourceMode: (mode: 'automatic' | 'all') => void
   toggleDiscord: () => void
   setDiscordClientId: (value: string) => void
@@ -617,6 +629,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
   uiDensity: 'comfortable',
   autoArtwork: false,
   artworkSteamGridDbKey: '',
+  artworkIgdbClientId: '',
+  artworkIgdbClientSecret: '',
   artworkSourceMode: 'automatic',
   discordPresence: false,
   discordClientId: '',
@@ -768,7 +782,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       }
       if (get().autoArtwork) {
         fresh.forEach(game => {
-          void automaticArtworkForGame(game, get().artworkSteamGridDbKey).then(resources => {
+          void automaticArtworkForGame(game, { steamGridDbKey: get().artworkSteamGridDbKey, igdbClientId: get().artworkIgdbClientId, igdbClientSecret: get().artworkIgdbClientSecret }).then(resources => {
             if (!Object.keys(resources).length) return
             set(state => ({
               games: state.games.map(current => current.id === game.id ? { ...current, resources: { ...current.resources, ...resources } } : current),
@@ -1271,6 +1285,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setUiDensity: uiDensity => set({ uiDensity }),
   setAutoArtwork: autoArtwork => set({ autoArtwork }),
   setArtworkSteamGridDbKey: artworkSteamGridDbKey => set({ artworkSteamGridDbKey }),
+  setArtworkIgdbClientId: artworkIgdbClientId => set({ artworkIgdbClientId }),
+  setArtworkIgdbClientSecret: artworkIgdbClientSecret => set({ artworkIgdbClientSecret }),
   setArtworkSourceMode: artworkSourceMode => set({ artworkSourceMode }),
   toggleDiscord: () => {
     set(state => ({ discordPresence: !state.discordPresence }))
@@ -2374,6 +2390,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
     uiDensity: state.uiDensity,
     autoArtwork: state.autoArtwork,
     artworkSteamGridDbKey: state.artworkSteamGridDbKey,
+    artworkIgdbClientId: state.artworkIgdbClientId,
+    artworkIgdbClientSecret: state.artworkIgdbClientSecret,
     artworkSourceMode: state.artworkSourceMode,
     discordPresence: state.discordPresence,
     discordClientId: state.discordClientId,

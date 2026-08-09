@@ -126,9 +126,15 @@ export function SettingsView() {
   const [settingsQuery, setSettingsQuery] = useState('')
   const artworkSteamGridDbKey = useStore(state => state.artworkSteamGridDbKey)
   const setArtworkSteamGridDbKey = useStore(state => state.setArtworkSteamGridDbKey)
+  const artworkIgdbClientId = useStore(state => state.artworkIgdbClientId)
+  const setArtworkIgdbClientId = useStore(state => state.setArtworkIgdbClientId)
+  const artworkIgdbClientSecret = useStore(state => state.artworkIgdbClientSecret)
+  const setArtworkIgdbClientSecret = useStore(state => state.setArtworkIgdbClientSecret)
   const artworkSourceMode = useStore(state => state.artworkSourceMode)
   const setArtworkSourceMode = useStore(state => state.setArtworkSourceMode)
   const [artworkGridDbDraft, setArtworkGridDbDraft] = useState('')
+  const [igdbIdDraft, setIgdbIdDraft] = useState('')
+  const [igdbSecretDraft, setIgdbSecretDraft] = useState('')
   const [artworkMessage, setArtworkMessage] = useState<string>()
   const [testingArtworkKey, setTestingArtworkKey] = useState(false)
   const settingsResults = useMemo(() => {
@@ -208,11 +214,11 @@ export function SettingsView() {
     }
   }
 
-  const testArtworkKey = async () => {
+  const testArtworkConnection = async (provider: 'steamgriddb' | 'igdb' | 'gamebanana', keys: Record<string, string>) => {
     setTestingArtworkKey(true)
     setArtworkMessage(undefined)
     try {
-      setArtworkMessage(await native.testArtworkProvider('steamgriddb', artworkSteamGridDbKey))
+      setArtworkMessage(await native.testArtworkProvider(provider, keys))
     } catch (reason) {
       setArtworkMessage(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -251,22 +257,36 @@ export function SettingsView() {
 
       <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
         <div className="mb-3 flex items-center gap-2 text-gold/70"><Palette size={13} /><h2 className="text-[11px] font-mono uppercase tracking-widest">Illustrations</h2></div>
-        <label className="flex items-center justify-between gap-4 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/62"><span className="flex items-center gap-2"><strong className="text-white/76">Images automatiques pour les nouveaux jeux</strong><InfoBubble text="ZAILON peut proposer des illustrations pour les nouveaux jeux détectés. La copie locale reste toujours soumise à confirmation. Sources actives : Steam officiel, + SteamGridDB si une clé est enregistrée." /></span><input type="checkbox" checked={autoArtwork} onChange={event => setAutoArtwork(event.target.checked)} className="accent-gold" /></label>
+        <label className="flex items-center justify-between gap-4 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/62"><span className="flex items-center gap-2"><strong className="text-white/76">Images automatiques pour les nouveaux jeux</strong><InfoBubble text="ZAILON peut proposer des illustrations pour les nouveaux jeux détectés. La copie locale reste toujours soumise à confirmation. Priorité : art officiel Steam d'abord, puis les sources configurées (SteamGridDB, IGDB, GameBanana)." /></span><input type="checkbox" checked={autoArtwork} onChange={event => setAutoArtwork(event.target.checked)} className="accent-gold" /></label>
         <div className="mt-2 flex items-center justify-between gap-4 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/62"><span className="flex items-center gap-2"><strong className="text-white/76">Source de recherche</strong><InfoBubble text="Automatique : essaie la première source fiable, puis les autres seulement si elle ne renvoie rien. Toutes les sources : une seule recherche fusionnée avec toutes les sources disponibles. Une source indisponible ne bloque jamais la recherche." /></span><select value={artworkSourceMode} onChange={event => setArtworkSourceMode(event.target.value as 'automatic' | 'all')} className="rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/72"><option value="automatic">Automatique</option><option value="all">Toutes les sources</option></select></div>
         <div className="mt-3 rounded-lg bg-white/[0.025] p-3">
           <p className="mb-2 text-[11px] font-semibold text-white/55">État des sources</p>
-          <div className="space-y-1.5">{artworkProvidersWithState({ steamgriddbApiKey: artworkSteamGridDbKey }).map(provider => <div key={provider.id} className="flex items-center gap-2 text-[11px]"><span className="w-36 shrink-0 text-white/65">{provider.label}</span><span className={provider.state === 'available' ? 'text-emerald-300/72' : provider.state === 'not-configured' ? 'text-amber-200/70' : 'text-white/30'}>{provider.state === 'available' ? '✓ disponible' : provider.state === 'not-configured' ? 'Non configuré' : 'Connecteur non disponible'}</span><InfoBubble text={provider.reason({ steamgriddbApiKey: artworkSteamGridDbKey })} /></div>)}</div>
+          <div className="space-y-1.5">{artworkProvidersWithState({ steamgriddbApiKey: artworkSteamGridDbKey, igdbClientId: artworkIgdbClientId, igdbClientSecret: artworkIgdbClientSecret }).map(provider => <div key={provider.id} className="flex items-center gap-2 text-[11px]"><span className="w-36 shrink-0 text-white/65">{provider.label}</span><span className={provider.state === 'available' ? 'text-emerald-300/72' : provider.state === 'not-configured' ? 'text-amber-200/70' : 'text-white/30'}>{provider.state === 'available' ? '✓ disponible' : provider.state === 'not-configured' ? 'Non configuré' : 'Connecteur non disponible'}</span><InfoBubble text={provider.reason({ steamgriddbApiKey: artworkSteamGridDbKey, igdbClientId: artworkIgdbClientId, igdbClientSecret: artworkIgdbClientSecret })} /></div>)}</div>
         </div>
         <div className="mt-2 rounded-lg bg-white/[0.025] p-3">
           <p className="mb-2 text-[11px] font-semibold text-white/55">SteamGridDB</p>
           <div className="flex flex-wrap items-center gap-2">
             <input type="password" value={artworkGridDbDraft} onChange={event => setArtworkGridDbDraft(event.target.value)} autoComplete="new-password" spellCheck={false} placeholder={artworkSteamGridDbKey ? 'Coller une nouvelle clé pour la remplacer' : 'Coller la clé API SteamGridDB (gratuite)'} className="min-w-[240px] flex-1 rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-gold/30" />
             <button type="button" onClick={() => { if (!artworkGridDbDraft.trim()) return; setArtworkSteamGridDbKey(artworkGridDbDraft.trim()); setArtworkGridDbDraft(''); setArtworkMessage('Clé SteamGridDB enregistrée localement.') }} disabled={!artworkGridDbDraft.trim()} className="rounded bg-gold px-3 py-1.5 text-[11px] font-semibold text-ink-400 disabled:opacity-30">{artworkSteamGridDbKey ? 'Remplacer' : 'Enregistrer'}</button>
-            {artworkSteamGridDbKey && <button type="button" onClick={() => void testArtworkKey()} disabled={testingArtworkKey} className="rounded border border-white/[0.1] px-3 py-1.5 text-[11px] text-white/64 disabled:opacity-35">{testingArtworkKey ? 'Test…' : 'Tester la connexion'}</button>}
+            {artworkSteamGridDbKey && <button type="button" onClick={() => void testArtworkConnection('steamgriddb', { steamgriddb: artworkSteamGridDbKey })} disabled={testingArtworkKey} className="rounded border border-white/[0.1] px-3 py-1.5 text-[11px] text-white/64 disabled:opacity-35">{testingArtworkKey ? 'Test…' : 'Tester la connexion'}</button>}
             {artworkSteamGridDbKey && <button type="button" onClick={() => { setArtworkSteamGridDbKey(''); setArtworkMessage('Clé SteamGridDB supprimée.') }} className="rounded border border-red-300/15 px-2 py-1.5 text-[11px] text-red-200/60">Supprimer</button>}
           </div>
           {artworkMessage && <p className="mt-2 text-[11px] text-white/45">{artworkMessage}</p>}
-          <p className="mt-2 text-[11px] leading-relaxed text-white/32">La clé est stockée localement et transmise uniquement à SteamGridDB, uniquement pour les illustrations. Les connecteurs IGDB, Nexus, GameBanana et CurseForge ne sont pas branchés dans cette version : leur état « non disponible » n’affiche jamais de résultat fictif.</p>
+          <p className="mt-2 text-[11px] leading-relaxed text-white/32">La clé est stockée localement et transmise uniquement à SteamGridDB, uniquement pour les illustrations.</p>
+        </div>
+        <div className="mt-2 rounded-lg bg-white/[0.025] p-3">
+          <p className="mb-2 text-[11px] font-semibold text-white/55">IGDB — application Twitch gratuite</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input type="text" value={igdbIdDraft} onChange={event => setIgdbIdDraft(event.target.value)} spellCheck={false} placeholder={artworkIgdbClientId ? 'Client ID enregistré — coller pour remplacer' : 'Client ID (dev.twitch.tv/console/apps)'} className="rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-gold/30" />
+            <input type="password" value={igdbSecretDraft} onChange={event => setIgdbSecretDraft(event.target.value)} autoComplete="new-password" spellCheck={false} placeholder={artworkIgdbClientSecret ? 'Client Secret enregistré — coller pour remplacer' : 'Client Secret'} className="rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-gold/30" />
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button type="button" onClick={() => { if (!igdbIdDraft.trim() || !igdbSecretDraft.trim()) return; setArtworkIgdbClientId(igdbIdDraft.trim()); setArtworkIgdbClientSecret(igdbSecretDraft.trim()); setIgdbIdDraft(''); setIgdbSecretDraft(''); setArtworkMessage('Client Twitch enregistré localement pour IGDB.') }} disabled={!igdbIdDraft.trim() || !igdbSecretDraft.trim()} className="rounded bg-gold px-3 py-1.5 text-[11px] font-semibold text-ink-400 disabled:opacity-30">{artworkIgdbClientId && artworkIgdbClientSecret ? 'Remplacer' : 'Enregistrer'}</button>
+            {artworkIgdbClientId && artworkIgdbClientSecret && <button type="button" onClick={() => void testArtworkConnection('igdb', { igdbClientId: artworkIgdbClientId, igdbClientSecret: artworkIgdbClientSecret })} disabled={testingArtworkKey} className="rounded border border-white/[0.1] px-3 py-1.5 text-[11px] text-white/64 disabled:opacity-35">{testingArtworkKey ? 'Test…' : 'Tester la connexion'}</button>}
+            {(artworkIgdbClientId || artworkIgdbClientSecret) && <button type="button" onClick={() => { setArtworkIgdbClientId(''); setArtworkIgdbClientSecret(''); setArtworkMessage('Client Twitch supprimé (IGDB).') }} className="rounded border border-red-300/15 px-2 py-1.5 text-[11px] text-red-200/60">Supprimer</button>}
+            <button type="button" onClick={() => void testArtworkConnection('gamebanana', {})} disabled={testingArtworkKey} className="rounded border border-white/[0.1] px-3 py-1.5 text-[11px] text-white/64 disabled:opacity-35">{testingArtworkKey ? 'Test…' : 'Tester GameBanana (public)'}</button>
+          </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-white/32">Le Client ID et le Client Secret sont stockés localement et transmis uniquement à Twitch/IGDB (échange Client Credentials pour obtenir un jeton). IGDB couvre les jeux absents de Steam : covers, artworks et screenshots.</p>
         </div>
       </section>
 

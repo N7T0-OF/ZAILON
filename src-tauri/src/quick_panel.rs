@@ -9,6 +9,7 @@
 //! (profils visuels, clavier) et communique avec la fenêtre principale par
 //! événements (`quick-panel-action`).
 
+use serde::Serialize;
 use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 
 const LABEL: &str = "quick-panel";
@@ -89,5 +90,48 @@ pub fn toggle_quick_panel(app: AppHandle) -> Result<bool, String> {
     } else {
         open_quick_panel(app)?;
         Ok(true)
+    }
+}
+
+/// État réel de la fenêtre du panneau rapide (spec Quick Panel §22, §50) :
+/// affiché dans État & Diagnostic > Lancement (mode avancé) — jamais de fausse
+/// activation : chaque ligne reflète l'état natif interrogé à l'instant.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickPanelStatus {
+    pub created: bool,
+    pub visible: bool,
+    pub focused: bool,
+    pub always_on_top: bool,
+    pub width: u32,
+    pub height: u32,
+    pub position: Option<(i32, i32)>,
+}
+
+#[tauri::command]
+pub fn quick_panel_status(app: AppHandle) -> QuickPanelStatus {
+    match app.get_webview_window(LABEL) {
+        Some(window) => {
+            let size = window.outer_size().unwrap_or_default();
+            let position = window.outer_position().ok().map(|point| (point.x, point.y));
+            QuickPanelStatus {
+                created: true,
+                visible: window.is_visible().unwrap_or(false),
+                focused: window.is_focused().unwrap_or(false),
+                always_on_top: window.is_always_on_top().unwrap_or(false),
+                width: size.width,
+                height: size.height,
+                position,
+            }
+        }
+        None => QuickPanelStatus {
+            created: false,
+            visible: false,
+            focused: false,
+            always_on_top: false,
+            width: 0,
+            height: 0,
+            position: None,
+        },
     }
 }

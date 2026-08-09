@@ -15397,6 +15397,7 @@ pub fn run() {
             quick_panel::open_quick_panel,
             quick_panel::close_quick_panel,
             quick_panel::toggle_quick_panel,
+            quick_panel::quick_panel_status,
             launch_game,
             restore_deployment_session,
             test_discord_connection,

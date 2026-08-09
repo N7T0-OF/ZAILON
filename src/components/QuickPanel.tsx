@@ -1,9 +1,10 @@
 import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { Check, Gamepad2, Gauge, Keyboard, MonitorDown, Palette, RefreshCw, X } from 'lucide-react'
+import { Check, ChevronDown, Gamepad2, Gauge, Keyboard, MonitorDown, Palette, RefreshCw, Star, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { native } from '../lib/native'
 import type { PerformanceMode } from '../lib/performanceProfiles'
+import type { QuickPanelSessionEntry } from '../lib/quickPanelState'
 
 const PERFORMANCE_LABELS: Record<PerformanceMode, string> = {
   auto: 'Automatique',
@@ -16,6 +17,7 @@ const PERFORMANCE_LABELS: Record<PerformanceMode, string> = {
 /** Résumé de session reçu de la fenêtre principale (spec « Quick Overlay »
  * §24-25) : contenu adaptatif selon le jeu en cours (prioritaire). */
 interface QuickPanelSessionState {
+  gameId?: string
   gameName?: string
   profileName?: string
   activeMods?: number
@@ -48,6 +50,8 @@ export function QuickPanel() {
   const [status, setStatus] = useState<string>('')
   const [keyboardOn, setKeyboardOn] = useState(true)
   const [session, setSession] = useState<QuickPanelSessionState | null>(null)
+  const [sessions, setSessions] = useState<QuickPanelSessionEntry[]>([])
+  const [sessionMenuOpen, setSessionMenuOpen] = useState(false)
 
   // À l'ouverture : demander l'état de la session prioritaire à la fenêtre
   // principale (le panneau est une WebView séparée, sans accès au store).
@@ -58,6 +62,11 @@ export function QuickPanel() {
       // Synchronise l'état réel de la session (pas un état local optimiste).
       if (event.payload.inputActive !== undefined) setKeyboardOn(event.payload.inputActive)
     }).then(dispose => { unlisten = dispose })
+    // Spec §14, §48 : liste des sessions actives pour le sélecteur multi-session.
+    let sessionsUnlisten: UnlistenFn | undefined
+    void listen<QuickPanelSessionEntry[]>('quick-panel-sessions', event => {
+      setSessions(event.payload || [])
+    }).then(dispose => { sessionsUnlisten = dispose })
     // Spec §24 : après un changement de Performance, la fenêtre principale
     // demande un rafraîchissement (re-émission de l'état actualisé).
     let refreshUnlisten: UnlistenFn | undefined
@@ -67,6 +76,7 @@ export function QuickPanel() {
     void emit('quick-panel-ready')
     return () => {
       unlisten?.()
+      sessionsUnlisten?.()
       refreshUnlisten?.()
     }
   }, [])
@@ -97,6 +107,17 @@ export function QuickPanel() {
     flash(`Mode Performance : ${PERFORMANCE_LABELS[mode]}`)
   }
 
+  const selectSession = (gameId: string) => {
+    setSessionMenuOpen(false)
+    void emit('quick-panel-action', { action: 'set-target', gameId })
+    void emit('quick-panel-ready')
+  }
+
+  const togglePin = (gameId: string) => {
+    setSessionMenuOpen(false)
+    void emit('quick-panel-action', { action: 'pin-target', gameId })
+  }
+
   const focusMain = () => {
     void emit('quick-panel-action', { action: 'focus-main' })
   }
@@ -125,10 +146,35 @@ export function QuickPanel() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#0d1111]/95 text-white shadow-2xl backdrop-blur-md">
-      {/* En-tête compact */}
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
-        <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">ZAILON · Panneau rapide</p>
-        <button type="button" onClick={close} aria-label="Fermer" className="flex h-6 w-6 items-center justify-center rounded-md text-white/40 hover:bg-white/[0.07] hover:text-white"><X size={12} /></button>
+      {/* En-tête compact — sélecteur multi-session (spec §14-15, §48) */}
+      <div className="relative flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
+        <div className="min-w-0 flex items-center gap-1.5">
+          {sessions.length > 1 ? (
+            <button type="button" onClick={() => setSessionMenuOpen(value => !value)} className="flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-semibold text-white/75 hover:bg-white/[0.06]">
+              <span className="truncate">{session?.gameName ?? 'Session'}</span>
+              <ChevronDown size={11} className={`shrink-0 text-white/40 transition-transform ${sessionMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+          ) : (
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-white/40">ZAILON · Panneau rapide</p>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {session?.gameId && (
+            <button type="button" onClick={() => togglePin(session.gameId!)} title={sessions.find(entry => entry.gameId === session.gameId)?.pinned ? 'Désépingler cette session' : 'Épingler cette session (le raccourci continue de l’ouvrir)'} aria-label="Épingler la session" className={`flex h-6 w-6 items-center justify-center rounded-md ${sessions.find(entry => entry.gameId === session.gameId)?.pinned ? 'text-gold' : 'text-white/30 hover:text-white/60'}`}><Star size={12} fill={sessions.find(entry => entry.gameId === session.gameId)?.pinned ? 'currentColor' : 'none'} /></button>
+          )}
+          <button type="button" onClick={close} aria-label="Fermer" className="flex h-6 w-6 items-center justify-center rounded-md text-white/40 hover:bg-white/[0.07] hover:text-white"><X size={12} /></button>
+        </div>
+        {sessionMenuOpen && sessions.length > 1 && (
+          <div className="absolute left-2 top-9 z-10 w-56 overflow-hidden rounded-lg border border-white/[0.1] bg-[#111515]/98 shadow-2xl backdrop-blur-md">
+            {sessions.map(entry => (
+              <button key={entry.gameId} type="button" onClick={() => selectSession(entry.gameId)} className={`flex w-full items-center gap-2 px-2.5 py-2 text-left text-[11px] hover:bg-white/[0.05] ${session?.gameId === entry.gameId ? 'text-gold' : 'text-white/70'}`}>
+                {entry.pinned || entry.isPriority ? <Star size={10} className={entry.pinned ? 'shrink-0 text-gold' : 'shrink-0 text-white/30'} fill={entry.pinned ? 'currentColor' : 'none'} /> : <span className="w-[10px] shrink-0" />}
+                <span className="min-w-0 flex-1 truncate">{entry.gameName}</span>
+                <span className="shrink-0 font-mono text-[9px] text-white/30">{entry.profileName}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-3">

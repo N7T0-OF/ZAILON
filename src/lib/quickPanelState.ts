@@ -1,5 +1,6 @@
+import { pickPrioritySession } from './sessionPriority.ts'
 import type { PerformanceMode } from './performanceProfiles'
-import type { GameSession } from '../types'
+import type { Game, GameSession } from '../types'
 
 /**
  * QuickPanelState — contenu contextuel du panneau rapide (spec Quick Panel
@@ -39,4 +40,37 @@ export function quickPanelPerformanceState(
  */
 export function modsPreparedFor(session: Pick<GameSession, 'source' | 'deploymentActive'>): boolean {
   return session.source === 'zailon' && session.deploymentActive === true
+}
+
+/** Une entrée de session pour le sélecteur du panneau (spec §14, §48). */
+export interface QuickPanelSessionEntry {
+  gameId: string
+  gameName: string
+  profileName: string
+  /** Session épinglée (spec §50) — le raccourci continue d'ouvrir celle-ci. */
+  pinned: boolean
+  /** Session prioritaire effective (pin > foreground > plus récente). */
+  isPriority: boolean
+}
+
+/** Sessions actives pour le sélecteur multi-session du panneau (spec §14,
+ * §48) : uniquement les sessions non terminales, triées priorité d'abord. */
+export function activeSessionsForQuickPanel(
+  sessions: GameSession[],
+  games: Pick<Game, 'id' | 'name'>[],
+  pinnedGameId: string | undefined,
+  foregroundGameId: string | undefined,
+): QuickPanelSessionEntry[] {
+  const terminal = new Set(['Ended', 'Failed', 'Aborted'])
+  const active = sessions.filter(session => !terminal.has(session.state))
+  const priorityId = pickPrioritySession(active, pinnedGameId, foregroundGameId)
+  return active
+    .map(session => ({
+      gameId: session.gameId,
+      gameName: games.find(game => game.id === session.gameId)?.name || session.gameId,
+      profileName: session.profileId,
+      pinned: session.gameId === pinnedGameId,
+      isPriority: session.gameId === priorityId,
+    }))
+    .sort((left, right) => Number(right.isPriority) - Number(left.isPriority))
 }

@@ -1318,6 +1318,16 @@
 - **Payload `quick-panel-state` enrichi** : `modsPrepared`, `performanceMode`, `downloadsPaused`, `scansPaused` — calculés par la logique pure `src/lib/quickPanelState.ts` (6 tests) et rafraîchis après changement de Performance (`quick-panel-refresh`).
 - Le contenu reste compact : profil, connexion, statuts réels, visuel, clavier, performance — pas de mini-launcher (spec §16).
 
+## 1.54.0 — Quick Panel : multi-session (sélecteur + épinglage)
+
+### Added
+
+- **Sélecteur de session en en-tête** (spec Quick Panel §14-15, §48) : quand plusieurs sessions sont actives (Cyberpunk + NTE + Photoshop…), l'en-tête affiche la session courante avec ▼ — la liste montre toutes les sessions actives (★ = prioritaire, étoile dorée = épinglée), et changer de cible **ne ferme pas le panneau**.
+- **Épinglage ★** (spec §50) : bouton dans l'en-tête pour épingler la session courante — le raccourci continue d'ouvrir celle-ci ; le pin est **retiré automatiquement à la fermeture du jeu** (déjà géré par le store).
+- **Priorité respectée** (spec §49) : la cible par défaut est la session prioritaire (pin > premier plan > plus récente, `pickPrioritySession`) ; après un changement manuel, la cible choisie est mémorisée pour la session du panneau et les actions (clavier, performance) s'y appliquent.
+- **`activeSessionsForQuickPanel`** dans `src/lib/quickPanelState.ts` (logique pure, 3 tests multi-session) : liste des sessions non terminales triées priorité d'abord.
+- Nouveaux événements : `quick-panel-sessions` (liste) et actions `set-target` / `pin-target`.
+
 ## [Unreleased]
 
 ### Added

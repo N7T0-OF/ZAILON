@@ -8,7 +8,7 @@ import { UpdateProvider } from './components/UpdateProvider'
 import { resolveProfileMods, useStore } from './store/useStore'
 import { buildRuntimeToastContent } from './lib/runtimeToast'
 import type { PerformanceMode } from './lib/performanceProfiles'
-import { modsPreparedFor, quickPanelPerformanceState } from './lib/quickPanelState'
+import { activeSessionsForQuickPanel, modsPreparedFor, quickPanelPerformanceState, type QuickPanelSessionEntry } from './lib/quickPanelState'
 import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type LearnedProcessSignature, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
 import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, STEAM_BACKED_ATTACH_THRESHOLD, windowRequestFor } from './lib/gamePresence'
@@ -18,6 +18,52 @@ import { isRed4extActive } from './lib/frameworkValidator'
 import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-profiles/application/shortcuts'
+
+// Émission du résumé compact d'une session vers le panneau (WebView séparée,
+// sans accès au store) — source de vérité : l'état RÉEL de la session.
+function emitQuickPanelStateFor(store: ReturnType<typeof useStore.getState>, gameId: string) {
+  const session = store.gameSessions.find(item => item.gameId === gameId && item.state !== 'Ended' && item.state !== 'Failed')
+  const game = store.games.find(item => item.id === gameId)
+  if (!session || !game) return
+  const profile = game.profiles.find(item => item.id === session.profileId)
+  const profileMods = profile ? resolveProfileMods(game, profile) : []
+  const activeMods = profileMods.filter(mod => mod.enabled).length
+  const performance = quickPanelPerformanceState(store.performanceModes, store.globalPerformanceMode, store.runtimeActivity, game.id)
+  void emit('quick-panel-state', {
+    gameId: game.id,
+    gameName: game.name,
+    profileName: profile?.name ?? 'Défaut',
+    activeMods,
+    layoutLabel: effectiveInputProfile(game, profile?.id) ? LAYOUT_LABELS[effectiveLayout(game, profile?.id)] : undefined,
+    bypassActive: Boolean(game.bypassPath),
+    red4extActive: isRed4extActive(profileMods),
+    // Spec §69 : les mods ont été préparés seulement si ZAILON a lancé le jeu
+    // avec le déploiement actif — sinon le panneau dit la vérité.
+    modsPrepared: modsPreparedFor(session),
+    // Spec §24 : mode Performance effectif + politiques de pause réelles.
+    performanceMode: performance.mode,
+    downloadsPaused: performance.downloadsPaused,
+    scansPaused: performance.scansPaused,
+    // Spec RuntimeSessionV3 §49 : le panneau affiche l'état RÉEL d'activation
+    // de la session (source de confiance), pas seulement la configuration.
+    connected: true,
+    inputActive: session.inputProfileActive,
+    visualActive: session.visualProfileActive,
+    runtimeActive: session.runtimeToolsActive,
+  }).catch(() => undefined)
+}
+
+// Liste des sessions actives pour le sélecteur multi-session du panneau
+// (spec §14, §48) : priorité d'abord, épinglée marquée ★.
+function emitQuickPanelSessions(store: ReturnType<typeof useStore.getState>) {
+  const entries: QuickPanelSessionEntry[] = activeSessionsForQuickPanel(
+    store.gameSessions,
+    store.games,
+    store.pinnedPriorityGameId,
+    store.foregroundGameId,
+  )
+  void emit('quick-panel-sessions', entries).catch(() => undefined)
+}
 
 export default function App() {
   const tick = useStore(s => s.tick)
@@ -362,22 +408,35 @@ export default function App() {
   }, [quickPanelEnabled, quickPanelShortcut, isLaunching, isPlaying])
 
   // Actions émises par le panneau rapide (fenêtre séparée) vers la fenêtre
-  // principale : bascule du clavier, retour à ZAILON.
+  // principale : cible multi-session, bascule du clavier, performance, retour.
+  const quickPanelTargetRef = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (!native.isDesktop()) return
     let unlisten: UnlistenFn | undefined
-    void listen<{ action: 'toggle-keyboard' | 'focus-main' | 'set-performance'; mode?: string }>('quick-panel-action', event => {
+    void listen<{ action: 'toggle-keyboard' | 'focus-main' | 'set-performance' | 'set-target' | 'pin-target'; mode?: string; gameId?: string }>('quick-panel-action', event => {
       const store = useStore.getState()
-      const priorityGameId = pickPrioritySession(store.gameSessions, store.pinnedPriorityGameId)
-      if (event.payload.action === 'toggle-keyboard') {
-        // Spec multi-sessions : le panneau rapide cible la session PRIORITAIRE.
-        const session = store.gameSessions.find(item => item.gameId === priorityGameId && item.state === 'GameRunning')
+      const priorityGameId = pickPrioritySession(store.gameSessions, store.pinnedPriorityGameId, store.foregroundGameId)
+      const targetId = quickPanelTargetRef.current ?? priorityGameId
+      if (event.payload.action === 'set-target') {
+        // Spec §13-15 : changer de session depuis le panneau sans le fermer.
+        if (event.payload.gameId) quickPanelTargetRef.current = event.payload.gameId
+        const next = quickPanelTargetRef.current ?? priorityGameId
+        if (next) emitQuickPanelStateFor(store, next)
+      } else if (event.payload.action === 'pin-target' && event.payload.gameId) {
+        // Spec §50 : épingler la session — le raccourci continue d'ouvrir
+        // celle-ci ; retiré automatiquement à la fermeture du jeu (store).
+        const pinned = store.pinnedPriorityGameId === event.payload.gameId ? undefined : event.payload.gameId
+        store.setPinnedPriority(pinned)
+        emitQuickPanelSessions(store)
+      } else if (event.payload.action === 'toggle-keyboard') {
+        // Spec multi-sessions : le panneau cible la session choisie (ou la
+        // prioritaire si aucune cible explicite).
+        const session = store.gameSessions.find(item => item.gameId === targetId && item.state === 'GameRunning')
         if (session) store.setSessionInputActive(session.gameId, !session.inputProfileActive)
       } else if (event.payload.action === 'set-performance' && event.payload.mode) {
         // Spec §24 : le mode Performance se change depuis le panneau — appliqué
-        // à la session prioritaire, répercuté dans la fenêtre principale.
-        const mode = event.payload.mode as PerformanceMode
-        if (priorityGameId) store.setPerformanceMode(priorityGameId, mode)
+        // à la session cible, répercuté dans la fenêtre principale.
+        if (targetId) store.setPerformanceMode(targetId, event.payload.mode as PerformanceMode)
         void emit('quick-panel-refresh')
       } else if (event.payload.action === 'focus-main') {
         store.setView('home')
@@ -389,44 +448,18 @@ export default function App() {
     return () => unlisten?.()
   }, [])
 
-  // Quick Panel adaptatif (spec « Quick Overlay » §24-25) : quand la fenêtre du
-  // panneau s'ouvre, elle demande l'état de la session prioritaire — ZAILON
-  // répond avec le résumé compact (jeu, profil, mods, clavier, bypass, RED4ext).
+  // Quick Panel adaptatif (spec §13-15, §48) : à l'ouverture, le panneau
+  // reçoit la liste des sessions actives (sélecteur multi-session) et l'état
+  // compact de la session cible (prioritaire par défaut).
   useEffect(() => {
     if (!native.isDesktop()) return
     let unlisten: UnlistenFn | undefined
     void listen('quick-panel-ready', () => {
       const store = useStore.getState()
-      const priorityGameId = pickPrioritySession(store.gameSessions, store.pinnedPriorityGameId)
-      const session = store.gameSessions.find(item => item.gameId === priorityGameId && item.state === 'GameRunning')
-      if (!session) return
-      const game = store.games.find(item => item.id === session.gameId)
-      if (!game) return
-      const profile = game.profiles.find(item => item.id === session.profileId)
-      const profileMods = profile ? resolveProfileMods(game, profile) : []
-      const activeMods = profileMods.filter(mod => mod.enabled).length
-      const performance = quickPanelPerformanceState(store.performanceModes, store.globalPerformanceMode, store.runtimeActivity, game.id)
-      void emit('quick-panel-state', {
-        gameName: game.name,
-        profileName: profile?.name ?? 'Défaut',
-        activeMods,
-        layoutLabel: effectiveInputProfile(game, profile?.id) ? LAYOUT_LABELS[effectiveLayout(game, profile?.id)] : undefined,
-        bypassActive: Boolean(game.bypassPath),
-        red4extActive: isRed4extActive(profileMods),
-        // Spec §69 : les mods ont été préparés seulement si ZAILON a lancé le
-        // jeu avec le déploiement actif — sinon le panneau dit la vérité.
-        modsPrepared: modsPreparedFor(session),
-        // Spec §24 : mode Performance effectif + politiques de pause réelles.
-        performanceMode: performance.mode,
-        downloadsPaused: performance.downloadsPaused,
-        scansPaused: performance.scansPaused,
-        // Spec RuntimeSessionV3 §49 : le panneau affiche l'état RÉEL d'activation
-        // de la session (source de confiance), pas seulement la configuration.
-        connected: true,
-        inputActive: session.inputProfileActive,
-        visualActive: session.visualProfileActive,
-        runtimeActive: session.runtimeToolsActive,
-      }).catch(() => undefined)
+      emitQuickPanelSessions(store)
+      const priorityGameId = pickPrioritySession(store.gameSessions, store.pinnedPriorityGameId, store.foregroundGameId)
+      const targetId = quickPanelTargetRef.current ?? priorityGameId
+      if (targetId) emitQuickPanelStateFor(store, targetId)
     }).then(dispose => { unlisten = dispose })
     return () => unlisten?.()
   }, [])

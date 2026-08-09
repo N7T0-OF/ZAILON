@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { modsPreparedFor, quickPanelPerformanceState } from '../../src/lib/quickPanelState.ts'
+import { activeSessionsForQuickPanel, modsPreparedFor, quickPanelPerformanceState } from '../../src/lib/quickPanelState.ts'
 import type { GameSession } from '../../src/types'
 
 const session = (overrides: Partial<GameSession> = {}): GameSession => ({
@@ -50,4 +50,35 @@ test('mods NON préparés : session détectée après coup (Steam / launcher / U
 
 test('mods NON préparés : lancé par ZAILON mais déploiement inactif', () => {
   assert.equal(modsPreparedFor(session({ source: 'zailon', deploymentActive: false })), false)
+})
+
+test('multi-session : la session épinglée est prioritaire (spec §50)', () => {
+  const sessions = [
+    session({ id: 's1', gameId: 'cyberpunk', state: 'GameRunning' }),
+    session({ id: 's2', gameId: 'nte', state: 'GameRunning' }),
+  ]
+  const entries = activeSessionsForQuickPanel(sessions, [{ id: 'cyberpunk', name: 'Cyberpunk 2077' }, { id: 'nte', name: 'Neverness to Everness' }], 'nte', 'cyberpunk')
+  assert.equal(entries.length, 2)
+  const priority = entries.find(entry => entry.isPriority)
+  assert.equal(priority?.gameId, 'nte')
+  assert.equal(entries.find(entry => entry.gameId === 'nte')?.pinned, true)
+})
+
+test('multi-session : sans pin, la session au premier plan est prioritaire (spec §14, §49)', () => {
+  const sessions = [
+    session({ id: 's1', gameId: 'cyberpunk', state: 'GameRunning' }),
+    session({ id: 's2', gameId: 'nte', state: 'GameRunning' }),
+  ]
+  const entries = activeSessionsForQuickPanel(sessions, [{ id: 'cyberpunk', name: 'Cyberpunk 2077' }, { id: 'nte', name: 'Neverness to Everness' }], undefined, 'cyberpunk')
+  assert.equal(entries.find(entry => entry.isPriority)?.gameId, 'cyberpunk')
+})
+
+test('multi-session : les sessions terminales sont exclues (spec §47)', () => {
+  const sessions = [
+    session({ id: 's1', gameId: 'cyberpunk', state: 'GameRunning' }),
+    session({ id: 's2', gameId: 'nte', state: 'Ended' }),
+  ]
+  const entries = activeSessionsForQuickPanel(sessions, [{ id: 'cyberpunk', name: 'Cyberpunk 2077' }, { id: 'nte', name: 'Neverness to Everness' }], undefined, undefined)
+  assert.equal(entries.length, 1)
+  assert.equal(entries[0].gameId, 'cyberpunk')
 })

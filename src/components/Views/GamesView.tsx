@@ -2,8 +2,8 @@ import { AlertTriangle, Archive, Boxes, CheckSquare2, ChevronDown, ChevronLeft, 
 import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { appVersion, getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
-import { BackgroundTaskSnapshot, CollectionInstallPlan, Mo2ImportOptions, Mo2ImportPreview, Mo2ImportResult, ProfileDeploymentAudit, native, pickExecutable, pickFolder, pickFolders, pickProfileArchive, resourceUrl, saveProfileArchive } from '../../lib/native'
+import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
+import { BackgroundTaskSnapshot, CollectionInstallPlan, Mo2ImportOptions, Mo2ImportPreview, Mo2ImportResult, ProfileDeploymentAudit, native, pickExecutable, pickFolder, pickFolders, resourceUrl } from '../../lib/native'
 import { ModCard } from '../UI/ModCard'
 import { FallbackArtwork } from '../UI/FallbackArtwork'
 import { ParallaxCover } from '../UI/ParallaxCover'
@@ -15,7 +15,7 @@ import { pickPrioritySession } from '../../lib/sessionPriority'
 import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { formatTime, timeAgo } from '../../utils'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
-import type { Game, GameSession, GameTab, Mod, ModImportCandidate, Profile, ProfileArchiveManifest, SensitiveFileAssessment, SensitiveImportAction } from '../../types'
+import type { Game, GameSession, GameTab, Mod, ModImportCandidate, Profile, SensitiveFileAssessment, SensitiveImportAction } from '../../types'
 import { VisualGamePanel } from '../../visual-profiles/ui/VisualGamePanel'
 import { GameConfigurationPanel } from './GameConfigurationPanel'
 import { GameDiagnosticPanel, GameHealthBar, type SubSection } from './GameDiagnosticPanel'
@@ -76,7 +76,6 @@ export function GamesView() {
   const setGameResources = useStore(state => state.setGameResources)
   const addProfile = useStore(state => state.addProfile)
   const duplicateProfile = useStore(state => state.duplicateProfile)
-  const importProfileManifest = useStore(state => state.importProfileManifest)
   const renameProfile = useStore(state => state.renameProfile)
   const removeProfile = useStore(state => state.removeProfile)
   const scanMods = useStore(state => state.scanMods)
@@ -227,47 +226,6 @@ export function GamesView() {
   const browseModsFolder = async () => {
     const path = await pickFolder()
     if (path) setModsPath(selectedGame.id, path)
-  }
-
-  const exportProfile = async (complete: boolean) => {
-    const destination = await saveProfileArchive(`${selectedGame.name}-${selectedProfile.name}`)
-    if (!destination) return
-    const { mods: _legacy, ...profile } = selectedProfile
-    const sanitizedMods = profileMods.map(mod => {
-      const { path: _path, ...safe } = mod
-      return safe
-    })
-    const manifest: ProfileArchiveManifest = {
-      schemaVersion: 1,
-      exportedAt: new Date().toISOString(),
-      app: 'ZAILON',
-      appVersion,
-      exportMode: complete ? 'complete' : 'light',
-      game: { name: selectedGame.name, provider: selectedGame.provider, providerGameId: selectedGame.providerGameId },
-      profile,
-      mods: sanitizedMods,
-    }
-    const sources = profileMods.flatMap(mod => mod.path ? [{ id: mod.id, name: mod.name, path: mod.path }] : [])
-    await native.exportProfile(destination, manifest, complete, sources)
-  }
-
-  const importProfile = async () => {
-    const archivePath = await pickProfileArchive()
-    if (!archivePath) return
-    const preview = await native.previewProfileImport(archivePath)
-    const message = [
-      `Profil : ${preview.manifest.profile.name}`,
-      `Jeu source : ${preview.manifest.game.name}`,
-      `${preview.manifest.mods.length} référence(s), ${preview.embeddedFiles} fichier(s) intégré(s).`,
-      ...preview.warnings,
-      'Importer ce profil sans écraser les profils existants ?',
-    ].join('\n')
-    if (!window.confirm(message)) return
-    importProfileManifest(preview.manifest)
-    if (preview.embeddedFiles && selectedGame.modsPath && window.confirm('Extraire aussi les fichiers intégrés dans le dossier Mods de ce jeu ?')) {
-      await native.extractProfileArchive(archivePath, selectedGame.modsPath)
-      await scanMods(selectedGame.id)
-    }
   }
 
   const deploymentArguments = () => {
@@ -533,7 +491,7 @@ export function GamesView() {
 
       {tab === 'downloads' && <CollectionDownloadsPanel gameId={selectedGame.id} gameName={selectedGame.name} onOpenProfile={profileId => { void setSelectedProfile(profileId); setTab('profiles') }} />}
       {tab === 'visuals' && <VisualGamePanel game={selectedGame} zailonProfile={selectedProfile} />}
-      {tab === 'configuration' && <GameConfigurationPanel game={selectedGame} profile={selectedProfile} onBrowseExecutable={() => void browseExecutable()} onBrowseModsFolder={() => void browseModsFolder()} onExportProfile={complete => void exportProfile(complete)} onImportProfile={() => void importProfile()} onSaveResources={resources => setGameResources(selectedGame.id, resources)} onOpenVisuals={() => setTab('visuals')} />}
+      {tab === 'configuration' && <GameConfigurationPanel game={selectedGame} profile={selectedProfile} onBrowseExecutable={() => void browseExecutable()} onBrowseModsFolder={() => void browseModsFolder()} onSaveResources={resources => setGameResources(selectedGame.id, resources)} onOpenVisuals={() => setTab('visuals')} />}
       {tab === 'diagnostic' && <GameDiagnosticPanel game={selectedGame} profile={selectedProfile} profileMods={profileMods} onOpenConfiguration={() => setTab('configuration')} onRepairMo2={selectedGame.name.toLocaleLowerCase().includes('cyberpunk') ? () => void repairMo2Deployment() : undefined} repairBusy={deploymentToolBusy} conflicts={resolvedConflicts} onSetWinner={(path, winnerId) => setConflictWinner(path, winnerId)} initialSection={diagSection} />}
     </section>
 

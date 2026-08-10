@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { BackgroundMediaType, BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, ExternalModReference, Game, GameBackgroundMedia, GameInputProfile, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, SessionSource, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
+import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
 import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { adapterFor, FALLBACK_ADAPTER, isLauncherBased } from '../lib/launchAdapters'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
@@ -31,7 +32,7 @@ let discordPublishedGameId: string | undefined
 let discordSwitchTimer: ReturnType<typeof setTimeout> | undefined
 import { evaluateSessionEnd } from '../lib/sessionEnd'
 
-const APP_VERSION = '1.62.0'
+const APP_VERSION = '1.65.0'
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 /** Instant du démarrage du store : sert à distinguer « Jeu détecté par ZAILON »
@@ -474,7 +475,7 @@ export interface Store {
   prepareCollectionProfile: (collection: NexusCollectionDetail, name: string, includeAdult: boolean) => Promise<string | undefined>
   installCollectionDownloads: (gameId: string, installId: string, gameName: string) => Promise<boolean>
   duplicateProfile: (profileId: string) => void
-  importProfileManifest: (manifest: ProfileArchiveManifest) => void
+  importProfileManifest: (manifest: ProfileArchiveManifest, preferredName?: string) => void
   renameProfile: (profileId: string, name: string) => void
   removeProfile: (profileId: string) => void
   registerImportedStages: (gameId: string, profileId: string, installedPaths: string[], enabled: boolean) => Promise<void>
@@ -1207,7 +1208,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       set(state => ({ games: updateProfile(state.games, game.id, copy.id, profile => withProfilePaths(profile, paths)) }))
     }).catch(error => set({ notice: asError(error) }))
   },
-  importProfileManifest: manifest => {
+  importProfileManifest: (manifest, preferredName) => {
     const { game } = selected(get())
     if (!game) return
     const importedMods = manifest.mods.map((mod, index): Mod => ({
@@ -1220,12 +1221,14 @@ export const useStore = create<Store>()(persist((set, get) => ({
     }))
     const catalogById = new Map(game.installedMods.map(mod => [mod.id, mod]))
     importedMods.forEach(mod => { if (!catalogById.has(mod.id)) catalogById.set(mod.id, mod) })
-    const source = manifest.profile
+    const source = sanitizeProfileForImport(manifest.profile)
+    // §37 : l'import crée TOUJOURS un nouveau profil, sans écraser — nom sans collision.
+    const name = nextProfileName(game.profiles.map(item => item.name), preferredName || source.name || 'Profil importé')
     const profile: Profile = {
       ...source,
       id: createId(),
       gameId: game.id,
-      name: `${source.name} — importé`,
+      name,
       modStates: source.modStates || statesFromMods(importedMods),
       createdAt: Date.now(),
       lastUsed: undefined,
@@ -1235,7 +1238,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     set(state => ({
       games: state.games.map(item => item.id === game.id ? { ...item, installedMods: [...catalogById.values()], profiles: [...item.profiles, profile] } : item),
       selectedProfileId: profile.id,
-      notice: `${manifest.mods.length} référence(s) de mods importée(s). Les fichiers absents restent désactivés.`,
+      notice: `${manifest.mods.length} référence(s) de mods importée(s) dans « ${name} ». Les fichiers absents restent désactivés.`,
     }))
   },
   renameProfile: (profileId, name) => {

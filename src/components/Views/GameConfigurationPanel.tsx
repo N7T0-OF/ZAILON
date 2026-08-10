@@ -25,6 +25,7 @@ import {
   type ZailonPriorityPolicy,
 } from '../../lib/performanceProfiles'
 import { native, pickFolder } from '../../lib/native'
+import { ProfileShareDialog } from '../UI/ProfileShareDialog'
 import { describeBackgroundMedia, resolveMediaType } from '../../lib/backgroundMedia'
 import { parseYouTubeUrl, youtubeThumbnailUrl } from '../../lib/youtubeUrl'
 import { resourceUrl } from '../../lib/native'
@@ -47,10 +48,6 @@ const RUNTIME_TYPE_LABELS: Array<[ModRuntimePathType, string]> = [
   ['custom', 'Custom'],
 ]
 
-const formatBytes = (size: number) => size >= 1024 * 1024
-  ? `${(size / (1024 * 1024)).toFixed(size >= 100 * 1024 * 1024 ? 0 : 1)} Mo`
-  : `${Math.max(1, Math.round(size / 1024))} Ko`
-
 const DEFAULT_OPEN = ['lancement', 'apparence']
 
 interface Props {
@@ -58,13 +55,11 @@ interface Props {
   profile: Profile
   onBrowseExecutable: () => void
   onBrowseModsFolder: () => void
-  onExportProfile: (complete: boolean) => void
-  onImportProfile: () => void
   onSaveResources: (resources: Partial<GameResources>) => void
   onOpenVisuals: () => void
 }
 
-export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBrowseModsFolder, onExportProfile, onImportProfile, onSaveResources, onOpenVisuals }: Props) {
+export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBrowseModsFolder, onSaveResources, onOpenVisuals }: Props) {
   const setGamePath = useStore(state => state.setGamePath)
   const setModsPath = useStore(state => state.setModsPath)
   const reduceExplanations = useStore(state => state.reduceExplanations)
@@ -90,6 +85,8 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
   const restoreRestorePoint = useStore(state => state.restoreRestorePoint)
   const deleteRestorePoint = useStore(state => state.deleteRestorePoint)
   const storageKey = `zailon:config-open:${game.id}`
+  const [shareOpen, setShareOpen] = useState(false)
+  const [shareTab, setShareTab] = useState<'export' | 'import'>('export')
   const [open, setOpen] = useState<string[]>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey) || 'null') as string[] | null
@@ -126,6 +123,8 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
   const profileMods = resolveProfileMods(game, profile)
   const frameworks = [...new Set(game.installedMods.map(mod => mod.framework).filter((value): value is string => Boolean(value)))]
   const points = restorePoints.filter(item => item.gameId === game.id).sort((left, right) => right.createdAt - left.createdAt)
+
+
 
   const comparePoint = (point: typeof points[number]) => {
     const current = {
@@ -268,21 +267,16 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
       </ConfigCard>
 
       <ConfigCard id="sauvegardes" title="Sauvegardes" icon={FileArchive} badge={`${points.length} point(s) de restauration`} open={open.includes('sauvegardes')} onToggle={() => toggle('sauvegardes')}>
-        <div className="grid gap-2 sm:grid-cols-3">
-          <button type="button" onClick={() => void onExportProfile(false)} className="flex flex-col items-start gap-1 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-left hover:border-gold/25">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <button type="button" onClick={() => { setShareTab('export'); setShareOpen(true) }} className="flex flex-col items-start gap-1 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-left hover:border-gold/25">
             <FileArchive size={15} className="text-gold/75" />
-            <span className="mt-1 text-[11px] font-semibold text-white/72">Exporter un profil léger</span>
-            <span className="text-[11px] leading-relaxed text-white/34">Archive de partage : métadonnées, liens, versions, ordre et réglages. Aucun fichier déployé dans le jeu.</span>
+            <span className="mt-1 text-[11px] font-semibold text-white/72">Exporter un profil</span>
+            <span className="text-[11px] leading-relaxed text-white/34">Léger (code ou fichier) ou hors ligne. Reproductibilité, taille estimée, chemins neutralisés.</span>
           </button>
-          <button type="button" onClick={() => void onExportProfile(true)} className="flex flex-col items-start gap-1 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-left hover:border-gold/25">
-            <Archive size={15} className="text-gold/75" />
-            <span className="mt-1 text-[11px] font-semibold text-white/72">Exporter un profil complet</span>
-            <span className="text-[11px] leading-relaxed text-white/34">Jusqu’à {formatBytes(profileMods.reduce((sum, mod) => sum + (mod.sizeBytes || 0), 0))} avant compression. Déploiement uniquement avec Jouer.</span>
-          </button>
-          <button type="button" onClick={() => void onImportProfile()} className="flex flex-col items-start gap-1 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-left hover:border-gold/25">
+          <button type="button" onClick={() => { setShareTab('import'); setShareOpen(true) }} className="flex flex-col items-start gap-1 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3 text-left hover:border-gold/25">
             <Upload size={15} className="text-gold/75" />
             <span className="mt-1 text-[11px] font-semibold text-white/72">Importer un profil</span>
-            <span className="text-[11px] leading-relaxed text-white/34">Valide l’archive et affiche un aperçu avant création d’un nouveau profil.</span>
+            <span className="text-[11px] leading-relaxed text-white/34">Fichier .zailon-profile ou code collé. Aperçu avant création d’un nouveau profil, sans écrasement.</span>
           </button>
         </div>
         <div className="mt-3 border-t border-white/[0.05] pt-3">
@@ -329,6 +323,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
         />
       </ConfigCard>
     </div>
+    {shareOpen && <ProfileShareDialog game={game} profile={profile} initialTab={shareTab} onClose={() => setShareOpen(false)} />}
   </div>
 }
 

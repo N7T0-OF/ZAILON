@@ -547,7 +547,16 @@ export interface ProfileArchiveManifest {
   app: 'ZAILON'
   appVersion: string
   exportMode: 'light' | 'complete'
-  game: { name: string; provider?: string; providerGameId?: string }
+  game: {
+    name: string
+    provider?: string
+    providerGameId?: string
+    /** Réglages globaux du jeu transportables (spec partage §44) : QWERTY virtuel,
+     * chaîne de lancement, fond multimédia — jamais de chemins absolus. */
+    keyboardLayout?: GameKeyboardLayout
+    launchAdapter?: GameLaunchAdapter
+    backgroundMedia?: GameBackgroundMedia
+  }
   profile: Omit<Profile, 'mods'>
   mods: Array<Omit<Mod, 'path' | 'files'> & { files?: string[] }>
 }

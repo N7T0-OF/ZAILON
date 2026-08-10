@@ -1340,6 +1340,23 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.65.0 — Partage de profils v2 : code léger copiable + dialogue export/import avec reproductibilité
+
+### Added
+
+- **Code de profil `ZAILON-PROFILE-V1:`** (`src/lib/profileShareCode.ts`, 10 tests) : manifeste léger encodé en base64url compact, validé strictement au décodage (format manifeste uniquement, aucune exécution), taille plafonnée — les profils lourds passent par l’export fichier. Copiable depuis l’export, collable dans l’import : **aucun serveur ni compte** (spec §51-53).
+- **Dialogue « Partager le profil »** (Bibliothèque > Jeu > Configuration > Sauvegardes) : onglets Exporter / Importer, **sans `window.confirm`**.
+  - Export : mode **Léger** (configuration, mods, versions, sources, ordre, réglages — mods retéléchargés à l’import) ou **Hors ligne** (paquets locaux inclus), **taille estimée**, **reproductibilité %** (spec §57), avertissement mods locaux sans source (§33), boutons « Copier un code » (léger) / « Exporter un fichier .zailon-profile ».
+  - Import : fichier `.zailon-profile` (aperçu natif validé : chemins sûrs, pas de symlink, limite de taille) **ou code collé**, aperçu complet avant création (jeu source, mods, frameworks, fichiers intégrés, avertissements), **création systématique d’un nouveau profil sans écrasement** — nom sans collision « Default (2) » (§37), alerte si le profil vient d’un autre jeu (§38), extraction optionnelle des fichiers intégrés dans le dossier Mods.
+- **Chemins portables** (spec §45-46) : l’export neutralise tous les chemins absolus utilisateur (`C:\Users\…`) en jetons `GAME_ROOT` / `PROFILE_STORE` ; l’import supprime les chemins machine (bypass, clonedFrom, template).
+- **Réglages jeu transportables** (spec §44) : disposition clavier (QWERTY virtuel), chaîne de lancement (`launchAdapter`) et fond multimédia inclus dans le manifeste — jamais de clés API, jetons ou données personnelles.
+- `APP_VERSION` du store resynchronisé (la valeur embarquée datait de 1.62.0).
+
+### Changed
+
+- `importProfileManifest` crée toujours un profil nommé sans collision et sélectionné, avec nettoyage des chemins machine.
+- La section Sauvegardes de Configuration affiche deux actions claires (Exporter / Importer) au lieu de trois boutons disparates ; le dialogue gère les deux modes d’export et les deux entrées d’import.
+
 ## 1.64.0 — Accueil multimédia : fonds vidéo locaux + YouTube sans clé API + audio discret
 
 ### Added

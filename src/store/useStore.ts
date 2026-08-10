@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, Game, GameInputProfile, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, SessionSource, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
+import { BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, ExternalModReference, Game, GameInputProfile, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, SessionSource, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
 import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { adapterFor, FALLBACK_ADAPTER, isLauncherBased } from '../lib/launchAdapters'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
@@ -14,6 +14,7 @@ import { enabledCountFromState, isSilentClear, repairReport } from '../lib/profi
 import { createDebouncer } from '../lib/persistDebounce'
 import { ZAILON_PERSIST_KEY } from '../lib/designTokens'
 import { buildDiscordActivity, DISCORD_APPLICATION_ID, DISCORD_PRIORITY_DEBOUNCE_MS, shouldDelayPrioritySwitch, type DiscordActivityInput } from '../lib/discordPresence'
+import { modMatchesRemote, remoteIdentityFromCatalog, remoteModKey } from '../lib/remoteInstallState'
 import { resolveDiscordAsset } from '../lib/discordAssets'
 
 // Sauvegarde debounced des réglages continus (spec §17) : le color picker
@@ -456,6 +457,10 @@ export interface Store {
   deleteGameInputProfile: (gameId: string, profileId: string) => void
   restorePoints: RestorePoint[]
   autoRestorePoints: boolean
+  /** Identités distantes en cours d'installation / désinstallation (Explorer,
+   * spec §21-22) : transitoires, jamais persistées. */
+  remoteInstallingKeys: string[]
+  remoteRemovingKeys: string[]
   createRestorePoint: (label: string, source?: 'manual' | 'auto') => void
   restoreRestorePoint: (gameId: string, pointId: string) => void
   deleteRestorePoint: (gameId: string, pointId: string) => void
@@ -580,6 +585,10 @@ export interface Store {
   setExploreColumns: (columns: ExploreColumns) => void
   refreshExplore: () => Promise<void>
   installMod: (mod: ExplodMod, target?: { gameId: string; profileId: string }) => Promise<void>
+  /** Désinstallation d'un mod distant (spec §19-20, §23) : `current` retire du
+   * profil actuel (paquet partagé conservé), `all` supprime les packages et
+   * les détache de tous les profils. */
+  uninstallRemoteMod: (provider: string, remoteModId: string, fileId: string | undefined, mode: 'current' | 'all') => Promise<void>
   replaceBackgroundTasks: (tasks: BackgroundTaskSnapshot[]) => void
   upsertBackgroundTask: (task: BackgroundTaskSnapshot) => void
   setTaskToastsEnabled: (enabled: boolean) => void
@@ -724,6 +733,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
   activeGameTab: 'mods',
   restorePoints: [],
   autoRestorePoints: true,
+  remoteInstallingKeys: [],
+  remoteRemovingKeys: [],
   games: [],
   selectedGameId: undefined,
   selectedProfileId: undefined,
@@ -2006,6 +2017,13 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const game = target ? get().games.find(item => item.id === target.gameId) : fallback.game
     const profile = target ? game?.profiles.find(item => item.id === target.profileId) : fallback.profile
     if (!game || !profile) { set({ notice: 'Sélectionnez un jeu et un profil avant l’import.' }); return }
+    // Spec §21-22 : identité distante suivie pendant l'installation — le bouton
+    // affiche « Installation… » désactivé, jamais de double clic.
+    const remoteKey = remoteModKey(mod.platform, String(mod.modId ?? mod.id))
+    set(state => ({ remoteInstallingKeys: [...new Set([...state.remoteInstallingKeys, remoteKey])] }))
+    // Snapshot avant import : les mods NOUVEAUX reçoivent la référence distante
+    // (spec §16 — l'état installé se dérive des packages locaux, pas d'un cache).
+    const beforeIds = new Set((get().games.find(item => item.id === game.id)?.installedMods || []).map(item => item.id))
     try {
       let downloadUrl = mod.downloadUrl
       let fileName = mod.fileName
@@ -2033,9 +2051,26 @@ export const useStore = create<Store>()(persist((set, get) => ({
       const imported = await native.importModCandidatesBackground(taskId, game.id, [profile.id], [download.path], game.name, game.modsPath || game.installDirectory || '', true, 'quarantine', task => get().upsertBackgroundTask(task))
       await get().registerImportedStages(game.id, profile.id, imported.installedPaths, true)
       await get().scanMods(game.id)
+      // Spec §16-17 : attacher la référence distante aux mods nouvellement
+      // importés — la carte Explorer passe immédiatement à « Installé » sans
+      // refresh (l'état se dérive des packages réels).
+      const identity = remoteIdentityFromCatalog(mod.platform, mod.id, mod.modId)
+      const reference: ExternalModReference = {
+        provider: mod.platform as Exclude<Platform, 'ayakamods'>,
+        modId: identity.remoteModId,
+        sourceUrl: mod.url,
+        confidence: 'exact',
+        confirmedByUser: true,
+      }
       set(state => ({
         games: state.games.map(item => item.id === game.id ? {
           ...item,
+          installedMods: item.installedMods.map(candidate => {
+            if (beforeIds.has(candidate.id)) return candidate
+            const existing = candidate.externalReferences || []
+            if (existing.some(item => item.provider === identity.provider && String(item.modId) === String(identity.remoteModId))) return candidate
+            return { ...candidate, externalReferences: [...existing, reference] }
+          }),
           profiles: item.profiles.map(profileItem => profileItem.id === profile.id ? {
             ...profileItem,
             installHistory: [{ name: mod.name, action: 'added' as const, at: Date.now() }, ...(profileItem.installHistory || [])].slice(0, 50),
@@ -2045,6 +2080,58 @@ export const useStore = create<Store>()(persist((set, get) => ({
       set({ notice: imported.status === 'CompletedWithWarnings' || download.status === 'CompletedWithWarnings' ? `${mod.name} a été importé avec avertissement : ${(download.sensitiveFiles.length + imported.sensitiveFiles.length)} fichier(s) sensible(s) isolé(s). Aucun n’a été exécuté.` : `${mod.name} a été téléchargé, validé et stocké. Il sera rendu visible dans ${game.name} au prochain lancement après vérification.` })
     } catch (error) {
       set({ notice: asError(error) })
+    } finally {
+      set(state => ({ remoteInstallingKeys: state.remoteInstallingKeys.filter(key => key !== remoteKey) }))
+    }
+  },
+  uninstallRemoteMod: async (provider, remoteModId, fileId, mode) => {
+    const key = remoteModKey(provider, remoteModId, fileId)
+    const identity = { provider, remoteModId, fileId }
+    const targets: Array<{ game: Game; mod: Mod }> = []
+    for (const game of get().games) {
+      for (const mod of game.installedMods || []) {
+        if (modMatchesRemote(mod, identity)) targets.push({ game, mod })
+      }
+    }
+    if (!targets.length) { set({ notice: 'Ce mod n’est plus installé.' }); return }
+    set(current => ({ remoteRemovingKeys: [...new Set([...current.remoteRemovingKeys, key])] }))
+    try {
+      if (mode === 'current') {
+        // Spec §20 : « Retirer du profil actuel » — le paquet partagé reste.
+        const { game: selectedGame, profile: selectedProfile } = selected(get())
+        for (const { mod } of targets) {
+          if (selectedGame && selectedProfile && Object.prototype.hasOwnProperty.call(selectedProfile.modStates, mod.id)) {
+            await get().deleteMod(mod.id)
+          }
+        }
+      } else {
+        // Suppression complète : paquet supprimé + détaché de tous les profils.
+        for (const { game, mod } of targets) {
+          if (mod.storage === 'staged' && mod.stageId) await native.deleteStagedMod(game.id, mod.stageId)
+          else if (mod.path) await native.deleteMod(mod.path, game.modsPath || '')
+          const profileIds = game.profiles.map(item => item.id)
+          set(current => ({
+            games: current.games.map(item => item.id !== game.id ? item : {
+              ...item,
+              installedMods: item.installedMods.filter(candidate => candidate.id !== mod.id),
+              profiles: item.profiles.map(profileItem => {
+                const modStates = { ...profileItem.modStates }
+                delete modStates[mod.id]
+                return { ...profileItem, modStates }
+              }),
+            }),
+          }))
+          if (native.isDesktop()) {
+            for (const profileId of profileIds) {
+              const updated = get().games.find(item => item.id === game.id)?.profiles.find(item => item.id === profileId)
+              if (updated) await native.syncProfileState(game.id, updated).catch(() => undefined)
+            }
+          }
+        }
+        set({ notice: targets.length === 1 ? `${targets[0].mod.name} désinstallé.` : `${targets.length} packages désinstallés.` })
+      }
+    } finally {
+      set(current => ({ remoteRemovingKeys: current.remoteRemovingKeys.filter(item => item !== key) }))
     }
   },
   setConflictWinner: (path, winnerModId) => {

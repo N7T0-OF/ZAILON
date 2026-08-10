@@ -1340,6 +1340,22 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.63.0 — État Installer/Désinstaller synchronisé dans Explorer (spec §15-23)
+
+### Added
+
+- État d'installation distant canonique dérivé des mods locaux (`src/lib/remoteInstallState.ts` — identité distante, classification Install / Installed / UpdateAvailable / Installing / Removing / Error) : Explorer ne devine plus l'état depuis la carte locale, il le dérive de la vérité (packages installés + référence distante attachée).
+- Bouton **Désinstaller** (danger rouge) après installation — y compris GameBanana — sans refresh manuel (spec §18) : la carte change immédiatement.
+- Dialogue multi-profils lors de la désinstallation (spec §20) : si le mod est utilisé par plusieurs profils, choix « Retirer du profil actuel » / « Désinstaller complètement » / « Annuler ».
+- Boutons désactivés + état « Installation… » pendant le téléchargement (spec §22) — pas de double clic.
+- Clé transitoire `installingRemote` / `removingRemote` dans le store (état pendant opération).
+
+### Changed
+
+- `installMod` attache désormais la référence distante (`externalReference`) au package installé : l'état « Installé » survit au redémarrage et au changement de profil.
+- `uninstallRemoteMod(provider, remoteModId, fileId, mode)` supprime/détache les packages du profil (mode `current`) ou de tous les profils (mode `all`), puis émet l'événement de synchronisation.
+- Même logique pour tous les providers (Nexus, GameBanana, CurseForge) — pas de recodage par page (spec §23).
+
 ## 1.62.0 — Persistance de l'accent corrigée + Theme Bootstrap + DesignTokenService
 
 ### Fixed

@@ -1,4 +1,4 @@
-import { FormEvent, PointerEvent, useEffect, useRef, useState } from 'react'
+import { FormEvent, PointerEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import {
   AlertTriangle,
@@ -16,10 +16,12 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Trash2,
   X,
 } from 'lucide-react'
 import { useStore } from '../../store/useStore'
 import type { ExplodMod, Game, Platform } from '../../types'
+import { classifyRemoteInstall, collectRemotePackages, remoteIdentityFromCatalog, remoteModKey } from '../../lib/remoteInstallState'
 import {
   native,
   NexusAccountCapabilities,
@@ -147,10 +149,14 @@ export function ExploreView() {
   const setColumns = useStore(state => state.setExploreColumns)
   const refresh = useStore(state => state.refreshExplore)
   const installMod = useStore(state => state.installMod)
+  const uninstallRemoteMod = useStore(state => state.uninstallRemoteMod)
   const setView = useStore(state => state.setView)
+  const remoteInstallingKeys = useStore(state => state.remoteInstallingKeys)
+  const remoteRemovingKeys = useStore(state => state.remoteRemovingKeys)
   const [installingId, setInstallingId] = useState<string>()
   const [previewMod, setPreviewMod] = useState<ExplodMod>()
   const [installInMod, setInstallInMod] = useState<ExplodMod>()
+  const [uninstallMod, setUninstallMod] = useState<ExplodMod>()
   const [providerStatuses, setProviderStatuses] = useState<Record<string, ProviderConnectionStatus>>({})
   const selectedGame = games.find(game => game.id === selectedGameId)
   const readyProvider = platform === 'gamebanana' || (platform === 'nexus' && providerStatuses.nexus?.configured)
@@ -158,6 +164,20 @@ export function ExploreView() {
   const selectedCatalogGame = gameChoices.find(game => game.id === gameId) || { id: gameId, name: `GameBanana #${gameId}` }
   const visibleMods = showNsfw ? mods : mods.filter(mod => !mod.nsfw)
   const hiddenNsfw = mods.length - visibleMods.length
+  // Spec §16 : état installé canonique dérivé des packages locaux réels — la
+  // carte Explorer ne devine jamais l'état depuis le catalogue.
+  const remotePackages = useMemo(() => collectRemotePackages(games.flatMap(game => game.installedMods || [])), [games])
+  const remoteStateFor = (mod: ExplodMod) => {
+    const identity = remoteIdentityFromCatalog(mod.platform, mod.id, mod.modId)
+    const key = remoteModKey(identity.provider, identity.remoteModId)
+    const installed = (remotePackages.get(key)?.length || 0) > 0
+    return {
+      key,
+      installed,
+      status: classifyRemoteInstall(installed, remoteInstallingKeys.includes(key), remoteRemovingKeys.includes(key)),
+      affectedProfiles: games.flatMap(game => game.profiles.filter(profile => (remotePackages.get(key) || []).some(packageId => Object.prototype.hasOwnProperty.call(profile.modStates, packageId)))).length,
+    }
+  }
 
   useEffect(() => {
     if (!native.isDesktop()) return
@@ -285,12 +305,13 @@ export function ExploreView() {
         </div>
 
         <ProviderSearchResults grid={grid} columns={columns} loading={loading && !mods.length} empty={!visibleMods.length && !error} loadingFallback={<LoadingGrid />} emptyFallback={<EmptyResults onReset={() => { setSearch(''); void refresh() }} />}>
-          {visibleMods.map(mod => <ModResult key={mod.id} mod={mod} grid={grid} installing={installingId === mod.id} canInstall={Boolean(selectedGame?.modsPath)} targetName={selectedGame?.name} onPreview={() => setPreviewMod(mod)} onInstall={() => void install(mod)} onInstallIn={() => installIn(mod)} />)}
+          {visibleMods.map(mod => { const remote = remoteStateFor(mod); return <ModResult key={mod.id} mod={mod} grid={grid} installing={installingId === mod.id || remote.status === 'installing'} removing={remote.status === 'removing'} installed={remote.installed} canInstall={Boolean(selectedGame?.modsPath)} targetName={selectedGame?.name} onPreview={() => setPreviewMod(mod)} onInstall={() => void install(mod)} onInstallIn={() => installIn(mod)} onUninstall={() => setUninstallMod(mod)} /> })}
         </ProviderSearchResults>
         <ProviderPagination provider="GameBanana" page={page} hasNextPage={hasNextPage} loading={loading} onPageChange={setPage} />
       </section>
     </>}
-    {previewMod && <ModPreviewModal mod={previewMod} canInstall={Boolean(selectedGame?.modsPath)} installing={installingId === previewMod.id} onInstall={() => void install(previewMod)} onInstallIn={() => installIn(previewMod)} onClose={() => setPreviewMod(undefined)} />}
+    {previewMod && <ModPreviewModal mod={previewMod} canInstall={Boolean(selectedGame?.modsPath)} installing={installingId === previewMod.id} installed={remoteStateFor(previewMod).installed} onInstall={() => void install(previewMod)} onInstallIn={() => installIn(previewMod)} onUninstall={() => { setPreviewMod(undefined); setUninstallMod(previewMod) }} onClose={() => setPreviewMod(undefined)} />}
+    {uninstallMod && <UninstallRemoteDialog mod={uninstallMod} profiles={remoteStateFor(uninstallMod).affectedProfiles} onClose={() => setUninstallMod(undefined)} onConfirm={mode => { const identity = remoteIdentityFromCatalog(uninstallMod.platform, uninstallMod.id, uninstallMod.modId); void uninstallRemoteMod(identity.provider, identity.remoteModId, identity.fileId, mode); setUninstallMod(undefined) }} />}
     {installInMod && <InstallTargetDialog mod={installInMod} games={games} onClose={() => setInstallInMod(undefined)} onConfirm={async (gameId, profileId) => {
       setInstallingId(installInMod.id)
       try {
@@ -744,15 +765,17 @@ function ProviderUnavailable({ provider, onConfigure }: { provider: string; onCo
   </section>
 }
 
-function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, galleryLoading = false, galleryError, onInstall, onInstallIn, onClose }: {
+function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, installed = false, galleryLoading = false, galleryError, onInstall, onInstallIn, onUninstall, onClose }: {
   mod: ExplodMod
   canInstall: boolean
   sourceOnly?: boolean
   installing: boolean
+  installed?: boolean
   galleryLoading?: boolean
   galleryError?: string
   onInstall: () => void
   onInstallIn?: () => void
+  onUninstall?: () => void
   onClose: () => void
 }) {
   const allImages = [...new Set([mod.thumbnail, ...(mod.screenshots || [])].filter(Boolean))]
@@ -833,7 +856,7 @@ function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, gall
           <div className="mt-4"><h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/48">Description</h3><p className="mt-2 whitespace-pre-line text-[11px] leading-relaxed text-white/48">{mod.description || 'Aucune description fournie par la source.'}</p></div>
           <p className="mt-4 rounded-lg border border-white/[0.07] bg-white/[0.018] p-3 text-[11px] leading-relaxed text-white/34">Source vérifiable : aucune miniature NSFW masquée n’est chargée. Seules l’image courante et ses deux voisines sont préchargées dans cette galerie.</p>
         </div>
-        <footer className="flex flex-wrap justify-end gap-2 border-t border-white/[0.07] p-4"><button type="button" onClick={() => void openSource()} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/62 hover:bg-white/[0.05]"><ExternalLink size={13} />Voir la page source</button>{onInstallIn && !sourceOnly && <button type="button" onClick={onInstallIn} disabled={installing} title="Choisir le jeu et le profil cibles" className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] text-white/58 hover:border-gold/25 hover:text-gold disabled:opacity-40"><FolderInput size={13} />Installer dans…</button>}<button type="button" onClick={sourceOnly ? () => void openSource() : onInstall} disabled={installing} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-40">{installing ? <Loader2 size={13} className="animate-spin" /> : sourceOnly ? <ExternalLink size={13} /> : <Download size={13} />}{installing ? 'Installation…' : sourceOnly ? 'Ouvrir Nexus' : canInstall ? 'Installer' : 'Configurer le jeu'}</button></footer>
+        <footer className="flex flex-wrap justify-end gap-2 border-t border-white/[0.07] p-4"><button type="button" onClick={() => void openSource()} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/62 hover:bg-white/[0.05]"><ExternalLink size={13} />Voir la page source</button>{onInstallIn && !sourceOnly && !installed && <button type="button" onClick={onInstallIn} disabled={installing} title="Choisir le jeu et le profil cibles" className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] text-white/58 hover:border-gold/25 hover:text-gold disabled:opacity-40"><FolderInput size={13} />Installer dans…</button>}{installed && onUninstall ? <button type="button" onClick={onUninstall} disabled={installing} className="flex items-center gap-1.5 rounded-lg bg-[var(--zailon-danger)] px-4 py-2 text-[11px] font-semibold text-white disabled:opacity-40"><Trash2 size={13} />Désinstaller</button> : <button type="button" onClick={sourceOnly ? () => void openSource() : onInstall} disabled={installing} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-40">{installing ? <Loader2 size={13} className="animate-spin" /> : sourceOnly ? <ExternalLink size={13} /> : <Download size={13} />}{installing ? 'Installation…' : sourceOnly ? 'Ouvrir Nexus' : canInstall ? 'Installer' : 'Configurer le jeu'}</button>}</footer>
       </aside>
     </section>
     {lightbox && currentImage && <div role="dialog" aria-modal="true" aria-label={`Image ${imageIndex + 1} de ${mod.name} au format complet`} className="fixed inset-0 z-[280] flex flex-col bg-black/94 p-3 backdrop-blur-xl" onPointerDown={event => { if (event.target === event.currentTarget) setLightbox(false) }}>
@@ -844,7 +867,7 @@ function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, gall
   </div>
 }
 
-function ModResult({ mod, grid, installing, canInstall, sourceOnly = false, targetName, onPreview, onInstall, onInstallIn }: { mod: ExplodMod; grid: boolean; installing: boolean; canInstall: boolean; sourceOnly?: boolean; targetName?: string; onPreview: () => void; onInstall: () => void; onInstallIn?: () => void }) {
+function ModResult({ mod, grid, installing, removing = false, installed = false, canInstall, sourceOnly = false, targetName, onPreview, onInstall, onInstallIn, onUninstall }: { mod: ExplodMod; grid: boolean; installing: boolean; removing?: boolean; installed?: boolean; canInstall: boolean; sourceOnly?: boolean; targetName?: string; onPreview: () => void; onInstall: () => void; onInstallIn?: () => void; onUninstall?: () => void }) {
   const openSource = () => native.isDesktop() ? native.openExternalUrl(mod.url) : window.open(mod.url, '_blank', 'noopener,noreferrer')
   return <article className={`group overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.018] transition-colors hover:border-white/15 hover:bg-white/[0.03] ${grid ? '' : 'flex min-h-28'}`}>
     <button type="button" onClick={onPreview} aria-label={`Aperçu rapide de ${mod.name}`} className={`relative shrink-0 cursor-pointer overflow-hidden bg-white/[0.025] text-left ${grid ? 'aspect-[16/7] w-full' : 'w-44'}`}>
@@ -863,9 +886,15 @@ function ModResult({ mod, grid, installing, canInstall, sourceOnly = false, targ
         <span className="flex items-center gap-1.5">
           {onInstallIn && !sourceOnly && canInstall && <button type="button" onClick={onInstallIn} title="Installer dans un autre jeu / profil" aria-label={`Choisir la cible d’installation de ${mod.name}`} className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] text-white/38 hover:bg-white/[0.06] hover:text-gold"><FolderInput size={13} /></button>}
           <button type="button" onClick={() => void openSource()} title={`Ouvrir la page ${mod.platform === 'nexus' ? 'Nexus Mods' : 'GameBanana'}`} aria-label={`Ouvrir ${mod.name} sur ${mod.platform === 'nexus' ? 'Nexus Mods' : 'GameBanana'}`} className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] text-white/38 hover:bg-white/[0.06] hover:text-white"><ExternalLink size={13} /></button>
-          <button type="button" onClick={sourceOnly ? () => void openSource() : onInstall} disabled={installing} title={sourceOnly ? `Ouvrir ${mod.name} sur Nexus Mods` : canInstall ? `Installer dans ${targetName}` : 'Configurer d’abord le dossier Mods du jeu cible'} className={`flex min-h-8 items-center gap-1.5 rounded-lg px-3 text-[11px] font-semibold transition-colors ${canInstall || sourceOnly ? 'bg-[var(--zailon-accent)] text-[var(--zailon-accent-text)] hover:bg-white' : 'border border-amber-200/16 bg-amber-200/[0.04] text-amber-100/64'} disabled:opacity-45`}>
-            {installing ? <Loader2 size={13} className="animate-spin" /> : sourceOnly ? <ExternalLink size={13} /> : <Download size={13} />}{installing ? 'Installation…' : sourceOnly ? 'Voir sur Nexus' : canInstall ? 'Installer' : 'Configurer'}
-          </button>
+          {installed && onUninstall && !sourceOnly ? (
+            <button type="button" onClick={onUninstall} disabled={removing} title={`Désinstaller ${mod.name}`} className={`flex min-h-8 items-center gap-1.5 rounded-lg bg-[var(--zailon-danger)] px-3 text-[11px] font-semibold text-white transition-colors hover:bg-[var(--zailon-danger-hover)] disabled:opacity-45`}>
+              {removing ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}{removing ? 'Suppression…' : 'Désinstaller'}
+            </button>
+          ) : (
+            <button type="button" onClick={sourceOnly ? () => void openSource() : onInstall} disabled={installing} title={sourceOnly ? `Ouvrir ${mod.name} sur Nexus Mods` : canInstall ? `Installer dans ${targetName}` : 'Configurer d’abord le dossier Mods du jeu cible'} className={`flex min-h-8 items-center gap-1.5 rounded-lg px-3 text-[11px] font-semibold transition-colors ${canInstall || sourceOnly ? 'bg-[var(--zailon-accent)] text-[var(--zailon-accent-text)] hover:bg-white' : 'border border-amber-200/16 bg-amber-200/[0.04] text-amber-100/64'} disabled:opacity-45`}>
+              {installing ? <Loader2 size={13} className="animate-spin" /> : sourceOnly ? <ExternalLink size={13} /> : installed ? <CheckCircle2 size={13} /> : <Download size={13} />}{installing ? 'Installation…' : sourceOnly ? 'Voir sur Nexus' : installed ? 'Installé' : canInstall ? 'Installer' : 'Configurer'}
+            </button>
+          )}
         </span>
       </div>
     </div>
@@ -920,4 +949,20 @@ function LoadingGrid() {
 
 function EmptyResults({ onReset }: { onReset: () => void }) {
   return <div className="flex min-h-48 flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.08] text-center"><Search size={20} className="text-white/22" /><h2 className="mt-3 text-sm font-semibold text-white/62">Aucun mod trouvé</h2><p className="mt-1 text-[11px] text-white/34">Essayez un terme plus large ou rechargez les nouveautés.</p><button type="button" onClick={onReset} className="mt-3 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/58 hover:bg-white/[0.05]">Afficher les nouveautés</button></div>
+}
+
+/** Spec §20 : dialogue de désinstallation multi-profils — jamais de suppression
+ * silencieuse quand le mod est partagé entre plusieurs profils. */
+function UninstallRemoteDialog({ mod, profiles, onClose, onConfirm }: { mod: ExplodMod; profiles: number; onClose: () => void; onConfirm: (mode: 'current' | 'all') => void }) {
+  const multiple = profiles > 1
+  return <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/70 p-5 backdrop-blur-sm" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
+    <section className="w-full max-w-md rounded-2xl border border-white/[0.1] bg-[#111414] p-5 shadow-2xl">
+      <div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--zailon-danger-muted)] text-[var(--zailon-danger)]"><Trash2 size={18} /></span><div className="min-w-0 flex-1"><h2 className="font-display text-base font-bold text-white">Désinstaller {mod.name} ?</h2>{multiple ? <p className="mt-1 text-[11px] leading-relaxed text-white/48">Ce mod est utilisé par <strong className="text-white/70">{profiles} profils</strong>.</p> : <p className="mt-1 text-[11px] leading-relaxed text-white/48">Le paquet sera supprimé et retiré du profil qui l'utilise.</p>}</div><button type="button" onClick={onClose} aria-label="Annuler" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><X size={15} /></button></div>
+      <div className="mt-4 flex flex-col gap-2">
+        {multiple && <button type="button" onClick={() => onConfirm('current')} className="rounded-lg border border-white/[0.1] px-3 py-2 text-left text-[11px] text-white/62 hover:bg-white/[0.05]"><strong className="block text-white/78">Retirer du profil actuel</strong><span className="mt-0.5 block text-[10px] text-white/34">Le paquet reste installé pour les autres profils.</span></button>}
+        <button type="button" onClick={() => onConfirm('all')} className="rounded-lg bg-[var(--zailon-danger)] px-3 py-2 text-[11px] font-semibold text-white hover:bg-[var(--zailon-danger-hover)]"><strong className="block">Désinstaller complètement</strong><span className="mt-0.5 block text-[10px] font-normal text-white/70">{multiple ? 'Supprime le paquet et le retire de tous les profils.' : 'Supprime le paquet et son enregistrement.'}</span></button>
+        <button type="button" onClick={onClose} className="rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/45 hover:bg-white/[0.04]">Annuler</button>
+      </div>
+    </section>
+  </div>
 }

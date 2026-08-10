@@ -10,7 +10,7 @@ import { native, type ProfileDeploymentAudit, type QuickPanelStatus } from '../.
 import { pickPrioritySession } from '../../lib/sessionPriority'
 import { useStore } from '../../store/useStore'
 import type { Game, GameTestRun, Mod, Profile } from '../../types'
-import { Toggle } from '../UI/Toggle'
+import { ZailonSwitch } from '../UI/ZailonSwitch'
 import { formatClock, formatSeconds, formatTime, timeAgo } from '../../utils'
 
 export interface GameHealth {
@@ -400,7 +400,7 @@ function LaunchSessionPanel({ game }: { game: Game }) {
     <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[11px] font-semibold text-white/68">Session {activeSession ? <span className={`ml-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${activeSession.state === 'GameRunning' ? 'border-emerald-300/25 bg-emerald-300/[0.08] text-emerald-200' : activeSession.state === 'GameLost' ? 'border-red-300/25 bg-red-300/[0.08] text-red-200' : 'border-amber-300/25 bg-amber-300/[0.08] text-amber-100'}`}>{SESSION_STATE_LABELS[activeSession.state]}</span> : '—'}</p>
-        <label className="flex items-center gap-2 text-[11px] text-white/45"><Toggle size="sm" checked={autoAttachGames.includes(game.id)} onChange={() => setGameAutoAttach(game.id, !autoAttachGames.includes(game.id))} />Attacher automatiquement si détecté</label>
+        <label className="flex items-center gap-2 text-[11px] text-white/45"><ZailonSwitch size="compact" checked={autoAttachGames.includes(game.id)} onChange={next => setGameAutoAttach(game.id, next)} />Attacher automatiquement si détecté</label>
       </div>
       {activeSession
         ? <div className="mt-3 space-y-2 text-[11px]">
@@ -552,7 +552,7 @@ function FrameworkLastKnownGood({ gameId, profile, profileMods }: { gameId: stri
     {currentFrameworks.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{currentFrameworks.map(name => <span key={name} className="rounded-full bg-white/[0.04] px-2 py-0.5 font-mono text-[10px] text-white/50">{name}{current[name]?.version ? ` ${current[name]!.version}` : ''}</span>)}</div>}
     <div className="mt-3 flex flex-wrap items-center gap-3">
       <button type="button" onClick={() => recordLastKnownGoodFrameworks(gameId)} className="rounded-lg border border-white/[0.09] px-2.5 py-1.5 text-[11px] font-semibold text-white/60 hover:bg-white/[0.05] hover:text-white">Enregistrer comme référence</button>
-      <label className="flex items-center gap-2 text-[11px] text-white/55"><Toggle checked={Boolean(profile.lockFrameworks)} onChange={() => setLockFrameworks(gameId, profile.id, !profile.lockFrameworks)} />Verrouiller les frameworks</label>
+      <label className="flex items-center gap-2 text-[11px] text-white/55"><ZailonSwitch checked={Boolean(profile.lockFrameworks)} onChange={next => setLockFrameworks(gameId, profile.id, next)} />Verrouiller les frameworks</label>
     </div>
   </div>
 }

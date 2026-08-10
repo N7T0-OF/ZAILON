@@ -6,6 +6,7 @@ import { appVersion, useStore } from '../store/useStore'
 import { countListItems, parseMarkdown, summarizeBlocks } from '../lib/safeMarkdown'
 import { SafeMarkdown } from './UI/SafeMarkdown'
 import { ScrollableModal } from './UI/ScrollableModal'
+import { ZailonSwitch } from './UI/ZailonSwitch'
 
 type UpdateStatus = 'idle' | 'checking' | 'upToDate' | 'available' | 'downloading' | 'verifying' | 'relaunching' | 'error'
 
@@ -243,7 +244,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
           footer={
             <>
               <label className="mr-auto flex cursor-pointer items-center gap-2 text-[11px] text-white/45">
-                <input type="checkbox" checked={!showReleaseNotesOnUpdate} onChange={event => setShowReleaseNotesOnUpdate(!event.target.checked)} className="accent-gold" />
+                <ZailonSwitch checked={!showReleaseNotesOnUpdate} onChange={next => setShowReleaseNotesOnUpdate(!next)} />
                 Ne plus afficher automatiquement les nouveautés
               </label>
               {summary.truncated && !notesFull && (

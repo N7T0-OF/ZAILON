@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { native } from '../lib/native'
 import type { PerformanceMode } from '../lib/performanceProfiles'
 import type { QuickPanelDiscordState, QuickPanelSessionEntry } from '../lib/quickPanelState'
+import { ZailonSwitch } from './UI/ZailonSwitch'
 
 const PERFORMANCE_LABELS: Record<PerformanceMode, string> = {
   auto: 'Automatique',
@@ -225,13 +226,13 @@ export function QuickPanel() {
           </div>
         </section>
 
-        {/* Clavier */}
+        {/* Clavier (spec §45 : même ZailonSwitch que partout, size compact). */}
         <section className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-2.5">
           <p className="mb-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-white/35"><Keyboard size={10} />Clavier</p>
-          <button type="button" onClick={toggleKeyboard} className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-[11px] ${keyboardOn ? 'bg-emerald-300/12 text-emerald-100/90' : 'bg-white/[0.03] text-white/45'}`}>
+          <div className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-[11px] ${keyboardOn ? 'bg-emerald-300/12 text-emerald-100/90' : 'bg-white/[0.03] text-white/45'}`}>
             <span className="flex items-center gap-1.5">{keyboardOn ? <Check size={11} className="text-emerald-300/80" /> : <MonitorDown size={11} />}Disposition ZAILON</span>
-            <span className={`font-mono text-[10px] uppercase tracking-widest ${keyboardOn ? 'text-emerald-200/70' : 'text-white/30'}`}>{keyboardOn ? 'Actif' : 'Inactif'}</span>
-          </button>
+            <ZailonSwitch checked={keyboardOn} onChange={toggleKeyboard} size="compact" />
+          </div>
         </section>
 
         {/* Performance (spec §24) : mode rapide + politiques de pause réelles. */}
@@ -246,13 +247,13 @@ export function QuickPanel() {
           </div>
         </section>
 
-        {/* Discord (spec §38) : état honnête + bascule rapide + Configurer. */}
+        {/* Discord (spec §38, §45) : état honnête + bascule rapide + Configurer. */}
         <section className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-2.5">
           <p className="mb-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-white/35"><Radio size={10} />Discord</p>
-          <button type="button" onClick={toggleDiscord} className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-[11px] ${session?.discord?.published ? 'bg-emerald-300/12 text-emerald-100/90' : 'bg-white/[0.03] text-white/45'}`}>
+          <div className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-[11px] ${session?.discord?.published ? 'bg-emerald-300/12 text-emerald-100/90' : 'bg-white/[0.03] text-white/45'}`}>
             <span className="flex items-center gap-1.5">{session?.discord?.published ? <Check size={11} className="text-emerald-300/80" /> : <Radio size={11} />}Présence Discord</span>
-            <span className={`font-mono text-[10px] uppercase tracking-widest ${session?.discord?.enabled ? 'text-emerald-200/70' : 'text-white/30'}`}>{session?.discord?.enabled ? 'ON' : 'OFF'}</span>
-          </button>
+            <ZailonSwitch checked={Boolean(session?.discord?.enabled)} onChange={toggleDiscord} size="compact" />
+          </div>
           <div className="mt-1.5 flex items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 text-[10px] text-white/40">
               <span className={`inline-block h-1.5 w-1.5 rounded-full ${session?.discord?.published ? 'bg-emerald-300/80' : session?.discord?.enabled ? 'bg-amber-300/70' : 'bg-white/15'}`} />

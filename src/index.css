@@ -153,3 +153,20 @@ select {
 [data-game-mode="true"] * {
   animation-play-state: paused !important;
 }
+
+/* Design system — ZailonSwitch (spec « Refonte globale des toggles » §9) :
+ * animation courte (140 ms), uniquement le déplacement du rond et la couleur
+ * de piste, jamais de bounce. Réduire les animations = transition annulée
+ * (spec §9, §63 — tests Reduce Motion). */
+.zailon-switch-thumb {
+  transition: transform 140ms ease;
+}
+.zailon-switch {
+  transition: background-color 140ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .zailon-switch,
+  .zailon-switch-thumb {
+    transition: none !important;
+  }
+}

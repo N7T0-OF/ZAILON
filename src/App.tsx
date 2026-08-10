@@ -13,6 +13,7 @@ import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, typ
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
 import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, STEAM_BACKED_ATTACH_THRESHOLD, windowRequestFor } from './lib/gamePresence'
 import { pickPrioritySession } from './lib/sessionPriority'
+import { accentContrastText } from './lib/designSystem'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from './lib/keyboardPresets'
 import { isRed4extActive } from './lib/frameworkValidator'
 import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
@@ -364,7 +365,6 @@ export default function App() {
   useEffect(() => {
     const hex = accentColor.replace('#', '')
     const [red, green, blue] = [0, 2, 4].map(index => Number.parseInt(hex.slice(index, index + 2), 16))
-    const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255
     const mix = (value: number, target: number, amount: number) => Math.round(value + (target - value) * amount)
     const rgb = (r: number, g: number, b: number) => `rgb(${r} ${g} ${b})`
     const root = document.documentElement
@@ -372,7 +372,7 @@ export default function App() {
     root.style.setProperty('--zailon-accent-hover', rgb(mix(red, 255, .18), mix(green, 255, .18), mix(blue, 255, .18)))
     root.style.setProperty('--zailon-accent-active', rgb(mix(red, 0, .16), mix(green, 0, .16), mix(blue, 0, .16)))
     root.style.setProperty('--zailon-accent-muted', `rgb(${red} ${green} ${blue} / .14)`)
-    root.style.setProperty('--zailon-accent-text', luminance > .56 ? '#090b0b' : '#ffffff')
+    root.style.setProperty('--zailon-accent-text', accentContrastText(accentColor))
     root.style.setProperty('--zailon-focus-ring', `rgb(${red} ${green} ${blue} / .78)`)
   }, [accentColor])
 

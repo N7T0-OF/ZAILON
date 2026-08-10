@@ -2,8 +2,9 @@ import { AlertTriangle, ArrowDown, ArrowUp, ExternalLink, FolderOpen, HelpCircle
 import type { MouseEvent } from 'react'
 import { Mod } from '../../types'
 import { LOADER_COLORS, PLATFORM_COLORS } from '../../utils'
-import { Toggle } from './Toggle'
 import { native } from '../../lib/native'
+import { ZailonSelectionCheckbox } from './ZailonSelectionCheckbox'
+import { ZailonSwitch } from './ZailonSwitch'
 
 interface ModCardProps {
   mod: Mod
@@ -30,7 +31,7 @@ export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteC
         ? 'bg-white/[0.04] border-white/[0.06] hover:bg-white/[0.06] hover:border-gold/20'
         : 'bg-white/[0.02] border-white/[0.03] opacity-60 hover:opacity-80'
     }`}>
-      {onSelect && <input type="checkbox" checked={Boolean(selected)} onClick={onSelect} onChange={() => undefined} aria-label={`Sélectionner ${mod.name}`} className="h-4 w-4 shrink-0 accent-gold" />}
+      {onSelect && <ZailonSelectionCheckbox checked={Boolean(selected)} onClick={onSelect} aria-label={`Sélectionner ${mod.name}`} />}
       {/* Loader badge */}
       <span className="text-[11px] font-mono font-bold px-1.5 py-0.5 rounded flex-shrink-0"
         style={{ color: loaderColor, backgroundColor: `${loaderColor}20`, border: `1px solid ${loaderColor}40` }}>
@@ -74,7 +75,7 @@ export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteC
         )}
         {onNoteChange && <button onClick={() => { const note = window.prompt(`Note pour ${mod.name}`, mod.note || ''); if (note !== null) onNoteChange(note) }} title={mod.note ? `Note : ${mod.note}` : 'Ajouter une note'} className={`opacity-0 transition-opacity group-hover:opacity-100 ${mod.note ? 'text-gold/70' : 'text-white/30 hover:text-white/60'}`}><StickyNote size={11} /></button>}
         {(onMoveUp || onMoveDown) && <span className="flex items-center rounded border border-white/[0.07] opacity-0 transition-opacity group-hover:opacity-100"><button onClick={onMoveUp} disabled={!onMoveUp} title="Monter dans l’ordre" className="p-0.5 text-white/35 hover:text-gold disabled:opacity-20"><ArrowUp size={10} /></button><button onClick={onMoveDown} disabled={!onMoveDown} title="Descendre dans l’ordre" className="p-0.5 text-white/35 hover:text-gold disabled:opacity-20"><ArrowDown size={10} /></button></span>}
-        <Toggle checked={mod.enabled} onChange={onToggle} size="sm" />
+        <ZailonSwitch checked={mod.enabled} onChange={onToggle} size="compact" />
       </div>
     </div>
   )

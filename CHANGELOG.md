@@ -1340,6 +1340,24 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.59.0 — Design System : ZailonSwitch global + parallaxe carte entière
+
+### Added
+
+- **ZailonSwitch** (`src/components/UI/ZailonSwitch.tsx`) — le composant UNIQUE des préférences ON/OFF (spec « Refonte globale des toggles » §1-13) : piste arrondie, rond à gauche = OFF / à droite = ON, **ON = couleur d'accent `--zailon-accent`** (jamais de couleur hardcodée, §2-3), animation courte 140 ms (thumb + piste, pas de bounce, §9), focus clavier visible (§10), disabled (§11), loading facultatif (§12), `role="switch"` + `aria-checked` (§58), `size="compact"` pour les lignes denses (§45). Réduire les animations = transition annulée (`prefers-reduced-motion`, §9).
+- **ZailonSelectionCheckbox** (`src/components/UI/ZailonSelectionCheckbox.tsx`) — la checkbox de SÉLECTION multiple, distincte du switch (§6-7) : sélectionner 20 mods reste une checkbox, activer une fonction reste un switch. Règle du design system : **préférence binaire = switch, sélection = checkbox, action = bouton**.
+- **`accentContrastText`** dans `src/lib/designSystem.ts` (logique pure, 7 tests) : contraste automatique du texte sur l'accent (§47-48) — utilisé par App pour `--zailon-accent-text` (dédupliqué).
+
+### Changed
+
+- **Migration complète des cases à cocher booléennes → ZailonSwitch** (spec §5, §44, §61 — mêmes valeurs, seule la présentation change) : Paramètres (Préférences, Tâches et notifications, Illustrations, Discord, Mode jeu, Panneau rapide, Explorer, Mises à jour des mods, Application updates, À propos — 24 contrôles), Update Provider (« Ne plus afficher les nouveautés »), Import intelligent (« Activer pour le prochain lancement »), ancien `Toggle` supprimé (ModCard, Configuration, Diagnostic, Clavier — §60). La checkbox `accent-gold` ne subsiste que pour les vraies sélections multiples (sélection de mods, dossiers d'import, « Tout visible » à état intermédiaire).
+- **Parallaxe sur la CARTE ENTIÈRE** (spec §16-28, §64-66) : `GameLibraryCard` tout entier (conteneur, couverture, titre, badges, favori) s'incline comme une seule jaquette — plus jamais uniquement l'image. Rotation max 4°, scale max 1.012 (pas un zoom), seul le survol anime (aucun loop global), retour au neutre 220 ms, **clic droit = retour au neutre avant l'ouverture du menu contextuel** (§65). Zones de clic préservées (§21).
+- **« Réduire les explications » ON par défaut** pour les nouvelles installations (spec §37) ; les installations existantes conservent leur choix (`?? true` seulement si la préférence n'existe pas).
+
+### Fixed
+
+- **Doublon « Réduire les explications »** dans Paramètres : deux étiquettes identiques s'affichaient côte à côte — supprimé.
+
 ## 1.58.0 — Quick Panel : toggle Présence Discord + lien Configurer
 
 ### Added

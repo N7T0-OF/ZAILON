@@ -32,7 +32,7 @@ const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Mat
 import { formatClock, formatTime } from '../../utils'
 import { GameAppearanceEditor } from '../GameResourcesDialog'
 import { GameKeyboardPanel } from './GameKeyboardPanel'
-import { Toggle } from '../UI/Toggle'
+import { ZailonSwitch } from '../UI/ZailonSwitch'
 import { InfoBubble } from '../UI/InfoBubble'
 
 const RUNTIME_TYPE_LABELS: Array<[ModRuntimePathType, string]> = [
@@ -284,7 +284,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-[11px] font-semibold text-white/68">Points de restauration</p>
             <div className="flex flex-wrap items-center gap-3">
-              <label className="flex items-center gap-2 text-[11px] text-white/45"><Toggle size="sm" checked={autoRestorePoints} onChange={() => setAutoRestorePoints(!autoRestorePoints)} />Auto avant lancement</label>
+              <label className="flex items-center gap-2 text-[11px] text-white/45"><ZailonSwitch size="compact" checked={autoRestorePoints} onChange={setAutoRestorePoints} />Auto avant lancement</label>
               <button type="button" onClick={() => createRestorePoint(`Manuel · ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`)} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313]"><History size={13} />Créer un point</button>
             </div>
           </div>

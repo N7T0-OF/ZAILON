@@ -4,7 +4,7 @@ import { INPUT_BACKENDS, planInputBackend } from '../../lib/inputBackends'
 import { AZERTY_TO_QWERTY, effectiveInputProfile, effectiveLayout, KEY_OPTIONS, LAYOUT_LABELS, presetForLayout, PRESET_GROUPS, QWERTZ_TO_QWERTY, QWERTY_TO_AZERTY } from '../../lib/keyboardPresets'
 import { useStore } from '../../store/useStore'
 import type { Game, GameInputProfile, GameKeyboardLayout, GameKeyMapping } from '../../types'
-import { Toggle } from '../UI/Toggle'
+import { ZailonSwitch } from '../UI/ZailonSwitch'
 
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 
@@ -190,8 +190,8 @@ export function GameKeyboardPanel({ game, profile, embedded = false }: { game: G
               </div>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-4 border-t border-white/[0.05] pt-2 text-[11px] text-white/38">
-              <label className="flex items-center gap-2"><Toggle size="sm" checked={item.enabled} onChange={() => saveGameInputProfile({ ...item, enabled: !item.enabled, updatedAt: Date.now() })} />Actif</label>
-              <label className="flex items-center gap-2"><Toggle size="sm" checked={item.restoreOnExit} onChange={() => saveGameInputProfile({ ...item, restoreOnExit: !item.restoreOnExit, updatedAt: Date.now() })} />Restaurer à la fermeture</label>
+              <label className="flex items-center gap-2"><ZailonSwitch size="compact" checked={item.enabled} onChange={next => saveGameInputProfile({ ...item, enabled: next, updatedAt: Date.now() })} />Actif</label>
+              <label className="flex items-center gap-2"><ZailonSwitch size="compact" checked={item.restoreOnExit} onChange={next => saveGameInputProfile({ ...item, restoreOnExit: next, updatedAt: Date.now() })} />Restaurer à la fermeture</label>
             </div>
           </div>
         })}</div>}

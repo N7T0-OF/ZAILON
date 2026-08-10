@@ -8,7 +8,7 @@ import { UpdateProvider } from './components/UpdateProvider'
 import { resolveProfileMods, useStore } from './store/useStore'
 import { buildRuntimeToastContent } from './lib/runtimeToast'
 import type { PerformanceMode } from './lib/performanceProfiles'
-import { activeSessionsForQuickPanel, modsPreparedFor, nextSessionAfterCurrent, quickPanelPerformanceState, type QuickPanelSessionEntry } from './lib/quickPanelState'
+import { activeSessionsForQuickPanel, modsPreparedFor, nextSessionAfterCurrent, quickPanelDiscordState, quickPanelPerformanceState, type QuickPanelSessionEntry } from './lib/quickPanelState'
 import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type LearnedProcessSignature, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
 import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, STEAM_BACKED_ATTACH_THRESHOLD, windowRequestFor } from './lib/gamePresence'
@@ -18,6 +18,11 @@ import { isRed4extActive } from './lib/frameworkValidator'
 import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-profiles/application/shortcuts'
+
+// Connexion IPC Discord réelle (spec §33-34) — maintenue par un listener dans
+// App, lue par le panneau via le payload (jamais un faux ✓ quand Discord est
+// fermé, spec §38).
+let discordConnected = false
 
 // Émission du résumé compact d'une session vers le panneau (WebView séparée,
 // sans accès au store) — source de vérité : l'état RÉEL de la session.
@@ -50,6 +55,9 @@ function emitQuickPanelStateFor(store: ReturnType<typeof useStore.getState>, gam
     inputActive: session.inputProfileActive,
     visualActive: session.visualProfileActive,
     runtimeActive: session.runtimeToolsActive,
+    // Spec §38 : état Discord honnête — ✓ seulement si la présence est activée
+    // ET réellement publiée (connexion IPC + session publiée).
+    discord: quickPanelDiscordState(store.discordPresence, discordConnected, store.lastDiscordPublished?.gameName),
   }).catch(() => undefined)
 }
 
@@ -407,13 +415,24 @@ export default function App() {
     // visuels repasse par unregisterAll à ces moments-là).
   }, [quickPanelEnabled, quickPanelShortcut, isLaunching, isPlaying])
 
+  // Connexion IPC Discord réelle (spec §33-34) : l'état natif est diffusé à
+  // toutes les fenêtres — la fenêtre principale le mémorise pour le panneau.
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    let unlisten: UnlistenFn | undefined
+    void listen<{ connected: boolean }>('discord-status-changed', event => {
+      discordConnected = Boolean(event.payload?.connected)
+    }).then(dispose => { unlisten = dispose })
+    return () => unlisten?.()
+  }, [])
+
   // Actions émises par le panneau rapide (fenêtre séparée) vers la fenêtre
   // principale : cible multi-session, bascule du clavier, performance, retour.
   const quickPanelTargetRef = useRef<string | undefined>(undefined)
   useEffect(() => {
     if (!native.isDesktop()) return
     let unlisten: UnlistenFn | undefined
-    void listen<{ action: 'toggle-keyboard' | 'focus-main' | 'set-performance' | 'set-target' | 'pin-target'; mode?: string; gameId?: string }>('quick-panel-action', event => {
+    void listen<{ action: 'toggle-keyboard' | 'focus-main' | 'set-performance' | 'set-target' | 'pin-target' | 'set-discord' | 'open-discord-settings'; mode?: string; gameId?: string }>('quick-panel-action', event => {
       const store = useStore.getState()
       const priorityGameId = pickPrioritySession(store.gameSessions, store.pinnedPriorityGameId, store.foregroundGameId)
       const targetId = quickPanelTargetRef.current ?? priorityGameId
@@ -438,6 +457,20 @@ export default function App() {
         // à la session cible, répercuté dans la fenêtre principale.
         if (targetId) store.setPerformanceMode(targetId, event.payload.mode as PerformanceMode)
         void emit('quick-panel-refresh')
+      } else if (event.payload.action === 'set-discord') {
+        // Spec §38 : bascule rapide de la Présence Discord depuis le panneau —
+        // le store persiste le réglage et re-synchronise la présence (ClearPresence
+        // si désactivée, spec §34).
+        store.toggleDiscord()
+        void emit('quick-panel-refresh')
+      } else if (event.payload.action === 'open-discord-settings') {
+        // Spec §38 : « Configurer » ouvre ZAILON > Paramètres > Intégrations >
+        // Discord (la fenêtre principale est ramenée au premier plan).
+        store.setView('settings')
+        const window = getCurrentWindow()
+        void window.unminimize().catch(() => undefined)
+        void window.setFocus().catch(() => undefined)
+        void emit('open-settings-section', { sectionLabel: 'Discord Rich Presence' }).catch(() => undefined)
       } else if (event.payload.action === 'focus-main') {
         store.setView('home')
         const window = getCurrentWindow()

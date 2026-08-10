@@ -1340,6 +1340,15 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.58.0 — Quick Panel : toggle Présence Discord + lien Configurer
+
+### Added
+
+- **État Discord honnête dans le panneau** (spec §38) : section « Discord » — ✓ « Présence active · <jeu> » **seulement si** le réglage est activé ET la présence réellement publiée (connexion IPC + session publiée, `lastDiscordPublished`) ; « En attente de Discord » quand le client est fermé (spec §33) ; « Désactivé » sinon. Jamais de faux ✓.
+- **Bascule rapide** (spec §38) : clic sur « Présence Discord » depuis le panneau → `set-discord` → le store persiste le réglage et re-synchronise la présence (ClearPresence si désactivée, spec §34), l'état est re-émis.
+- **Lien « Configurer »** (spec §38) : ouvre ZAILON > Paramètres > section **Discord Rich Presence** (nouvel événement `open-settings-section`, défilement jusqu'à la section) et ramène la fenêtre principale au premier plan.
+- **`quickPanelDiscordState`** dans `src/lib/quickPanelState.ts` (logique pure, 4 tests) : `published = enabled && connected && publishedGameName` — la source de vérité reste la session publiée, pas la configuration.
+
 ## 1.57.0 — Discord Rich Presence : assets par jeu + diagnostic + timestamp préservé
 
 ### Added

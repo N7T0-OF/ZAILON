@@ -1,10 +1,10 @@
 import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { Check, ChevronDown, Gamepad2, Gauge, Keyboard, MonitorDown, Palette, RefreshCw, Star, X } from 'lucide-react'
+import { Check, ChevronDown, Gamepad2, Gauge, Keyboard, MonitorDown, Palette, Radio, RefreshCw, Settings2, Star, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { native } from '../lib/native'
 import type { PerformanceMode } from '../lib/performanceProfiles'
-import type { QuickPanelSessionEntry } from '../lib/quickPanelState'
+import type { QuickPanelDiscordState, QuickPanelSessionEntry } from '../lib/quickPanelState'
 
 const PERFORMANCE_LABELS: Record<PerformanceMode, string> = {
   auto: 'Automatique',
@@ -37,6 +37,8 @@ interface QuickPanelSessionState {
   performanceMode?: PerformanceMode
   downloadsPaused?: boolean
   scansPaused?: boolean
+  /** Spec §38 : état Discord honnête (✓ seulement si réellement publiée). */
+  discord?: QuickPanelDiscordState
 }
 
 /**
@@ -105,6 +107,18 @@ export function QuickPanel() {
   const setPerformance = (mode: PerformanceMode) => {
     void emit('quick-panel-action', { action: 'set-performance', mode })
     flash(`Mode Performance : ${PERFORMANCE_LABELS[mode]}`)
+  }
+
+  // Spec §38 : bascule rapide de la Présence Discord depuis le panneau — la
+  // fenêtre principale persiste le réglage et re-synchronise la présence.
+  const toggleDiscord = () => {
+    void emit('quick-panel-action', { action: 'set-discord' })
+    flash(session?.discord?.enabled ? 'Présence Discord désactivée' : 'Présence Discord activée')
+  }
+
+  // Spec §38 : « Configurer » ouvre ZAILON > Paramètres > Intégrations > Discord.
+  const openDiscordSettings = () => {
+    void emit('quick-panel-action', { action: 'open-discord-settings' })
   }
 
   const selectSession = (gameId: string) => {
@@ -229,6 +243,26 @@ export function QuickPanel() {
             </select>
             {session?.downloadsPaused && <span className="rounded-md bg-amber-300/10 px-1.5 py-0.5 text-[10px] text-amber-100/80">Téléchargements : en pause</span>}
             {session?.scansPaused && <span className="rounded-md bg-amber-300/10 px-1.5 py-0.5 text-[10px] text-amber-100/80">Scans : en pause</span>}
+          </div>
+        </section>
+
+        {/* Discord (spec §38) : état honnête + bascule rapide + Configurer. */}
+        <section className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-2.5">
+          <p className="mb-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-white/35"><Radio size={10} />Discord</p>
+          <button type="button" onClick={toggleDiscord} className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-[11px] ${session?.discord?.published ? 'bg-emerald-300/12 text-emerald-100/90' : 'bg-white/[0.03] text-white/45'}`}>
+            <span className="flex items-center gap-1.5">{session?.discord?.published ? <Check size={11} className="text-emerald-300/80" /> : <Radio size={11} />}Présence Discord</span>
+            <span className={`font-mono text-[10px] uppercase tracking-widest ${session?.discord?.enabled ? 'text-emerald-200/70' : 'text-white/30'}`}>{session?.discord?.enabled ? 'ON' : 'OFF'}</span>
+          </button>
+          <div className="mt-1.5 flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5 text-[10px] text-white/40">
+              <span className={`inline-block h-1.5 w-1.5 rounded-full ${session?.discord?.published ? 'bg-emerald-300/80' : session?.discord?.enabled ? 'bg-amber-300/70' : 'bg-white/15'}`} />
+              {session?.discord?.published
+                ? `Présence active · ${session.discord.publishedGameName}`
+                : session?.discord?.enabled
+                  ? session?.discord?.connected ? 'En attente de session publiée' : 'En attente de Discord'
+                  : 'Désactivé'}
+            </span>
+            <button type="button" onClick={openDiscordSettings} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-gold/70 hover:bg-white/[0.06]"><Settings2 size={10} />Configurer</button>
           </div>
         </section>
 

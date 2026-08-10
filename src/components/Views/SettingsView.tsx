@@ -190,6 +190,22 @@ export function SettingsView() {
     return () => unlisten?.()
   }, [])
 
+  // Spec §38 : « Configurer » depuis le Quick Panel ouvre les Paramètres et
+  // défile jusqu'à la section Discord Rich Presence.
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    let unlisten: (() => void) | undefined
+    void listen<{ sectionLabel: string }>('open-settings-section', event => {
+      const label = event.payload?.sectionLabel
+      if (!label) return
+      window.setTimeout(() => {
+        const section = Array.from(document.querySelectorAll<HTMLElement>('section')).find(element => element.textContent?.includes(label))
+        section?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 120)
+    }).then(listener => { unlisten = listener })
+    return () => unlisten?.()
+  }, [])
+
   const testDiscord = async () => {
     if (!discordClientId.trim()) return
     setTestingDiscord(true)

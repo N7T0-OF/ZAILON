@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { activeSessionsForQuickPanel, modsPreparedFor, nextSessionAfterCurrent, quickPanelPerformanceState } from '../../src/lib/quickPanelState.ts'
+import { activeSessionsForQuickPanel, modsPreparedFor, nextSessionAfterCurrent, quickPanelDiscordState, quickPanelPerformanceState } from '../../src/lib/quickPanelState.ts'
 import type { GameSession } from '../../src/types'
 
 const session = (overrides: Partial<GameSession> = {}): GameSession => ({
@@ -115,4 +115,27 @@ test('bascule : le pin d\'une autre session est respecté (spec §84)', () => {
   ]
   const next = nextSessionAfterCurrent(sessions, [{ id: 'cyberpunk', name: 'Cyberpunk 2077' }, { id: 'nte', name: 'Neverness to Everness' }, { id: 'photoshop', name: 'Photoshop' }], 'cyberpunk', 'photoshop', 'nte')
   assert.equal(next, 'photoshop')
+})
+
+test('discord : ✓ Présence active seulement si activée ET réellement publiée (spec §38)', () => {
+  const state = quickPanelDiscordState(true, true, 'Cyberpunk 2077')
+  assert.equal(state.published, true)
+  assert.equal(state.publishedGameName, 'Cyberpunk 2077')
+})
+
+test('discord : activée mais Discord fermé → jamais de faux ✓ (spec §38)', () => {
+  const state = quickPanelDiscordState(true, false, undefined)
+  assert.equal(state.published, false)
+  assert.equal(state.connected, false)
+})
+
+test('discord : désactivée même si publiée par le passé → pas de ✓ (spec §34)', () => {
+  const state = quickPanelDiscordState(false, true, 'Cyberpunk 2077')
+  assert.equal(state.published, false)
+})
+
+test('discord : publiée pour une session mais pas pour la cible → état honnête (spec §38)', () => {
+  const state = quickPanelDiscordState(true, true, undefined)
+  assert.equal(state.published, false)
+  assert.equal(state.enabled, true)
 })

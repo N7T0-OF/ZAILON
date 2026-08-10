@@ -148,6 +148,8 @@ export function SettingsView() {
   const setTaskAutoReduceImports = useStore(state => state.setTaskAutoReduceImports)
   const showSupportButton = useStore(state => state.showSupportButton)
   const accentColor = useStore(state => state.accentColor)
+  const backgroundMediaSettings = useStore(state => state.backgroundMediaSettings)
+  const setBackgroundMediaSettings = useStore(state => state.setBackgroundMediaSettings)
   const setShowSupportButton = useStore(state => state.setShowSupportButton)
   const restartTour = useStore(state => state.restartTour)
   const resetTour = useStore(state => state.resetTour)
@@ -336,6 +338,20 @@ export function SettingsView() {
         <div className="flex flex-wrap items-center gap-2">{['#f3faf8', '#38bdf8', '#2dd4bf', '#a78bfa', '#fb7185', '#fbbf24', '#f97316'].map(color => <button key={color} type="button" onClick={() => setAccentColor(color)} aria-label={`Accent ${color}`} className={`h-10 w-10 rounded-full border-2 transition-transform hover:scale-105 ${accentColor.toLowerCase() === color ? 'border-white shadow-[0_0_20px_var(--zailon-accent-muted)]' : 'border-white/15'}`} style={{ backgroundColor: color }} />)}<label className="ml-1 flex items-center gap-2 rounded-lg border border-white/[0.08] px-2 text-xs text-white/55">Libre<input type="color" value={accentColor} onChange={event => setAccentColor(event.target.value)} className="h-9 w-11 cursor-pointer border-0 bg-transparent" /></label><button type="button" onClick={() => setAccentColor('#f3faf8')} className="rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/55 hover:bg-white/[0.05]">Réinitialiser</button></div>
         <div className="mt-3 grid gap-2 sm:grid-cols-3"><button type="button" className="rounded-lg bg-gold px-3 py-2 font-semibold text-[var(--zailon-accent-text)]">Action principale</button><div className="rounded-lg border border-gold/35 bg-gold/[0.06] px-3 py-2 text-center text-xs text-gold">Sélection active</div><div className="rounded-lg border border-white/[0.08] px-3 py-2 text-center text-xs text-white/55">Les erreurs gardent leur rouge sémantique</div></div>
         {!reduceExplanations && <p className="mt-3 text-xs leading-relaxed text-white/38">La couleur est appliquée en direct aux actions principales, sélections et anneaux de focus. Le texte de bouton bascule automatiquement entre sombre et clair selon la luminance.</p>}
+        <div className="mt-3 rounded-lg bg-white/[0.025] p-3">
+          <div className="mb-2 flex items-center justify-between"><p className="text-[11px] font-semibold text-white/55">Fonds multimédia de l’Accueil</p><ZailonInfoPopover text="Chaque jeu peut définir son propre fond (image, vidéo locale ou lien YouTube) dans Bibliothèque > Jeu > Configuration > Apparence. Aucune clé API YouTube n’est demandée : seul l’identifiant de la vidéo est utilisé, la vidéo reste diffusée par YouTube et n’est jamais téléchargée. La lecture est suspendue quand ZAILON est en arrière-plan ou quand un jeu démarre." /></div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/58">Fond vidéo<ZailonSwitch checked={backgroundMediaSettings.bgVideoEnabled} onChange={value => setBackgroundMediaSettings({ bgVideoEnabled: value })} /></label>
+            <label className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/58">Audio des fonds<ZailonSwitch checked={backgroundMediaSettings.bgAudioEnabled} onChange={value => setBackgroundMediaSettings({ bgAudioEnabled: value })} /></label>
+            <label className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/58">Toujours démarrer muet<ZailonSwitch checked={backgroundMediaSettings.bgAlwaysMuted} onChange={value => setBackgroundMediaSettings({ bgAlwaysMuted: value })} /></label>
+            <label className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/58">Pause hors premier plan<ZailonSwitch checked={backgroundMediaSettings.bgPauseOnBlur} onChange={value => setBackgroundMediaSettings({ bgPauseOnBlur: value })} /></label>
+          </div>
+          <div className="mt-2 flex items-center gap-3 rounded-lg bg-white/[0.025] px-3 py-2.5">
+            <span className="text-[11px] text-white/58">Volume du fond</span>
+            <input type="range" min={0} max={0.2} step={0.01} value={backgroundMediaSettings.bgVolume} onChange={event => setBackgroundMediaSettings({ bgVolume: Number(event.target.value) })} disabled={!backgroundMediaSettings.bgAudioEnabled} aria-label="Volume du fond" className="h-1 flex-1 accent-[var(--zailon-accent)] disabled:opacity-30" />
+            <span className="w-10 text-right font-mono text-[10px] text-white/60">{Math.round(backgroundMediaSettings.bgVolume * 100)}%</span>
+          </div>
+        </div>
       </AccordionSection>
 
 

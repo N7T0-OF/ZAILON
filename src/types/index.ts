@@ -3,6 +3,25 @@ export type Platform = 'gamebanana' | 'nexus' | 'curseforge' | 'ayakamods'
 export type UpdateChannel = 'stable' | 'beta'
 export type DownloadRetention = 'startup' | '1d' | '7d' | 'never'
 export type ModRuntimePathType = 'loader' | 'bypass' | 'plugins' | 'scripts' | 'custom'
+export type BackgroundMediaType = 'auto' | 'image' | 'video' | 'youtube'
+
+/** Configuration de fond multimédia par jeu (spec Accueil multimédia §11, §46, §53). */
+export interface GameBackgroundMedia {
+  type: BackgroundMediaType
+  /** URL YouTube fournie par l'utilisateur (spec §1) — jamais injectée telle quelle. */
+  youtubeUrl?: string
+  /** VideoId extrait — ce qui est réellement utilisé par le lecteur (spec §2). */
+  youtubeVideoId?: string
+  /** Timestamp de début (spec §36). */
+  startSeconds?: number
+  /** Timestamp de fin (spec §36). */
+  endSeconds?: number
+  /** Chemin vidéo locale alternatif (sinon resources.videoPath). */
+  localPath?: string
+  /** Surcharge audio spécifique au jeu (spec §11). */
+  mutedOverride?: boolean
+  volumeOverride?: number
+}
 
 export interface GameRuntimePath {
   name: string
@@ -324,6 +343,8 @@ export interface Game {
   testRuns?: GameTestRun[]
   /** Comportement de lancement (launcher intermédiaire, chaîne multi-étapes). */
   launchAdapter?: GameLaunchAdapter
+  /** Fond multimédia de l'Accueil pour ce jeu (spec Accueil multimédia §11). */
+  backgroundMedia?: GameBackgroundMedia
 }
 
 export type LaunchBehavior = 'DirectProcess' | 'LauncherChild' | 'LauncherDetached' | 'SteamLauncher' | 'ExternalLauncher' | 'MultiStage'

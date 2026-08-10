@@ -25,6 +25,9 @@ import {
   type ZailonPriorityPolicy,
 } from '../../lib/performanceProfiles'
 import { native, pickFolder } from '../../lib/native'
+import { describeBackgroundMedia, resolveMediaType } from '../../lib/backgroundMedia'
+import { parseYouTubeUrl, youtubeThumbnailUrl } from '../../lib/youtubeUrl'
+import { resourceUrl } from '../../lib/native'
 import { resolveProfileMods, useStore } from '../../store/useStore'
 import type { Game, GamePreset, GameResources, ModRuntimePathType, Profile } from '../../types'
 
@@ -34,6 +37,7 @@ import { GameAppearanceEditor } from '../GameResourcesDialog'
 import { GameKeyboardPanel } from './GameKeyboardPanel'
 import { ZailonSwitch } from '../UI/ZailonSwitch'
 import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
+import { BackgroundMediaLayer } from '../UI/BackgroundMediaLayer'
 
 const RUNTIME_TYPE_LABELS: Array<[ModRuntimePathType, string]> = [
   ['loader', 'Loader'],
@@ -216,6 +220,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
           <button type="button" onClick={onOpenVisuals} className="rounded-lg border border-gold/25 px-3 py-2 text-[11px] font-semibold text-gold">{visualName ? `Modifier « ${visualName} »` : 'Modifier le profil visuel'}</button>
         </div>
         <GameAppearanceEditor game={game} embedded onSave={onSaveResources} />
+        <BackgroundPicker game={game} />
       </ConfigCard>
 
       <ConfigCard id="commandes" title="Commandes" icon={Keyboard} badge={`${LAYOUT_LABELS[effectiveLayout(game, profile.id)]}`} open={open.includes('commandes')} onToggle={() => toggle('commandes')}>
@@ -501,4 +506,103 @@ function Field({ label, value, placeholder, onChange, onBrowse, onOpen }: { labe
       <button type="button" onClick={onBrowse} className="rounded-lg border border-white/[0.09] bg-white/[0.025] px-3 py-2 text-[11px] text-white/55 hover:border-gold/25 hover:text-gold">Parcourir</button>
     </div>
   </label>
+}
+
+function BackgroundPicker({ game }: { game: Game }) {
+  const setGameBackgroundMedia = useStore(state => state.setGameBackgroundMedia)
+  const backgroundMediaSettings = useStore(state => state.backgroundMediaSettings)
+  const [urlDraft, setUrlDraft] = useState('')
+  const [urlFeedback, setUrlFeedback] = useState<'idle' | 'valid' | 'invalid'>('idle')
+  const [previewOpen, setPreviewOpen] = useState(false)
+
+  const media = game.backgroundMedia
+  const localVideoUrl = resourceUrl(game.resources?.videoPath)
+  const heroUrl = resourceUrl(game.resources?.backgroundPath || game.resources?.bannerPath || game.resources?.coverPath) || game.backgroundArt
+  const effectiveType = resolveMediaType(media, backgroundMediaSettings, Boolean(localVideoUrl))
+  const description = describeBackgroundMedia(media, Boolean(localVideoUrl))
+  const thumb = media?.youtubeVideoId ? youtubeThumbnailUrl(media.youtubeVideoId) : heroUrl
+
+  const applyType = (type: 'auto' | 'image' | 'video' | 'youtube') => {
+    setGameBackgroundMedia(game.id, { type })
+    setUrlFeedback('idle')
+  }
+
+  const applyYouTube = () => {
+    const parsed = parseYouTubeUrl(urlDraft)
+    if (!parsed) { setUrlFeedback('invalid'); return }
+    setGameBackgroundMedia(game.id, { type: 'youtube', youtubeUrl: urlDraft.trim(), youtubeVideoId: parsed.videoId, startSeconds: parsed.startSeconds })
+    setUrlFeedback('valid')
+  }
+
+  const previewMedia = media?.type === 'youtube' && media.youtubeVideoId
+    ? media
+    : media?.type === 'video' || (media?.type === 'auto' && (media.youtubeVideoId || localVideoUrl))
+      ? media
+      : undefined
+
+  return <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex items-center gap-3">
+        <div className="relative h-16 w-28 flex-none overflow-hidden rounded-lg border border-white/[0.08] bg-black/30">
+          {thumb ? <img src={thumb} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center font-mono text-[10px] text-white/25">Aucun fond</div>}
+          {effectiveType === 'youtube' && <span className="absolute right-1 top-1 rounded bg-red-600/90 px-1 py-0.5 font-mono text-[8px] font-bold uppercase text-white">YouTube</span>}
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold text-white/72">Fond de l’Accueil</p>
+          <p className="mt-0.5 text-[11px] text-white/38">{description}</p>
+        </div>
+      </div>
+      {effectiveType !== 'none' && (
+        <button type="button" onClick={() => setPreviewOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-gold/25 px-3 py-2 text-[11px] font-semibold text-gold hover:bg-gold/10"><Rocket size={12} />Aperçu</button>
+      )}
+    </div>
+
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {(['auto', 'image', 'video', 'youtube'] as const).map(type => (
+        <button
+          key={type}
+          type="button"
+          onClick={() => applyType(type)}
+          className={`rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors ${media?.type === type ? 'border-gold/40 bg-gold/10 text-gold' : 'border-white/[0.09] text-white/48 hover:bg-white/[0.05] hover:text-white/75'}`}
+        >
+          {type === 'auto' ? 'Automatique' : type === 'image' ? 'Image' : type === 'video' ? 'Vidéo locale' : 'YouTube'}
+        </button>
+      ))}
+    </div>
+
+    {(media?.type === 'youtube' || media?.type === 'auto') && (
+      <div className="mt-3">
+        <label className="text-[11px] font-medium text-white/55">Lien YouTube</label>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <input
+            type="url"
+            value={urlDraft}
+            onChange={event => { setUrlDraft(event.target.value); setUrlFeedback('idle') }}
+            placeholder="https://youtube.com/watch?v=…"
+            className="min-w-0 flex-1 rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2 text-[11px] text-white/80 placeholder-white/25 outline-none focus:border-gold/40"
+          />
+          <button type="button" onClick={applyYouTube} className="rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90">Utiliser comme fond</button>
+        </div>
+        {urlFeedback === 'valid' && <p className="mt-1.5 text-[11px] text-emerald-300/85">Vidéo enregistrée — lecteur intégré, aucun téléchargement.</p>}
+        {urlFeedback === 'invalid' && <p className="mt-1.5 text-[11px] text-red-300/85">Lien non pris en charge. Actuellement : YouTube (watch, youtu.be, shorts).</p>}
+        <ZailonInfoPopover text="Aucune clé API demandée : seul l’identifiant de la vidéo est utilisé, la vidéo reste diffusée par YouTube et démarre toujours muette. La lecture est suspendue quand ZAILON est en arrière-plan ou qu’un jeu démarre." />
+      </div>
+    )}
+
+    {previewOpen && (
+      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setPreviewOpen(false)}>
+        <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/[0.09] bg-[#141818] shadow-[0_24px_70px_rgba(0,0,0,0.6)]" onClick={event => event.stopPropagation()}>
+          <div className="relative aspect-video overflow-hidden bg-black">
+            {previewMedia
+              ? <BackgroundMediaLayer playerKey={`preview-${game.id}`} priority="preview" media={previewMedia} localVideoUrl={localVideoUrl} fallbackImageUrl={heroUrl} paused={false} settings={backgroundMediaSettings} />
+              : <div className="flex h-full items-center justify-center text-[11px] text-white/35">Sélectionnez une vidéo locale ou un lien YouTube pour prévisualiser.</div>}
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-white/[0.06] px-4 py-3">
+            <p className="text-[11px] text-white/45">Aperçu muet — le Hero se met en pause pendant l’aperçu.</p>
+            <button type="button" onClick={() => setPreviewOpen(false)} className="rounded-lg border border-white/[0.12] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:bg-white/[0.06]">Fermer</button>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
 }

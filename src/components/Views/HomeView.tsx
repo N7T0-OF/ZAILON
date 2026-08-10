@@ -13,6 +13,7 @@ import { GameResourcesDialog } from '../GameResourcesDialog'
 import { FallbackArtwork } from '../UI/FallbackArtwork'
 import { SessionStopModal } from '../SessionStopModal'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
+import { BackgroundMediaLayer } from '../UI/BackgroundMediaLayer'
 
 export function HomeView() {
   const summaries = useWorkspaceCache()
@@ -29,6 +30,7 @@ export function HomeView() {
   const launchProgress = useStore(state => state.launchProgress)
   const isPlaying = useStore(state => state.isPlaying)
   const sessionTime = useStore(state => state.sessionTime)
+  const backgroundMediaSettings = useStore(state => state.backgroundMediaSettings)
   const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
   const endSession = useStore(state => state.endSession)
   const cancelSession = useStore(state => state.cancelSession)
@@ -41,6 +43,9 @@ export function HomeView() {
   const [quitConfirm, setQuitConfirm] = useState(false)
   const [stopSearchingOpen, setStopSearchingOpen] = useState(false)
   const [resourcesGameId, setResourcesGameId] = useState<string>()
+  // Duck audio avant le lancement (spec §40, §63) : le fond se tait dès le clic
+  // sur Jouer, avant même que la préparation démarre.
+  const [mediaDucked, setMediaDucked] = useState(false)
 
   // SmartPlayButton — un seul CTA : l'état du jeu pilote le libellé et le
   // comportement (Jouer → Préparation… → Recherche du jeu… → En cours).
@@ -51,6 +56,11 @@ export function HomeView() {
   const launchPercent = launchProgress?.total
     ? Math.min(100, Math.round((launchProgress.current / launchProgress.total) * 100))
     : undefined
+
+  // Réarmement du fond quand plus rien ne tourne (spec §65-66 : reprise muette).
+  useEffect(() => {
+    if (!playBusy && !sessionRunning) setMediaDucked(false)
+  }, [playBusy, sessionRunning])
 
   const resourcesGame = games.find(game => game.id === resourcesGameId)
   useEffect(() => {
@@ -120,12 +130,17 @@ export function HomeView() {
       className="group relative h-full min-h-[520px] overflow-hidden"
       onContextMenu={event => { event.preventDefault(); openMenu({ x: event.clientX, y: event.clientY }) }}
     >
-      {video
-        ? <video src={video} autoPlay muted loop playsInline className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-80" />
-        : background
-          ? <img src={background} alt="" className="pointer-events-none absolute inset-0 h-full w-full opacity-85" style={{ objectFit: heroTransform.fit ?? 'cover', objectPosition: `${heroTransform.x ?? 50}% ${heroTransform.y ?? 50}%`, transform: `scale(${(heroTransform.zoom ?? 100) / 100})` }} />
-          : <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_72%_30%,rgba(128,58,111,0.42),transparent_37%),radial-gradient(ellipse_at_68%_54%,rgba(42,78,77,0.18),transparent_40%),linear-gradient(130deg,#141718,#090b0b)]" />}
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(7,9,9,0.82)_0%,rgba(7,9,9,0.55)_42%,rgba(7,9,9,0.18)_68%,rgba(7,9,9,0.30)_100%),linear-gradient(0deg,rgba(9,11,11,0.78)_0%,rgba(9,11,11,0.45)_22%,rgba(9,11,11,0.12)_55%,rgba(9,11,11,0.18)_100%)]" />
+      <BackgroundMediaLayer
+        playerKey="home-hero"
+        media={selectedGame.backgroundMedia}
+        localVideoUrl={video}
+        fallbackImageUrl={background}
+        fallbackArtwork={<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_72%_30%,rgba(128,58,111,0.42),transparent_37%),radial-gradient(ellipse_at_68%_54%,rgba(42,78,77,0.18),transparent_40%),linear-gradient(130deg,#141718,#090b0b)]" />}
+        paused={mediaDucked || playBusy || sessionRunning}
+        settings={backgroundMediaSettings}
+        heroStyle={{ objectFit: heroTransform.fit ?? 'cover', objectPosition: `${heroTransform.x ?? 50}% ${heroTransform.y ?? 50}%`, transform: `scale(${(heroTransform.zoom ?? 100) / 100})` }}
+        overlay={<div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(7,9,9,0.82)_0%,rgba(7,9,9,0.55)_42%,rgba(7,9,9,0.18)_68%,rgba(7,9,9,0.30)_100%),linear-gradient(0deg,rgba(9,11,11,0.78)_0%,rgba(9,11,11,0.45)_22%,rgba(9,11,11,0.12)_55%,rgba(9,11,11,0.18)_100%)]" />}
+      />
 
       <div className="relative flex h-full min-h-[520px] flex-col px-[clamp(1.25rem,4vw,4.5rem)] pb-4 pt-5">
         <header className="flex items-start justify-between gap-4">
@@ -215,7 +230,7 @@ export function HomeView() {
           )}
           <div className="mt-5 flex items-center gap-2">
             <div className="relative flex items-center">
-              <button type="button" disabled={playBusy} title={sessionRunning ? 'Le jeu est en cours. Cliquez pour le quitter.' : playBusy ? 'En attente du jeu…' : 'Préparer les mods et lancer le jeu'} onClick={sessionRunning ? () => { setQuitConfirm(false); setQuitOpen(true) } : () => void launchSelectedGame()} className={`flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full px-5 py-2.5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all min-w-[168px] ${playBusy ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : sessionRunning ? 'bg-emerald-300/90 text-[#0c1212] hover:-translate-y-0.5 hover:bg-emerald-200' : 'bg-[var(--zailon-accent)] text-[var(--zailon-accent-text)] hover:-translate-y-0.5 hover:bg-white'}`}>
+              <button type="button" disabled={playBusy} title={sessionRunning ? 'Le jeu est en cours. Cliquez pour le quitter.' : playBusy ? 'En attente du jeu…' : 'Préparer les mods et lancer le jeu'} onClick={sessionRunning ? () => { setQuitConfirm(false); setQuitOpen(true) } : () => { setMediaDucked(true); void launchSelectedGame() }} className={`flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full px-5 py-2.5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all min-w-[168px] ${playBusy ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : sessionRunning ? 'bg-emerald-300/90 text-[#0c1212] hover:-translate-y-0.5 hover:bg-emerald-200' : 'bg-[var(--zailon-accent)] text-[var(--zailon-accent-text)] hover:-translate-y-0.5 hover:bg-white'}`}>
                 {playBusy ? <Loader2 size={12} className="animate-spin" /> : sessionRunning ? <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-900/60" /> : <Play size={10} fill="currentColor" />}
                 {isLaunching ? `Préparation${launchPercent === undefined ? '…' : ` ${launchPercent}%`}` : sessionRunning ? 'En cours' : sessionWaiting ? (activeSession?.state === 'WaitingForGame' ? 'Recherche du jeu…' : 'Lancement…') : sessionFailed ? 'Réessayer' : 'Jouer'}
               </button>

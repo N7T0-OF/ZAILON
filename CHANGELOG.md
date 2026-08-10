@@ -1340,6 +1340,21 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.64.0 — Accueil multimédia : fonds vidéo locaux + YouTube sans clé API + audio discret
+
+### Added
+
+- **Fond de l’Accueil par jeu** (Bibliothèque > Jeu > Configuration > Apparence) : type Automatique / Image / Vidéo locale / YouTube, avec miniature, aperçu muet (le Hero se met en pause pendant l’aperçu — un seul lecteur actif) et réglages audio globaux.
+- **YouTube sans Data API** (`src/lib/youtubeUrl.ts`) : aucun téléchargement ni clé — l’URL est validée (domaines whitelistés : watch, youtu.be, shorts, embed, live), l’identifiant est extrait puis seul cet identifiant entre dans l’URL du lecteur `youtube-nocookie.com`. La vidéo reste diffusée par YouTube, timestamps `t=`/`#t=` conservés.
+- **Lecteur `BackgroundMediaLayer`** : démarre **toujours muet** (politique d’autoplay), 🔇 → 🔊 au clic, volume ambiant **7 % par défaut** (0-20 % réglable, persistant), image affichée d’abord puis fondu quand la vidéo est prête, fallback silencieux vers le Hero/Cover hors connexion ou vidéo indisponible.
+- **Pause/destruction automatique** : hors focus (blur/minimisé — aucun décodage en arrière-plan), dès le clic sur **Jouer** (duck avant lancement), pendant toute la session, et reprise muette à la fin. ZAILON en arrière-plan ou un jeu qui démarre = plus aucun fond vidéo.
+- **MediaPlaybackArbiter** : maximum un lecteur de fond actif ; le contenu distant est isolé (whitelist stricte, messages API vérifiés par origine, aucun privilège natif).
+- Réglages globaux persistés dans Paramètres > Apparence > Fonds multimédia (fond vidéo, audio, toujours muet, pause hors premier plan, volume).
+
+### Changed
+
+- L’Accueil utilise désormais le système multimédia complet : image du jeu affichée instantanément, puis vidéo en fondu si configurée et disponible.
+
 ## 1.63.0 — État Installer/Désinstaller synchronisé dans Explorer (spec §15-23)
 
 ### Added

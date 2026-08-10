@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, ExternalModReference, Game, GameInputProfile, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, SessionSource, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
+import { BackgroundMediaType, BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, ExternalModReference, Game, GameBackgroundMedia, GameInputProfile, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, SessionSource, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
 import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { adapterFor, FALLBACK_ADAPTER, isLauncherBased } from '../lib/launchAdapters'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
@@ -16,6 +16,7 @@ import { ZAILON_PERSIST_KEY } from '../lib/designTokens'
 import { buildDiscordActivity, DISCORD_APPLICATION_ID, DISCORD_PRIORITY_DEBOUNCE_MS, shouldDelayPrioritySwitch, type DiscordActivityInput } from '../lib/discordPresence'
 import { modMatchesRemote, remoteIdentityFromCatalog, remoteModKey } from '../lib/remoteInstallState'
 import { resolveDiscordAsset } from '../lib/discordAssets'
+import { DEFAULT_BACKGROUND_MEDIA_SETTINGS, type BackgroundMediaSettings } from '../lib/backgroundMedia'
 
 // Sauvegarde debounced des réglages continus (spec §17) : le color picker
 // d'accent n'écrit pas sur disque à chaque pixel — coalescence 250 ms, flush
@@ -357,6 +358,8 @@ export interface Store {
   discordMinimalPresence: boolean
   /** Dernière présence publiée (diagnostic spec §40) : jeu, asset, moment. */
   lastDiscordPublished?: { gameId: string; gameName: string; asset: string; at: number }
+  /** Fonds multimédia de l'Accueil (spec §10) — réglages globaux. */
+  backgroundMediaSettings: BackgroundMediaSettings
   autoCheckUpdates: boolean
   autoInstallUpdates: boolean
   modUpdateFrequency: 'never' | 'startup' | 'daily' | 'weekly'
@@ -449,6 +452,8 @@ export interface Store {
   clearGameTestRuns: (gameId: string) => void
   applyGamePreset: (gameId: string, presetId: string) => Promise<void>
   setGameResources: (gameId: string, resources: Partial<GameResources>) => void
+  setGameBackgroundMedia: (gameId: string, media: Partial<GameBackgroundMedia>) => void
+  setBackgroundMediaSettings: (patch: Partial<BackgroundMediaSettings>) => void
   setGameFavorite: (gameId: string, favorite?: boolean) => void
   setGameHidden: (gameId: string, hidden?: boolean) => void
   setGameCategories: (gameId: string, categories: string[]) => void
@@ -763,6 +768,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   discordShowElapsed: true,
   discordMinimalPresence: false,
   lastDiscordPublished: undefined,
+  backgroundMediaSettings: DEFAULT_BACKGROUND_MEDIA_SETTINGS,
   autoCheckUpdates: true,
   autoInstallUpdates: false,
   modUpdateFrequency: 'weekly',
@@ -976,6 +982,19 @@ export const useStore = create<Store>()(persist((set, get) => ({
   },
   setGameResources: (gameId, resources) => set(state => ({
     games: state.games.map(game => game.id === gameId ? { ...game, resources: { ...game.resources, ...resources } } : game),
+  })),
+  setGameBackgroundMedia: (gameId, media) => set(state => ({
+    games: state.games.map(game => game.id === gameId ? {
+      ...game,
+      backgroundMedia: {
+        ...game.backgroundMedia,
+        ...media,
+        type: media.type ?? game.backgroundMedia?.type ?? 'auto',
+      },
+    } : game),
+  })),
+  setBackgroundMediaSettings: patch => set(state => ({
+    backgroundMediaSettings: { ...state.backgroundMediaSettings, ...patch },
   })),
   setGameFavorite: (gameId, favorite) => set(state => ({
     games: state.games.map(game => game.id === gameId ? { ...game, favorite: favorite ?? !game.favorite } : game),
@@ -2805,6 +2824,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     lastInstalledUpdate: state.lastInstalledUpdate,
     lastSeenReleaseNotesVersion: state.lastSeenReleaseNotesVersion,
     showReleaseNotesOnUpdate: state.showReleaseNotesOnUpdate,
+    backgroundMediaSettings: state.backgroundMediaSettings,
     explorePlatform: state.explorePlatform,
     exploreGameId: state.exploreGameId,
     explorePinnedGames: state.explorePinnedGames,

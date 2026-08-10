@@ -1340,6 +1340,18 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.61.0 — Bulles d'aide uniformes : ZailonInfoPopover (ⓘ / ⚠ / technique)
+
+### Added
+
+- **ZailonInfoPopover** (`src/components/UI/ZailonInfoPopover.tsx`) — la bulle d'information UNIFORME de ZAILON (spec §40-42) : variantes **info (ⓘ)**, **warning (⚠ ambre)** et **technique** — jamais « ! » pour une simple documentation (§40) ; ouverture au survol après ~200 ms (§42), **clic = verrouille la bulle** (la souris peut entrer dans la bulle), clic ailleurs ou Échap referment et déverrouillent ; contenu court dans la bulle, **« En savoir plus »** ouvrant une petite modale scrollable pour les textes longs (§41).
+- **`popoverHasMore` / `popoverShortText`** dans `src/lib/infoPopover.ts` (logique pure, 6 tests) : les textes de plus de 220 caractères sont tronqués dans la bulle et gagnent automatiquement le bouton « En savoir plus ».
+
+### Changed
+
+- **12 bulles migrées** vers le composant unique (spec §40 « Usage global ») : Configuration du jeu (Bypass, chemins additionnels, performance, priorité, FPS), Paramètres (couvertures, illustrations, sources, fournisseurs), Visual Profiles (Diagnostic).
+- **Ancien `InfoBubble` supprimé** — un seul système de bulles reste dans ZAILON.
+
 ## 1.60.0 — Paramètres : sections repliables (accordion) + mémoire + recherche
 
 ### Added

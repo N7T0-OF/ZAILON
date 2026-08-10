@@ -1,5 +1,5 @@
 import { AlertTriangle, BookOpenCheck, Check, Copy, Download, Gauge, GitCompareArrows, Heart, History, Monitor, Play, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react'
-import { InfoBubble } from '../../components/UI/InfoBubble'
+import { ZailonInfoPopover } from '../../components/UI/ZailonInfoPopover'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { native } from '../../lib/native'
 import { createVisualProfile } from '../application/profile'
@@ -336,7 +336,7 @@ function DiagnosticSection({ backend, report, display, historyCount, onOpenHisto
     <div className="flex items-center gap-2">
       <Gauge size={15} className="text-gold" />
       <h2 className="text-sm font-bold text-white/78">Diagnostic visuel</h2>
-      <span className="ml-auto"><InfoBubble wide text="" ><span className="block max-h-48 overflow-y-auto space-y-1.5 pr-1">{bubbleLines.map(line => <span key={line} className="block">• {line}</span>)}</span></InfoBubble></span>
+      <span className="ml-auto"><ZailonInfoPopover wide text="" ><span className="block max-h-48 overflow-y-auto space-y-1.5 pr-1">{bubbleLines.map(line => <span key={line} className="block">• {line}</span>)}</span></ZailonInfoPopover></span>
     </div>
     <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
       <DiagnosticState label="Backend" value={backend?.name || report?.activeBackendId || 'aperçu'} />

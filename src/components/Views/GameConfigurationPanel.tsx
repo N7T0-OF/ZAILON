@@ -33,7 +33,7 @@ import { formatClock, formatTime } from '../../utils'
 import { GameAppearanceEditor } from '../GameResourcesDialog'
 import { GameKeyboardPanel } from './GameKeyboardPanel'
 import { ZailonSwitch } from '../UI/ZailonSwitch'
-import { InfoBubble } from '../UI/InfoBubble'
+import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
 
 const RUNTIME_TYPE_LABELS: Array<[ModRuntimePathType, string]> = [
   ['loader', 'Loader'],
@@ -171,7 +171,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
           </button>
           {(advancedOpen || advancedMode) && <div className="space-y-3 border-t border-white/[0.05] px-3 pb-3 pt-3">
             <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
-              <div className="flex items-center gap-2"><span className="text-[11px] text-white/45">Dossier Bypass / Loader</span><InfoBubble text="Certains jeux nécessitent un loader, un bypass de signature ou un dossier intermédiaire pour charger les mods (ex. Ultimate ASI Loader, dossier Paks). Laissez vide si le jeu n’en utilise pas." /></div>
+              <div className="flex items-center gap-2"><span className="text-[11px] text-white/45">Dossier Bypass / Loader</span><ZailonInfoPopover text="Certains jeux nécessitent un loader, un bypass de signature ou un dossier intermédiaire pour charger les mods (ex. Ultimate ASI Loader, dossier Paks). Laissez vide si le jeu n’en utilise pas." /></div>
               <div className="mt-1.5 flex gap-2">
                 <input value={game.bypassPath || ''} onChange={event => setGameBypassPath(game.id, event.target.value)} placeholder="Optionnel — dossier du loader ou bypass" className="min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-black/20 px-3 py-2 text-xs text-white/72 outline-none focus:border-gold/30" />
                 <button type="button" onClick={async () => { const path = await pickFolder(`Choisir le dossier Bypass / Loader — ${game.name}`); if (path) setGameBypassPath(game.id, path) }} className="rounded-lg border border-white/[0.09] bg-white/[0.025] px-3 py-2 text-[11px] text-white/55 hover:border-gold/25 hover:text-gold">Choisir</button>
@@ -180,7 +180,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
             </div>
             <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2"><span className="text-[11px] text-white/45">Chemins additionnels</span><InfoBubble text="Certains jeux ont une structure inhabituelle : plusieurs dossiers utiles au runtime (plugin folder, dossier de scripts, signature bypass…). Ajoutez-les ici pour éviter de recoder ZAILON pour chaque jeu." /></div>
+                <div className="flex items-center gap-2"><span className="text-[11px] text-white/45">Chemins additionnels</span><ZailonInfoPopover text="Certains jeux ont une structure inhabituelle : plusieurs dossiers utiles au runtime (plugin folder, dossier de scripts, signature bypass…). Ajoutez-les ici pour éviter de recoder ZAILON pour chaque jeu." /></div>
                 <button type="button" onClick={() => addGameRuntimePath(game.id, { name: '', path: '', type: 'loader' })} className="flex items-center gap-1.5 rounded-lg border border-gold/25 px-2.5 py-1.5 text-[11px] font-semibold text-gold hover:bg-gold/10"><Plus size={12} />Ajouter</button>
               </div>
               {(game.runtimePaths || []).map((entry, index) => (
@@ -429,7 +429,7 @@ function PerformanceSettings({ game, mode, custom, sessions, priorityGameId, onM
 
   return <div className="space-y-3">
     <label className="flex items-center justify-between gap-3">
-      <span className="flex items-center gap-2 text-[11px] text-white/60"><strong className="text-white/76">Mode de performance</strong><InfoBubble text="La manière dont ZAILON se comporte autour du jeu : téléchargements, scans, animations, priorité. Ne modifie jamais les réglages graphiques du jeu sans adaptateur spécifique." /></span>
+      <span className="flex items-center gap-2 text-[11px] text-white/60"><strong className="text-white/76">Mode de performance</strong><ZailonInfoPopover text="La manière dont ZAILON se comporte autour du jeu : téléchargements, scans, animations, priorité. Ne modifie jamais les réglages graphiques du jeu sans adaptateur spécifique." /></span>
       <select value={mode} onChange={event => onMode(event.target.value as PerformanceMode)} className="rounded-lg border border-white/[0.08] bg-[#111515] px-2.5 py-2 text-[11px] text-white/72">{MODE_OPTIONS.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select>
     </label>
     {preset && <p className="rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] leading-relaxed text-white/40">{preset.description}</p>}
@@ -459,11 +459,11 @@ function PerformanceSettings({ game, mode, custom, sessions, priorityGameId, onM
     <div className="rounded-xl border border-white/[0.07] bg-white/[0.015] p-3">
       <p className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-white/68"><Gamepad2 size={12} className="text-gold/70" />Performance du jeu</p>
       <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] text-white/55">
-        <span className="flex items-center gap-2"><span>Priorité du processus</span><InfoBubble text="Automatique : Windows gère normalement. Jamais « Temps réel » — il peut rendre Windows instable. La priorité revient à l’état précédent à la fermeture du jeu." /></span>
+        <span className="flex items-center gap-2"><span>Priorité du processus</span><ZailonInfoPopover text="Automatique : Windows gère normalement. Jamais « Temps réel » — il peut rendre Windows instable. La priorité revient à l’état précédent à la fermeture du jeu." /></span>
         <select value={mode === 'custom' ? 'auto' : PERFORMANCE_PRESETS[mode].game.processPriority} disabled className="rounded border border-white/[0.08] bg-[#111515] px-2 py-1.5 text-[11px] text-white/70">{GAME_PROCESS_PRIORITIES.map(priority => <option key={priority} value={priority}>{GAME_PROCESS_PRIORITY_LABELS[priority]}</option>)}</select>
       </label>
       <p className="mt-2 flex items-center justify-between gap-3 rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] text-white/45">
-        <span>Limite d’images par seconde</span><span className="font-semibold text-white/60">Backends natifs à venir <InfoBubble text="Le contrôle FPS utilisera uniquement des méthodes officielles (paramètre natif du jeu, API du pilote) — jamais d’injection. Les jeux protégés (anti-cheat) resteront limités aux réglages officiels." /></span>
+        <span>Limite d’images par seconde</span><span className="font-semibold text-white/60">Backends natifs à venir <ZailonInfoPopover text="Le contrôle FPS utilisera uniquement des méthodes officielles (paramètre natif du jeu, API du pilote) — jamais d’injection. Les jeux protégés (anti-cheat) resteront limités aux réglages officiels." /></span>
       </p>
     </div>
 

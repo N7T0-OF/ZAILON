@@ -65,6 +65,24 @@ testé (7 cas). Le switch utilise les variables CSS — aucun re-render requis.
 La même logique pourra s'appliquer aux sections de Configuration par jeu
 (§50-51) dans une release suivante.
 
+## Bulles d'aide uniformes (spec §40-42, release 1.61.0)
+
+`src/components/UI/ZailonInfoPopover.tsx` (remplace `InfoBubble`, supprimé) :
+
+- variantes `info` (ⓘ), `warning` (⚠ ambre), `technical` (dashé) — jamais « ! »
+  pour une simple documentation (§40) ;
+- ouverture au survol après ~200 ms ; **clic = verrouille** la bulle (la souris
+  peut entrer dedans) ; clic ailleurs ou Échap referment et déverrouillent
+  (§42) ;
+- texte long (> 220 caractères) ou bloc `details` → bouton « En savoir plus »
+  qui ouvre une petite modale scrollable (§41) — logique pure testée
+  (`src/lib/infoPopover.ts`, 6 tests) ;
+- accessible : focus clavier, Entrée/Espace, `role="tooltip"`,
+  `aria-expanded`/`aria-controls`.
+
+12 bulles migrées (Configuration, Paramètres, Visual Profiles) — un seul
+système de bulles dans ZAILON.
+
 ## Parallaxe carte entière (spec §16-28)
 
 `src/components/UI/ParallaxCover.tsx` + `GameLibraryCard` (GamesView) :
@@ -82,5 +100,5 @@ La même logique pourra s'appliquer aux sections de Configuration par jeu
 
 ## Validation
 
-- `tsc` ✅, build ✅, **178/178 tests** (7 nouveaux : design system).
-- Verify native + Verify ZAILON ✅ (release 1.60.0).
+- `tsc` ✅, build ✅, **184/184 tests** (6 nouveaux : popover).
+- Verify native + Verify ZAILON ✅ (release 1.61.0).

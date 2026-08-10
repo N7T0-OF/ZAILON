@@ -46,6 +46,25 @@ reste natif (état intermédiaire via ref).
 accent sombre. Utilisé par App pour `--zailon-accent-text` (dédupliqué) et
 testé (7 cas). Le switch utilise les variables CSS — aucun re-render requis.
 
+## Accordions Paramètres (spec §31-36, §50-54, release 1.60.0)
+
+`src/components/UI/AccordionSection.tsx` + 15 sections de SettingsView :
+
+- en-tête compact : icône + titre + sous-titre très court + chevron (§35) ;
+- **repliées par défaut** (§31) — « Réduire le scroll » (§52) ;
+- état mémorisé (`localStorage zailon.settingsOpenSection`) et restauré au
+  prochain lancement (§33) ;
+- la recherche Paramètres et les liens internes (`open-settings-section`, ex.
+  Quick Panel → Configurer) **déploient automatiquement** la section cible avant
+  de défiler (spec §53-54, map `SETTINGS_SECTION_BY_LABEL`) ;
+- point ambre sur « Application updates » quand une mise à jour est prête ou une
+  erreur présente — jamais d'information critique totalement cachée (§39) ;
+- animation 180 ms (fade + glissement léger), instantanée sous
+  `prefers-reduced-motion` (§36).
+
+La même logique pourra s'appliquer aux sections de Configuration par jeu
+(§50-51) dans une release suivante.
+
 ## Parallaxe carte entière (spec §16-28)
 
 `src/components/UI/ParallaxCover.tsx` + `GameLibraryCard` (GamesView) :
@@ -64,4 +83,4 @@ testé (7 cas). Le switch utilise les variables CSS — aucun re-render requis.
 ## Validation
 
 - `tsc` ✅, build ✅, **178/178 tests** (7 nouveaux : design system).
-- Verify native + Verify ZAILON ✅ (release 1.59.0).
+- Verify native + Verify ZAILON ✅ (release 1.60.0).

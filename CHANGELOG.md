@@ -1340,6 +1340,20 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.60.0 — Paramètres : sections repliables (accordion) + mémoire + recherche
+
+### Added
+
+- **AccordionSection** (`src/components/UI/AccordionSection.tsx`) — section repliable (spec §31-36) : en-tête compact icône + titre + sous-titre court + chevron (§35), **repliée par défaut** (§31), animation 180 ms annulée sous Reduce Motion (§36).
+- **15 sections Paramètres converties en accordions** (spec §52 — réduire le scroll) : Préférences, Apparence, Tâches, Illustrations, Discord, Mode jeu, Panneau rapide, Contenu, Fournisseurs, NXM, Mises à jour des mods, Application updates, Library statistics, Stockage, À propos.
+- **Mémoire de l'état** (spec §33) : la dernière section ouverte est mémorisée (`localStorage`) et restaurée au prochain lancement ; les nouvelles installations partent tout replié.
+- **Recherche et liens internes ouvrent la section** (spec §53-54) : `goToSetting` et l'événement `open-settings-section` (Quick Panel → Configurer) déploient automatiquement l'accordion cible avant de défiler (map `SETTINGS_SECTION_BY_LABEL`).
+- **Point ambre d'alerte** (spec §39) : « Application updates » affiche un point dans l'en-tête quand une mise à jour est disponible ou qu'une erreur est présente — les informations critiques ne sont jamais totalement cachées par un accordion.
+
+### Changed
+
+- En-têtes de sections uniformisés (même hauteur, sous-titre très court) — la densité visuelle des Paramètres est nettement réduite.
+
 ## 1.59.0 — Design System : ZailonSwitch global + parallaxe carte entière
 
 ### Added

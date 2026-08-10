@@ -170,3 +170,29 @@ select {
     transition: none !important;
   }
 }
+
+/* Accordions Paramètres (spec « Refonte globale » §36) : apparition 180 ms
+ * (fade + léger glissement), chevron 150 ms — instantané en mode réduit. */
+.accordion-body {
+  animation: zailon-accordion-in 180ms ease;
+}
+.accordion-chevron {
+  transition: transform 150ms ease;
+}
+@keyframes zailon-accordion-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .accordion-body,
+  .accordion-chevron {
+    animation: none;
+    transition: none;
+  }
+}

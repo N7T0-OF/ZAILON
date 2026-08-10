@@ -14,6 +14,7 @@ import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
 import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, STEAM_BACKED_ATTACH_THRESHOLD, windowRequestFor } from './lib/gamePresence'
 import { pickPrioritySession } from './lib/sessionPriority'
 import { applyAccentTokens, applyDangerTokens } from './lib/designTokens'
+import { createStartupProfiler, createUiWatchdog, StartupCoordinator } from './lib/startup'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from './lib/keyboardPresets'
 import { isRed4extActive } from './lib/frameworkValidator'
 import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
@@ -24,6 +25,13 @@ import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-prof
 // App, lue par le panneau via le payload (jamais un faux ✓ quand Discord est
 // fermé, spec §38).
 let discordConnected = false
+
+// Startup (spec Startup Partie A) : le coordinateur orchestre les phases — le
+// shell s'affiche depuis le cache, la récupération de session passe AVANT les
+// services distants, et la maintenance est différée. Le réseau ne conditionne
+// jamais Time To Interactive.
+const startupCoordinator = new StartupCoordinator()
+const startupProfiler = createStartupProfiler()
 
 // Émission du résumé compact d'une session vers le panneau (WebView séparée,
 // sans accès au store) — source de vérité : l'état RÉEL de la session.
@@ -127,8 +135,16 @@ export default function App() {
   // de chaque jeu est réconcilié avec le store staged — un cache UI vide
   // persisté ne fait plus afficher « 0 mods » à un profil qui référence des
   // paquets (toast « Profil restauré automatiquement » si réparation).
+  // Startup phase « local » (§6) : la réconciliation staged ne bloque pas le
+  // shell — elle est différée de quelques dizaines de ms pour ne pas entrer en
+  // concurrence avec la récupération de session au boot.
   useEffect(() => {
-    void refreshStagedCatalogs()
+    startupProfiler.mark('shellAt')
+    startupCoordinator.schedule('local', 'Réconciliation du catalogue staged', () => {
+      void refreshStagedCatalogs()
+    })
+    const interactiveTimer = globalThis.setTimeout(() => startupProfiler.mark('interactiveAt'), 300)
+    return () => globalThis.clearTimeout(interactiveTimer)
   }, [refreshStagedCatalogs])
 
   // Persistance UI (spec §17, §4) : les réglages debouncés (accent, sliders)
@@ -365,6 +381,16 @@ export default function App() {
     document.documentElement.dataset.density = uiDensity
   }, [textSize, uiDensity])
 
+  // UIWatchdog (spec Startup §13) : en développement, tout bloc de l'event loop
+  // > 250 ms est signalé — outil de chasse aux freezes futurs. Zéro coût en prod.
+  useEffect(() => {
+    if (!import.meta.env?.DEV) return
+    const watchdog = createUiWatchdog(250, task => {
+      console.warn(`[zailon-startup] Long UI task detected · ${task.durationMs} ms (${new Date(task.at).toLocaleTimeString()})`)
+    })
+    return () => watchdog.stop()
+  }, [])
+
   useEffect(() => {
     // DesignTokenService (spec §8) : la SEULE source des tokens d'action —
     // aucun composant ne choisit sa propre couleur primaire.
@@ -375,8 +401,10 @@ export default function App() {
   useEffect(() => {
     if (!native.isDesktop()) return
     let unlisten: UnlistenFn | undefined
-    void native.pendingExternalInstalls().then(setExternalInstalls).catch(() => undefined)
-    void listen<NxmRequest>('nxm-opened', event => setExternalInstalls(current => current.some(item => item.requestId === event.payload.requestId) ? current : [...current, event.payload])).then(dispose => { unlisten = dispose })
+    startupCoordinator.schedule('services', 'Demandes d\'installation externes', () => {
+      void native.pendingExternalInstalls().then(setExternalInstalls).catch(() => undefined)
+      void listen<NxmRequest>('nxm-opened', event => setExternalInstalls(current => current.some(item => item.requestId === event.payload.requestId) ? current : [...current, event.payload])).then(dispose => { unlisten = dispose })
+    })
     return () => unlisten?.()
   }, [])
 
@@ -577,11 +605,15 @@ export default function App() {
   useEffect(() => {
     if (!native.isDesktop()) return
     let unlisten: UnlistenFn | undefined
-    void native.backgroundTasks().then(tasks => {
-      useStore.getState().replaceBackgroundTasks(tasks)
-      useStore.getState().cleanupBackgroundTasks()
-    }).catch(() => undefined)
-    void listen<BackgroundTaskSnapshot>('background-task-changed', event => useStore.getState().upsertBackgroundTask(event.payload)).then(dispose => { unlisten = dispose })
+    // Phase « services » (§8) : l'état des tâches d'arrière-plan n'est pas
+    // nécessaire au shell — différé pour ne pas charger l'IPC au boot.
+    startupCoordinator.schedule('services', 'État des tâches d\'arrière-plan', () => {
+      void native.backgroundTasks().then(tasks => {
+        useStore.getState().replaceBackgroundTasks(tasks)
+        useStore.getState().cleanupBackgroundTasks()
+      }).catch(() => undefined)
+      void listen<BackgroundTaskSnapshot>('background-task-changed', event => useStore.getState().upsertBackgroundTask(event.payload)).then(dispose => { unlisten = dispose })
+    })
     return () => unlisten?.()
   }, [])
 

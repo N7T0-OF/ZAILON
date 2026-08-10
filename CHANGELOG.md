@@ -1340,6 +1340,23 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.66.0 — Démarrage optimisé (StartupCoordinator) + backend Frosty générique (NFS 2015)
+
+### Added
+
+- **StartupCoordinator** (`src/lib/startup.ts`, 7 tests) : pipeline de démarrage en phases — Bootstrap → Shell → État local → Sessions → Services → Maintenance différée. Priorités Critical/Interactive/Normal/Background/Idle, délais croissants, jamais de réseau avant l’interactif (spec Startup §1-25).
+- **Câblage App** : la réconciliation du catalogue staged et les listeners d’arrière-plan (tâches, demandes d’installation externes) sont désormais **différés hors du chemin critique** — le shell s’affiche depuis le cache, la récupération de session reste prioritaire, et le réseau ne conditionne plus jamais Time To Interactive.
+- **UIWatchdog** : en développement, tout bloc de l’event loop > 250 ms est signalé (`Long UI task detected · durée ms`) — outil de chasse aux freezes (zéro coût en prod). **StartupProfiler** : mesures timeToWindow / Shell / Interactif, visibles en mode dev.
+- **LibraryStartupCache** : résumé léger (id, titre, miniature, favori, running, temps de jeu, profil actif) — jamais les listes de mods.
+- **Backend Frosty générique** (`src/lib/frosty.ts`, 12 tests) : registre d’adaptateurs registry-driven (§75), **FrostyRuntimeVersionManager** (1.0.6.3 préférée pour NFS 2015, 1.0.7 bloquée — jamais « latest » imposé, §29-30), **FrostyPackageInspector** (.fbmod moderne / structure legacy / non supporté — jamais traité comme archive générique, §33), ordre de chargement (haut/bas/top/bottom + hints « place at bottom », §42-43, §88), **FrostyPlatformCompatibility** (EA App natif, Steam/Epic → DatapathFix, conflit DatapathFix + LaunchPlatformPlugin détecté, §47-52), détection de conflits d’overhauls (Evolution vs Remastered, §87), fingerprint de déploiement (staging mis en cache, §78-80).
+- **IModBackend** (`src/lib/modBackends.ts`, 7 tests) : 4 backends derrière la même UI — Cyberpunk VFS / Frosty / NTE PAK / Dossier générique — et **détection automatique par exécutable** (NFS16.exe → Frosty, Cyberpunk2077.exe → VFS, §59-60). Le backend Frosty n’est **jamais initialisé au démarrage** (lazy-only, §96).
+- **Bloc Frosty en Configuration** (jeu Frosty détecté) : runtime recommandé, stratégie plateforme, alerte de version bloquée, conflit plugins avec bouton « Corriger », alerte overhauls, bouton « Tester le profil ».
+- `src/vite-env.d.ts` ajouté (types Vite client pour les gates DEV).
+
+### Changed
+
+- Boot allégé : les opérations secondaires ne sont plus lancées simultanément avec la récupération de session — l’UI devient interactive sans attendre les services distants.
+
 ## 1.65.0 — Partage de profils v2 : code léger copiable + dialogue export/import avec reproductibilité
 
 ### Added

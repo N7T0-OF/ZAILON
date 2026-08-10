@@ -1,5 +1,5 @@
 import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, History, Keyboard, Layers3, MonitorDown, Palette, Plus, Rocket, Settings2, ShieldCheck, Trash2, Upload, Wrench } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
 import { adapterFor, isLauncherBased, LAUNCH_BEHAVIOR_LABELS } from '../../lib/launchAdapters'
@@ -26,6 +26,8 @@ import {
 } from '../../lib/performanceProfiles'
 import { native, pickFolder } from '../../lib/native'
 import { ProfileShareDialog } from '../UI/ProfileShareDialog'
+import { detectModBackend, frostyBackendStatus } from '../../lib/modBackends'
+import { frostyOverhaulConflict, FROSTY_STRATEGY_LABELS } from '../../lib/frosty'
 import { describeBackgroundMedia, resolveMediaType } from '../../lib/backgroundMedia'
 import { parseYouTubeUrl, youtubeThumbnailUrl } from '../../lib/youtubeUrl'
 import { resourceUrl } from '../../lib/native'
@@ -310,6 +312,8 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
           : <p className="text-[11px] leading-relaxed text-white/38">Aucun framework identifié dans le dossier Mods. Lancez « Analyser le dossier Mods » depuis l’onglet Outils pour rafraîchir.</p>}
         <p className="mt-3 text-[11px] leading-relaxed text-white/34">Détection d’overlays, de gestionnaires concurrents (ex. MO2) et de configuration particulière : à venir (Phase 2 de la refonte UX).</p>
       </ConfigCard>
+
+      <FrostyConfigCard game={game} profile={profile} />
 
       <ConfigCard id="performances" title="Performances" icon={Gamepad2} badge={modeLabel(performanceMode)} open={open.includes('performances')} onToggle={() => toggle('performances')}>
         <PerformanceSettings
@@ -600,4 +604,83 @@ function BackgroundPicker({ game }: { game: Game }) {
       </div>
     )}
   </div>
+}
+
+function FrostyConfigCard({ game, profile }: { game: Game; profile: Profile }) {
+  const [open, setOpen] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(`zailon:config-open:${game.id}`) || 'null') as string[] | null
+      return Array.isArray(saved) && saved.includes('frosty')
+    } catch { return false }
+  })
+  const toggle = () => {
+    setOpen(current => {
+      const next = !current
+      try {
+        const saved = JSON.parse(localStorage.getItem(`zailon:config-open:${game.id}`) || 'null') as string[] | null
+        const list = Array.isArray(saved) ? saved : []
+        const updated = next ? [...new Set([...list, 'frosty'])] : list.filter(item => item !== 'frosty')
+        localStorage.setItem(`zailon:config-open:${game.id}`, JSON.stringify(updated))
+      } catch { /* persistance best-effort */ }
+      return next
+    })
+  }
+  const [datapathFix, setDatapathFix] = useState(false)
+  const [launchPlatformPlugin, setLaunchPlatformPlugin] = useState(false)
+  const [tested, setTested] = useState<string>()
+  const profileMods = resolveProfileMods(game, profile)
+  const platform = game.platform === 'steam' ? 'steam' as const : game.platform === 'epic' ? 'epic' as const : 'ea-app' as const
+  const status = useMemo(() => frostyBackendStatus({
+    gameId: game.id,
+    execPath: game.execPath,
+    platform,
+    datapathFix,
+    launchPlatformPlugin,
+  }), [game.id, game.execPath, platform, datapathFix, launchPlatformPlugin])
+  const isFrosty = detectModBackend({ execPath: game.execPath, gameName: game.name }) === 'frosty'
+  const overhaulAlert = useMemo(() => frostyOverhaulConflict(profileMods.map(mod => mod.name)), [profileMods])
+  const runTest = () => {
+    const checks: string[] = []
+    checks.push(status.adapterFound ? `Adaptateur : ${status.preferredRuntime ? `Frosty ${status.preferredRuntime} recommandé` : 'détecté'}` : 'Aucun adaptateur Frosty')
+    checks.push(`Support : ${status.supportLevel}`)
+    checks.push(`Plateforme : ${platform} → ${status.strategyLabel ? FROSTY_STRATEGY_LABELS[status.strategyLabel as keyof typeof FROSTY_STRATEGY_LABELS] : '—'}`)
+    checks.push(status.versionAlert ? `⚠ ${status.versionAlert}` : 'Version runtime : OK (préférée)')
+    checks.push(status.pluginConflict ? '⚠ Conflit de plugins (DatapathFix + LaunchPlatformPlugin)' : 'Plugins : aucun conflit')
+    checks.push(overhaulAlert ? `⚠ ${overhaulAlert}` : 'Overhauls : aucun conflit déclaré')
+    setTested(checks.join('\n'))
+  }
+  if (!isFrosty && !status.adapterFound) return null
+  return (
+    <ConfigCard id="frosty" title="Frosty" icon={Wrench} badge={status.adapterFound ? `Frosty ${status.preferredRuntime || '—'}` : 'À configurer'} open={open} onToggle={toggle}>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="rounded-xl border border-white/[0.07] bg-black/15 p-3">
+          <p className="text-[11px] font-semibold text-white/68">Backend</p>
+          <p className="mt-1 text-[11px] text-white/45">{status.adapterFound ? `Frosty ${status.preferredRuntime || ''} — pipeline de patch de ressources Frostbite` : 'Non configuré'}</p>
+        </div>
+        <div className="rounded-xl border border-white/[0.07] bg-black/15 p-3">
+          <p className="text-[11px] font-semibold text-white/68">Compatibilité plateforme</p>
+          <p className="mt-1 text-[11px] text-white/45">{platform} · {status.strategyLabel ? FROSTY_STRATEGY_LABELS[status.strategyLabel as keyof typeof FROSTY_STRATEGY_LABELS] : '—'}</p>
+        </div>
+      </div>
+      {status.versionAlert && (
+        <p className="mt-2 flex items-start gap-2 rounded-lg border border-amber-300/25 bg-amber-300/[0.05] px-3 py-2 text-[11px] text-amber-100/80"><AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-300/90" />{status.versionAlert}</p>
+      )}
+      {status.pluginConflict && (
+        <p className="mt-2 flex items-start justify-between gap-3 rounded-lg border border-red-300/25 bg-red-400/[0.06] px-3 py-2 text-[11px] text-red-100/85">
+          <span className="flex items-start gap-2"><AlertTriangle size={13} className="mt-0.5 shrink-0 text-red-300/90" />Conflit Frosty détecté : DatapathFix et LaunchPlatformPlugin ne doivent pas être actifs ensemble.</span>
+          <button type="button" onClick={() => setLaunchPlatformPlugin(false)} className="shrink-0 rounded-lg border border-red-300/30 px-2.5 py-1 font-semibold text-red-200 hover:bg-red-400/10">Corriger</button>
+        </p>
+      )}
+      {overhaulAlert && (
+        <p className="mt-2 flex items-start gap-2 rounded-lg border border-amber-300/25 bg-amber-300/[0.05] px-3 py-2 text-[11px] text-amber-100/80"><AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-300/90" />{overhaulAlert}</p>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2 text-[11px] text-white/55"><ZailonSwitch size="compact" checked={datapathFix} onChange={setDatapathFix} />DatapathFix</label>
+        <label className="flex items-center gap-2 text-[11px] text-white/55"><ZailonSwitch size="compact" checked={launchPlatformPlugin} onChange={setLaunchPlatformPlugin} />Launch Platform Plugin</label>
+        <button type="button" onClick={runTest} className="ml-auto flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold"><ShieldCheck size={13} />Tester le profil</button>
+      </div>
+      {tested && <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-black/25 px-3 py-2 font-mono text-[10px] leading-relaxed text-white/55">{tested}</pre>}
+      <p className="mt-2 text-[10px] text-white/30">Le backend Frosty n&apos;est jamais initialisé au démarrage de ZAILON — seulement à l&apos;ouverture de ce jeu, à l&apos;import d&apos;un .fbmod ou au lancement.</p>
+    </ConfigCard>
+  )
 }

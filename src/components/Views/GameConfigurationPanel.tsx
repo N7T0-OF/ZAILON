@@ -201,7 +201,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
               <p className="text-[11px] font-semibold text-white/68">Raccourci de lancement sécurisé</p>
               <p className="mt-1 text-[11px] leading-relaxed text-white/34">Crée un raccourci bureau ZAILON lié à ce jeu et au profil « {profile.name} ». Le lien contient uniquement leurs identifiants internes.</p>
             </div>
-            <button type="button" onClick={() => void native.createDesktopShortcut(game.id, profile.id, game.name, game.resources?.iconPath, game.execPath).then(path => window.alert(`Raccourci créé :\n${path}`)).catch(error => window.alert(String(error)))} className="flex items-center gap-2 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313]"><MonitorDown size={14} />Créer sur le bureau</button>
+            <button type="button" onClick={() => void native.createDesktopShortcut(game.id, profile.id, game.name, game.resources?.iconPath, game.execPath).then(path => window.alert(`Raccourci créé :\n${path}`)).catch(error => window.alert(String(error)))} className="flex items-center gap-2 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><MonitorDown size={14} />Créer sur le bureau</button>
           </div>
         </div>
         <LaunchChainTest game={game} />
@@ -238,7 +238,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
               updatedAt: now,
             }
             saveGamePreset(game.id, preset)
-          }} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313]"><Plus size={12} />Créer depuis l’état actuel</button>
+          }} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><Plus size={12} />Créer depuis l’état actuel</button>
         </div>
         {(game.presets || []).length === 0
           ? <p className="mt-3 text-[11px] text-white/34">Aucun preset. Créez-en un depuis la configuration actuelle (profil « {profile.name} », clavier et visuel associés).</p>
@@ -285,7 +285,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
             <p className="text-[11px] font-semibold text-white/68">Points de restauration</p>
             <div className="flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-2 text-[11px] text-white/45"><ZailonSwitch size="compact" checked={autoRestorePoints} onChange={setAutoRestorePoints} />Auto avant lancement</label>
-              <button type="button" onClick={() => createRestorePoint(`Manuel · ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`)} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313]"><History size={13} />Créer un point</button>
+              <button type="button" onClick={() => createRestorePoint(`Manuel · ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`)} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><History size={13} />Créer un point</button>
             </div>
           </div>
           {points.length === 0

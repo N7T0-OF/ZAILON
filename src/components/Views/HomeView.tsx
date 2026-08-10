@@ -73,12 +73,12 @@ export function HomeView() {
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_70%_26%,rgba(126,67,116,0.20),transparent_35%),linear-gradient(120deg,#0b0d0d,#111314_55%,#090a0b)]" />
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(7,8,8,0.95),rgba(7,8,8,0.35),rgba(7,8,8,0.82)),linear-gradient(0deg,#080909,transparent_65%)]" />
         <div className="relative max-w-xl">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-white/[0.13] bg-black/35 shadow-[0_16px_55px_rgba(0,0,0,0.42)]"><span className="font-display text-2xl font-black text-[#dbe8e5]">Z</span></div>
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-white/[0.13] bg-black/35 shadow-[0_16px_55px_rgba(0,0,0,0.42)]"><span className="font-display text-2xl font-black text-[var(--zailon-accent)]">Z</span></div>
           <p className="mt-6 font-mono text-[11px] uppercase tracking-[0.28em] text-white/30">Universal Mod Launcher</p>
           <h1 className="mt-2 font-display text-5xl font-black uppercase leading-[0.88] text-white">Créez votre<br />bibliothèque</h1>
           <p className="mx-auto mt-4 max-w-md text-[11px] leading-relaxed text-white/38">Ajoutez un exécutable local ou détectez les bibliothèques installées sur cet appareil.</p>
           <div className="mt-6 flex flex-wrap justify-center gap-2">
-            <button type="button" onClick={() => void addGameFromExecutable()} className="flex items-center gap-2 rounded-full bg-[#dbe8e5] px-5 py-2.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[#101313] hover:bg-white"><FolderPlus size={12} /> Ajouter</button>
+            <button type="button" onClick={() => void addGameFromExecutable()} className="flex items-center gap-2 rounded-full bg-[var(--zailon-accent)] px-5 py-2.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--zailon-accent-text)] hover:bg-[var(--zailon-accent-hover)]"><FolderPlus size={12} /> Ajouter</button>
             <button type="button" onClick={() => setDiscoveryOpen(true)} className="flex items-center gap-2 rounded-full border border-white/[0.12] bg-black/22 px-5 py-2.5 text-[11px] uppercase tracking-[0.12em] text-white/58 backdrop-blur hover:bg-white/[0.07] hover:text-white"><Radar size={12} /> Détecter</button>
           </div>
         </div>
@@ -143,7 +143,7 @@ export function HomeView() {
             <CircleAction label="Modifier l’apparence" onClick={() => setResourcesGameId(selectedGame.id)}><Palette size={11} /></CircleAction>
             <CircleAction label="Actions du jeu" onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); openMenu({ x: rect.right - 252, y: rect.bottom + 5 }) }}><MoreHorizontal size={12} /></CircleAction>
             <button type="button" onClick={() => { setGamesBrowsing(false); setView('games') }} title="Ouvrir les paramètres du jeu" className="ml-1 flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/[0.14] bg-[#111515] shadow-[0_8px_24px_rgba(0,0,0,0.35)] hover:border-white/30">
-              {gameIcon ? <img src={gameIcon} alt="" className="h-full w-full object-cover" /> : <span className="font-display text-sm font-black text-[#dbe8e5]">{selectedGame.name.charAt(0).toUpperCase()}</span>}
+              {gameIcon ? <img src={gameIcon} alt="" className="h-full w-full object-cover" /> : <span className="font-display text-sm font-black text-[var(--zailon-accent)]">{selectedGame.name.charAt(0).toUpperCase()}</span>}
             </button>
           </div>
         </header>
@@ -215,7 +215,7 @@ export function HomeView() {
           )}
           <div className="mt-5 flex items-center gap-2">
             <div className="relative flex items-center">
-              <button type="button" disabled={playBusy} title={sessionRunning ? 'Le jeu est en cours. Cliquez pour le quitter.' : playBusy ? 'En attente du jeu…' : 'Préparer les mods et lancer le jeu'} onClick={sessionRunning ? () => { setQuitConfirm(false); setQuitOpen(true) } : () => void launchSelectedGame()} className={`flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full px-5 py-2.5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all min-w-[168px] ${playBusy ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : sessionRunning ? 'bg-emerald-300/90 text-[#0c1212] hover:-translate-y-0.5 hover:bg-emerald-200' : 'bg-[#dbe8e5] text-[#0d1111] hover:-translate-y-0.5 hover:bg-white'}`}>
+              <button type="button" disabled={playBusy} title={sessionRunning ? 'Le jeu est en cours. Cliquez pour le quitter.' : playBusy ? 'En attente du jeu…' : 'Préparer les mods et lancer le jeu'} onClick={sessionRunning ? () => { setQuitConfirm(false); setQuitOpen(true) } : () => void launchSelectedGame()} className={`flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full px-5 py-2.5 font-display text-[11px] font-bold uppercase tracking-[0.11em] transition-all min-w-[168px] ${playBusy ? 'cursor-not-allowed bg-emerald-200/18 text-emerald-100/72' : sessionRunning ? 'bg-emerald-300/90 text-[#0c1212] hover:-translate-y-0.5 hover:bg-emerald-200' : 'bg-[var(--zailon-accent)] text-[var(--zailon-accent-text)] hover:-translate-y-0.5 hover:bg-white'}`}>
                 {playBusy ? <Loader2 size={12} className="animate-spin" /> : sessionRunning ? <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-900/60" /> : <Play size={10} fill="currentColor" />}
                 {isLaunching ? `Préparation${launchPercent === undefined ? '…' : ` ${launchPercent}%`}` : sessionRunning ? 'En cours' : sessionWaiting ? (activeSession?.state === 'WaitingForGame' ? 'Recherche du jeu…' : 'Lancement…') : sessionFailed ? 'Réessayer' : 'Jouer'}
               </button>
@@ -224,7 +224,7 @@ export function HomeView() {
           </div>
           {isLaunching && <div className="mt-3 w-full max-w-md" role="status" aria-live="polite">
             <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
-              <div className={`h-full rounded-full bg-[#dbe8e5] transition-[width] duration-300 ${launchPercent === undefined ? 'w-1/3 animate-pulse' : ''}`} style={launchPercent === undefined ? undefined : { width: `${launchPercent}%` }} />
+              <div className={`h-full rounded-full bg-[var(--zailon-accent)] transition-[width] duration-300 ${launchPercent === undefined ? 'w-1/3 animate-pulse' : ''}`} style={launchPercent === undefined ? undefined : { width: `${launchPercent}%` }} />
             </div>
             <p className="mt-2 truncate text-[11px] text-white/48">{launchProgress?.message || 'Préparation du jeu en arrière-plan…'}</p>
           </div>}
@@ -238,7 +238,7 @@ export function HomeView() {
               </div>
               <div className="flex min-w-0 flex-1 items-end justify-between gap-1.5">
                 {activity.map((value, index) => <div key={index} className="flex min-w-0 flex-1 flex-col items-center gap-1" title={selectedGame.profiles[index]?.name || 'Aucun profil'}>
-                  <span className="w-full max-w-3 rounded-[2px] bg-[#dbe8e5]/75" style={{ height: `${Math.max(4, Math.round((value / activityMaximum) * 38))}px`, opacity: value ? 1 : 0.14 }} />
+                  <span className="w-full max-w-3 rounded-[2px] bg-[var(--zailon-accent)]/75" style={{ height: `${Math.max(4, Math.round((value / activityMaximum) * 38))}px`, opacity: value ? 1 : 0.14 }} />
                   <span className="max-w-full truncate font-mono text-[11px] uppercase text-white/18">{selectedGame.profiles[index]?.name.charAt(0) || '·'}</span>
                 </div>)}
               </div>
@@ -287,7 +287,7 @@ export function HomeView() {
             <div className="mt-4 flex justify-end gap-2">
               {!quitConfirm ? (
                 <>
-                  <button type="button" onClick={() => setQuitOpen(false)} className="rounded-lg bg-gold px-3.5 py-2 text-[11px] font-semibold text-[#101313] hover:bg-gold/90">Retour au jeu</button>
+                  <button type="button" onClick={() => setQuitOpen(false)} className="rounded-lg bg-gold px-3.5 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90">Retour au jeu</button>
                   <button type="button" onClick={() => setQuitConfirm(true)} className="rounded-lg border border-white/[0.12] px-3.5 py-2 text-[11px] font-semibold text-white/70 hover:bg-white/[0.06]">Quitter le jeu</button>
                 </>
               ) : (

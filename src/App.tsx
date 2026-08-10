@@ -13,7 +13,7 @@ import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, typ
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
 import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, STEAM_BACKED_ATTACH_THRESHOLD, windowRequestFor } from './lib/gamePresence'
 import { pickPrioritySession } from './lib/sessionPriority'
-import { accentContrastText } from './lib/designSystem'
+import { applyAccentTokens, applyDangerTokens } from './lib/designTokens'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from './lib/keyboardPresets'
 import { isRed4extActive } from './lib/frameworkValidator'
 import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
@@ -131,13 +131,16 @@ export default function App() {
     void refreshStagedCatalogs()
   }, [refreshStagedCatalogs])
 
-  // Persistance UI (spec §17) : les réglages debouncés (accent, sliders) sont
-  // écrits immédiatement à la fermeture — aucune valeur récente n'est perdue.
+  // Persistance UI (spec §17, §4) : les réglages debouncés (accent, sliders)
+  // sont écrits immédiatement à la fermeture — `pagehide` couvre les cas où
+  // `beforeunload` n'est pas garanti (fermeture du webview Tauri).
   useEffect(() => {
     const flush = () => flushPendingSettings()
     window.addEventListener('beforeunload', flush)
+    window.addEventListener('pagehide', flush)
     return () => {
       window.removeEventListener('beforeunload', flush)
+      window.removeEventListener('pagehide', flush)
       flush()
     }
   }, [flushPendingSettings])
@@ -363,17 +366,10 @@ export default function App() {
   }, [textSize, uiDensity])
 
   useEffect(() => {
-    const hex = accentColor.replace('#', '')
-    const [red, green, blue] = [0, 2, 4].map(index => Number.parseInt(hex.slice(index, index + 2), 16))
-    const mix = (value: number, target: number, amount: number) => Math.round(value + (target - value) * amount)
-    const rgb = (r: number, g: number, b: number) => `rgb(${r} ${g} ${b})`
-    const root = document.documentElement
-    root.style.setProperty('--zailon-accent', accentColor)
-    root.style.setProperty('--zailon-accent-hover', rgb(mix(red, 255, .18), mix(green, 255, .18), mix(blue, 255, .18)))
-    root.style.setProperty('--zailon-accent-active', rgb(mix(red, 0, .16), mix(green, 0, .16), mix(blue, 0, .16)))
-    root.style.setProperty('--zailon-accent-muted', `rgb(${red} ${green} ${blue} / .14)`)
-    root.style.setProperty('--zailon-accent-text', accentContrastText(accentColor))
-    root.style.setProperty('--zailon-focus-ring', `rgb(${red} ${green} ${blue} / .78)`)
+    // DesignTokenService (spec §8) : la SEULE source des tokens d'action —
+    // aucun composant ne choisit sa propre couleur primaire.
+    applyDangerTokens(document.documentElement)
+    applyAccentTokens(document.documentElement, accentColor)
   }, [accentColor])
 
   useEffect(() => {
@@ -719,7 +715,7 @@ function SessionToast({ toast, games, shortcutLabel, shortcutHintCount, toastRun
 // peut pas s'afficher au-dessus du jeu. Message honnête + actions, aucune
 // injection pour contourner la limite.
 function QuickPanelExclusiveNotice({ onClose }: { onClose: () => void }) {
-  return <div className="fixed inset-0 z-[270] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}><section role="dialog" aria-modal="true" aria-labelledby="exclusive-notice-title" className="w-full max-w-sm rounded-2xl border border-white/[0.11] bg-[#111414] p-5 shadow-2xl" onClick={event => event.stopPropagation()}><div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-300/10 text-amber-200"><MonitorX size={18} /></span><div className="min-w-0 flex-1"><h2 id="exclusive-notice-title" className="font-display text-base font-bold text-white">Plein écran exclusif détecté</h2><p className="mt-1 text-xs leading-relaxed text-white/45">Le panneau rapide n'est pas disponible en plein écran exclusif : une fenêtre ZAILON ne peut pas s'afficher au-dessus du jeu dans ce mode. Aucune injection n'est utilisée pour contourner cette limite.</p></div><button type="button" onClick={onClose} aria-label="Fermer" className="rounded-lg p-2 text-white/36 hover:bg-white/[0.06]"><X size={15} /></button></div><div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/70 hover:bg-white/[0.05]">Utiliser Borderless</button><button type="button" onClick={onClose} className="rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-ink-400">Fermer</button></div></section></div>
+  return <div className="fixed inset-0 z-[270] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}><section role="dialog" aria-modal="true" aria-labelledby="exclusive-notice-title" className="w-full max-w-sm rounded-2xl border border-white/[0.11] bg-[#111414] p-5 shadow-2xl" onClick={event => event.stopPropagation()}><div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-300/10 text-amber-200"><MonitorX size={18} /></span><div className="min-w-0 flex-1"><h2 id="exclusive-notice-title" className="font-display text-base font-bold text-white">Plein écran exclusif détecté</h2><p className="mt-1 text-xs leading-relaxed text-white/45">Le panneau rapide n'est pas disponible en plein écran exclusif : une fenêtre ZAILON ne peut pas s'afficher au-dessus du jeu dans ce mode. Aucune injection n'est utilisée pour contourner cette limite.</p></div><button type="button" onClick={onClose} aria-label="Fermer" className="rounded-lg p-2 text-white/36 hover:bg-white/[0.06]"><X size={15} /></button></div><div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/70 hover:bg-white/[0.05]">Utiliser Borderless</button><button type="button" onClick={onClose} className="rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]">Fermer</button></div></section></div>
 }
 
 function NotificationCenter({ history, onDismiss, onClear, onClearAll }: {
@@ -755,5 +751,5 @@ function ExternalInstallDialog({ request, games, onCancel, onContinue }: { reque
   const game = games.find(item => item.id === gameId)
   const [profileId, setProfileId] = useState(game?.profiles[0]?.id || '')
   const selectGame = (nextGameId: string) => { setGameId(nextGameId); setProfileId(games.find(item => item.id === nextGameId)?.profiles[0]?.id || '') }
-  return <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/75 p-5 backdrop-blur-sm"><section className="w-full max-w-lg rounded-2xl border border-white/[0.1] bg-[#111414] p-4 shadow-2xl"><div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gold/10 text-gold"><Download size={17} /></span><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-white/80">Lien Nexus reçu</h2><p className="mt-1 text-[11px] leading-relaxed text-white/40">{request.gameDomain} · mod {request.modId} · fichier {request.fileId}</p></div><button onClick={onCancel} title="Annuler" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06]"><X size={14} /></button></div>{games.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="text-[11px] text-white/45">Jeu cible<select value={gameId} onChange={event => selectGame(event.target.value)} className="mt-1.5 block w-full rounded-lg border border-white/[0.08] bg-[#0d1010] px-2 py-2 text-[11px] text-white/70">{games.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label className="text-[11px] text-white/45">Profil cible<select value={profileId} onChange={event => setProfileId(event.target.value)} className="mt-1.5 block w-full rounded-lg border border-white/[0.08] bg-[#0d1010] px-2 py-2 text-[11px] text-white/70">{game?.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label></div> : <p className="mt-4 rounded-lg border border-amber-300/15 bg-amber-300/[0.04] p-3 text-[11px] text-amber-100/60">Ajoutez d’abord le jeu cible à la bibliothèque.</p>}<p className="mt-4 text-[11px] leading-relaxed text-white/35">Sans paramètres d’application Nexus enregistrés, ZAILON ouvre la page exacte du fichier au lieu de prétendre l’avoir téléchargé.</p><div className="mt-4 flex justify-end gap-2"><button onClick={onCancel} className="rounded-lg px-3 py-2 text-[11px] text-white/45">Annuler</button><button disabled={!gameId || !profileId} onClick={() => onContinue(gameId, profileId)} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-ink-400 disabled:opacity-30"><ExternalLink size={12} /> Ouvrir le fichier Nexus</button></div></section></div>
+  return <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/75 p-5 backdrop-blur-sm"><section className="w-full max-w-lg rounded-2xl border border-white/[0.1] bg-[#111414] p-4 shadow-2xl"><div className="flex items-start gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gold/10 text-gold"><Download size={17} /></span><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-white/80">Lien Nexus reçu</h2><p className="mt-1 text-[11px] leading-relaxed text-white/40">{request.gameDomain} · mod {request.modId} · fichier {request.fileId}</p></div><button onClick={onCancel} title="Annuler" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06]"><X size={14} /></button></div>{games.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="text-[11px] text-white/45">Jeu cible<select value={gameId} onChange={event => selectGame(event.target.value)} className="mt-1.5 block w-full rounded-lg border border-white/[0.08] bg-[#0d1010] px-2 py-2 text-[11px] text-white/70">{games.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label className="text-[11px] text-white/45">Profil cible<select value={profileId} onChange={event => setProfileId(event.target.value)} className="mt-1.5 block w-full rounded-lg border border-white/[0.08] bg-[#0d1010] px-2 py-2 text-[11px] text-white/70">{game?.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label></div> : <p className="mt-4 rounded-lg border border-amber-300/15 bg-amber-300/[0.04] p-3 text-[11px] text-amber-100/60">Ajoutez d’abord le jeu cible à la bibliothèque.</p>}<p className="mt-4 text-[11px] leading-relaxed text-white/35">Sans paramètres d’application Nexus enregistrés, ZAILON ouvre la page exacte du fichier au lieu de prétendre l’avoir téléchargé.</p><div className="mt-4 flex justify-end gap-2"><button onClick={onCancel} className="rounded-lg px-3 py-2 text-[11px] text-white/45">Annuler</button><button disabled={!gameId || !profileId} onClick={() => onContinue(gameId, profileId)} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-30"><ExternalLink size={12} /> Ouvrir le fichier Nexus</button></div></section></div>
 }

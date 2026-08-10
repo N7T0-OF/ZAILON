@@ -150,7 +150,7 @@ export function ProfileSwitcherPopover({ open, anchorRef, profiles, selectedProf
             <button
               type="button"
               onClick={() => { if (newName.trim()) { onCreate(newName.trim()); setNewName(''); onClose() } }}
-              className="flex items-center gap-1 rounded-lg bg-gold px-2.5 py-1.5 text-[11px] font-semibold text-[#101313]"
+              className="flex items-center gap-1 rounded-lg bg-gold px-2.5 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)]"
             >
               <Plus size={12} />Créer
             </button>

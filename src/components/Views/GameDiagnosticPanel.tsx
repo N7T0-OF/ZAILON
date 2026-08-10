@@ -271,7 +271,7 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
 
       {section === 'deployment' && <div>
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" onClick={() => void runAudit()} disabled={busy || !native.isDesktop()} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313] disabled:opacity-40">{busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}{busy ? 'Analyse en cours…' : (audit ? 'Relancer l’audit' : 'Lancer l’audit')}</button>
+          <button type="button" onClick={() => void runAudit()} disabled={busy || !native.isDesktop()} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-40">{busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}{busy ? 'Analyse en cours…' : (audit ? 'Relancer l’audit' : 'Lancer l’audit')}</button>
           {onRepairMo2 && <button type="button" onClick={onRepairMo2} disabled={repairBusy} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/55 hover:border-gold/25 hover:text-gold disabled:cursor-not-allowed disabled:opacity-40">{repairBusy ? <Loader2 size={12} className="animate-spin" /> : <Wrench size={12} />}{repairBusy ? 'Réparation en cours…' : 'Réparer l’import MO2 et le déploiement'}</button>}
         </div>
         {audit && <div className="mt-4 space-y-3">
@@ -589,7 +589,7 @@ function Red4extRepairCard({ summary, audit, busy, onRepair, onRepairMo2 }: { su
   return <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="text-[11px] font-semibold text-white/68">Réparer RED4ext</p>
-      <button type="button" onClick={onRepair} disabled={busy} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313] disabled:opacity-40">{busy ? <Loader2 size={13} className="animate-spin" /> : <Wrench size={13} />}{busy ? 'Diagnostic en cours…' : 'Réparer'}</button>
+      <button type="button" onClick={onRepair} disabled={busy} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-40">{busy ? <Loader2 size={13} className="animate-spin" /> : <Wrench size={13} />}{busy ? 'Diagnostic en cours…' : 'Réparer'}</button>
     </div>
     <p className="mt-1.5 text-[11px] leading-relaxed text-white/40">Snapshot + retrouver le paquet + vérifier le core et les plugins + reconstruire la table virtuelle (audit). ZAILON ne télécharge jamais une autre version sans confirmation.</p>
     {summary && <div className={`mt-3 rounded-xl border p-3 ${RED4EXT_VERDICT_TONE[summary.verdict]}`}>

@@ -162,7 +162,7 @@ export function GameKeyboardPanel({ game, profile, embedded = false }: { game: G
             <option value="">Lier à un profil de mods…</option>
             {game.profiles.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
-          <button type="button" onClick={() => createProfile()} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[#101313]"><Plus size={13} />Profil pour tout le jeu</button>
+          <button type="button" onClick={() => createProfile()} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><Plus size={13} />Profil pour tout le jeu</button>
         </div>
       </div>
 
@@ -264,7 +264,7 @@ function RemapTestDialog({ game, profileName, layout, mapping, onClose }: { game
           ? mapping.map((entry, index) => <div key={`${entry.physical}-${index}`} className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-black/15 px-3 py-2 font-mono text-[11px] text-white/55"><span className="text-gold">{entry.physical}</span><span>→</span><span className="text-white/80">{entry.gameKey}</span></div>)
           : <p className="col-span-2 text-[11px] text-white/34">Aucune traduction active pour cette disposition.</p>}
       </div>
-      <footer className="mt-4 flex justify-end"><button type="button" onClick={onClose} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[#101313]">Fermer</button></footer>
+      <footer className="mt-4 flex justify-end"><button type="button" onClick={onClose} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]">Fermer</button></footer>
     </section>
   </div>
 }

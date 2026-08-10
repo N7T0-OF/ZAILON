@@ -252,7 +252,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
                   Voir tous les changements
                 </button>
               )}
-              <button type="button" onClick={closeReleaseNotes} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[#101313] hover:bg-gold/90">
+              <button type="button" onClick={closeReleaseNotes} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90">
                 <CheckCircle2 size={13} /> Fermer
               </button>
             </>
@@ -312,8 +312,8 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
             )}
 
             <div className="mt-5 flex flex-wrap justify-end gap-2">
-              {status === 'available' && <button onClick={() => void installUpdate()} className="flex items-center gap-1.5 rounded bg-gold px-3 py-2 text-xs font-semibold text-ink-400 hover:bg-gold-light"><Download size={13} /> Install update</button>}
-              {status === 'error' && <button onClick={() => void checkUpdates()} className="flex items-center gap-1.5 rounded bg-gold px-3 py-2 text-xs font-semibold text-ink-400"><RefreshCw size={13} /> Retry</button>}
+              {status === 'available' && <button onClick={() => void installUpdate()} className="flex items-center gap-1.5 rounded bg-gold px-3 py-2 text-xs font-semibold text-[var(--zailon-accent-text)] hover:bg-gold-light"><Download size={13} /> Install update</button>}
+              {status === 'error' && <button onClick={() => void checkUpdates()} className="flex items-center gap-1.5 rounded bg-gold px-3 py-2 text-xs font-semibold text-[var(--zailon-accent-text)]"><RefreshCw size={13} /> Retry</button>}
               {(status === 'error' || status === 'available') && <button onClick={() => void openLog()} className="flex items-center gap-1.5 rounded border border-white/10 px-3 py-2 text-xs text-white/65 hover:bg-white/5"><FileText size={13} /> Open log</button>}
             </div>
           </section>

@@ -84,7 +84,7 @@ export function GuidedTour({ onClose }: { onClose?: () => void }) {
               {stepIndex > 0 && (
                 <button type="button" onClick={previous} className="flex items-center gap-1 rounded-lg border border-white/[0.08] px-2.5 py-1.5 text-[11px] text-white/55 hover:bg-white/[0.05]"><ChevronLeft size={12} />Précédent</button>
               )}
-              <button type="button" onClick={next} className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-[11px] font-semibold ${isLast ? 'bg-emerald-300/90 text-[#101313]' : 'bg-gold text-ink-400'}`}>
+              <button type="button" onClick={next} className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-[11px] font-semibold ${isLast ? 'bg-emerald-300/90 text-[var(--zailon-accent-text)]' : 'bg-gold text-[var(--zailon-accent-text)]'}`}>
                 {isLast ? (<><Check size={12} />Terminer</>) : (<>Suivant<ChevronRight size={12} /></>)}
               </button>
             </div>

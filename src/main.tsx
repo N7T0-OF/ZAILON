@@ -4,7 +4,13 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import { QuickPanel } from './components/QuickPanel'
+import { bootstrapTheme } from './lib/designTokens'
 import './index.css'
+
+// ThemeBootstrap (spec §7) : appliquer les tokens persistés AVANT le premier
+// rendu — la couleur d'accent choisie par l'utilisateur ne clignote jamais en
+// blanc par défaut au démarrage.
+bootstrapTheme(document.documentElement)
 
 // Deux fenêtres partagent le même bundle : la fenêtre principale rend l'app
 // complète, la fenêtre « quick-panel » (Quick Game Panel, Phase 6) rend

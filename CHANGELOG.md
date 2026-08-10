@@ -1340,6 +1340,23 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.62.0 — Persistance de l'accent corrigée + Theme Bootstrap + DesignTokenService
+
+### Fixed
+
+- **LE bug de persistance de la couleur d'accent** (spec §1, §6) : la couleur choisie dans Apparence était appliquée en session mais **absente de `partialize`** (zustand persist) — au redémarrage, la migration retombait sur le blanc par défaut. `accentColor` est maintenant persisté, et `flushPendingSettings` est aussi déclenché sur `pagehide` (fermeture du webview Tauri), en plus de `beforeunload` (spec §4).
+
+### Added
+
+- **DesignTokenService** (`src/lib/designTokens.ts`, 8 tests) : `applyAccentTokens` injecte les 8 tokens dérivés (`--zailon-accent-hover/active/muted/border/text/contrast`, `--zailon-focus-ring`), `applyDangerTokens` la palette danger **indépendante de l'accent** (`--zailon-danger*`, spec §14, §70-71 — un accent rouge n'absorbe jamais le Danger), `bootstrapTheme` applique les tokens persistés **avant le premier rendu** (spec §7 : plus aucun flash du thème blanc par défaut). Clé de persistance `zailon-v1` centralisée.
+- **`--zailon-danger` / `--zailon-danger-hover` / `--zailon-danger-muted` / `--zailon-accent-border` / `--zailon-accent-contrast`** dans `index.css`.
+- **AccentTokenAudit** (spec §68) : test CI qui échoue si un composant hardcode une couleur d'action (fonds d'accent prédéfinis, textes de contraste sombres) au lieu des tokens.
+
+### Changed
+
+- **Migration de toutes les couleurs d'action hardcodées → tokens** (spec §9-13) : le bouton **Jouer** (Accueil + Bibliothèque), **Ajouter**, **Installer**, **Détails**, le **sidebar actif**, les boutons **Retour au jeu / Fermer / Créer / Réparer / Enregistrer**, le Quick Panel — `bg-[#dbe8e5]` → `var(--zailon-accent)`, textes de contraste → `var(--zailon-accent-text)`, hover → `var(--zailon-accent-hover)` (44 occurrences au total). Le thème suit maintenant la couleur choisie partout, y compris après redémarrage.
+- App.tsx utilise désormais le DesignTokenService (logique de tokens dédupliquée).
+
 ## 1.61.0 — Bulles d'aide uniformes : ZailonInfoPopover (ⓘ / ⚠ / technique)
 
 ### Added

@@ -219,7 +219,7 @@ export function QuickPanel() {
         <section className="rounded-xl border border-white/[0.06] bg-white/[0.025] p-2.5">
           <p className="mb-2 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-white/35"><Palette size={10} />Visuel</p>
           <div className="grid grid-cols-2 gap-1.5">
-            <button type="button" onClick={() => void visual('toggle')} className="flex items-center justify-center gap-1.5 rounded-lg bg-[#dbe8e5]/90 px-2 py-1.5 text-[11px] font-semibold text-[#0d1111] hover:bg-white">Activer / désactiver</button>
+            <button type="button" onClick={() => void visual('toggle')} className="flex items-center justify-center gap-1.5 rounded-lg bg-[var(--zailon-accent)]/90 px-2 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-[var(--zailon-accent-hover)]">Activer / désactiver</button>
             <button type="button" onClick={() => void visual('previous')} className="flex items-center justify-center gap-1.5 rounded-lg border border-white/[0.08] px-2 py-1.5 text-[11px] text-white/60 hover:bg-white/[0.06]">Profil précédent</button>
             <button type="button" onClick={() => void visual('next')} className="flex items-center justify-center gap-1.5 rounded-lg border border-white/[0.08] px-2 py-1.5 text-[11px] text-white/60 hover:bg-white/[0.06]">Profil suivant</button>
             <button type="button" onClick={() => void visual('restore')} className="flex items-center justify-center gap-1.5 rounded-lg border border-white/[0.08] px-2 py-1.5 text-[11px] text-white/60 hover:bg-white/[0.06]"><RefreshCw size={10} />Restaurer</button>

@@ -12,6 +12,7 @@ import { compareFrameworkSets, fingerprintFrameworkSet, hasFrameworkChanges, typ
 import { effectivePerformance, type DownloadPolicy, type PerformanceMode, type ScanPolicy, type ZailonPerformancePolicies } from '../lib/performanceProfiles'
 import { enabledCountFromState, isSilentClear, repairReport } from '../lib/profileConsistency'
 import { createDebouncer } from '../lib/persistDebounce'
+import { ZAILON_PERSIST_KEY } from '../lib/designTokens'
 import { buildDiscordActivity, DISCORD_APPLICATION_ID, DISCORD_PRIORITY_DEBOUNCE_MS, shouldDelayPrioritySwitch, type DiscordActivityInput } from '../lib/discordPresence'
 import { resolveDiscordAsset } from '../lib/discordAssets'
 
@@ -2673,8 +2674,12 @@ export const useStore = create<Store>()(persist((set, get) => ({
   clearNotificationHistory: () => set({ notificationHistory: [] }),
   clearNotice: () => set({ notice: undefined }),
 }), {
-  name: 'zailon-v1',
+  name: ZAILON_PERSIST_KEY,
   partialize: state => ({
+    // LE fix de persistance de l'accent (spec §1, §6) : la couleur choisie
+    // dans Apparence était appliquée en session mais ABSENTE de partialize —
+    // au redémarrage, la migration retombait sur le blanc par défaut.
+    accentColor: state.accentColor,
     activeGameTab: state.activeGameTab,
     games: state.games,
     selectedGameId: state.selectedGameId,

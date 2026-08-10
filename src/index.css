@@ -7,7 +7,13 @@
   --zailon-accent-hover: #ffffff;
   --zailon-accent-active: #cfd8d6;
   --zailon-accent-muted: rgb(243 250 248 / 0.14);
+  --zailon-accent-border: rgb(243 250 248 / 0.35);
   --zailon-accent-text: #090b0b;
+  --zailon-accent-contrast: #090b0b;
+  /* Palette danger indépendante de l'accent (spec §14, §70-71). */
+  --zailon-danger: #f87171;
+  --zailon-danger-hover: #ef4444;
+  --zailon-danger-muted: rgb(248 113 113 / 0.12);
   --zailon-focus-ring: rgb(243 250 248 / 0.78);
   --zailon-caption: 15px;
   --zailon-small: 16px;

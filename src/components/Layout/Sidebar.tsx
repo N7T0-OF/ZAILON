@@ -24,7 +24,7 @@ export function Sidebar() {
 
   return <><aside className="relative z-20 flex w-[56px] flex-shrink-0 flex-col items-center border-r border-white/[0.045] bg-[#0a0c0c]/95 px-2 py-3 shadow-[12px_0_34px_rgba(0,0,0,0.15)]">
     <button type="button" onClick={() => setView('home')} title="ZAILON — Accueil" className="mb-6 flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.11] bg-[#111515] shadow-[0_9px_22px_rgba(0,0,0,0.32)]">
-      <span className="font-display text-sm font-black text-[#dbe8e5]">Z</span>
+      <span className="font-display text-sm font-black text-[var(--zailon-accent)]">Z</span>
     </button>
 
     <nav className="flex w-full flex-col items-center gap-2" aria-label="Navigation principale">
@@ -50,7 +50,7 @@ function NavButton({ item, active, onClick }: { item: { id: ViewType; icon: Luci
     title={item.label}
     aria-label={item.label}
     aria-current={active ? 'page' : undefined}
-    className={`relative flex h-8 w-8 items-center justify-center rounded-full transition-all ${active ? 'bg-[#dbe8e5] text-[#101313] shadow-[0_8px_22px_rgba(0,0,0,0.32)]' : 'text-white/32 hover:bg-white/[0.06] hover:text-white/74'}`}
+    className={`relative flex h-8 w-8 items-center justify-center rounded-full transition-all ${active ? 'bg-[var(--zailon-accent)] text-[var(--zailon-accent-text)] shadow-[0_8px_22px_rgba(0,0,0,0.32)]' : 'text-white/32 hover:bg-white/[0.06] hover:text-white/74'}`}
   >
     <Icon size={13} strokeWidth={active ? 2.35 : 1.7} />
   </button>

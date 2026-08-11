@@ -1,5 +1,49 @@
 # Changelog
 
+## [1.72.0] - 2026-08-11
+
+> Migration réelle vers l'architecture Add-ons : Discord, Frosty, ReShade et les
+> sources Explorer n'existent plus sans leur add-on installé et activé. Fonds
+> multimédia retirés de Paramètres > Apparence et déplacés vers l'Accueil
+> (contrôle audio par jeu dans le Hero + lien YouTube collable). Paramètres
+> compacts au redémarrage, cartes Add-ons allégées.
+
+### Added
+
+- Registre de capacités add-ons (`src/lib/addonGating.ts`) : une fonctionnalité
+  n'existe que si son add-on est installé ET activé — règle absolue (§10-24, §74).
+- Contrôle audio du Hero (Accueil) : icône 🔇/🔊 + slider discret, persisté par
+  jeu (mutedOverride/volumeOverride) — jamais un réglage global.
+- Bloc « Fond de l'Accueil » dans Apparence du jeu (depuis le Hero) : type de
+  fond par jeu + lien YouTube collable directement (watch, youtu.be, shorts).
+- État « Aucune source installée » dans Explorer : sans add-on de provider,
+  aucune requête distante, boutons d'ajout vers la page Add-ons.
+- Carte « Module disponible » dans Configuration pour Frosty/ReShade éligibles
+  sans add-on — « Ajouter à ZAILON » en un clic.
+- Badge 🔐 avec popover de permissions sur les cartes Add-ons (permissions au
+  clic, jamais sur la carte).
+
+### Changed
+
+- Paramètres > Apparence : bloc « Fonds multimédia de l'Accueil » supprimé — les
+  contrôles du fond vivent désormais sur l'Accueil du jeu.
+- Sections Discord, Fournisseurs de mods, Illustrations et NXM : affichées
+  uniquement avec les add-ons correspondants (les clés stockées restent et
+  réapparaissent à la réinstallation).
+- Configuration jeu : blocs Frosty/ReShade gatés par add-on — sans add-on, ni
+  bouton, ni diagnostic, ni presets (§12-15).
+- Explorer : onglets Nexus/GameBanana/CurseForge filtrés par add-ons installés.
+- Paramètres : accordéons compacts au redémarrage (état mémorisé par session,
+  sessionStorage — §49).
+- Cartes Add-ons : texte « installation atomique » répété supprimé (détails dans
+  ⓘ Sécurité), description courte + bulle, bouton Documentation remplacé par une
+  icône 📄 avec infobulle.
+
+### Removed
+
+- Options globales Fond vidéo / Audio / Volume / Pause des fonds hors de
+  Paramètres > Apparence.
+
 ## [1.10.0] - 2026-08-08
 
 > Release du lot Refonte UX Phase 1 + Phase 2 partielle : clavier par jeu, fusion

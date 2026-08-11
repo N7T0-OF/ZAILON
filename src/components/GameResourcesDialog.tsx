@@ -5,6 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { Game, GameResources } from '../types'
 import { ArtworkCandidate, GameResourceKind, native, pickGameResource, resourceUrl } from '../lib/native'
 import { artworkProvidersWithState, artworkSearchPlan, dedupeArtworkCandidates, resultSourceLabels } from '../lib/artworkRegistry'
+import { parseYouTubeUrl, youtubeThumbnailUrl } from '../lib/youtubeUrl'
 import { useStore } from '../store/useStore'
 
 type ResourceKey = 'coverPath' | 'logoPath' | 'iconPath' | 'backgroundPath' | 'bannerPath' | 'videoPath'
@@ -230,6 +231,7 @@ export function GameAppearanceEditor({ game, onSave, onCancel, embedded = false,
   return <div className={`flex min-h-0 flex-1 flex-col ${embedded ? 'rounded-xl border border-white/[0.07] bg-white/[0.012]' : ''}`}>
     {!embedded && <header className="flex flex-shrink-0 items-center justify-between border-b border-white/[0.065] px-4 py-3"><div><p className="font-mono text-[11px] uppercase tracking-[0.22em] text-gold/55">Apparence du jeu</p><h2 id="game-resources-title" className="mt-0.5 font-display text-lg font-bold text-white">{title || game.name}</h2></div><button type="button" onClick={() => void cancel()} disabled={busy} aria-label="Fermer" className="rounded-lg p-1.5 text-white/38 hover:bg-white/[0.07] hover:text-white disabled:opacity-30"><X size={16} /></button></header>}
     {error && <p className="mx-4 mt-3 rounded-lg border border-red-400/20 bg-red-500/10 px-3 py-2 text-[11px] text-red-200">{error}</p>}
+    <HeroMediaStrip game={game} />
     <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[180px_minmax(280px,1fr)_220px]">
       <nav className="border-b border-white/[0.06] p-2 lg:border-b-0 lg:border-r" aria-label="Ressources visuelles">
         <div className="grid grid-cols-3 gap-1 lg:grid-cols-1">
@@ -292,4 +294,44 @@ function PositionControls({ draft, fields, onChange }: {
     {sliders.map(({ icon: Icon, label, field, value, min, max }) => <label key={label} className="block"><span className="mb-1.5 flex items-center justify-between text-[11px] text-white/38"><span className="flex items-center gap-1"><Icon size={9} />{label}</span><span className="font-mono text-white/28">{value}%</span></span><input type="range" min={min} max={max} value={value} onChange={event => onChange(field, Number(event.target.value))} className="h-1 w-full accent-gold" /></label>)}
     <div><p className="mb-1.5 text-[11px] text-white/38">Remplissage</p><div className="grid grid-cols-2 gap-1">{(['cover', 'contain'] as const).map(fit => <button type="button" key={fit} onClick={() => onChange(fields.fit, fit)} className={`rounded-md border py-1.5 text-[11px] ${draft[fields.fit] === fit || (!draft[fields.fit] && fit === 'cover') ? 'border-gold/28 bg-gold/[0.07] text-gold' : 'border-white/[0.07] text-white/34 hover:bg-white/[0.035]'}`}>{fit === 'cover' ? 'Remplir' : 'Contenir'}</button>)}</div></div>
   </div>
+}
+
+/** Bloc « Fond de l'Accueil » (spec Accueil §3, §6-7) : type de fond par jeu +
+ * lien YouTube collable directement, persisté par jeu (setGameBackgroundMedia). */
+function HeroMediaStrip({ game }: { game: Game }) {
+  const setGameBackgroundMedia = useStore(state => state.setGameBackgroundMedia)
+  const [urlDraft, setUrlDraft] = useState('')
+  const [feedback, setFeedback] = useState<'idle' | 'valid' | 'invalid'>('idle')
+  const media = game.backgroundMedia
+  const type = media?.type
+  const applyYouTube = () => {
+    const parsed = parseYouTubeUrl(urlDraft)
+    if (!parsed) { setFeedback('invalid'); return }
+    setGameBackgroundMedia(game.id, { type: 'youtube', youtubeUrl: urlDraft.trim(), youtubeVideoId: parsed.videoId, startSeconds: parsed.startSeconds })
+    setFeedback('valid')
+  }
+  const thumb = media?.youtubeVideoId ? youtubeThumbnailUrl(media.youtubeVideoId) : undefined
+  return (
+    <div className="mx-4 mt-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] font-semibold text-white/55">Fond de l'Accueil</p>
+        <div className="flex gap-1">
+          {([['image', 'Image'], ['video', 'Vidéo locale'], ['youtube', 'YouTube']] as const).map(([id, label]) => (
+            <button key={id} type="button" onClick={() => { setGameBackgroundMedia(game.id, { type: id }); setFeedback('idle') }} className={`rounded-full border px-2.5 py-1 text-[10px] font-medium transition-colors ${type === id ? 'border-gold/40 bg-gold/10 text-gold' : 'border-white/[0.09] text-white/45 hover:text-white/70'}`}>{label}</button>
+          ))}
+        </div>
+      </div>
+      {type === 'youtube' && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {thumb && <img src={thumb} alt="" className="h-10 w-16 flex-none rounded border border-white/[0.08] object-cover" />}
+          <input type="url" value={urlDraft} onChange={event => { setUrlDraft(event.target.value); setFeedback('idle') }} placeholder="https://youtube.com/watch?v=…" className="min-w-0 flex-1 rounded-lg border border-white/[0.1] bg-black/25 px-3 py-1.5 text-[11px] text-white/80 placeholder-white/25 outline-none focus:border-gold/40" />
+          <button type="button" onClick={applyYouTube} className="rounded-lg bg-gold px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90"><Check size={11} className="mr-1 inline" />Utiliser comme fond</button>
+        </div>
+      )}
+      {type === 'video' && <p className="mt-2 text-[11px] text-white/38">Sélectionnez le slot « Vidéo » ci-contre pour choisir un fichier MP4 ou WebM local.</p>}
+      {type === 'image' && <p className="mt-2 text-[11px] text-white/38">Image fixe — choisissez une jaquette, bannière ou arrière-plan ci-contre.</p>}
+      {feedback === 'valid' && <p className="mt-1.5 text-[11px] text-emerald-300/85">Vidéo enregistrée — lecteur intégré, aucun téléchargement.</p>}
+      {feedback === 'invalid' && <p className="mt-1.5 text-[11px] text-red-300/85">Lien non pris en charge. Accepté : youtube.com/watch, youtu.be, shorts.</p>}
+    </div>
+  )
 }

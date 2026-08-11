@@ -36,6 +36,7 @@ import {
 } from '../../lib/native'
 import { NexusExplorerAdapter } from '../../lib/explorerProviders'
 import { cachedProviderStatuses, providerHealthCache } from '../../lib/lazyPages'
+import { addonCapabilities, hasCapability, PROVIDER_ADDON } from '../../lib/addonGating'
 import { inspectReShadePreset, RESHADE_SHADER_PACKS } from '../../lib/reshade'
 import type { ReShadePresetInspection } from '../../lib/reshade'
 import { GridColumnCycleButton, ProviderExplorerToolbar, ProviderFilters, ProviderPagination, ProviderSearchResults, ProviderSortControl, ProviderViewModeToggle } from '../Explorer/ProviderExplorer'
@@ -163,7 +164,18 @@ export function ExploreView() {
   const [uninstallMod, setUninstallMod] = useState<ExplodMod>()
   const [providerStatuses, setProviderStatuses] = useState<Record<string, ProviderConnectionStatus>>({})
   const selectedGame = games.find(game => game.id === selectedGameId)
-  const readyProvider = platform === 'gamebanana' || (platform === 'nexus' && providerStatuses.nexus?.configured)
+  // Gating réel (spec Add-ons §21-24) : seuls les providers dont l'add-on est
+  // installé et activé existent. Sans aucun add-on de source, Explorer affiche
+  // « Aucune source installée » — zéro requête distante (§22-23).
+  const installedAddons = useStore(state => state.addons)
+  const capabilities = useMemo(() => addonCapabilities(installedAddons), [installedAddons])
+  const availableProviders = providers.filter(provider => {
+    const capability = PROVIDER_ADDON[provider.id]
+    return Boolean(capability) && hasCapability(capabilities, capability)
+  })
+  const activeProviderMissing = !availableProviders.some(provider => provider.id === platform)
+  const readyProvider = availableProviders.some(provider => provider.id === 'gamebanana')
+    || (availableProviders.some(provider => provider.id === 'nexus') && providerStatuses.nexus?.configured)
   const gameChoices = [...new Map([...pinnedGames, ...recentGames, ...catalogGames].map(game => [game.id, game])).values()]
   const selectedCatalogGame = gameChoices.find(game => game.id === gameId) || { id: gameId, name: `GameBanana #${gameId}` }
   const visibleMods = showNsfw ? mods : mods.filter(mod => !mod.nsfw)
@@ -197,16 +209,16 @@ export function ExploreView() {
   }, [])
 
   useEffect(() => {
-    if (platform !== 'gamebanana') return
+    if (platform !== 'gamebanana' || !hasCapability(capabilities, 'provider.gamebanana')) return
     const timeout = window.setTimeout(() => void refresh(), search ? 450 : 0)
     return () => window.clearTimeout(timeout)
-  }, [platform, gameId, page, sort, search, refresh])
+  }, [platform, gameId, page, sort, search, refresh, capabilities])
 
   useEffect(() => {
-    if (platform !== 'gamebanana') return
+    if (platform !== 'gamebanana' || !hasCapability(capabilities, 'provider.gamebanana')) return
     const timeout = window.setTimeout(() => void searchGames(), 400)
     return () => window.clearTimeout(timeout)
-  }, [gameQuery, platform, searchGames])
+  }, [gameQuery, platform, searchGames, capabilities])
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault()
@@ -244,8 +256,9 @@ export function ExploreView() {
       <TargetGame gameName={selectedGame?.name} configured={Boolean(selectedGame?.modsPath)} onConfigure={() => setView('games')} />
     </header>
 
+    {availableProviders.length > 0 ? <>
     <section className="mt-5 grid gap-2 md:grid-cols-2 xl:grid-cols-4" aria-label="Sources de mods">
-      {providers.map(provider => {
+      {availableProviders.map(provider => {
         const connected = provider.ready || (provider.id === 'nexus' && providerStatuses.nexus?.configured)
         const detail = provider.id === 'nexus' && providerStatuses.nexus?.configured
           ? providerStatuses.nexus.connected ? `Connecté${providerStatuses.nexus.accountName ? ` · ${providerStatuses.nexus.accountName}` : ''}` : 'Clé sécurisée · test conseillé'
@@ -265,7 +278,7 @@ export function ExploreView() {
       })}
     </section>
 
-    {!readyProvider ? <ProviderUnavailable provider={providers.find(item => item.id === platform)?.name || platform} onConfigure={() => setView('settings')} /> : platform === 'nexus' ? <NexusCatalogV2 selectedGameName={selectedGame?.name} showNsfw={showNsfw} /> : <>
+    {!readyProvider ? <ProviderUnavailable provider={availableProviders.find(item => item.id === platform)?.name || platform} onConfigure={() => setView(activeProviderMissing ? 'addons' : 'settings')} /> : platform === 'nexus' ? <NexusCatalogV2 selectedGameName={selectedGame?.name} showNsfw={showNsfw} /> : <>
       <section className="mt-4 rounded-xl border border-white/[0.07] bg-black/10 p-3">
         <ProviderExplorerToolbar>
           <div className="relative min-w-0 flex-1">
@@ -317,6 +330,7 @@ export function ExploreView() {
         <ProviderPagination provider="GameBanana" page={page} hasNextPage={hasNextPage} loading={loading} onPageChange={setPage} />
       </section>
     </>}
+    </> : <NoProvidersInstalled onBrowseAddons={() => setView('addons')} />}
     {previewMod && (() => { const preset = inspectReShadePreset({ fileName: previewMod.fileName, category: previewMod.category, tags: previewMod.tags, description: previewMod.description, name: previewMod.name }); return <ModPreviewModal mod={previewMod} preset={preset.isPreset ? preset : undefined} canInstall={Boolean(selectedGame?.modsPath)} installing={installingId === previewMod.id} installed={remoteStateFor(previewMod).installed} onInstall={() => void install(previewMod)} onInstallIn={() => installIn(previewMod)} onUninstall={() => { setPreviewMod(undefined); setUninstallMod(previewMod) }} onClose={() => setPreviewMod(undefined)} /> })()}
     {uninstallMod && <UninstallRemoteDialog mod={uninstallMod} profiles={remoteStateFor(uninstallMod).affectedProfiles} onClose={() => setUninstallMod(undefined)} onConfirm={mode => { const identity = remoteIdentityFromCatalog(uninstallMod.platform, uninstallMod.id, uninstallMod.modId); void uninstallRemoteMod(identity.provider, identity.remoteModId, identity.fileId, mode); setUninstallMod(undefined) }} />}
     {installInMod && <InstallTargetDialog mod={installInMod} games={games} onClose={() => setInstallInMod(undefined)} onConfirm={async (gameId, profileId) => {
@@ -986,4 +1000,18 @@ function UninstallRemoteDialog({ mod, profiles, onClose, onConfirm }: { mod: Exp
       </div>
     </section>
   </div>
+}
+
+/** État « Aucune source installée » (spec Add-ons §23) : sans add-on de source,
+ * Explorer ne fait aucune requête distante et propose d'ajouter un provider. */
+function NoProvidersInstalled({ onBrowseAddons }: { onBrowseAddons: () => void }) {
+  return <section className="mt-5 flex min-h-64 flex-col items-center justify-center rounded-2xl border border-white/[0.07] bg-white/[0.018] p-8 text-center">
+    <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.025] text-white/28"><Compass size={19} /></div>
+    <h2 className="mt-3 text-sm font-semibold text-white/72">Aucune source installée</h2>
+    <p className="mt-1 max-w-md text-xs leading-relaxed text-white/38">Ajoutez un provider pour rechercher des mods en ligne — Nexus, GameBanana ou CurseForge. Rien n'est chargé ni interrogé tant que vous n'installez pas l'add-on correspondant.</p>
+    <div className="mt-4 flex flex-wrap justify-center gap-2">
+      {['Nexus Mods', 'GameBanana', 'CurseForge'].map(name => <button key={name} type="button" onClick={onBrowseAddons} className="rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/62 hover:bg-white/[0.05] hover:text-white/85">{name}</button>)}
+      <button type="button" onClick={onBrowseAddons} className="rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90">Voir les add-ons</button>
+    </div>
+  </section>
 }

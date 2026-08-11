@@ -1,6 +1,7 @@
-import { Boxes, Check, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { Game } from '../../types'
+import { Boxes, Check, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2, Volume2, VolumeX, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Game, GameBackgroundMedia } from '../../types'
+import { resolveAudioSettings } from '../../lib/backgroundMedia'
 import { resourceUrl, native } from '../../lib/native'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
 import { isRed4extActive } from '../../lib/frameworkValidator'
@@ -31,6 +32,7 @@ export function HomeView() {
   const isPlaying = useStore(state => state.isPlaying)
   const sessionTime = useStore(state => state.sessionTime)
   const backgroundMediaSettings = useStore(state => state.backgroundMediaSettings)
+  const setGameBackgroundMedia = useStore(state => state.setGameBackgroundMedia)
   const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
   const endSession = useStore(state => state.endSession)
   const cancelSession = useStore(state => state.cancelSession)
@@ -46,6 +48,11 @@ export function HomeView() {
   // Duck audio avant le lancement (spec §40, §63) : le fond se tait dès le clic
   // sur Jouer, avant même que la préparation démarre.
   const [mediaDucked, setMediaDucked] = useState(false)
+
+  // Contrôle audio du Hero (spec Accueil §3-5) : mute/unmute + volume persistés
+  // par jeu (mutedOverride/volumeOverride) — jamais un réglage global.
+  const heroAudio = resolveAudioSettings(selectedGame ? selectedGame.backgroundMedia : undefined, backgroundMediaSettings)
+  const setHeroMedia = (patch: Partial<GameBackgroundMedia>) => { if (selectedGame) setGameBackgroundMedia(selectedGame.id, patch) }
 
   // SmartPlayButton — un seul CTA : l'état du jeu pilote le libellé et le
   // comportement (Jouer → Préparation… → Recherche du jeu… → En cours).
@@ -140,6 +147,13 @@ export function HomeView() {
         settings={backgroundMediaSettings}
         heroStyle={{ objectFit: heroTransform.fit ?? 'cover', objectPosition: `${heroTransform.x ?? 50}% ${heroTransform.y ?? 50}%`, transform: `scale(${(heroTransform.zoom ?? 100) / 100})` }}
         overlay={<div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(7,9,9,0.82)_0%,rgba(7,9,9,0.55)_42%,rgba(7,9,9,0.18)_68%,rgba(7,9,9,0.30)_100%),linear-gradient(0deg,rgba(9,11,11,0.78)_0%,rgba(9,11,11,0.45)_22%,rgba(9,11,11,0.12)_55%,rgba(9,11,11,0.18)_100%)]" />}
+      />
+
+      <HeroAudioControl
+        muted={heroAudio.muted}
+        volume={Math.round(heroAudio.volume * 100)}
+        onToggle={() => setHeroMedia({ mutedOverride: !heroAudio.muted })}
+        onVolume={value => setHeroMedia({ volumeOverride: value / 100, mutedOverride: value === 0 })}
       />
 
       <div className="relative flex h-full min-h-[520px] flex-col px-[clamp(1.25rem,4vw,4.5rem)] pb-4 pt-5">
@@ -356,4 +370,49 @@ function QuickGame({ game, summary, active, onSelect, favorite }: { game: Game; 
     {favorite && <span className="absolute left-1 top-1 text-[10px] text-amber-300/90" title="Favori">★</span>}
     <span className="absolute inset-x-1.5 bottom-1.5 flex items-center gap-1 truncate text-[11px] font-semibold text-white/78"><span className="min-w-0 flex-1 truncate">{game.name}</span>{activeCount !== undefined && <span className="shrink-0 font-mono text-[9px] text-white/40">{activeCount} actif(s)</span>}</span>
   </button>
+}
+
+/** Contrôle audio discret du Hero (spec Accueil §3-5) : icône toujours visible,
+ * slider révélé au survol/clic puis rétracté après quelques secondes. */
+function HeroAudioControl({ muted, volume, onToggle, onVolume }: {
+  muted: boolean
+  volume: number
+  onToggle: () => void
+  onVolume: (value: number) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const collapseTimer = useRef<number>()
+  const scheduleCollapse = () => {
+    window.clearTimeout(collapseTimer.current)
+    collapseTimer.current = window.setTimeout(() => setExpanded(false), 2600)
+  }
+  useEffect(() => () => window.clearTimeout(collapseTimer.current), [])
+  return (
+    <div
+      className="absolute bottom-3 right-4 z-30 flex items-center gap-1.5 rounded-full border border-white/[0.12] bg-black/40 p-1.5 backdrop-blur-md"
+      onMouseEnter={() => { window.clearTimeout(collapseTimer.current); setExpanded(true) }}
+      onMouseLeave={scheduleCollapse}
+    >
+      <button
+        type="button"
+        onClick={() => { onToggle(); setExpanded(true); window.clearTimeout(collapseTimer.current) }}
+        title={muted ? 'Activer le son du fond' : 'Couper le son du fond'}
+        aria-label={muted ? 'Activer le son du fond' : 'Couper le son du fond'}
+        className="flex h-6 w-6 items-center justify-center rounded-full text-white/70 hover:bg-white/[0.08] hover:text-white"
+      >
+        {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+      </button>
+      {expanded && (
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={volume}
+          onChange={event => onVolume(Number(event.target.value))}
+          aria-label="Volume du fond"
+          className="h-1 w-24 accent-[var(--zailon-accent)]"
+        />
+      )}
+    </div>
+  )
 }

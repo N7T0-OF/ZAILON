@@ -1,5 +1,6 @@
-import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, History, Keyboard, Layers3, MonitorDown, Palette, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Trash2, Upload, Wand2, Wrench } from 'lucide-react'
+import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, History, Keyboard, Layers3, MonitorDown, Palette, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Snowflake, Trash2, Upload, Wand2, Wrench } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
 import { adapterFor, isLauncherBased, LAUNCH_BEHAVIOR_LABELS } from '../../lib/launchAdapters'
@@ -37,6 +38,7 @@ import {
 } from '../../lib/reshade'
 import { describeBackgroundMedia, resolveMediaType } from '../../lib/backgroundMedia'
 import { parseYouTubeUrl, youtubeThumbnailUrl } from '../../lib/youtubeUrl'
+import { addonCapabilities, hasCapability } from '../../lib/addonGating'
 import { resourceUrl } from '../../lib/native'
 import { resolveProfileMods, useStore } from '../../store/useStore'
 import type { Game, GamePreset, GameResources, ModRuntimePathType, Profile } from '../../types'
@@ -106,6 +108,17 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
   const [currentVisualId, setCurrentVisualId] = useState<string | undefined>()
   const [visualProfiles, setVisualProfiles] = useState<Array<{ id: string; name: string }>>([])
   const [advancedOpen, setAdvancedOpen] = useState(false)
+
+  // Gating réel (spec Add-ons §12-15) : blocs Frosty/ReShade uniquement si les
+  // add-ons correspondants sont installés et activés.
+  const installedAddons = useStore(state => state.addons)
+  const capabilities = useMemo(() => addonCapabilities(installedAddons), [installedAddons])
+  const hasFrostyCap = hasCapability(capabilities, 'frosty.backend')
+  const hasReShadeCap = hasCapability(capabilities, 'reshade.manager')
+  const frostyEligible = detectModBackend({ execPath: game.execPath, gameName: game.name }) === 'frosty'
+  const reshadeEligible = resolveReShadeTarget(game).confidence >= 0.6
+  const setView = useStore(state => state.setView)
+  const openAddons = () => setView('addons')
 
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(open))
@@ -320,9 +333,20 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
         <p className="mt-3 text-[11px] leading-relaxed text-white/34">Détection d’overlays, de gestionnaires concurrents (ex. MO2) et de configuration particulière : à venir (Phase 2 de la refonte UX).</p>
       </ConfigCard>
 
-      <FrostyConfigCard game={game} profile={profile} />
+      {/* Gating réel (spec Add-ons §12-15, §74) : Frosty et ReShade n'existent
+          que si leurs add-ons sont installés et activés. Sans add-on, un jeu
+          éligible propose simplement « Ajouter à ZAILON » (spec §36, §38). */}
+      {hasFrostyCap
+        ? <FrostyConfigCard game={game} profile={profile} />
+        : frostyEligible
+          ? <AddonAvailableCard icon={<Snowflake size={14} />} addonName="Frosty Support" description="Support Frosty pour les jeux Frostbite compatibles (NFS 2015, Battlefield…) : .fbmod, runtimes, ordre de chargement et lancement." onInstall={openAddons} />
+          : null}
 
-      <ReShadeConfigCard game={game} profile={profile} />
+      {hasReShadeCap
+        ? <ReShadeConfigCard game={game} profile={profile} />
+        : reshadeEligible
+          ? <AddonAvailableCard icon={<Wand2 size={14} />} addonName="ReShade Manager" description="Installation ReShade, mises à jour, presets et shaders pour ce jeu — sans clé API." onInstall={openAddons} />
+          : null}
 
       <ConfigCard id="performances" title="Performances" icon={Gamepad2} badge={modeLabel(performanceMode)} open={open.includes('performances')} onToggle={() => toggle('performances')}>
         <PerformanceSettings
@@ -834,4 +858,20 @@ function ReShadeConfigCard({ game, profile }: { game: Game; profile: Profile }) 
       <p className="mt-2 text-[10px] leading-relaxed text-white/30">Le runtime ReShade est partagé par installation de jeu ; l&apos;activation, le preset et le verrou de version sont propres à chaque profil (§36). Jamais de mise à jour pendant qu&apos;un jeu tourne (§14).</p>
     </ConfigCard>
   )
+}
+
+/** Carte « Module disponible » (spec Add-ons §36, §38) : l'add-on manquant est
+ * proposé en un clic depuis la configuration du jeu, sans téléchargement auto. */
+function AddonAvailableCard({ icon, addonName, description, onInstall }: { icon: ReactNode; addonName: string; description: string; onInstall: () => void }) {
+  return <section className="rounded-xl border border-dashed border-gold/22 bg-gold/[0.018]">
+    <button type="button" className="flex w-full items-center gap-3 px-4 py-3 text-left">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gold/20 bg-gold/[0.06] text-gold/80">{icon}</span>
+      <span className="flex-1 text-xs font-semibold text-white/80">{addonName}</span>
+      <span className="rounded-full bg-gold/10 px-2.5 py-1 font-mono text-[10px] text-gold/80">Module disponible</span>
+    </button>
+    <div className="space-y-3 border-t border-gold/10 px-4 pb-4 pt-3">
+      <p className="text-[11px] leading-relaxed text-white/42">{description}</p>
+      <button type="button" onClick={onInstall} className="flex items-center gap-1.5 rounded-lg border border-gold/25 bg-gold/[0.05] px-3 py-2 text-[11px] font-semibold text-gold hover:bg-gold/10"><Plus size={13} />Ajouter à ZAILON</button>
+    </div>
+  </section>
 }

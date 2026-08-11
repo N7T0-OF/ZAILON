@@ -1,4 +1,4 @@
-import { BookOpen, Download, Import, Loader2, Package, Power, RefreshCw, Search, Trash2, Wand2, X, Zap } from 'lucide-react'
+import { BookOpen, Download, Import, Loader2, Lock, Package, Power, RefreshCw, Search, Trash2, Wand2, X, Zap } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import {
   ADDON_API_VERSION,
@@ -148,10 +148,10 @@ export function AddonsView() {
       <div className="min-w-0 flex-1">
         <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-gold/58">Core léger · Add-ons à la demande</p>
         <h1 className="mt-1 font-display text-2xl font-bold text-white">Add-ons</h1>
-        <p className="mt-1 max-w-2xl text-xs text-white/42">Installations optionnelles : compatibilité jeux, frameworks, visuel, sources et utilitaires. Jamais chargés au démarrage — un add-on défectueux ne bloque jamais ZAILON.</p>
+        <p className="mt-1 flex items-center gap-1.5 text-xs text-white/42">Ajoutez uniquement les fonctions dont vous avez besoin.<ZailonInfoPopover text="Optionnel, chargé à la demande, fonctionne hors ligne et isolé — aucun compte ni marketplace. Un add-on non installé n'apparaît nulle part et ne tourne pas. Un add-on défectueux ne bloque jamais ZAILON." /></p>
       </div>
       <div className="flex items-center gap-2">
-        <button type="button" onClick={() => void native.openExternalUrl(ADDON_DOCS_URL)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/62 hover:bg-white/[0.05]"><BookOpen size={13} />Documentation</button>
+        <button type="button" onClick={() => void native.openExternalUrl(ADDON_DOCS_URL)} title="Créer un add-on — documentation développeur" aria-label="Créer un add-on" className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.09] text-white/62 hover:bg-white/[0.05] hover:text-white"><BookOpen size={14} /></button>
         <button type="button" onClick={() => void syncCatalog()} disabled={syncing} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-40"><RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />Catalogue</button>
         <button type="button" onClick={startImport} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold"><Import size={13} />Importer un add-on</button>
       </div>
@@ -262,7 +262,7 @@ function AddonCard({ row, onInstall, onEnable, onRemove }: {
       <span className="rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/38">{ADDON_CATEGORY_LABELS[entry.category]}</span>
       <span className="rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/38">v{entry.version}</span>
       {entry.size > 0 && <span className="rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/38">{formatAddonSize(entry.size)} téléchargement{installed ? ` · ~${formatAddonSize(installedSize)} installé` : ''}</span>}
-      {entry.permissions.length > 0 && <span className="rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/38">{entry.permissions.length} permission(s)</span>}
+      {entry.permissions.length > 0 && <PermissionsButton permissions={entry.permissions} />}
     </div>
     {installed && (
       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-white/34">
@@ -285,7 +285,6 @@ function AddonCard({ row, onInstall, onEnable, onRemove }: {
         <button type="button" onClick={onInstall} className="ml-auto flex items-center gap-1.5 rounded-lg bg-[var(--zailon-accent)] px-3.5 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] transition-colors hover:bg-white"><Download size={12} />Installer</button>
       )}
     </div>
-    <p className="mt-2 text-[10px] text-white/24">{installed ? 'Désinstaller retire le code ; les données utilisateur sont conservées (§17).' : 'Installation atomique : HTTPS → SHA-256 → échange → santé (§14-15, §65).'}</p>
   </article>
 }
 
@@ -464,4 +463,20 @@ function AddonRemoveDialog({ row, dependents, onClose, onConfirm }: {
       <footer className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="px-3 py-2 text-[11px] text-white/45">Annuler</button><button type="button" disabled={blocked} onClick={onConfirm} className="flex items-center gap-1.5 rounded-lg bg-[var(--zailon-danger)] px-4 py-2 text-[11px] font-semibold text-white disabled:opacity-35"><Trash2 size={13} />Désinstaller</button></footer>
     </section>
   </div>
+}
+
+/** Badge 🔐 compact avec popover de permissions (spec §39) — les permissions ne
+ * s'affichent qu'au clic, jamais sur la carte. */
+function PermissionsButton({ permissions }: { permissions: AddonPermission[] }) {
+  const [open, setOpen] = useState(false)
+  return <span className="relative">
+    <button type="button" onClick={() => setOpen(value => !value)} title="Voir les permissions" className="flex items-center gap-1 rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/50 hover:bg-white/[0.07] hover:text-white"><Lock size={10} />{permissions.length}</button>
+    {open && <>
+      <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+      <span className="absolute bottom-full left-0 z-20 mb-1.5 w-64 rounded-xl border border-white/[0.1] bg-[#121617] p-3 shadow-2xl">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">Permissions</p>
+        <ul className="mt-2 space-y-1">{permissions.map(permission => <li key={permission} className="flex items-start gap-1.5 text-[10px] leading-relaxed text-white/58"><span className="mt-0.5 text-emerald-300/80">✓</span>{ADDON_PERMISSION_LABELS[permission as AddonPermission] || permission}</li>)}</ul>
+      </span>
+    </>}
+  </span>
 }

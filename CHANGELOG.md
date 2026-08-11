@@ -1340,6 +1340,24 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.71.0 — SDK d'extensions : interfaces publiques, permissions à l'appel, événements lazy, slots UI, cycle de vie isolé
+
+### Added
+
+- **SDK d'extensions** (`src/lib/addonSdk.ts`, 8 tests, spec §19, §24-28, §69-71) :
+  - **Interfaces publiques versionnées** (Addon API v1, §24-25) : `GameService`, `ProfileService`, `ModService`, `LaunchService`, `SettingsService`, `ProviderService`, `UIExtensionService` — les add-ons n'accèdent jamais aux composants internes privés ;
+  - **Gate de permissions à l'appel** : `assertServicePermission` (launch → `game.launch`, provider → `provider`, ui → `ui.extend`…) — un add-on aux permissions minimales ne s'active que s'il utilise réellement un service non couvert (§11-13) ;
+  - **Bus d'événements isolé** (`createAddonEventBus`) : un handler fautif (sync ou async) ne bloque ni les autres ni le Core (§21) ; `assertLazyEvents` restreint `OnZailonStarted` (§69) ;
+  - **Slots UI définis** (`UiExtensionRegistry`, §26-27) : emplacements fixes (`GameSettings.ModBackend`, `GameSettings.Visual`, `GameDiagnostics`, `ProfileTools`, `QuickPanel.Visual`, `Explorer`, `ContextMenu`), un par add-on, libérés à la désactivation ;
+  - **Cycle de vie lazy** (`AddonLifecycle`, §19, §21) : idle → loaded (à la demande) → active au premier usage ; erreur d'activation → **crash guard (2 échecs → désactivé)** ; deactivate libère les extensions, données intactes (§16-17) ;
+  - **Contribution au démarrage** (`StartupContributionMonitor`, §68) : rapport core vs add-ons — le lazy loading doit tendre vers zéro ;
+  - `createAddonApi` : construit l'API publique versionnée avec gate, stockage séparé (données ≠ code, §16) et journalisation.
+- **AddonsView** : les cartes installées affichent désormais API version, nombre d'événements déclarés et badge « lazy ✓ » (chargé à la demande, jamais au démarrage).
+
+### Changed
+
+- Les contrats d'extensions sont maintenant documentés et testables sans exécuter de code add-on — la base du mécanisme d'extensibilité universelle (§51-53).
+
 ## 1.70.0 — Add-ons : pipeline d'installation réel (HTTPS → SHA-256 → échange atomique → santé)
 
 ### Added

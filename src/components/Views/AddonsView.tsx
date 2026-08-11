@@ -264,6 +264,13 @@ function AddonCard({ row, onInstall, onEnable, onRemove }: {
       {entry.size > 0 && <span className="rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/38">{formatAddonSize(entry.size)} téléchargement{installed ? ` · ~${formatAddonSize(installedSize)} installé` : ''}</span>}
       {entry.permissions.length > 0 && <span className="rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/38">{entry.permissions.length} permission(s)</span>}
     </div>
+    {installed && (
+      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-white/34">
+        <span className="rounded bg-white/[0.03] px-1.5 py-0.5 font-mono">API v{installed.manifest.minAddonApiVersion || '1'}</span>
+        {(installed.manifest.events?.length || 0) > 0 && <span className="rounded bg-white/[0.03] px-1.5 py-0.5">{installed.manifest.events!.length} événement(s)</span>}
+        <span className="rounded bg-white/[0.03] px-1.5 py-0.5">lazy ✓</span>
+      </div>
+    )}
     {incompatible && <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-300/[0.05] px-2.5 py-1.5 text-[10px] text-amber-100/75">{compatibility.reasons[0]}</p>}
     <div className="mt-auto flex items-center justify-between gap-2 pt-3">
       {installed ? (

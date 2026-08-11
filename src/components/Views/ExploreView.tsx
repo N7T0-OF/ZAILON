@@ -34,6 +34,7 @@ import {
   ProviderConnectionStatus,
 } from '../../lib/native'
 import { NexusExplorerAdapter } from '../../lib/explorerProviders'
+import { cachedProviderStatuses, providerHealthCache } from '../../lib/lazyPages'
 import { GridColumnCycleButton, ProviderExplorerToolbar, ProviderFilters, ProviderPagination, ProviderSearchResults, ProviderSortControl, ProviderViewModeToggle } from '../Explorer/ProviderExplorer'
 
 const providers: Array<{ id: Platform; name: string; detail: string; ready: boolean }> = [
@@ -179,9 +180,12 @@ export function ExploreView() {
     }
   }
 
+  // Spec Startup §20 : la santé des providers vient du cache partagé (TTL
+  // 5 min) — ouvrir Explorer puis Intégrations n'appelle plus qu'une fois le
+  // getter natif. L'état est rafraîchi sur refresh manuel uniquement.
   useEffect(() => {
     if (!native.isDesktop()) return
-    void native.providerConnectionStatuses().then(setProviderStatuses).catch(() => undefined)
+    void cachedProviderStatuses(providerHealthCache, () => native.providerConnectionStatuses()).then(setProviderStatuses).catch(() => undefined)
     let unlisten: (() => void) | undefined
     void listen<ProviderConnectionStatus>('provider-status-changed', event => {
       setProviderStatuses(current => ({ ...current, [event.payload.provider]: event.payload }))

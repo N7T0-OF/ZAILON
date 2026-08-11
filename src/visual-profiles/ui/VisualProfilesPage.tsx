@@ -1,5 +1,6 @@
 import { AlertTriangle, BookOpenCheck, Check, Copy, Download, Gauge, GitCompareArrows, Heart, History, Monitor, Play, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react'
 import { ZailonInfoPopover } from '../../components/UI/ZailonInfoPopover'
+import { PageSkeleton, Skeleton, SkeletonIndicators } from '../../components/UI/Skeleton'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { native } from '../../lib/native'
 import { createVisualProfile } from '../application/profile'
@@ -29,10 +30,15 @@ export function VisualProfilesPage() {
   const [shortcuts, setShortcuts] = useState<VisualShortcutConfig>(() => getVisualShortcutConfig())
   const [historyOpen, setHistoryOpen] = useState(false)
   const [compare, setCompare] = useState<{ fileName: string; updatedAt: number; settings?: VisualSettings }>()
+  // Squelette (spec Startup §5, §16) : la page n'est montée qu'à l'ouverture ;
+  // elle affiche des blocs pulsés pendant le premier chargement du backend,
+  // puis son contenu réel — jamais d'écran vide au premier accès.
+  const [backendReady, setBackendReady] = useState(false)
 
   const refresh = useCallback(async (preferredId?: string) => {
     if (!native.isDesktop()) {
       setStatus('Aperçu uniquement dans le navigateur. Ouvrez l’application ZAILON pour piloter Windows.')
+      setBackendReady(true)
       return
     }
     try {
@@ -46,6 +52,8 @@ export function VisualProfilesPage() {
       setStatus(nextReport.diagnostics[0] || 'Backend prêt.')
     } catch (reason) {
       setStatus(messageOf(reason))
+    } finally {
+      setBackendReady(true)
     }
   }, [])
 
@@ -220,6 +228,18 @@ export function VisualProfilesPage() {
     ['Mode', 'système'],
     ['Restauration', backend?.supportsAutomaticRestore ? 'active' : 'aperçu'],
   ]
+
+  if (!backendReady) {
+    return (
+      <PageSkeleton eyebrow="Affichage local · gratuit · hors ligne" title="Visual Profiles">
+        <div className="mt-4"><SkeletonIndicators count={6} /></div>
+        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,.8fr)]">
+          <Skeleton className="h-72 rounded-2xl" />
+          <Skeleton className="h-72 rounded-2xl" />
+        </div>
+      </PageSkeleton>
+    )
+  }
 
   return <div className="h-full overflow-y-auto p-4 sm:p-6">
     <header className="flex flex-wrap items-start gap-4">

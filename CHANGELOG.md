@@ -1340,6 +1340,19 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.67.0 — Lazy loading réel : squelettes de chargement + cache santé providers
+
+### Added
+
+- **Cache de santé des providers** (`src/lib/lazyPages.ts`, 5 tests, spec Startup §20) : un seul état par processus partagé entre Explorer et Intégrations avec TTL 5 minutes — ouvrir les deux pages n'appelle plus le getter natif qu'une fois, et aucun test d'API n'a lieu au démarrage. Invalidation possible (refresh manuel).
+- **Squelettes de chargement réutilisables** (`src/components/UI/Skeleton.tsx`) : `Skeleton`, `SkeletonCard`, `SkeletonGrid`, `SkeletonRows`, `SkeletonIndicators`, `PageSkeleton` — blocs pulsés aux dimensions du contenu final, conformes à la règle « afficher le shell immédiatement, charger ensuite » (§5).
+- **Visual Profiles** : la page affiche désormais un squelette complet (en-tête + indicateurs + panneaux) pendant le premier chargement du backend au lieu d'un contenu vide avec un simple texte d'état — la page n'est montée qu'à l'ouverture (§16).
+- `scheduleAfterIdle` : exécution d'initialisations non critiques après le premier paint (requestIdleCallback avec repli setTimeout, annulable).
+
+### Changed
+
+- Explorer et Paramètres > Intégrations utilisent le cache santé partagé — plus d'appel IPC redondant à chaque ouverture d'onglet.
+
 ## 1.66.0 — Démarrage optimisé (StartupCoordinator) + backend Frosty générique (NFS 2015)
 
 ### Added

@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import type { GameTab } from '../../types'
 import { appVersion, useStore } from '../../store/useStore'
 import { DiscordConnectionStatus, native, ProviderConnectionStatus } from '../../lib/native'
+import { cachedProviderStatuses, providerHealthCache } from '../../lib/lazyPages'
 import { formatTime } from '../../utils'
 import { useUpdater } from '../UpdateProvider'
 import { CREATOR_LINKS } from '../../config/creatorLinks'
@@ -224,9 +225,11 @@ export function SettingsView() {
     }
   }
 
+  // Spec Startup §20 : santé providers via le cache partagé (TTL 5 min) —
+  // Intégrations n'appelle plus le getter natif si Explorer vient de le faire.
   useEffect(() => {
     if (!native.isDesktop()) return
-    void native.providerConnectionStatuses().then(setProviderStatuses).catch(() => undefined)
+    void cachedProviderStatuses(providerHealthCache, () => native.providerConnectionStatuses()).then(setProviderStatuses).catch(() => undefined)
     void native.nxmAssociationStatus().then(setNxmAssociated).catch(() => undefined)
     let unlisten: (() => void) | undefined
     void listen<ProviderConnectionStatus>('provider-status-changed', event => {

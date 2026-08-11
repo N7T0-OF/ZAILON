@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { BackgroundMediaType, BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, ExternalModReference, Game, GameBackgroundMedia, GameInputProfile, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, ReShadeProfileState, RestorePoint, SessionSource, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
 import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
+import { validateAddonManifest } from '../lib/addons'
+import type { AddonSource, InstalledAddon, ZailonAddonManifest } from '../lib/addons'
 import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { adapterFor, FALLBACK_ADAPTER, isLauncherBased } from '../lib/launchAdapters'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
@@ -436,6 +438,13 @@ export interface Store {
   bulkHistory: BulkOperation[]
   notificationHistory: UiNotification[]
   notice?: string
+  // Add-ons (spec §1-83) : jamais chargés au démarrage — état installé/activé
+  // persisté, catalogue officiel en cache hors ligne.
+  addons: InstalledAddon[]
+  installAddon: (manifest: ZailonAddonManifest, source: AddonSource) => void
+  uninstallAddon: (id: string) => { dependents: string[] }
+  setAddonEnabled: (id: string, enabled: boolean) => void
+  importAddonManifest: (manifest: ZailonAddonManifest) => { ok: boolean; error?: string }
   setView: (view: ViewType) => void
   setActiveGameTab: (tab: GameTab) => void
   setSelectedGame: (gameId: string) => void
@@ -741,6 +750,7 @@ export function migratePersistedState(persisted: unknown) {
 export const useStore = create<Store>()(persist((set, get) => ({
   currentView: 'home',
   activeGameTab: 'mods',
+  addons: [],
   restorePoints: [],
   autoRestorePoints: true,
   remoteInstallingKeys: [],
@@ -831,6 +841,40 @@ export const useStore = create<Store>()(persist((set, get) => ({
   notificationHistory: [],
   setView: currentView => set({ currentView }),
   setActiveGameTab: activeGameTab => set({ activeGameTab, currentView: 'games' }),
+  // Add-ons (spec §1-83) : l'installation remplace proprement une version
+  // existante (même id) en conservant l'état et les données utilisateur.
+  installAddon: (manifest, source) => {
+    const now = Date.now()
+    set(state => ({
+      addons: state.addons.some(item => item.manifest.id === manifest.id)
+        ? state.addons.map(item => item.manifest.id === manifest.id
+          ? { ...item, manifest, source, installedAt: now }
+          : item)
+        : [...state.addons, { manifest, source, installedAt: now, enabled: true, dataKept: false }],
+    }))
+  },
+  uninstallAddon: id => {
+    const state = get()
+    const dependents = state.addons
+      .filter(item => item.manifest.dependencies?.includes(id))
+      .map(item => item.manifest.id)
+    if (dependents.length === 0) {
+      // Supprime le code ; les données utilisateur restent (dossier addon-data
+      // non touché par le store — spec §16-17).
+      set(current => ({ addons: current.addons.filter(item => item.manifest.id !== id) }))
+    }
+    return { dependents }
+  },
+  setAddonEnabled: (id, enabled) => set(state => ({
+    addons: state.addons.map(item => item.manifest.id === id ? { ...item, enabled } : item),
+  })),
+  importAddonManifest: manifest => {
+    const validation = validateAddonManifest(manifest)
+    if (!validation.ok || !validation.manifest) return { ok: false, error: validation.error || 'Manifest invalide.' }
+    get().installAddon(validation.manifest, 'community')
+    return { ok: true }
+  },
+
   setSelectedGame: selectedGameId => {
     const game = get().games.find(item => item.id === selectedGameId)
     set({ selectedGameId, selectedProfileId: game?.profiles[0]?.id })
@@ -2800,6 +2844,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
     // au redémarrage, la migration retombait sur le blanc par défaut.
     accentColor: state.accentColor,
     activeGameTab: state.activeGameTab,
+    // Add-ons (spec §1-83) : installés/activés persistés — jamais chargés au
+    // démarrage (lazy), le catalogue officiel reste un cache hors ligne.
+    addons: state.addons,
     games: state.games,
     selectedGameId: state.selectedGameId,
     selectedProfileId: state.selectedProfileId,

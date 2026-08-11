@@ -1340,6 +1340,25 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.69.0 — Architecture Add-ons : Core léger + fonctionnalités installables à la demande
+
+### Added
+
+- **Add-on Manager v1** — nouvelle vue « Add-ons » dans la navigation principale (recherche, filtres Tous/Installés/Jeux/Modding/Visuel/Apparence/Sources/Utilitaires, grille de cartes compacte avec état installé/activé, taille téléchargement + estimée installée, badge Officiel ✓/Local, bouton Documentation).
+- **Logique pure Add-ons** (`src/lib/addons.ts`, 17 tests, spec §1-83) :
+  - Manifest `.zailon-addon` (schéma 1), **IDs immuables** segmentés (§10), permissions déclarées avec labels français (§11), `checkAddonCompatibility` (ZAILON min/max, version d'API séparée §24, plateforme, dépendances — §23, §64) ;
+  - `parseAddonCatalog` (validation schema 1, entrées invalides rejetées, doublons détectés), `verifyAddonHash` (SHA-256), `validateAddonManifest` pour l'import ;
+  - `resolveAddonDependencies` (dépendances du catalogue installées ensemble, manquantes signalées, cycle détecté — §31-33), `planAddonUninstall` (jamais de suppression silencieuse si dépendants — §33) ;
+  - **AddonCrashGuard** (2 crashs → module désactivé avec message au prochain démarrage — §21) et **Safe Mode** (seuil de crashs au boot — §22) ;
+  - `validateAddonEvents` (événements lazy §69-71 : OnGameSelected/Launched/Started/Stopped, OnExplorerOpened, OnProfileChanged, OnDemand — OnZailonStarted restreint), `planAddonInstall` (phases atomiques download→verify→staging→swap→health→cleanup avec rollback — §15, §65), `estimateInstalledSize` (~2,5× — §73).
+- **Catalogue officiel de référence** (15 add-ons Phase 1-3, §79) en cache hors ligne (§6) : Frosty Support, ReShade Manager, Discord Presence, Nexus/GameBanana/CurseForge Providers, Cyberpunk Advanced, NTE Support, FiveM Profiles, MO2/Vortex/Frosty Importers, Steam Advanced, Artwork+, Theme Packs, Performance+ — avec tailles, permissions et dépendances déclarées. Aucun téléchargement automatique (§76).
+- **Dialogue d'installation** : liste des permissions demandées, dépendances (« Installer aussi » / manquantes), compatibilité, taille — installation atomique annoncée. **Désinstallation sûre** : bloquée si des add-ons en dépendent, données utilisateur conservées (§17). **Import communautaire** : manifest JSON collé → validation → permissions → installation locale, sans compte ni marketplace (§7-8, §59).
+- **Store** : slice `addons` persisté (installé/enabled/source) + actions `installAddon` (remplace proprement une version existante en conservant l'état), `uninstallAddon` (retourne les dépendants), `setAddonEnabled`, `importAddonManifest` (validation complète avant installation).
+
+### Changed
+
+- ZAILON est désormais structuré « Core + Add-ons » : les add-ons ne sont jamais chargés au démarrage (lazy) et un add-on défectueux ne bloque plus le launcher. Frosty/ReShade restent dans le Core cette version ; leur migration en add-ons officiels (`official.zailon.frosty`, `official.zailon.reshade`) suit.
+
 ## 1.68.0 — Intégration ReShade : détection, presets, dépendances et compatibilité
 
 ### Added

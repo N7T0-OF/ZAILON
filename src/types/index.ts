@@ -1,4 +1,4 @@
-export type ViewType = 'home' | 'games' | 'explore' | 'downloads' | 'visuals' | 'news' | 'settings'
+export type ViewType = 'home' | 'games' | 'explore' | 'downloads' | 'visuals' | 'news' | 'settings' | 'addons'
 export type Platform = 'gamebanana' | 'nexus' | 'curseforge' | 'ayakamods'
 export type UpdateChannel = 'stable' | 'beta'
 export type DownloadRetention = 'startup' | '1d' | '7d' | 'never'

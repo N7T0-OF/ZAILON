@@ -9,6 +9,7 @@ import { SettingsView } from '../Views/SettingsView'
 import { DownloadsView } from '../Views/DownloadsView'
 import { StatusBar } from './StatusBar'
 import { VisualProfilesPage } from '../../visual-profiles/ui/VisualProfilesPage'
+import { AddonsView } from '../Views/AddonsView'
 
 export function AppWindow() {
   const { currentView } = useStore()
@@ -21,6 +22,7 @@ export function AppWindow() {
     visuals: VisualProfilesPage,
     news: NewsView,
     settings: SettingsView,
+    addons: AddonsView,
   } as const)[currentView] ?? HomeView
 
   return (

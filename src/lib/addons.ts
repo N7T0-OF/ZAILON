@@ -124,6 +124,10 @@ export interface AddonCatalogEntry {
   description: string
   dependencies?: string[]
   optionalDependencies?: string[]
+  /** Signature Ed25519 (base64) du SHA-256 du package (spec §14, §52). */
+  signature?: string
+  /** Clé publique Ed25519 (base64, 32 octets) ayant signé le package. */
+  signaturePublicKey?: string
   official: boolean
 }
 
@@ -243,6 +247,14 @@ export function parseAddonCatalog(json: unknown): ParseCatalogResult {
       errors.push(`[${id}] Catégorie inconnue : ${category}.`)
       valid = false
     }
+    // Signature (spec §14) : signature et clé publique vont toujours ensemble —
+    // un package déclarant l'un sans l'autre est rejeté par le parseur.
+    const hasSignature = typeof entry.signature === 'string' && entry.signature.length > 0
+    const hasPublicKey = typeof entry.signaturePublicKey === 'string' && entry.signaturePublicKey.length > 0
+    if (hasSignature !== hasPublicKey) {
+      errors.push(`[${id}] signature et signaturePublicKey doivent être fournies ensemble.`)
+      valid = false
+    }
     if (valid) {
       addons.push({
         id: id as string,
@@ -259,6 +271,8 @@ export function parseAddonCatalog(json: unknown): ParseCatalogResult {
         description: entry.description as string,
         dependencies: Array.isArray(entry.dependencies) ? (entry.dependencies as string[]).filter(isValidAddonId) : undefined,
         optionalDependencies: Array.isArray(entry.optionalDependencies) ? (entry.optionalDependencies as string[]).filter(isValidAddonId) : undefined,
+        signature: hasSignature ? (entry.signature as string) : undefined,
+        signaturePublicKey: hasSignature ? (entry.signaturePublicKey as string) : undefined,
         official: true,
       })
     }

@@ -19,7 +19,7 @@ import {
   type InstalledAddon,
   type ZailonAddonManifest,
 } from '../../lib/addons'
-import { ADDON_INSTALL_INITIAL_STATE, addonInstallReducer, addonStorageReport, fetchAddonCatalog, type CatalogFetchResult } from '../../lib/addonsInstall'
+import { ADDON_INSTALL_INITIAL_STATE, addonInstallReducer, addonSignaturePolicy, addonStorageReport, fetchAddonCatalog, hasAddonSignature, type CatalogFetchResult } from '../../lib/addonsInstall'
 import { native } from '../../lib/native'
 import { useStore } from '../../store/useStore'
 import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
@@ -298,6 +298,7 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
   const { entry } = row
   const catalogById = new Map(catalogEntries.map(item => [item.id, item]))
   const dependencyPlan = resolveAddonDependencies(entry.id, catalogById, new Set(installedIds))
+  const signaturePolicy = addonSignaturePolicy(entry)
   const compatibility = checkAddonCompatibility(entry, { zailonVersion: ZAILON_CURRENT_VERSION, addonApiVersion: ADDON_API_VERSION, installedIds })
   const [deps, setDeps] = useState(entry.dependencies?.length ? true : false)
   const [run, setRun] = useState<{ state: ReturnType<typeof addonInstallReducer> | undefined; error?: string }>({ state: undefined })
@@ -352,6 +353,25 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
         const valid = await native.addonVerifySha256(cachePath, entry.sha256)
         if (!valid) {
           state = addonInstallReducer(state, { type: 'failed', message: 'SHA-256 incorrect — installation refusée (§14).' })
+          setRun({ state })
+          return
+        }
+      }
+
+      // 2b. Signature Ed25519 (spec §14, §52) : un add-on officiel avec SHA-256
+      // réel DOIT être signé ; sinon la signature déclarée est vérifiée.
+      const signaturePolicy = addonSignaturePolicy(entry)
+      if (signaturePolicy.required && !hasAddonSignature(entry)) {
+        state = addonInstallReducer(state, { type: 'failed', message: signaturePolicy.reason })
+        setRun({ state })
+        return
+      }
+      if (hasAddonSignature(entry)) {
+        state = addonInstallReducer(state, { type: 'phase', phase: 'verify', message: 'Vérification de la signature Ed25519…' })
+        setRun({ state })
+        const signed = await native.addonVerifySignature(cachePath, entry.signature!, entry.signaturePublicKey!)
+        if (!signed) {
+          state = addonInstallReducer(state, { type: 'failed', message: 'Signature Ed25519 invalide — installation refusée (§14).' })
           setRun({ state })
           return
         }
@@ -415,7 +435,12 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
             </div>
           )}
 
-          {entry.size > 0 && <p className="mt-3 text-[11px] text-white/42">{formatAddonSize(entry.size)} à télécharger · ~{formatAddonSize(estimateInstalledSize(entry.size))} installé · vérification SHA-256 puis installation atomique.</p>}
+          <div className={`mt-3 flex items-start gap-1.5 rounded-lg border px-3 py-2 text-[11px] ${signaturePolicy.required && !hasAddonSignature(entry) ? 'border-red-300/18 bg-red-300/[0.04] text-red-200/80' : hasAddonSignature(entry) ? 'border-emerald-300/16 bg-emerald-300/[0.035] text-emerald-100/75' : 'border-white/[0.06] text-white/40'}`}>
+            <Lock size={12} className="mt-0.5 shrink-0" />
+            <span>{signaturePolicy.reason}</span>
+          </div>
+
+          {entry.size > 0 && <p className="mt-3 text-[11px] text-white/42">{formatAddonSize(entry.size)} à télécharger · ~{formatAddonSize(estimateInstalledSize(entry.size))} installé · vérification SHA-256, signature et installation atomique.</p>}
 
           <footer className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="px-3 py-2 text-[11px] text-white/45">Annuler</button><button type="button" onClick={() => { void startInstall() }} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><Download size={13} />Installer</button></footer>
         </>

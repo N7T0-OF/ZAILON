@@ -1,10 +1,11 @@
 /**
  * Orchestration de l'installation des add-ons (spec §14-15, §65).
  *
- * Pipeline : téléchargement (HTTPS) → vérification SHA-256 → extraction en
- * staging → swap atomique → vérification de santé → terminé. En cas d'échec,
- * rollback (l'ancien répertoire est restauré côté natif). La machine à états
- * est pure et testable ; l'orchestrateur appelle les commandes natives.
+ * Pipeline : téléchargement (HTTPS) → vérification SHA-256 → signature Ed25519
+ * (si déclarée) → extraction en staging → swap atomique → vérification de
+ * santé → terminé. En cas d'échec, rollback (l'ancien répertoire est restauré
+ * côté natif). La machine à états est pure et testable ; l'orchestrateur
+ * appelle les commandes natives.
  */
 
 import { ADDON_INSTALL_PHASES, estimateInstalledSize, parseAddonCatalog, type AddonCatalog, type AddonCatalogEntry, type InstalledAddon, type ParseCatalogResult } from './addons.ts'
@@ -27,6 +28,45 @@ export type AddonInstallEvent =
   | { type: 'done' }
   | { type: 'failed'; message: string }
   | { type: 'rolled_back'; message: string }
+
+// ─────────────────────────── Politique de signature ─────────────────────────
+// Spec §14, §52 : le SHA-256 garantit l'intégrité, la signature Ed25519 garantit
+// l'origine. Règle : un add-on OFFICIEL avec un SHA-256 réel (catalogue distant)
+// DOIT être signé — sinon installation refusée. Les add-ons communautaires
+// restent installables sans signature (permissions affichées, §59).
+
+/** Vrai si l'entrée déclare une signature utilisable (signature + clé). */
+export function hasAddonSignature(entry: Pick<AddonCatalogEntry, 'signature' | 'signaturePublicKey'>): boolean {
+  return Boolean(entry.signature && entry.signaturePublicKey)
+}
+
+/** Vrai si le SHA-256 est réel (pas le placeholder 'catalog' de référence). */
+export function hasRealSha256(entry: Pick<AddonCatalogEntry, 'sha256'>): boolean {
+  return Boolean(entry.sha256 && entry.sha256 !== 'catalog')
+}
+
+export interface AddonSignaturePolicy {
+  /** Une signature doit être présente pour installer. */
+  required: boolean
+  /** Raison lisible de la politique. */
+  reason: string
+}
+
+/** Politique de signature d'une entrée de catalogue (pur, testable). */
+export function addonSignaturePolicy(entry: Pick<AddonCatalogEntry, 'official' | 'sha256' | 'signature' | 'signaturePublicKey'>): AddonSignaturePolicy {
+  if (entry.official && hasRealSha256(entry)) {
+    return hasAddonSignature(entry)
+      ? { required: true, reason: 'Signature officielle requise et déclarée — vérifiée avant installation.' }
+      : { required: true, reason: 'Add-on officiel avec SHA-256 réel mais SANS signature — installation refusée (spec §14).' }
+  }
+  if (hasAddonSignature(entry)) {
+    return { required: false, reason: 'Signature déclarée — vérifiée avant installation.' }
+  }
+  if (entry.official) {
+    return { required: false, reason: 'Catalogue de référence (SHA-256 en attente) — signature vérifiée quand le package réel sera publié.' }
+  }
+  return { required: false, reason: 'Add-on communautaire — signature facultative (permissions affichées avant installation, §59).' }
+}
 
 const PHASE_INDEX = new Map(ADDON_INSTALL_PHASES.map((phase, index) => [phase, index]))
 

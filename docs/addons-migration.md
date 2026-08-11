@@ -114,3 +114,29 @@ service sans son add-on.
 - Extraction complète : Cyberpunk Advanced, NTE Support, FiveM, importers,
   Theme Packs, Performance+, UE Modding comme vrais add-ons livrés.
 - Vérification de signature des add-ons (au-delà du SHA-256).
+
+## Phase 3 — Signature Ed25519 (1.74.0)
+
+Le SHA-256 garantit l'intégrité ; la signature garantit l'origine (spec §14, §52).
+
+- `addon_verify_signature` (Rust, ed25519-dalek 2 + base64 0.22) : vérifie la
+  signature Ed25519 (base64) du SHA-256 du fichier contre la clé publique
+  (base64, 32 octets) déclarée par le catalogue. La clé publique n'est jamais
+  un secret.
+- Le catalogue peut déclarer `signature` + `signaturePublicKey` (les deux ou
+  rien — le parseur rejette un champ isolé).
+- Politique : officiel + SHA-256 réel sans signature → **installation refusée** ;
+  signature déclarée → vérifiée avant extraction ; communautaire → facultative
+  (permissions affichées, §59).
+- Le dialogue d'installation affiche l'état de la signature (vérifiée ✓ /
+  refusée / facultative).
+
+Quand le repository officiel publiera de vrais packages, chaque entrée portera
+sa signature — le pipeline la refusera en cas de divergence ou d'absence.
+
+### Reste à faire (Phase 4)
+
+- Gate des commandes Nexus restantes (collections, installations) côté natif.
+- Extraction de Cyberpunk Advanced / NTE Support / FiveM / Theme Packs /
+  Performance+ en vrais add-ons livrés.
+- Template GitHub `zailon-addon-template` + docs `addon-development/`.

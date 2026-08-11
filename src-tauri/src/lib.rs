@@ -505,6 +505,43 @@ fn set_enabled_addons(state: State<'_, AddonGate>, addons: Vec<String>) {
     items.extend(addons.into_iter().filter(|id| !id.trim().is_empty()));
 }
 
+/// Vérifie la signature Ed25519 d'un package d'add-on (spec §14, §52) : la
+/// signature (base64) est validée contre le SHA-256 du fichier et la clé
+/// publique (base64, 32 octets) fournie par le catalogue. La clé publique n'est
+/// jamais un secret — elle n'autorise que la vérification.
+#[tauri::command]
+fn addon_verify_signature(
+    file_path: String,
+    signature: String,
+    public_key: String,
+) -> Result<bool, String> {
+    use ed25519_dalek::{Signature, VerifyingKey};
+    use sha2::{Digest, Sha256};
+
+    let bytes = std::fs::read(&file_path)
+        .map_err(|error| format!("Lecture du package impossible : {error}"))?;
+    let digest = Sha256::digest(&bytes);
+
+    let key_bytes = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        public_key.trim(),
+    )
+    .map_err(|_| "Clé publique invalide (base64).".to_string())?;
+    let key_bytes: [u8; 32] = key_bytes
+        .try_into()
+        .map_err(|_| "Clé publique invalide (doit faire 32 octets).".to_string())?;
+    let verifying_key = VerifyingKey::from_bytes(&key_bytes)
+        .map_err(|error| format!("Clé publique Ed25519 invalide : {error}"))?;
+
+    let sig_bytes =
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, signature.trim())
+            .map_err(|_| "Signature invalide (base64).".to_string())?;
+    let signature = Signature::from_slice(&sig_bytes)
+        .map_err(|error| format!("Signature Ed25519 invalide : {error}"))?;
+
+    Ok(verifying_key.verify_strict(&digest, &signature).is_ok())
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DiscordPresenceConfig {
@@ -15513,6 +15550,57 @@ mod tests {
     }
 
     #[test]
+    fn verifies_ed25519_addon_signature_and_rejects_tampering() {
+        use base64::Engine;
+        use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+        use sha2::{Digest, Sha256};
+
+        let seed = [7u8; 32];
+        let signing_key = SigningKey::from_bytes(&seed);
+        let verifying_key: VerifyingKey = signing_key.verifying_key();
+
+        let payload: Vec<u8> = b"zailon-addon-content".to_vec();
+        let digest = Sha256::digest(&payload);
+        let signature = signing_key.sign(&digest);
+        let signature_b64 = base64::engine::general_purpose::STANDARD.encode(signature.to_bytes());
+        let key_b64 = base64::engine::general_purpose::STANDARD.encode(verifying_key.to_bytes());
+
+        let path = std::env::temp_dir().join(format!(
+            "zailon-addon-sig-test-{}-{}.bin",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        std::fs::write(&path, &payload).unwrap();
+
+        // Vérification positive — mêmes étapes que la commande native.
+        let bytes = std::fs::read(&path).unwrap();
+        let file_digest = Sha256::digest(&bytes);
+        let key_bytes: [u8; 32] = base64::engine::general_purpose::STANDARD
+            .decode(key_b64.as_bytes())
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let verifying = VerifyingKey::from_bytes(&key_bytes).unwrap();
+        let sig_bytes = base64::engine::general_purpose::STANDARD
+            .decode(signature_b64.as_bytes())
+            .unwrap();
+        let parsed_sig = ed25519_dalek::Signature::from_slice(&sig_bytes).unwrap();
+        assert!(verifying.verify_strict(&file_digest, &parsed_sig).is_ok());
+
+        // Altération du fichier → la signature ne passe plus.
+        std::fs::write(&path, b"tampered-content").unwrap();
+        let tampered_digest = Sha256::digest(std::fs::read(&path).unwrap());
+        assert!(verifying
+            .verify_strict(&tampered_digest, &parsed_sig)
+            .is_err());
+
+        // Clé publique de mauvaise taille → rejetée.
+        assert!(VerifyingKey::from_bytes(&[0u8; 31]).is_err());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn validates_remote_image_signatures_and_nexus_domains() {
         assert!(valid_image_bytes(b"\x89PNG\r\n\x1a\nrest", "png"));
         assert!(!valid_image_bytes(b"MZ executable", "png"));
@@ -16146,6 +16234,7 @@ pub fn run() {
             launch_game,
             restore_deployment_session,
             set_enabled_addons,
+            addon_verify_signature,
             test_discord_connection,
             set_discord_activity_for,
             clear_discord_activity_for,

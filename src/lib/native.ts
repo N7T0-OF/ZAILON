@@ -808,6 +808,8 @@ export const native = {
    * sans l'add-on, aucun service natif (Discord, providers, Nexus, artwork)
    * ne démarre (spec Add-ons §74). */
   setEnabledAddons: (addons: string[]) => desktopOnly<void>('set_enabled_addons', { addons }),
+  /** Vérifie la signature Ed25519 (base64) du SHA-256 d'un fichier (spec §14). */
+  addonVerifySignature: (filePath: string, signature: string, publicKey: string) => desktopOnly<boolean>('addon_verify_signature', { filePath, signature, publicKey }),
   listStagedMods: (gameId: string) => desktopOnly<NativeMod[]>('list_staged_mods', { gameId }),
   scanModImport: (paths: string[], gameName: string) => desktopOnly<ModImportCandidate[]>('scan_mod_import', { paths, gameName }),
   scanModImportBackground: (taskId: string, paths: string[], gameName: string, onProgress: (task: BackgroundTaskSnapshot) => void) => {

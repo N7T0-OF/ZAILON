@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.74.0] - 2026-08-11
+
+> Signature Ed25519 des add-ons (spec §14, §52) : au-delà du SHA-256, chaque
+> package peut déclarer une signature vérifiée contre le hash réel du fichier.
+> Un add-on officiel avec SHA-256 réel mais sans signature est refusé.
+
+### Added
+
+- Commande native `addon_verify_signature` (Rust, ed25519-dalek 2 + base64 0.22) :
+  vérifie la signature Ed25519 (base64) du SHA-256 du fichier contre la clé
+  publique (32 octets) déclarée par le catalogue.
+- Champs `signature` / `signaturePublicKey` dans `AddonCatalogEntry` — le
+  parseur refuse une entrée qui n'en déclare qu'un des deux.
+- Politique de signature pure (`addonSignaturePolicy`, `hasAddonSignature`,
+  `hasRealSha256`) : officiel + SHA-256 réel sans signature → refus ; signature
+  déclarée → vérifiée avant installation ; communautaire → facultative (§59).
+- Pipeline d'installation : étape de vérification de signature entre le SHA-256
+  et l'extraction, avec refus explicite en cas d'échec.
+- Dialogue d'installation : ligne d'état de signature (verte / rouge / neutre)
+  selon la politique de l'add-on.
+
+### Changed
+
+- Cargo.toml : dépendances `ed25519-dalek = "2"` et `base64 = "0.22"`
+  (Cargo.lock synchronisé) ; test natif de vérification/altération + clé de
+  mauvaise taille.
+
 ## [1.73.0] - 2026-08-11
 
 > Gating natif des services : le Core Rust ne démarre plus Discord, les

@@ -17,6 +17,7 @@ import {
   Search,
   ShieldCheck,
   Trash2,
+  Wand2,
   X,
 } from 'lucide-react'
 import { useStore } from '../../store/useStore'
@@ -35,6 +36,8 @@ import {
 } from '../../lib/native'
 import { NexusExplorerAdapter } from '../../lib/explorerProviders'
 import { cachedProviderStatuses, providerHealthCache } from '../../lib/lazyPages'
+import { inspectReShadePreset, RESHADE_SHADER_PACKS } from '../../lib/reshade'
+import type { ReShadePresetInspection } from '../../lib/reshade'
 import { GridColumnCycleButton, ProviderExplorerToolbar, ProviderFilters, ProviderPagination, ProviderSearchResults, ProviderSortControl, ProviderViewModeToggle } from '../Explorer/ProviderExplorer'
 
 const providers: Array<{ id: Platform; name: string; detail: string; ready: boolean }> = [
@@ -309,12 +312,12 @@ export function ExploreView() {
         </div>
 
         <ProviderSearchResults grid={grid} columns={columns} loading={loading && !mods.length} empty={!visibleMods.length && !error} loadingFallback={<LoadingGrid />} emptyFallback={<EmptyResults onReset={() => { setSearch(''); void refresh() }} />}>
-          {visibleMods.map(mod => { const remote = remoteStateFor(mod); return <ModResult key={mod.id} mod={mod} grid={grid} installing={installingId === mod.id || remote.status === 'installing'} removing={remote.status === 'removing'} installed={remote.installed} canInstall={Boolean(selectedGame?.modsPath)} targetName={selectedGame?.name} onPreview={() => setPreviewMod(mod)} onInstall={() => void install(mod)} onInstallIn={() => installIn(mod)} onUninstall={() => setUninstallMod(mod)} /> })}
+          {visibleMods.map(mod => { const remote = remoteStateFor(mod); const preset = inspectReShadePreset({ fileName: mod.fileName, category: mod.category, tags: mod.tags, description: mod.description, name: mod.name }); return <ModResult key={mod.id} mod={mod} grid={grid} preset={preset.isPreset ? preset : undefined} installing={installingId === mod.id || remote.status === 'installing'} removing={remote.status === 'removing'} installed={remote.installed} canInstall={Boolean(selectedGame?.modsPath)} targetName={selectedGame?.name} onPreview={() => setPreviewMod(mod)} onInstall={() => void install(mod)} onInstallIn={() => installIn(mod)} onUninstall={() => setUninstallMod(mod)} /> })}
         </ProviderSearchResults>
         <ProviderPagination provider="GameBanana" page={page} hasNextPage={hasNextPage} loading={loading} onPageChange={setPage} />
       </section>
     </>}
-    {previewMod && <ModPreviewModal mod={previewMod} canInstall={Boolean(selectedGame?.modsPath)} installing={installingId === previewMod.id} installed={remoteStateFor(previewMod).installed} onInstall={() => void install(previewMod)} onInstallIn={() => installIn(previewMod)} onUninstall={() => { setPreviewMod(undefined); setUninstallMod(previewMod) }} onClose={() => setPreviewMod(undefined)} />}
+    {previewMod && (() => { const preset = inspectReShadePreset({ fileName: previewMod.fileName, category: previewMod.category, tags: previewMod.tags, description: previewMod.description, name: previewMod.name }); return <ModPreviewModal mod={previewMod} preset={preset.isPreset ? preset : undefined} canInstall={Boolean(selectedGame?.modsPath)} installing={installingId === previewMod.id} installed={remoteStateFor(previewMod).installed} onInstall={() => void install(previewMod)} onInstallIn={() => installIn(previewMod)} onUninstall={() => { setPreviewMod(undefined); setUninstallMod(previewMod) }} onClose={() => setPreviewMod(undefined)} /> })()}
     {uninstallMod && <UninstallRemoteDialog mod={uninstallMod} profiles={remoteStateFor(uninstallMod).affectedProfiles} onClose={() => setUninstallMod(undefined)} onConfirm={mode => { const identity = remoteIdentityFromCatalog(uninstallMod.platform, uninstallMod.id, uninstallMod.modId); void uninstallRemoteMod(identity.provider, identity.remoteModId, identity.fileId, mode); setUninstallMod(undefined) }} />}
     {installInMod && <InstallTargetDialog mod={installInMod} games={games} onClose={() => setInstallInMod(undefined)} onConfirm={async (gameId, profileId) => {
       setInstallingId(installInMod.id)
@@ -540,12 +543,13 @@ function NexusCatalog({ selectedGameName, showNsfw }: { selectedGameName?: strin
     <ProviderSearchResults grid={grid} columns={columns} loading={loadingMods && !mods.length} empty={Boolean(domain && !mods.length && !error)} loadingFallback={<LoadingGrid />} emptyFallback={<EmptyResults onReset={() => { setQuery(''); setServerQuery(''); setPage(1) }} />}>
       {mods.map(item => {
         const mod = NexusExplorerAdapter.toResult(item, selectedCatalogGame?.name)
-        return <ModResult key={mod.id} mod={mod} grid={grid} installing={false} canInstall={false} sourceOnly targetName={selectedCatalogGame?.name} onPreview={() => openPreview(item)} onInstall={() => undefined} />
+        const preset = inspectReShadePreset({ fileName: mod.fileName, category: mod.category, tags: mod.tags, description: mod.description, name: mod.name })
+        return <ModResult key={mod.id} mod={mod} grid={grid} preset={preset.isPreset ? preset : undefined} installing={false} canInstall={false} sourceOnly targetName={selectedCatalogGame?.name} onPreview={() => openPreview(item)} onInstall={() => undefined} />
       })}
     </ProviderSearchResults>
     {domain && catalogPage && catalogPage.pagination.totalResults > 0 && <ProviderPagination provider="Nexus Mods" page={page} pageCount={pageCount} hasNextPage={catalogPage.pagination.hasNext} loading={loadingMods} onPageChange={changePage} />}
     </section>
-    {previewMod && <ModPreviewModal mod={previewMod} canInstall={false} sourceOnly installing={false} galleryLoading={previewGalleryLoading} galleryError={previewGalleryError} onInstall={() => undefined} onClose={closePreview} />}
+    {previewMod && <ModPreviewModal mod={previewMod} preset={undefined} canInstall={false} sourceOnly installing={false} galleryLoading={previewGalleryLoading} galleryError={previewGalleryError} onInstall={() => undefined} onClose={closePreview} />}
   </section>
 }
 
@@ -769,8 +773,9 @@ function ProviderUnavailable({ provider, onConfigure }: { provider: string; onCo
   </section>
 }
 
-function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, installed = false, galleryLoading = false, galleryError, onInstall, onInstallIn, onUninstall, onClose }: {
+function ModPreviewModal({ mod, preset, canInstall, sourceOnly = false, installing, installed = false, galleryLoading = false, galleryError, onInstall, onInstallIn, onUninstall, onClose }: {
   mod: ExplodMod
+  preset?: ReShadePresetInspection
   canInstall: boolean
   sourceOnly?: boolean
   installing: boolean
@@ -858,6 +863,15 @@ function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, inst
           <div className="grid grid-cols-2 gap-2"><div className="rounded-lg bg-white/[0.025] p-3"><p className="text-[11px] text-white/32">Téléchargements</p><p className="mt-1 text-sm font-semibold text-white/76">{formatCount(mod.downloads)}</p></div><div className="rounded-lg bg-white/[0.025] p-3"><p className="text-[11px] text-white/32">Mentions J’aime</p><p className="mt-1 text-sm font-semibold text-white/76">{formatCount(mod.rating)}</p></div></div>
           {mod.tags.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{mod.tags.map(tag => <span key={tag} className="rounded-full border border-white/[0.08] bg-white/[0.025] px-2 py-1 text-[11px] text-white/44">{tag}</span>)}{mod.nsfw && <span className="rounded-full border border-red-300/18 bg-red-300/[0.06] px-2 py-1 text-[11px] text-red-200/70">NSFW</span>}</div>}
           <div className="mt-4"><h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-white/48">Description</h3><p className="mt-2 whitespace-pre-line text-[11px] leading-relaxed text-white/48">{mod.description || 'Aucune description fournie par la source.'}</p></div>
+          {preset && (
+            <div className="mt-3 rounded-xl border border-gold/18 bg-gold/[0.035] p-3">
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-gold"><Wand2 size={13} />ReShade Preset détecté</p>
+              {preset.needsShaders && preset.dependencyHints.length > 0 && (
+                <p className="mt-1.5 text-[11px] text-white/50">{preset.dependencyHints.length} dépendance(s) shader : {preset.dependencyHints.map(id => RESHADE_SHADER_PACKS.find(pack => pack.id === id)?.displayName || id).join(', ')}</p>
+              )}
+              <p className="mt-1.5 text-[10px] leading-relaxed text-white/38">L’installation vérifiera la présence de ReShade et installera les dépendances depuis leurs sources officielles (§28-32).</p>
+            </div>
+          )}
           <p className="mt-4 rounded-lg border border-white/[0.07] bg-white/[0.018] p-3 text-[11px] leading-relaxed text-white/34">Source vérifiable : aucune miniature NSFW masquée n’est chargée. Seules l’image courante et ses deux voisines sont préchargées dans cette galerie.</p>
         </div>
         <footer className="flex flex-wrap justify-end gap-2 border-t border-white/[0.07] p-4"><button type="button" onClick={() => void openSource()} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/62 hover:bg-white/[0.05]"><ExternalLink size={13} />Voir la page source</button>{onInstallIn && !sourceOnly && !installed && <button type="button" onClick={onInstallIn} disabled={installing} title="Choisir le jeu et le profil cibles" className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] text-white/58 hover:border-gold/25 hover:text-gold disabled:opacity-40"><FolderInput size={13} />Installer dans…</button>}{installed && onUninstall ? <button type="button" onClick={onUninstall} disabled={installing} className="flex items-center gap-1.5 rounded-lg bg-[var(--zailon-danger)] px-4 py-2 text-[11px] font-semibold text-white disabled:opacity-40"><Trash2 size={13} />Désinstaller</button> : <button type="button" onClick={sourceOnly ? () => void openSource() : onInstall} disabled={installing} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-40">{installing ? <Loader2 size={13} className="animate-spin" /> : sourceOnly ? <ExternalLink size={13} /> : <Download size={13} />}{installing ? 'Installation…' : sourceOnly ? 'Ouvrir Nexus' : canInstall ? 'Installer' : 'Configurer le jeu'}</button>}</footer>
@@ -871,7 +885,7 @@ function ModPreviewModal({ mod, canInstall, sourceOnly = false, installing, inst
   </div>
 }
 
-function ModResult({ mod, grid, installing, removing = false, installed = false, canInstall, sourceOnly = false, targetName, onPreview, onInstall, onInstallIn, onUninstall }: { mod: ExplodMod; grid: boolean; installing: boolean; removing?: boolean; installed?: boolean; canInstall: boolean; sourceOnly?: boolean; targetName?: string; onPreview: () => void; onInstall: () => void; onInstallIn?: () => void; onUninstall?: () => void }) {
+function ModResult({ mod, preset, grid, installing, removing = false, installed = false, canInstall, sourceOnly = false, targetName, onPreview, onInstall, onInstallIn, onUninstall }: { mod: ExplodMod; preset?: ReShadePresetInspection; grid: boolean; installing: boolean; removing?: boolean; installed?: boolean; canInstall: boolean; sourceOnly?: boolean; targetName?: string; onPreview: () => void; onInstall: () => void; onInstallIn?: () => void; onUninstall?: () => void }) {
   const openSource = () => native.isDesktop() ? native.openExternalUrl(mod.url) : window.open(mod.url, '_blank', 'noopener,noreferrer')
   return <article className={`group overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.018] transition-colors hover:border-white/15 hover:bg-white/[0.03] ${grid ? '' : 'flex min-h-28'}`}>
     <button type="button" onClick={onPreview} aria-label={`Aperçu rapide de ${mod.name}`} className={`relative shrink-0 cursor-pointer overflow-hidden bg-white/[0.025] text-left ${grid ? 'aspect-[16/7] w-full' : 'w-44'}`}>
@@ -885,6 +899,9 @@ function ModResult({ mod, grid, installing, removing = false, installed = false,
         {mod.nsfw && <span className="rounded border border-red-300/18 bg-red-300/[0.06] px-1.5 py-0.5 text-[11px] font-semibold text-red-200/70">NSFW</span>}
       </div>
       {mod.description && <p className="mt-2 line-clamp-2 text-[11px] leading-relaxed text-white/34">{mod.description}</p>}
+      {preset && (
+        <div className="mt-2 flex items-center gap-1.5"><span className="inline-flex items-center gap-1 rounded-full border border-gold/20 bg-gold/[0.06] px-2 py-0.5 text-[10px] font-semibold text-gold"><Wand2 size={10} />ReShade Preset</span>{preset.dependencyHints.length > 0 && <span className="text-[10px] text-white/32">{preset.dependencyHints.length} dépendance(s)</span>}</div>
+      )}
       <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-3">
         <span className="text-[11px] text-white/32">{formatCount(mod.downloads)} téléchargements · {formatCount(mod.rating)} mentions J’aime</span>
         <span className="flex items-center gap-1.5">

@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, History, Keyboard, Layers3, MonitorDown, Palette, Plus, Rocket, Settings2, ShieldCheck, Trash2, Upload, Wrench } from 'lucide-react'
+import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, History, Keyboard, Layers3, MonitorDown, Palette, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Trash2, Upload, Wand2, Wrench } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
@@ -28,6 +28,13 @@ import { native, pickFolder } from '../../lib/native'
 import { ProfileShareDialog } from '../UI/ProfileShareDialog'
 import { detectModBackend, frostyBackendStatus } from '../../lib/modBackends'
 import { frostyOverhaulConflict, FROSTY_STRATEGY_LABELS } from '../../lib/frosty'
+import {
+  classifyReShadeCompatibility,
+  COMPATIBILITY_LABELS,
+  GRAPHICS_API_LABELS,
+  resolveReShadeSessionStrategy,
+  resolveReShadeTarget,
+} from '../../lib/reshade'
 import { describeBackgroundMedia, resolveMediaType } from '../../lib/backgroundMedia'
 import { parseYouTubeUrl, youtubeThumbnailUrl } from '../../lib/youtubeUrl'
 import { resourceUrl } from '../../lib/native'
@@ -314,6 +321,8 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
       </ConfigCard>
 
       <FrostyConfigCard game={game} profile={profile} />
+
+      <ReShadeConfigCard game={game} profile={profile} />
 
       <ConfigCard id="performances" title="Performances" icon={Gamepad2} badge={modeLabel(performanceMode)} open={open.includes('performances')} onToggle={() => toggle('performances')}>
         <PerformanceSettings
@@ -681,6 +690,148 @@ function FrostyConfigCard({ game, profile }: { game: Game; profile: Profile }) {
       </div>
       {tested && <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-black/25 px-3 py-2 font-mono text-[10px] leading-relaxed text-white/55">{tested}</pre>}
       <p className="mt-2 text-[10px] text-white/30">Le backend Frosty n&apos;est jamais initialisé au démarrage de ZAILON — seulement à l&apos;ouverture de ce jeu, à l&apos;import d&apos;un .fbmod ou au lancement.</p>
+    </ConfigCard>
+  )
+}
+
+// ───────────────────────────── ReShade (spec §1-115) ─────────────────────────
+
+const RESHADE_OFFICIAL_URL = 'https://reshade.me/'
+
+interface ReShadeLocalRecord {
+  /** Version déclarée (installation adoptée manuellement) — jamais inventée. */
+  installedVersion?: string
+  installStartedAt?: number
+  autoUpdate: boolean
+  versionLock: boolean
+  safeMode: boolean
+}
+
+const readReShadeRecord = (gameId: string): ReShadeLocalRecord => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(`zailon:reshade:${gameId}`) || 'null') as Partial<ReShadeLocalRecord> | null
+    return {
+      installedVersion: typeof parsed?.installedVersion === 'string' ? parsed.installedVersion : undefined,
+      installStartedAt: typeof parsed?.installStartedAt === 'number' ? parsed.installStartedAt : undefined,
+      autoUpdate: parsed?.autoUpdate ?? true,
+      versionLock: parsed?.versionLock ?? false,
+      safeMode: parsed?.safeMode ?? false,
+    }
+  } catch {
+    return { autoUpdate: true, versionLock: false, safeMode: false }
+  }
+}
+
+const writeReShadeRecord = (gameId: string, record: ReShadeLocalRecord) => {
+  try { localStorage.setItem(`zailon:reshade:${gameId}`, JSON.stringify(record)) } catch { /* best-effort */ }
+}
+
+function ReShadeConfigCard({ game, profile }: { game: Game; profile: Profile }) {
+  const setProfileReshade = useStore(state => state.setProfileReshade)
+  const [open, setOpen] = useState(() => Boolean(readReShadeRecord(game.id).installStartedAt))
+  const [record, setRecord] = useState<ReShadeLocalRecord>(() => readReShadeRecord(game.id))
+  const [checked, setChecked] = useState<string>()
+
+  const target = useMemo(() => resolveReShadeTarget(game), [game])
+  const compatibility = useMemo(() => classifyReShadeCompatibility(game, game.categories || []), [game])
+  const strategy = resolveReShadeSessionStrategy(profile.reshade, record.safeMode)
+  const installed = Boolean(record.installedVersion)
+
+  const updateRecord = (patch: Partial<ReShadeLocalRecord>) => {
+    setRecord(current => {
+      const next = { ...current, ...patch }
+      writeReShadeRecord(game.id, next)
+      return next
+    })
+  }
+
+  const setProfileEnabled = (enabled: boolean) => {
+    const current = profile.reshade ?? { enabled: false, shaderDependencies: [] }
+    setProfileReshade(game.id, profile.id, { ...current, enabled })
+  }
+
+  const openOfficialSource = () => {
+    updateRecord({ installStartedAt: Date.now() })
+    setOpen(true)
+    void native.openExternalUrl(RESHADE_OFFICIAL_URL)
+  }
+
+  const runCheck = () => {
+    const checks: string[] = []
+    checks.push(`Cible : ${target.executableName || '—'} · ${GRAPHICS_API_LABELS[target.graphicsApi]} · confiance ${Math.round(target.confidence * 100)} %`)
+    checks.push(target.confidence < 0.55 ? `⚠ ${target.reason}` : target.reason)
+    checks.push(`Compatibilité : ${COMPATIBILITY_LABELS[compatibility.level]}`)
+    checks.push(compatibility.autoInstallSafe ? 'Installation automatique autorisée pour ce jeu.' : '⚠ Installation automatique non autorisée — à valider (§60).')
+    checks.push(`Stratégie de session : ${strategy.kind === 'Disabled' ? strategy.reason : `preset ${strategy.presetId || 'par défaut'}`}`)
+    setChecked(checks.join('\n'))
+  }
+
+  return (
+    <ConfigCard
+      id="reshade"
+      title="ReShade"
+      icon={Wand2}
+      badge={installed ? `v${record.installedVersion} installé` : record.installStartedAt ? 'Téléchargement lancé' : 'Non installé'}
+      open={open}
+      onToggle={() => setOpen(current => !current)}
+    >
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="rounded-xl border border-white/[0.07] bg-black/15 p-3">
+          <p className="text-[11px] font-semibold text-white/68">Exécutable cible</p>
+          <p className="mt-1 text-[11px] text-white/45">{target.executableName || '—'} · {GRAPHICS_API_LABELS[target.graphicsApi]}</p>
+          {target.confidence < 0.55 && <p className="mt-1 text-[10px] text-amber-100/65">⚠ {target.reason}</p>}
+        </div>
+        <div className="rounded-xl border border-white/[0.07] bg-black/15 p-3">
+          <p className="text-[11px] font-semibold text-white/68">Compatibilité</p>
+          <p className="mt-1 text-[11px] text-white/45">{COMPATIBILITY_LABELS[compatibility.level]}</p>
+          {compatibility.detectedAntiCheats.length > 0 && <p className="mt-1 text-[10px] text-red-200/70">{compatibility.detectedAntiCheats.join(', ')} détecté</p>}
+        </div>
+      </div>
+
+      {!compatibility.autoInstallSafe && (
+        <p className="mt-2 flex items-start gap-2 rounded-lg border border-red-300/25 bg-red-400/[0.06] px-3 py-2 text-[11px] text-red-100/85"><AlertTriangle size={13} className="mt-0.5 shrink-0 text-red-300/90" />{compatibility.reason}</p>
+      )}
+
+      {record.safeMode && (
+        <p className="mt-2 flex items-start gap-2 rounded-lg border border-amber-300/25 bg-amber-300/[0.05] px-3 py-2 text-[11px] text-amber-100/80"><ShieldCheck size={13} className="mt-0.5 shrink-0 text-amber-300/90" />Démarrer sans ReShade actif — le jeu sera lancé sans ReShade pour cette session (§106-107).</p>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {!installed ? (
+          <button type="button" onClick={openOfficialSource} className="flex items-center gap-1.5 rounded-lg bg-gold px-3.5 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><Wand2 size={13} />Installer depuis reshade.me</button>
+        ) : (
+          <>
+            <button type="button" onClick={openOfficialSource} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold"><RefreshCw size={13} />Mettre à jour</button>
+            <button type="button" onClick={() => updateRecord({ installedVersion: undefined })} className="flex items-center gap-1.5 rounded-lg border border-red-300/15 px-3 py-2 text-[11px] font-semibold text-red-200/65 hover:bg-red-400/10"><Trash2 size={13} />Désinstaller</button>
+          </>
+        )}
+        <button type="button" onClick={runCheck} className="ml-auto flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold"><ShieldCheck size={13} />Vérifier</button>
+      </div>
+      {!installed && !compatibility.autoInstallSafe && (
+        <p className="mt-2 text-[10px] text-white/34">Téléchargement depuis la source officielle uniquement — le setup officiel gère DirectX/OpenGL et le layer Vulkan (§7, §9). Le pipeline de téléchargement natif arrivera dans une prochaine mise à jour.</p>
+      )}
+      {checked && <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-black/25 px-3 py-2 font-mono text-[10px] leading-relaxed text-white/55">{checked}</pre>}
+
+      <div className="mt-3 space-y-2">
+        <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/60">
+          <span>ReShade activé pour ce profil ({profile.name})</span>
+          <ZailonSwitch size="compact" checked={profile.reshade?.enabled ?? false} onChange={setProfileEnabled} />
+        </label>
+        <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/60">
+          <span>Mises à jour automatiques</span>
+          <ZailonSwitch size="compact" checked={record.autoUpdate} onChange={value => updateRecord({ autoUpdate: value })} />
+        </label>
+        <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/60">
+          <span className="flex items-center gap-2">Verrouiller la version {record.versionLock && <span className="text-gold">🔒</span>}</span>
+          <ZailonSwitch size="compact" checked={record.versionLock} onChange={value => updateRecord({ versionLock: value })} />
+        </label>
+        <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/60">
+          <span className="flex items-center gap-2">Démarrer sans ReShade (diagnostic)</span>
+          <ZailonSwitch size="compact" checked={record.safeMode} onChange={value => updateRecord({ safeMode: value })} />
+        </label>
+      </div>
+
+      <p className="mt-2 text-[10px] leading-relaxed text-white/30">Le runtime ReShade est partagé par installation de jeu ; l&apos;activation, le preset et le verrou de version sont propres à chaque profil (§36). Jamais de mise à jour pendant qu&apos;un jeu tourne (§14).</p>
     </ConfigCard>
   )
 }

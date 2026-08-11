@@ -191,6 +191,15 @@ export interface ManagedExecutable {
   enabled: boolean
 }
 
+/** État ReShade d'un profil ZAILON (spec §35-36) : le runtime est partagé par
+ * installation de jeu, le preset et l'activation sont propres au profil. */
+export interface ReShadeProfileState {
+  enabled: boolean
+  presetId?: string
+  shaderDependencies: string[]
+  versionLock?: boolean
+}
+
 export interface Profile {
   id: string
   gameId: string
@@ -241,6 +250,7 @@ export interface Profile {
     selections: string[]
     localOverrides: string[]
   }
+  reshade?: ReShadeProfileState
 }
 
 export type BulkOperationKind = 'copy' | 'move' | 'delete' | 'enable' | 'disable' | 'tag'

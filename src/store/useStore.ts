@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { BackgroundMediaType, BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, ExternalModReference, Game, GameBackgroundMedia, GameInputProfile, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, RestorePoint, SessionSource, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
+import { BackgroundMediaType, BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, ExternalModReference, Game, GameBackgroundMedia, GameInputProfile, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, ReShadeProfileState, RestorePoint, SessionSource, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
 import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
 import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { adapterFor, FALLBACK_ADAPTER, isLauncherBased } from '../lib/launchAdapters'
@@ -253,6 +253,9 @@ function makeGame({ name, execPath, modsPath, platform = 'standalone', provider,
   const profile: Profile = {
     id: createId(), gameId, name: 'Default', modStates: {}, playtime: 0,
     createdAt: Date.now(), isDefault: true,
+    // ReShade (spec §35) : désactivé par défaut — le Vanilla reste le profil
+    // de référence, l'utilisateur active ReShade par profil.
+    reshade: { enabled: false, shaderDependencies: [] },
   }
   return {
     id: gameId,
@@ -477,6 +480,7 @@ export interface Store {
   duplicateProfile: (profileId: string) => void
   importProfileManifest: (manifest: ProfileArchiveManifest, preferredName?: string) => void
   renameProfile: (profileId: string, name: string) => void
+  setProfileReshade: (gameId: string, profileId: string, reshade: ReShadeProfileState) => void
   removeProfile: (profileId: string) => void
   registerImportedStages: (gameId: string, profileId: string, installedPaths: string[], enabled: boolean) => Promise<void>
   completeMo2Import: (gameId: string, result: Mo2ImportResult) => Promise<void>
@@ -1249,6 +1253,12 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const renamed = { ...profile, name: name.trim() }
     set(state => ({ games: updateProfile(state.games, game.id, profileId, () => renamed) }))
     if (native.isDesktop()) void native.syncProfileState(game.id, renamed).catch(error => set({ notice: asError(error) }))
+  },
+  // ReShade (spec §35-36) : l'état par profil (activé, preset, dépendances,
+  // verrou de version) est persisté avec le store — le runtime reste partagé
+  // par installation de jeu.
+  setProfileReshade: (gameId, profileId, reshade) => {
+    set(state => ({ games: updateProfile(state.games, gameId, profileId, profile => ({ ...profile, reshade })) }))
   },
   removeProfile: profileId => {
     const { game } = selected(get())

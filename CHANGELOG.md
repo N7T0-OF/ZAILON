@@ -1340,6 +1340,24 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.68.0 — Intégration ReShade : détection, presets, dépendances et compatibilité
+
+### Added
+
+- **Logique ReShade complète** (`src/lib/reshade.ts`, 17 tests, spec §1-115) :
+  - `resolveReShadeTarget` — le vrai exécutable de rendu plutôt que le launcher (confiance plafonnée sur un launcher, §3-4) ; `detectGraphicsApi` avec adaptateurs connus (NFS16.exe → DirectX, Cyberpunk, RDR2 → Vulkan, Unreal/Unity en heuristique) et fallback manuel (§5-6).
+  - `classifyReShadeInstallation` — NotInstalled / Installed / UpdateAvailable / Broken (§2, §23) et `versionCompare` sémantique.
+  - `inspectReShadePreset` — scoring pondéré (seuil 25) : un simple `.ini` n'est jamais classé ReShade sans indices ; ENB est explicitement exclu (§26). `resolveShaderDependencies` + registre des packs (qUINT, SweetFX, prod80, AstrayFX, standard) avec sources officielles (§30-32) et `referenceCountFor` / `unusedShaderPacks` (pack partagé jamais supprimé, §47-48).
+  - `classifyReShadeCompatibility` — EAC / BattlEye / ACE / Vanguard / nProtect détectés → jamais d'installation automatique ; NTE classé Restricted/Experimental (§58-61) ; jeux solo connus → installation proposée (§62).
+  - `resolveReShadeSessionStrategy` (Vanilla et « Démarrer sans ReShade » → Disabled, §38, §106-107), `findProxyDllConflicts` (dxgi/d3d11 jamais écrasés, §91-92), fingerprint de déploiement pour le fast check (§78), `planReShadeUpdate` (verrou de version bloqué, jeu en cours → différé, §13-14, §20).
+- **Bloc ReShade en Configuration > Apparence** (modèle du bloc Frosty) : état (non installé / téléchargement lancé / installé adopté), exécutable cible + API + confiance, compatibilité avec avertissement anti-cheat (NTE en rouge), boutons « Installer depuis reshade.me » (source officielle uniquement, §9) / Mettre à jour / Désinstaller / Vérifier, **mises à jour automatiques**, **verrou de version 🔒** et **Démarrer sans ReShade** (diagnostic) persistés par jeu, activation ReShade **par profil** (persistée dans le store).
+- **Explorer** : badge « ReShade Preset » + nombre de dépendances sur les cartes, bloc « ReShade Preset détecté » avec dépendances shaders dans l'aperçu (§25-28) — l'installation vérifiera la présence de ReShade et les sources officielles.
+- `ReShadeProfileState` dans les types + défaut par profil (désactivé, Vanilla reste le profil de référence, §35) + action store `setProfileReshade` persistée.
+
+### Changed
+
+- Aucun pipeline de téléchargement natif cette version : le bloc guide vers le setup officiel (le setup gère DirectX/OpenGL et le layer Vulkan, §7) — le téléchargement automatisé, les mises à jour groupées et le Quick Panel ReShade arrivent dans une prochaine mise à jour.
+
 ## 1.67.0 — Lazy loading réel : squelettes de chargement + cache santé providers
 
 ### Added

@@ -87,3 +87,30 @@ Comportement sans add-on :
 - Extraction complète : Cyberpunk Advanced, NTE Support, FiveM, importers,
   Theme Packs, Performance+, UE Modding comme vrais add-ons livrés.
 - Vérification de signature des add-ons (au-delà du SHA-256).
+
+## Phase 2 — Gating natif (1.73.0)
+
+Le gate n'est plus seulement visuel : le **Core Rust** refuse de démarrer un
+service sans son add-on.
+
+- `AddonGate` (état Tauri géré) : liste des add-ons activés, poussée par le
+  frontend (`native.setEnabledAddons`) au démarrage et à chaque changement de
+  `store.addons` (App.tsx).
+- Commandes natives gardées : Discord (`set_discord_activity_for`,
+  `test_discord_connection`), providers (`provider_connection_statuses` filtre
+  par add-ons installés, `test_provider_connection`), lectures Nexus
+  (`nexus_catalog_games/mods`, `nexus_mod_gallery`), artwork
+  (`search_game_artwork`, `test_artwork_provider`).
+- Sans l'add-on, la commande renvoie une erreur explicite — jamais de
+  présence Discord publiée, jamais de requête Nexus, jamais d'appel
+  SteamGridDB/IGDB, même si le réglage est resté activé dans le store.
+- L'UI Apparence du jeu masque aussi la recherche d'illustrations sans
+  Artwork+ (artwork minimal local/Steam).
+
+### Reste à faire (Phase 3)
+
+- Gate des commandes Nexus restantes (collections, installations) — déjà
+  inaccessibles via l'UI gatée, à verrouiller côté natif.
+- Extraction complète : Cyberpunk Advanced, NTE Support, FiveM, importers,
+  Theme Packs, Performance+, UE Modding comme vrais add-ons livrés.
+- Vérification de signature des add-ons (au-delà du SHA-256).

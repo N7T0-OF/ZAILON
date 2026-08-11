@@ -475,6 +475,36 @@ impl<T: Read + Write + Send> DiscordStream for T {}
 #[derive(Clone)]
 struct DiscordRuntime(Arc<Mutex<Option<Box<dyn DiscordStream>>>>);
 
+/// Gate d'add-ons natifs (spec Add-ons §74) : le Core natif ne démarre aucun
+/// service (Discord, providers, lectures Nexus, artwork) sans l'add-on
+/// correspondant installé ET activé. La liste des add-ons activés est poussée
+/// par le frontend à chaque changement (jamais de code mort côté natif).
+#[derive(Default)]
+struct AddonGate(Arc<Mutex<HashSet<String>>>);
+
+fn addon_gate_enabled(gate: &State<'_, AddonGate>, addon_id: &str) -> bool {
+    gate.0
+        .lock()
+        .map(|items| items.contains(addon_id))
+        .unwrap_or(false)
+}
+
+fn addon_gate_error(addon_id: &str, label: &str) -> String {
+    format!("L'add-on {label} n'est pas installé (ou est désactivé) — fonctionnalité indisponible ({addon_id}).")
+}
+
+/// Synchronise la liste des add-ons activés depuis le frontend (installés ET
+/// activés). Appelé au démarrage et à chaque changement de la liste.
+#[tauri::command]
+fn set_enabled_addons(state: State<'_, AddonGate>, addons: Vec<String>) {
+    let mut items = state
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    items.clear();
+    items.extend(addons.into_iter().filter(|id| !id.trim().is_empty()));
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DiscordPresenceConfig {
@@ -1789,12 +1819,16 @@ fn push_artwork_candidate(
 
 #[tauri::command]
 async fn search_game_artwork(
+    gate: State<'_, AddonGate>,
     game_name: String,
     provider: Option<String>,
     provider_game_id: Option<String>,
     kind: String,
     api_keys: Option<HashMap<String, String>>,
 ) -> Result<Vec<ArtworkCandidate>, String> {
+    if !addon_gate_enabled(&gate, "official.zailon.artwork") {
+        return Err(addon_gate_error("official.zailon.artwork", "Artwork+"));
+    }
     if !matches!(
         kind.as_str(),
         "cover" | "logo" | "icon" | "background" | "banner"
@@ -2297,9 +2331,13 @@ fn push_gamebanana_candidate(
 
 #[tauri::command]
 async fn test_artwork_provider(
+    gate: State<'_, AddonGate>,
     provider: String,
     api_keys: HashMap<String, String>,
 ) -> Result<String, String> {
+    if !addon_gate_enabled(&gate, "official.zailon.artwork") {
+        return Err(addon_gate_error("official.zailon.artwork", "Artwork+"));
+    }
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
         .user_agent(format!("ZAILON/{}", env!("CARGO_PKG_VERSION")))
@@ -5585,8 +5623,15 @@ fn prepare_profile_deployment(
 #[tauri::command]
 fn test_discord_connection(
     app: AppHandle,
+    gate: State<'_, AddonGate>,
     client_id: String,
 ) -> Result<DiscordConnectionStatus, String> {
+    if !addon_gate_enabled(&gate, "official.zailon.discord") {
+        return Err(addon_gate_error(
+            "official.zailon.discord",
+            "Discord Presence",
+        ));
+    }
     let _stream = discord_handshake(client_id.trim())?;
     let status = DiscordConnectionStatus {
         connected: true,
@@ -5602,6 +5647,7 @@ fn test_discord_connection(
 #[tauri::command]
 fn set_discord_activity_for(
     app: AppHandle,
+    gate: State<'_, AddonGate>,
     state: State<'_, DiscordRuntime>,
     game_name: String,
     profile_name: String,
@@ -5609,6 +5655,17 @@ fn set_discord_activity_for(
     config: Option<DiscordPresenceConfig>,
 ) -> Result<DiscordConnectionStatus, String> {
     let runtime = state.inner().clone();
+    // Règle absolue (spec §74) : jamais de présence publiée sans l'add-on —
+    // même si le réglage est activé dans le store.
+    if !addon_gate_enabled(&gate, "official.zailon.discord") {
+        clear_discord_activity(&runtime);
+        let status = DiscordConnectionStatus {
+            connected: false,
+            message: "Add-on Discord Presence non installé — présence désactivée.".into(),
+        };
+        let _ = app.emit("discord-status-changed", status.clone());
+        return Ok(status);
+    }
     match config.as_ref().filter(|config| config.enabled) {
         Some(config) => {
             match set_discord_activity(&runtime, config, &game_name, &profile_name, active_mods) {
@@ -10935,11 +10992,21 @@ fn delete_provider_secret(
 
 #[tauri::command]
 fn provider_connection_statuses(
+    gate: State<'_, AddonGate>,
     state: State<'_, ProviderConnectionCache>,
 ) -> HashMap<String, ProviderConnectionStatus> {
     let cache = state.0.lock().ok();
+    // Spec Add-ons §21 : sans l'add-on d'un provider, aucun état n'est rapporté.
     ["nexus", "curseforge"]
         .into_iter()
+        .filter(|provider| {
+            let addon = match *provider {
+                "nexus" => "official.zailon.provider.nexus",
+                "curseforge" => "official.zailon.provider.curseforge",
+                _ => return false,
+            };
+            addon_gate_enabled(&gate, addon)
+        })
         .map(|provider| {
             let cached = cache
                 .as_ref()
@@ -10959,9 +11026,18 @@ fn provider_connection_statuses(
 #[tauri::command]
 async fn test_provider_connection(
     app: AppHandle,
+    gate: State<'_, AddonGate>,
     state: State<'_, ProviderConnectionCache>,
     provider: String,
 ) -> Result<ProviderConnectionStatus, String> {
+    let addon = match provider.as_str() {
+        "nexus" => "official.zailon.provider.nexus",
+        "curseforge" => "official.zailon.provider.curseforge",
+        other => return Err(format!("Fournisseur inconnu : {other}.")),
+    };
+    if !addon_gate_enabled(&gate, addon) {
+        return Err(addon_gate_error(addon, &format!("provider {provider}")));
+    }
     let secret = provider_credential(&provider)?
         .get_password()
         .map_err(|_| "Aucun identifiant n'est enregistré pour ce fournisseur.".to_string())?;
@@ -11514,8 +11590,15 @@ fn refresh_nexus_status_from_headers(
 #[tauri::command]
 async fn nexus_catalog_games(
     app: AppHandle,
+    gate: State<'_, AddonGate>,
     state: State<'_, ProviderConnectionCache>,
 ) -> Result<Vec<NexusCatalogGame>, String> {
+    if !addon_gate_enabled(&gate, "official.zailon.provider.nexus") {
+        return Err(addon_gate_error(
+            "official.zailon.provider.nexus",
+            "Nexus Provider",
+        ));
+    }
     let (payload, headers) = nexus_api_json("games.json").await?;
     refresh_nexus_status_from_headers(&app, &state, &headers);
     let rows = payload
@@ -11550,6 +11633,7 @@ async fn nexus_catalog_games(
 #[tauri::command]
 async fn nexus_catalog_mods(
     app: AppHandle,
+    gate: State<'_, AddonGate>,
     state: State<'_, ProviderConnectionCache>,
     game_domain: String,
     query: String,
@@ -11558,6 +11642,12 @@ async fn nexus_catalog_mods(
     page_size: u64,
     include_adult: bool,
 ) -> Result<NexusCatalogPage, String> {
+    if !addon_gate_enabled(&gate, "official.zailon.provider.nexus") {
+        return Err(addon_gate_error(
+            "official.zailon.provider.nexus",
+            "Nexus Provider",
+        ));
+    }
     let domain = game_domain.trim().to_ascii_lowercase();
     if !valid_nexus_domain(&domain) {
         return Err("Le domaine Nexus du jeu est invalide.".into());
@@ -11641,7 +11731,17 @@ async fn nexus_catalog_mods(
 }
 
 #[tauri::command]
-async fn nexus_mod_gallery(game_domain: String, mod_id: u64) -> Result<NexusModGallery, String> {
+async fn nexus_mod_gallery(
+    gate: State<'_, AddonGate>,
+    game_domain: String,
+    mod_id: u64,
+) -> Result<NexusModGallery, String> {
+    if !addon_gate_enabled(&gate, "official.zailon.provider.nexus") {
+        return Err(addon_gate_error(
+            "official.zailon.provider.nexus",
+            "Nexus Provider",
+        ));
+    }
     let domain = game_domain.trim().to_ascii_lowercase();
     if !valid_nexus_domain(&domain) || mod_id == 0 {
         return Err("La référence du mod Nexus est invalide.".into());
@@ -15400,6 +15500,19 @@ mod tests {
     }
 
     #[test]
+    fn addon_gate_filters_enabled_ids() {
+        let gate = AddonGate(Arc::new(Mutex::new(
+            ["official.zailon.discord".to_string()]
+                .into_iter()
+                .collect(),
+        )));
+        let enabled = gate.0.lock().unwrap();
+        assert!(enabled.contains("official.zailon.discord"));
+        assert!(!enabled.contains("official.zailon.frosty"));
+        assert!(!enabled.contains("official.zailon.provider.nexus"));
+    }
+
+    #[test]
     fn validates_remote_image_signatures_and_nexus_domains() {
         assert!(valid_image_bytes(b"\x89PNG\r\n\x1a\nrest", "png"));
         assert!(!valid_image_bytes(b"MZ executable", "png"));
@@ -15946,6 +16059,7 @@ pub fn run() {
         .manage(ProviderConnectionCache(Mutex::new(HashMap::new())))
         .manage(BackgroundTaskRegistry(Arc::new(Mutex::new(HashMap::new()))))
         .manage(DiscordRuntime(Arc::new(Mutex::new(None))))
+        .manage(AddonGate::default())
         .manage(visual_profiles::VisualRuntime::default());
     #[cfg(desktop)]
     let builder = builder
@@ -16031,6 +16145,7 @@ pub fn run() {
             quick_panel::quick_panel_status,
             launch_game,
             restore_deployment_session,
+            set_enabled_addons,
             test_discord_connection,
             set_discord_activity_for,
             clear_discord_activity_for,

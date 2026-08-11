@@ -122,6 +122,17 @@ export default function App() {
   const restoreAfterGame = useStore(s => s.restoreAfterGame)
   const [externalInstalls, setExternalInstalls] = useState<NxmRequest[]>([])
   const [exclusiveNoticeOpen, setExclusiveNoticeOpen] = useState(false)
+  const installedAddons = useStore(s => s.addons)
+
+  // Gate d'add-ons natif (spec Add-ons §74) : la liste des add-ons activés
+  // (installés ET activés) est poussée au Rust à chaque changement — sans
+  // l'add-on, les services natifs (Discord, providers, Nexus, artwork) ne
+  // démarrent jamais. Startup phase « shell » : coût minimal, aucune attente.
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    const enabled = installedAddons.filter(item => item.enabled !== false).map(item => item.manifest.id)
+    void native.setEnabledAddons(enabled)
+  }, [installedAddons])
 
   // Game Mode (spec §11-13, §36) : à chaque changement de session ou de profil
   // Performance, les politiques effectives (téléchargements/scans) sont

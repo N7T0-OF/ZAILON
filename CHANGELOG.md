@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.73.0] - 2026-08-11
+
+> Gating natif des services : le Core Rust ne démarre plus Discord, les
+> providers, les lectures Nexus ou la recherche d'illustrations sans leur
+> add-on installé et activé. La liste des add-ons activés est synchronisée au
+> natif à chaque changement — zéro service tournant sans son add-on.
+
+### Added
+
+- `AddonGate` natif (Rust) : état géré de la liste des add-ons activés, poussé
+  par le frontend via `set_enabled_addons` au démarrage et à chaque changement
+  de la liste (App.tsx).
+- Garde `addon_gate_enabled` + erreur explicite sur les commandes natives :
+  `set_discord_activity_for`, `test_discord_connection`, `provider_connection_statuses`
+  (filtre les providers sans add-on), `test_provider_connection`,
+  `nexus_catalog_games`, `nexus_catalog_mods`, `nexus_mod_gallery`,
+  `search_game_artwork`, `test_artwork_provider`.
+- Test natif `addon_gate_filters_enabled_ids`.
+
+### Changed
+
+- Apparence du jeu : le bouton « Rechercher automatiquement » et les sources
+  SteamGridDB/IGDB n'apparaissent que si l'add-on Artwork+ est installé
+  (artwork minimal local/Steam sinon — spec §25).
+
 ## [1.72.0] - 2026-08-11
 
 > Migration réelle vers l'architecture Add-ons : Discord, Frosty, ReShade et les

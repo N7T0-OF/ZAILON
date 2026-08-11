@@ -804,6 +804,10 @@ export const native = {
   addonVerifySha256: (path: string, expected: string) => desktopOnly<boolean>('addon_verify_sha256', { path, expected }),
   addonInstallStaged: (archivePath: string, installDir: string) => desktopOnly<void>('addon_install_staged', { archivePath, installDir }),
   addonInstallDir: () => desktopOnly<string>('addon_install_dir'),
+  /** Pousse la liste des add-ons activés (installés ET activés) au gate natif —
+   * sans l'add-on, aucun service natif (Discord, providers, Nexus, artwork)
+   * ne démarre (spec Add-ons §74). */
+  setEnabledAddons: (addons: string[]) => desktopOnly<void>('set_enabled_addons', { addons }),
   listStagedMods: (gameId: string) => desktopOnly<NativeMod[]>('list_staged_mods', { gameId }),
   scanModImport: (paths: string[], gameName: string) => desktopOnly<ModImportCandidate[]>('scan_mod_import', { paths, gameName }),
   scanModImportBackground: (taskId: string, paths: string[], gameName: string, onProgress: (task: BackgroundTaskSnapshot) => void) => {

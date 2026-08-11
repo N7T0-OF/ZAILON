@@ -599,6 +599,12 @@ export interface BackgroundTaskSnapshot {
 
 export type BackgroundTaskEvent = { event: 'Progress'; data: { task: BackgroundTaskSnapshot } }
 
+/** Événements du pipeline d'installation d'add-on (spec §14-15). */
+export type AddonInstallEvent =
+  | { event: 'Started'; data: { total: number } }
+  | { event: 'Progress'; data: { received: number } }
+  | { event: 'Finished'; data: Record<string, never> }
+
 export interface DiscordPresenceConfig {
   enabled: boolean
   clientId: string
@@ -784,6 +790,20 @@ export const native = {
       desktopOnly<void>('open_visual_windows_settings', { kind }),
   },
   scanMods: (modsPath: string) => desktopOnly<NativeMod[]>('scan_mods', { modsPath }),
+  // Add-ons (spec §14-15, §65) : téléchargement HTTPS + SHA-256 + installation
+  // atomique avec rollback — jamais d'écrasement direct.
+  addonDownload: (url: string, destPath: string, onProgress: (received: number, total: number) => void) => {
+    if (!isTauri()) return Promise.reject(new Error('Add-on download requires the ZAILON desktop app.'))
+    const channel = new Channel<AddonInstallEvent>()
+    channel.onmessage = event => {
+      if (event.event === 'Started') onProgress(0, event.data.total)
+      else if (event.event === 'Progress') onProgress(event.data.received, 0)
+    }
+    return invoke<void>('addon_download', { url, destPath, onEvent: channel })
+  },
+  addonVerifySha256: (path: string, expected: string) => desktopOnly<boolean>('addon_verify_sha256', { path, expected }),
+  addonInstallStaged: (archivePath: string, installDir: string) => desktopOnly<void>('addon_install_staged', { archivePath, installDir }),
+  addonInstallDir: () => desktopOnly<string>('addon_install_dir'),
   listStagedMods: (gameId: string) => desktopOnly<NativeMod[]>('list_staged_mods', { gameId }),
   scanModImport: (paths: string[], gameName: string) => desktopOnly<ModImportCandidate[]>('scan_mod_import', { paths, gameName }),
   scanModImportBackground: (taskId: string, paths: string[], gameName: string, onProgress: (task: BackgroundTaskSnapshot) => void) => {

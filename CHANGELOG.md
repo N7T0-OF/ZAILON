@@ -1340,6 +1340,23 @@
 
 - Le panneau ne restait plus ouvert avec une session terminée affichée (spec §47 : « Ne pas afficher les anciennes données ») — il bascule ou se ferme proprement.
 
+## 1.70.0 — Add-ons : pipeline d'installation réel (HTTPS → SHA-256 → échange atomique → santé)
+
+### Added
+
+- **Pipeline d'installation natif** (spec §14-15, §65) — 4 commandes Tauri :
+  - `addon_download` : téléchargement HTTPS uniquement (jamais de mirror, §9), taille plafonnée, écriture dans le cache add-ons ;
+  - `addon_verify_sha256` : vérification SHA-256 avant toute installation (§14) ;
+  - `addon_install_staged` : extraction ZIP en staging avec garde anti-traversal et anti-symlink (réutilise `enclosed_name` + `validate_archive_relative`), manifest.json obligatoire, puis **échange atomique** : ancien répertoire → backup, staging → install, backup supprimé seulement après succès, **restauré en cas d'échec (rollback)** ;
+  - `addon_install_dir` : `addons/installed` (code) — les données utilisateur restent séparées (`addon-data`, spec §16).
+- **Orchestrateur** (`src/lib/addonsInstall.ts`, 7 tests) : machine à états pure (download → verify → staging → swap → health → done / failed / rolled_back), `fetchAddonCatalog` (cache localStorage d'abord, réseau validé ensuite, **fallback hors ligne** — jamais d'échec bloquant, §6), `mergeCatalogs` (le distant prime, le fallback complète), `isOfficialCatalogUrl` (source officielle uniquement, §5/§9), `isSafeDownloadUrl` (HTTPS sans identifiants), rapport de stockage (§72).
+- **AddonsView câblée au pipeline réel** : bouton « Catalogue » (synchronisation distante avec indicateur source : à jour / en cache / hors ligne), dialogue d'installation avec **progression par phase** (barre + badges download/verify/staging/swap/health), échec affiché avec possibilité de fermer, vérification de santé post-install (compatibilité + dépendances), ligne de stockage total installé.
+
+### Changed
+
+- Le SHA-256 est vérifié quand le catalogue fournit le hash réel ; le catalogue de référence hors ligne utilise un placeholder honnête (aucune vérification inventée).
+- L'installation des add-ons est désormais réelle (fichiers dans `addons/installed`) et jamais destructive : rollback automatique en cas d'échec.
+
 ## 1.69.0 — Architecture Add-ons : Core léger + fonctionnalités installables à la demande
 
 ### Added

@@ -1039,6 +1039,16 @@ fn background_tasks_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(update_data_root(app)?.join("background-tasks.json"))
 }
 
+/// Dossier d'installation des add-ons : code dans `addons/installed`, données
+/// utilisateur séparées dans `addon-data` (spec §16).
+#[tauri::command]
+fn addon_install_dir(app: AppHandle) -> Result<String, String> {
+    let root = update_data_root(&app)?;
+    let dir = root.join("addons").join("installed");
+    fs::create_dir_all(&dir).map_err(to_error)?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
 fn persist_background_tasks(app: &AppHandle, registry: &BackgroundTaskRegistry) {
     let snapshots = registry
         .0
@@ -14338,6 +14348,149 @@ async fn install_update(
         .map_err(to_error)
 }
 
+// ─────────────────── Add-ons : pipeline d'installation (spec §14-15, §65) ──
+
+#[derive(Clone, Serialize)]
+#[serde(tag = "event", content = "data")]
+enum AddonInstallEvent {
+    Started { total: u64 },
+    Progress { received: u64 },
+    Finished,
+}
+
+/// Télécharge un add-on depuis une URL HTTPS uniquement (spec §9, §14).
+/// Jamais de mirror : la validation d'URL est renforcée côté UI (source
+/// officielle ou URL choisie par l'utilisateur pour un add-on communautaire).
+#[tauri::command]
+async fn addon_download(
+    url: String,
+    dest_path: String,
+    on_event: Channel<AddonInstallEvent>,
+) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("Add-on URL must use HTTPS.".into());
+    }
+    let response = reqwest::get(&url).await.map_err(to_error)?;
+    if !response.status().is_success() {
+        return Err(format!("Add-on download failed: {}", response.status()));
+    }
+    let total = response.content_length().unwrap_or(0);
+    let bytes = response.bytes().await.map_err(to_error)?;
+    if bytes.len() > 1024 * 1024 * 1024 {
+        return Err("Add-on archive exceeds 1 GiB.".into());
+    }
+    let destination = std::path::Path::new(&dest_path);
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent).map_err(to_error)?;
+    }
+    std::fs::write(destination, &bytes).map_err(to_error)?;
+    let _ = on_event.send(AddonInstallEvent::Started { total });
+    let _ = on_event.send(AddonInstallEvent::Progress { received: bytes.len() as u64 });
+    let _ = on_event.send(AddonInstallEvent::Finished);
+    Ok(())
+}
+
+/// Vérifie le SHA-256 d'un fichier téléchargé (spec §14). Refuse l'installation
+/// si le hash ne correspond pas.
+#[tauri::command]
+fn addon_verify_sha256(path: String, expected: String) -> Result<bool, String> {
+    let bytes = std::fs::read(&path).map_err(to_error)?;
+    let actual = Sha256::digest(&bytes);
+    let actual_hex = format!("{:x}", actual);
+    Ok(actual_hex.eq_ignore_ascii_case(&expected))
+}
+
+/// Installe un add-on .zailon-addon (ZIP) : extraction en staging → swap
+/// atomique → rollback (spec §15, §65). Jamais d'écrasement direct : l'ancien
+/// répertoire est déplacé en backup, le staging prend sa place, le backup est
+/// supprimé seulement après succès (restauré en cas d'échec).
+#[tauri::command]
+fn addon_install_staged(archive_path: String, install_dir: String) -> Result<(), String> {
+    let archive = std::path::Path::new(&archive_path);
+    let install = std::path::Path::new(&install_dir);
+    let extension = archive
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if !extension.eq_ignore_ascii_case("zip") {
+        return Err("Add-on archive must be a ZIP.".into());
+    }
+    let file = std::fs::File::open(archive).map_err(to_error)?;
+    let mut zip = zip::ZipArchive::new(file).map_err(to_error)?;
+    if zip.len() > 100_000 {
+        return Err("Add-on archive contains too many entries.".into());
+    }
+    let parent = install
+        .parent()
+        .ok_or_else(|| "Invalid add-on install directory.".to_string())?;
+    let token = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_nanos())
+        .unwrap_or(0);
+    let staging = parent.join(format!(".zailon-addon-staging-{}", token));
+    let backup = parent.join(format!(".zailon-addon-backup-{}", token));
+    std::fs::create_dir_all(&staging).map_err(to_error)?;
+
+    let mut manifest_found = false;
+    {
+        const MAX_ADDON_EXTRACTED_BYTES: u64 = 512 * 1024 * 1024;
+        let mut total = 0u64;
+        for index in 0..zip.len() {
+            let mut entry = zip.by_index(index).map_err(to_error)?;
+            if archive_is_symlink(entry.unix_mode()) {
+                let _ = std::fs::remove_dir_all(&staging);
+                return Err("Add-on archive contains a symbolic link.".into());
+            }
+            let relative = entry
+                .enclosed_name()
+                .ok_or_else(|| "Add-on archive contains an unsafe path.".to_string())?;
+            validate_archive_relative(&relative)?;
+            total = total.saturating_add(entry.size());
+            if total > MAX_ADDON_EXTRACTED_BYTES {
+                let _ = std::fs::remove_dir_all(&staging);
+                return Err("Add-on archive exceeds the extraction limit.".into());
+            }
+            let output = staging.join(&relative);
+            if entry.is_dir() {
+                std::fs::create_dir_all(&output).map_err(to_error)?;
+            } else {
+                if let Some(parent_dir) = output.parent() {
+                    std::fs::create_dir_all(parent_dir).map_err(to_error)?;
+                }
+                let mut reader = std::io::BufReader::new(entry);
+                let mut writer = std::fs::File::create(&output).map_err(to_error)?;
+                std::io::copy(&mut reader, &mut writer).map_err(to_error)?;
+                if relative == std::path::Path::new("manifest.json") {
+                    manifest_found = true;
+                }
+            }
+        }
+    }
+    if !manifest_found {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err("Add-on archive is missing manifest.json.".into());
+    }
+
+    if install.exists() {
+        std::fs::rename(install, &backup).map_err(to_error)?;
+    }
+    match std::fs::rename(&staging, install) {
+        Ok(()) => {
+            if backup.exists() {
+                let _ = std::fs::remove_dir_all(&backup);
+            }
+            Ok(())
+        }
+        Err(error) => {
+            // Rollback : restaure l'ancienne version si le swap a échoué.
+            if backup.exists() {
+                let _ = std::fs::rename(&backup, install);
+            }
+            Err(to_error(error))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -15883,6 +16036,10 @@ pub fn run() {
             install_mod,
             import_mod_candidates,
             import_mod_candidates_background,
+            addon_download,
+            addon_verify_sha256,
+            addon_install_staged,
+            addon_install_dir,
             export_profile,
             preview_profile_import,
             extract_profile_archive,

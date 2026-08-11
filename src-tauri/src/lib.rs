@@ -14385,7 +14385,9 @@ async fn addon_download(
     }
     std::fs::write(destination, &bytes).map_err(to_error)?;
     let _ = on_event.send(AddonInstallEvent::Started { total });
-    let _ = on_event.send(AddonInstallEvent::Progress { received: bytes.len() as u64 });
+    let _ = on_event.send(AddonInstallEvent::Progress {
+        received: bytes.len() as u64,
+    });
     let _ = on_event.send(AddonInstallEvent::Finished);
     Ok(())
 }

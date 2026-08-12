@@ -505,6 +505,21 @@ fn set_enabled_addons(state: State<'_, AddonGate>, addons: Vec<String>) {
     items.extend(addons.into_iter().filter(|id| !id.trim().is_empty()));
 }
 
+/// Décode et valide la clé publique Ed25519 (base64, exactement 32 octets).
+/// La clé publique n'est jamais un secret — elle ne sert qu'à vérifier.
+fn parse_verifying_key(public_key: &str) -> Result<ed25519_dalek::VerifyingKey, String> {
+    use base64::Engine;
+
+    let key_bytes = base64::engine::general_purpose::STANDARD
+        .decode(public_key.trim())
+        .map_err(|_| "Clé publique invalide (base64).".to_string())?;
+    let key_bytes: [u8; 32] = key_bytes
+        .try_into()
+        .map_err(|_| "Clé publique invalide (doit faire 32 octets).".to_string())?;
+    ed25519_dalek::VerifyingKey::from_bytes(&key_bytes)
+        .map_err(|error| format!("Clé publique Ed25519 invalide : {error}"))
+}
+
 /// Vérifie la signature Ed25519 d'un package d'add-on (spec §14, §52) : la
 /// signature (base64) est validée contre le SHA-256 du fichier et la clé
 /// publique (base64, 32 octets) fournie par le catalogue. La clé publique n'est
@@ -515,27 +530,19 @@ fn addon_verify_signature(
     signature: String,
     public_key: String,
 ) -> Result<bool, String> {
-    use ed25519_dalek::{Signature, VerifyingKey};
+    use base64::Engine;
+    use ed25519_dalek::Signature;
     use sha2::{Digest, Sha256};
 
     let bytes = std::fs::read(&file_path)
         .map_err(|error| format!("Lecture du package impossible : {error}"))?;
     let digest = Sha256::digest(&bytes);
 
-    let key_bytes = base64::Engine::decode(
-        &base64::engine::general_purpose::STANDARD,
-        public_key.trim(),
-    )
-    .map_err(|_| "Clé publique invalide (base64).".to_string())?;
-    let key_bytes: [u8; 32] = key_bytes
-        .try_into()
-        .map_err(|_| "Clé publique invalide (doit faire 32 octets).".to_string())?;
-    let verifying_key = VerifyingKey::from_bytes(&key_bytes)
-        .map_err(|error| format!("Clé publique Ed25519 invalide : {error}"))?;
+    let verifying_key = parse_verifying_key(&public_key)?;
 
-    let sig_bytes =
-        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, signature.trim())
-            .map_err(|_| "Signature invalide (base64).".to_string())?;
+    let sig_bytes = base64::engine::general_purpose::STANDARD
+        .decode(signature.trim())
+        .map_err(|_| "Signature invalide (base64).".to_string())?;
     let signature = Signature::from_slice(&sig_bytes)
         .map_err(|error| format!("Signature Ed25519 invalide : {error}"))?;
 
@@ -15594,8 +15601,13 @@ mod tests {
             .verify_strict(&tampered_digest, &parsed_sig)
             .is_err());
 
-        // Clé publique de mauvaise taille → rejetée.
-        assert!(VerifyingKey::from_bytes(&[0u8; 31]).is_err());
+        // Rejets runtime de la clé publique : base64 invalide, mauvaise taille.
+        let short_key_b64 = base64::engine::general_purpose::STANDARD.encode([0u8; 31]);
+        assert!(parse_verifying_key(&short_key_b64).is_err());
+        assert!(parse_verifying_key("### pas du base64 ###").is_err());
+
+        // Signature de mauvaise taille (63 octets au lieu de 64) → rejetée.
+        assert!(ed25519_dalek::Signature::from_slice(&[0u8; 63]).is_err());
 
         let _ = std::fs::remove_file(&path);
     }

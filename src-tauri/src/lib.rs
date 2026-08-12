@@ -1275,7 +1275,7 @@ fn frosty_worker_start(runtime_path: String) -> Result<u32, String> {
     if !path.is_file() {
         return Err("Runtime Frosty introuvable.".to_string());
     }
-    let child = process::Command::new(&path)
+    let child = Command::new(&path)
         .current_dir(path.parent().unwrap_or_else(|| std::path::Path::new(".")))
         .spawn()
         .map_err(to_error)?;
@@ -1305,7 +1305,7 @@ fn process_memory_mb(pid: u32) -> Option<u64> {
     #[cfg(target_os = "windows")]
     {
         let filter = format!("PID eq {pid}");
-        let output = process::Command::new("tasklist")
+        let output = Command::new("tasklist")
             .args(["/FI", &filter, "/FO", "CSV", "/NH"])
             .output()
             .ok()?;
@@ -1331,7 +1331,7 @@ fn process_memory_mb(pid: u32) -> Option<u64> {
 fn kill_process(pid: u32) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        let status = process::Command::new("taskkill")
+        let status = Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/F"])
             .status()
             .map_err(to_error)?;
@@ -1342,7 +1342,7 @@ fn kill_process(pid: u32) -> Result<(), String> {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let status = process::Command::new("kill")
+        let status = Command::new("kill")
             .args(["-9", &pid.to_string()])
             .status()
             .map_err(to_error)?;

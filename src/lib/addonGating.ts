@@ -13,6 +13,7 @@ import type { InstalledAddon } from './addons'
 export type ZailonCapability =
   | 'discord.presence'
   | 'frosty.backend'
+  | 'frosty.editor'
   | 'reshade.manager'
   | 'provider.nexus'
   | 'provider.gamebanana'
@@ -33,6 +34,7 @@ export type ZailonCapability =
 export const CAPABILITY_ADDON: Record<ZailonCapability, string> = {
   'discord.presence': 'official.zailon.discord',
   'frosty.backend': 'official.zailon.frosty',
+  'frosty.editor': 'official.zailon.frosty-editor',
   'reshade.manager': 'official.zailon.reshade',
   'provider.nexus': 'official.zailon.provider.nexus',
   'provider.gamebanana': 'official.zailon.provider.gamebanana',

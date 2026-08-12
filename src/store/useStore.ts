@@ -4,6 +4,7 @@ import { BackgroundMediaType, BulkOperation, DownloadRetention, ExplodMod, Explo
 import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
 import { validateAddonManifest } from '../lib/addons'
 import type { AddonSource, InstalledAddon, ZailonAddonManifest } from '../lib/addons'
+import type { FrostyProject } from '../lib/frostyEditor'
 import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
 import { adapterFor, FALLBACK_ADAPTER, isLauncherBased } from '../lib/launchAdapters'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
@@ -442,6 +443,13 @@ export interface Store {
   // persisté, catalogue officiel en cache hors ligne.
   addons: InstalledAddon[]
   installAddon: (manifest: ZailonAddonManifest, source: AddonSource) => void
+  /** Projets Frosty Editor (spec §10-13) — persistés, hors du dossier jeu (§11). */
+  frostyProjects: FrostyProject[]
+  /** Jeu ouvert dans l'espace Création Frosty (session, non persisté). */
+  frostyContextGameId?: string
+  upsertFrostyProject: (project: FrostyProject) => void
+  removeFrostyProject: (id: string) => void
+  setFrostyContextGame: (gameId?: string) => void
   uninstallAddon: (id: string) => { dependents: string[] }
   setAddonEnabled: (id: string, enabled: boolean) => void
   importAddonManifest: (manifest: ZailonAddonManifest) => { ok: boolean; error?: string }
@@ -751,6 +759,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   currentView: 'home',
   activeGameTab: 'mods',
   addons: [],
+  frostyProjects: [],
   restorePoints: [],
   autoRestorePoints: true,
   remoteInstallingKeys: [],
@@ -874,6 +883,14 @@ export const useStore = create<Store>()(persist((set, get) => ({
     get().installAddon(validation.manifest, 'community')
     return { ok: true }
   },
+  // Frosty Editor (spec §10-13) : projets persistés hors du dossier jeu.
+  upsertFrostyProject: project => set(state => ({
+    frostyProjects: state.frostyProjects.some(p => p.id === project.id)
+      ? state.frostyProjects.map(p => p.id === project.id ? project : p)
+      : [...state.frostyProjects, project],
+  })),
+  removeFrostyProject: id => set(state => ({ frostyProjects: state.frostyProjects.filter(p => p.id !== id) })),
+  setFrostyContextGame: gameId => set({ frostyContextGameId: gameId }),
 
   setSelectedGame: selectedGameId => {
     const game = get().games.find(item => item.id === selectedGameId)
@@ -2847,6 +2864,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     // Add-ons (spec §1-83) : installés/activés persistés — jamais chargés au
     // démarrage (lazy), le catalogue officiel reste un cache hors ligne.
     addons: state.addons,
+    frostyProjects: state.frostyProjects,
     games: state.games,
     selectedGameId: state.selectedGameId,
     selectedProfileId: state.selectedProfileId,

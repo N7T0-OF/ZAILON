@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, History, Keyboard, Layers3, MonitorDown, Palette, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Snowflake, Trash2, Upload, Wand2, Wrench } from 'lucide-react'
+import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, History, Keyboard, Layers3, MonitorDown, Package, Palette, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Snowflake, Trash2, Upload, Wand2, Wrench } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
@@ -640,6 +640,10 @@ function BackgroundPicker({ game }: { game: Game }) {
 }
 
 function FrostyConfigCard({ game, profile }: { game: Game; profile: Profile }) {
+  const capabilities = addonCapabilities(useStore(state => state.addons))
+  const hasEditor = hasCapability(capabilities, 'frosty.editor')
+  const setView = useStore(state => state.setView)
+  const setFrostyContextGame = useStore(state => state.setFrostyContextGame)
   const [open, setOpen] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(`zailon:config-open:${game.id}`) || 'null') as string[] | null
@@ -713,6 +717,9 @@ function FrostyConfigCard({ game, profile }: { game: Game; profile: Profile }) {
         <button type="button" onClick={runTest} className="ml-auto flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold"><ShieldCheck size={13} />Tester le profil</button>
       </div>
       {tested && <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-black/25 px-3 py-2 font-mono text-[10px] leading-relaxed text-white/55">{tested}</pre>}
+      {hasEditor
+        ? <button type="button" onClick={() => { setFrostyContextGame(game.id); setView('frosty') }} className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-gold/25 bg-gold/[0.06] px-3 py-2 text-[11px] font-semibold text-gold hover:border-gold/45 hover:bg-gold/10"><Wrench size={13} />Création de mods — éditer avec Frosty</button>
+        : <button type="button" onClick={() => setView('addons')} className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/55 hover:border-gold/30 hover:text-gold"><Package size={13} />Module disponible — ajouter Frosty Editor</button>}
       <p className="mt-2 text-[10px] text-white/30">Le backend Frosty n&apos;est jamais initialisé au démarrage de ZAILON — seulement à l&apos;ouverture de ce jeu, à l&apos;import d&apos;un .fbmod ou au lancement.</p>
     </ConfigCard>
   )

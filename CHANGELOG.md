@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.76.0] - 2026-08-12
+
+> Add-on officiel **Frosty Editor** (spec Frosty Editor §1-122) : audit profond de la
+> source Frosty locale, architecture « Create » séparée de Frosty Support « Install /
+> Apply / Run », Worker isolé, projets/autosave, matrice de capacités par jeu et
+> espace Création Frosty dans ZAILON. Licence respectée : aucun code Frosty bundle
+> (CC BY-NC-ND 4.0) — le runtime officiel externe est piloté.
+
+### Added
+
+- **Audit complet de la source Frosty locale** (`G:\2_Logiciel\CLAUDE CODE\EXEMPLE\Frosty Editor`) : 8 projets core, 25 profils SDK, 29 plugins, 445 fichiers .cs — 9 rapports `docs/frosty-*.md` (source-audit, source-map, plugin-inventory, license-audit, old-vs-new-architecture, editor-addon-architecture, editor-worker, nfs2015-editor-e2e-test, editor-performance).
+- **Add-on `official.zailon.frosty-editor`** au catalogue (dépend de `official.zailon.frosty`, ~52 Mo, catégorie modding) + capacité `frosty.editor` (gating réel).
+- **`src/lib/frostyEditor.ts`** (19 tests) : `FrostyProject` (stocké hors du jeu), autosave par snapshots avec rotation, projets récents, matrice `FROSTY_EDITOR_SUPPORT` par jeu (NFS 2015 cible complète), validation avant build (§102), pipeline de build par étapes, estimation de taille, historique de build, **cycle de vie du Worker** (warm timeout 45 s / 5 s / 0, crash de plugin → redémarrage + désactivation après 2 crashs, RAM libérée) et politique de licence stricte.
+- **Vue « Création Frosty »** gatée (Frosty Support + Frosty Editor requis) : sélecteur de jeux Frostbite, projets/récents/autosave, matrice de capacités, assets (modifiés/ajoutés/supprimés, notes, favoris), Build & Test avec progression, historique, **Worker avec simulation de crash**, diagnostic compact.
+- **Entrée « Création de mods — éditer avec Frosty »** dans la config Frosty des jeux compatibles (bouton « Module disponible » sinon).
+
+### Validation
+
+- 361 tests ✅ (19 nouveaux). tsc ✅, build ✅, audit accent ✅.
+
 ## [1.75.0] - 2026-08-12
 
 > Boîte à outils développeur Add-ons (spec §54-56) : template officiel

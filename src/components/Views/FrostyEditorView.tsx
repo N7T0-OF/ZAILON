@@ -3,7 +3,7 @@ import {
   FolderOpen, Gauge, Hammer, HardDrive, History, Info, Package, Play, Plus, RefreshCw, Save, Server,
   Sparkles, Trash2, Wrench, X,
 } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../../store/useStore'
 import { addonCapabilities, hasCapability } from '../../lib/addonGating'
 import {
@@ -20,6 +20,7 @@ import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
 import { AssetBrowserPanel, BulkExportDialog, EbxEditorPanel, PluginManagerPanel } from './FrostyPanels'
 import { buildFrostyProjectArchive, frostyProjectArchiveText, parseFrostyProjectExport } from '../../lib/frostyProjectFile'
 import { native } from '../../lib/native'
+import { classifyRuntimeExe, type FrostyRuntime } from '../../lib/frostyBridge'
 import type { FrostyAsset } from '../../lib/frostyAssets'
 
 const WORKER_INITIAL: FrostyWorkerStatus = { state: 'stopped', crashCount: 0, disabledPlugins: [] }
@@ -60,6 +61,9 @@ export function FrostyEditorView() {
   const [importing, setImporting] = useState(false)
   const [importText, setImportText] = useState('')
   const [importResult, setImportResult] = useState<string | undefined>()
+  const [detectedRuntime, setDetectedRuntime] = useState<FrostyRuntime | null>(null)
+  const [detecting, setDetecting] = useState(false)
+  const [nativeWorker, setNativeWorker] = useState<{ pid: number; running: boolean; memoryMb: number | null } | null>(null)
   const tickRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
 
   const selected = projects.find(p => p.id === selectedId)
@@ -146,8 +150,41 @@ export function FrostyEditorView() {
     setTimeout(() => setWorker(prev => workerTick(prev, Date.now() + 100)), 45_000)
   }
 
-  const runtime = frostyGame ? FROSTY_RUNTIME_BY_GAME[frostyGame.name] ?? '1.0.6.3' : undefined
+  const runtime = frostyGame ? FROSTY_RUNTIME_BY_GAME[frostyGame.name] ?? '1.0.6.3' : undefined // version conseillée
   const recent = recentFrostyProjects(projects)
+
+  // Détection du runtime officiel à l'ouverture du jeu de contexte (spec §86).
+  useEffect(() => {
+    const execPath = frostyGame?.execPath
+    if (!execPath) return
+    void (async () => {
+      setDetecting(true)
+      try {
+        const info = await native.detectFrostyRuntime(execPath, [])
+        setDetectedRuntime(info ? { ...info, kind: classifyRuntimeExe(info.exe), detectedAt: Date.now() } : null)
+      } catch { setDetectedRuntime(null) }
+      setDetecting(false)
+    })()
+  }, [frostyGame?.id, frostyGame?.execPath])
+
+  async function startNativeWorker() {
+    if (!detectedRuntime || nativeWorker?.running) return
+    try {
+      const pid = await native.frostyWorkerStart(detectedRuntime.path)
+      const status = await native.frostyWorkerStatus(pid)
+      setNativeWorker({ pid, running: status.running, memoryMb: status.memoryMb })
+      setWorker(workerWarmed(worker))
+    } catch { setError('Impossible de démarrer le Worker Frosty natif.') }
+  }
+
+  async function stopNativeWorker() {
+    if (!nativeWorker) return
+    try {
+      await native.frostyWorkerStop(nativeWorker.pid)
+    } catch { /* déjà arrêté */ }
+    setNativeWorker(null)
+    setWorker(workerReset(worker))
+  }
 
   if (!hasBackend || !hasEditor) {
     return <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
@@ -343,6 +380,23 @@ export function FrostyEditorView() {
             </div>}
           </section>
 
+          {/* Runtime officiel (spec §86) */}
+          <section className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-4">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/40"><Package size={12} />Runtime Frosty officiel<ZailonInfoPopover text="Jamais bundle (licence CC BY-NC-ND — docs/frosty-license-audit.md) : ZAILON détecte l'installation officielle Frosty (ModManager/Editor/Cmd) près du jeu ou dans addon-data, puis la pilote en Worker séparé." /></p>
+            {detectedRuntime
+              ? <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-300/20 bg-emerald-300/[0.05] px-3 py-2">
+                <div className="min-w-0">
+                  <p className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-200/90"><Check size={12} />Détecté · {detectedRuntime.exe} <span className="font-mono text-[9px] text-emerald-200/50">({detectedRuntime.kind})</span></p>
+                  <p className="mt-0.5 truncate font-mono text-[10px] text-white/45">{detectedRuntime.path}</p>
+                </div>
+                <span className="font-mono text-[10px] text-white/40">{formatSize(detectedRuntime.size)}</span>
+              </div>
+              : <div className="mt-2 flex items-center justify-between rounded-lg border border-white/[0.07] bg-black/15 px-3 py-2">
+                <p className="text-[11px] text-white/45">{detecting ? 'Détection en cours…' : 'Aucun runtime Frosty officiel détecté pour ce jeu.'}</p>
+                {!detecting && <button type="button" onClick={() => setDetecting(true)} className="rounded-md border border-white/[0.09] px-2 py-1 text-[10px] text-white/50 hover:border-gold/30 hover:text-gold">Réessayer</button>}
+              </div>}
+          </section>
+
           {/* Worker + Diagnostic */}
           <div className="grid gap-4 lg:grid-cols-2">
             <section className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-4">
@@ -355,7 +409,13 @@ export function FrostyEditorView() {
               </div>
               {worker.lastError && <p className="mt-2 text-[11px] text-rose-200/75">{worker.lastError}</p>}
               {worker.disabledPlugins.length > 0 && <p className="mt-2 text-[11px] text-amber-200/75">Plugins désactivés (2 crashs) : {worker.disabledPlugins.join(', ')}</p>}
+              {nativeWorker && <div className="mt-2 flex items-center justify-between rounded-lg border border-white/[0.07] bg-black/15 px-3 py-2">
+                <span className="flex items-center gap-1.5 text-[11px] text-emerald-300/85"><CircleDot size={10} />PID {nativeWorker.pid} · {nativeWorker.running ? 'en cours' : 'terminé'}</span>
+                <span className="font-mono text-[10px] text-white/40">{nativeWorker.memoryMb !== null ? `${nativeWorker.memoryMb} Mo RAM` : '—'}</span>
+              </div>}
               <div className="mt-3 flex flex-wrap gap-2">
+                {detectedRuntime && !nativeWorker?.running && <button type="button" onClick={() => void startNativeWorker()} className="rounded-lg border border-emerald-300/25 bg-emerald-300/[0.06] px-3 py-1.5 text-[10px] font-semibold text-emerald-200/85 hover:border-emerald-300/45"><Play size={10} />Démarrer le Worker natif</button>}
+                {nativeWorker?.running && <button type="button" onClick={() => void stopNativeWorker()} className="rounded-lg border border-rose-300/25 px-3 py-1.5 text-[10px] font-semibold text-rose-200/80 hover:border-rose-300/45">Arrêter le Worker</button>}
                 <button type="button" onClick={crashSimulation} className="rounded-lg border border-white/[0.09] px-3 py-1.5 text-[10px] font-semibold text-white/50 hover:border-rose-300/30 hover:text-rose-200">Simuler un crash de plugin</button>
                 <button type="button" onClick={() => { setWorker(workerReset(worker)); if (tickRef.current) clearInterval(tickRef.current); setPipeline({ stage: 'idle', progress: 0, issues: [] }) }} className="rounded-lg border border-white/[0.09] px-3 py-1.5 text-[10px] font-semibold text-white/50 hover:border-gold/30 hover:text-gold">Réinitialiser</button>
                 <button type="button" onClick={closeEditor} className="rounded-lg border border-white/[0.09] px-3 py-1.5 text-[10px] font-semibold text-white/50 hover:border-gold/30 hover:text-gold">Fermer l'éditeur</button>
@@ -385,6 +445,8 @@ export function FrostyEditorView() {
               />
             : <AssetBrowserPanel
                 gameKey={selected.gameId}
+                gamePath={frostyGame?.execPath ?? undefined}
+                runtimePath={detectedRuntime?.path}
                 frostyVersion={selected.frostyRuntimeVersion}
                 favorites={selected.favorites}
                 onToggleFavorite={assetId => upsert(toggleFavorite(selected, assetId))}

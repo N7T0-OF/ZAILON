@@ -109,3 +109,19 @@ Le runtime officiel est **externe**, détecté par Frosty Support. Attribution c
   sources (§107). Écriture atomique native (temp+rename).
 - **Bulk Export** (`src/lib/frostyBulk.ts`) : textures DDS / meshes / audio
   EALayer3 selon les capacités réelles du backend (§44-45), en arrière-plan.
+
+## Suite 1.78.0 — pont natif vers le runtime réel
+
+- **`frosty_detect_runtime`** : détection du runtime Frosty officiel (ModManager >
+  Editor > Cmd) — dossier du jeu, dossier Frosty, addon-data, chemins fournis.
+  Jamais bundle : le runtime reste l'installation officielle de l'utilisateur.
+- **`frosty_scan_game_data`** : inventaire réel des données du jeu (Data/),
+  plafonné, avec chemins/tailles/mtime — alimente l'index d'assets au lieu des
+  données de démonstration (spec §16 : « l'index vient des vrais fichiers »).
+- **Worker natif** : `frosty_worker_start` (processus séparé), `frosty_worker_status`
+  (running + RAM via tasklist), `frosty_worker_stop` (kill cross-platform) —
+  l'isolation §76-83 devient réelle : fermer l'éditeur tue le processus et libère
+  sa RAM.
+- **`src/lib/frostyBridge.ts`** : classification honnête par extension
+  (cas/cat/toc/bin-cat → chunks, ebx, dds → texture, mesh → mesh, spk/ea3 → audio),
+  résumé du scan, politique de crash, exigence de runtime réel avant build (§102).

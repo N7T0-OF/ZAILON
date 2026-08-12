@@ -1140,6 +1140,219 @@ fn save_project_archive(path: String, bytes: Vec<u8>) -> Result<(), String> {
     Ok(())
 }
 
+// ────────────────── Frosty Editor : runtime officiel + Worker natif ─────────
+// Spec Frosty Editor §76-86 : le runtime Frosty est TOUJOURS externe (jamais
+// bundle — licence CC BY-NC-ND, docs/frosty-license-audit.md). ZAILON le
+// détecte, l'inventorie et le pilote en processus séparé.
+
+/// Fichier réel du jeu scanné (inventaire — jamais de hash lourd).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GameDataFile {
+    path: String,
+    size: u64,
+    modified: u64,
+}
+
+/// Résultat de détection du runtime Frosty officiel.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FrostyRuntimeInfo {
+    path: String,
+    exe: String,
+    size: u64,
+}
+
+const FROSTY_RUNTIME_NAMES: [&str; 3] =
+    ["FrostyModManager.exe", "FrostyEditor.exe", "FrostyCmd.exe"];
+
+/// Cherche le runtime Frosty officiel dans une liste de dossiers (pur,
+/// testable). Ordre de préférence : ModManager > Editor > Cmd.
+fn find_frosty_runtime_in(
+    dirs: &[std::path::PathBuf],
+) -> Option<(std::path::PathBuf, String, u64)> {
+    for dir in dirs {
+        for name in FROSTY_RUNTIME_NAMES {
+            let candidate = dir.join(name);
+            if let Ok(meta) = candidate.metadata() {
+                if meta.is_file() {
+                    return Some((candidate, name.to_string(), meta.len()));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Détecte le runtime Frosty officiel : dossier du jeu, à côté, dossier
+/// Frosty du jeu, addon-data/official.zailon.frosty, et chemins fournis.
+#[tauri::command]
+fn frosty_detect_runtime(
+    app: AppHandle,
+    game_path: String,
+    extra_paths: Vec<String>,
+) -> Result<Option<FrostyRuntimeInfo>, String> {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(exe_dir) = std::path::Path::new(&game_path).parent() {
+        dirs.push(exe_dir.to_path_buf());
+        dirs.push(exe_dir.join("Frosty"));
+        if let Some(parent) = exe_dir.parent() {
+            dirs.push(parent.to_path_buf());
+        }
+    }
+    if let Ok(root) = update_data_root(&app) {
+        dirs.push(root.join("addon-data").join("official.zailon.frosty"));
+    }
+    for extra in &extra_paths {
+        dirs.push(std::path::PathBuf::from(extra));
+    }
+    Ok(
+        find_frosty_runtime_in(&dirs).map(|(path, exe, size)| FrostyRuntimeInfo {
+            path: path.to_string_lossy().to_string(),
+            exe,
+            size,
+        }),
+    )
+}
+
+/// Inventaire réel des données du jeu (Data, sinon racine) — alimente l'index
+/// des assets avec de vraies tailles (spec §16). Plafonné pour ne jamais
+/// bloquer ni saturer le canal IPC.
+#[tauri::command]
+fn frosty_scan_game_data(game_path: String) -> Result<Vec<GameDataFile>, String> {
+    const MAX_FILES: usize = 50_000;
+    let root = std::path::PathBuf::from(&game_path);
+    let mut scan_root = root.join("Data");
+    if !scan_root.is_dir() {
+        scan_root = root.clone();
+    }
+    let mut out: Vec<GameDataFile> = Vec::new();
+    let mut stack = vec![scan_root];
+    while let Some(dir) = stack.pop() {
+        if out.len() >= MAX_FILES {
+            break;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            if meta.is_dir() {
+                stack.push(path);
+            } else if meta.is_file() {
+                if out.len() >= MAX_FILES {
+                    break;
+                }
+                let modified = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                out.push(GameDataFile {
+                    path: path
+                        .strip_prefix(&root)
+                        .unwrap_or(&path)
+                        .to_string_lossy()
+                        .to_string(),
+                    size: meta.len(),
+                    modified,
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(out)
+}
+
+/// Démarre le runtime Frosty officiel en tant que Worker isolé (§76-78).
+#[tauri::command]
+fn frosty_worker_start(runtime_path: String) -> Result<u32, String> {
+    let path = std::path::PathBuf::from(&runtime_path);
+    if !path.is_file() {
+        return Err("Runtime Frosty introuvable.".to_string());
+    }
+    let child = process::Command::new(&path)
+        .current_dir(path.parent().unwrap_or_else(|| std::path::Path::new(".")))
+        .spawn()
+        .map_err(to_error)?;
+    Ok(child.id())
+}
+
+/// État du Worker : running + RAM utilisée (Windows via tasklist).
+#[tauri::command]
+fn frosty_worker_status(pid: u32) -> Result<serde_json::Value, String> {
+    let running = process_is_running(pid);
+    let memory_mb = if running {
+        process_memory_mb(pid)
+    } else {
+        None
+    };
+    Ok(serde_json::json!({ "running": running, "memoryMb": memory_mb }))
+}
+
+/// Arrête le Worker (kill propre, spec §79-81).
+#[tauri::command]
+fn frosty_worker_stop(pid: u32) -> Result<(), String> {
+    kill_process(pid)
+}
+
+/// RAM d'un processus (Mo) — Windows via tasklist, ailleurs non disponible.
+fn process_memory_mb(pid: u32) -> Option<u64> {
+    #[cfg(target_os = "windows")]
+    {
+        let filter = format!("PID eq {pid}");
+        let output = process::Command::new("tasklist")
+            .args(["/FI", &filter, "/FO", "CSV", "/NH"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let field = text
+            .split(',')
+            .nth(4)
+            .map(|v| v.trim_matches(['"', ' ', '\r', '\n']).to_string())?;
+        let kb = field.trim_end_matches(" K").parse::<u64>().ok()?;
+        return Some(kb / 1024);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// Tue un processus (cross-platform, cf. process_is_running).
+fn kill_process(pid: u32) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let status = process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .status()
+            .map_err(to_error)?;
+        if status.success() || !process_is_running(pid) {
+            return Ok(());
+        }
+        return Err(format!("Impossible d'arrêter le processus {pid}."));
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let status = process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .status()
+            .map_err(to_error)?;
+        if status.success() || !process_is_running(pid) {
+            return Ok(());
+        }
+        Err(format!("Impossible d'arrêter le processus {pid}."))
+    }
+}
+
 fn persist_background_tasks(app: &AppHandle, registry: &BackgroundTaskRegistry) {
     let snapshots = registry
         .0
@@ -15574,6 +15787,55 @@ mod tests {
     }
 
     #[test]
+    fn find_frosty_runtime_prefers_modmanager() {
+        let dir = std::env::temp_dir().join(format!("zailon-frosty-detect-{}", unix_timestamp()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("FrostyModManager.exe"), b"mm").unwrap();
+        std::fs::write(dir.join("FrostyEditor.exe"), b"ed").unwrap();
+        let found = find_frosty_runtime_in(&[dir.clone()]);
+        assert!(found.is_some());
+        let (path, name, size) = found.unwrap();
+        assert_eq!(name, "FrostyModManager.exe");
+        assert_eq!(size, 2);
+        assert!(path.to_string_lossy().ends_with("FrostyModManager.exe"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn find_frosty_runtime_returns_none_when_absent() {
+        let dir = std::env::temp_dir().join(format!("zailon-frosty-none-{}", unix_timestamp()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(find_frosty_runtime_in(&[dir.clone()]).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn frosty_scan_game_data_lists_real_files() {
+        let dir = std::env::temp_dir().join(format!("zailon-frosty-scan-{}", unix_timestamp()));
+        std::fs::create_dir_all(dir.join("Data").join("Win32")).unwrap();
+        std::fs::write(
+            dir.join("Data").join("Win32").join("cas_01.cas"),
+            vec![0u8; 64],
+        )
+        .unwrap();
+        std::fs::write(dir.join("Data").join("cat.bin"), b"catalogue").unwrap();
+        let files = frosty_scan_game_data(dir.to_string_lossy().to_string()).unwrap();
+        assert_eq!(files.len(), 2);
+        assert!(files
+            .iter()
+            .any(|f| f.path.ends_with("cas_01.cas") && f.size == 64));
+        assert!(files
+            .iter()
+            .any(|f| f.path.ends_with("cat.bin") && f.size == 9));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn process_is_running_for_current_pid() {
+        assert!(process_is_running(std::process::id()));
+    }
+
+    #[test]
     fn save_project_archive_writes_atomically() {
         let dir = std::env::temp_dir().join(format!("zailon-frosty-test-{}", unix_timestamp()));
         let target = dir.join("projet.zailon-frosty-project");
@@ -16294,6 +16556,11 @@ pub fn run() {
             addon_install_staged,
             addon_install_dir,
             save_project_archive,
+            frosty_detect_runtime,
+            frosty_scan_game_data,
+            frosty_worker_start,
+            frosty_worker_status,
+            frosty_worker_stop,
             export_profile,
             preview_profile_import,
             extract_profile_archive,

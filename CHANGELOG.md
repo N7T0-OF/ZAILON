@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.78.0] - 2026-08-12
+
+> Frosty Editor — **pont natif vers le runtime Frosty réel** (spec §76-86, §16) :
+> détection du runtime officiel, inventaire réel des données du jeu, Worker natif
+> (start/status/stop) et index d'assets alimenté par de vraies données. Licence
+> toujours respectée : le runtime reste externe, jamais bundle.
+
+### Added
+
+- **Commande native `frosty_detect_runtime`** : détection du runtime Frosty officiel
+  (ModManager > Editor > Cmd) dans le dossier du jeu, dossier Frosty, à côté,
+  `addon-data/official.zailon.frosty` et chemins fournis — avec helper pur testable
+  `find_frosty_runtime_in` (3 tests natifs).
+- **Commande native `frosty_scan_game_data`** : inventaire réel des données du jeu
+  (Data/, sinon racine) — chemin, taille, mtime, plafonné à 50 000 fichiers pour ne
+  jamais saturer le canal IPC (test natif).
+- **Worker natif** : `frosty_worker_start` (spawn du runtime officiel en processus
+  séparé), `frosty_worker_status` (running + **RAM utilisée** via tasklist Windows),
+  `frosty_worker_stop` (kill cross-platform, réutilise `process_is_running`).
+- **`src/lib/frostyBridge.ts`** (8 tests) : classification du runtime, versions
+  recommandées par jeu, **traduction de l'inventaire réel en index d'assets**
+  (classification honnête par extension — jamais inventée), résumé du scan,
+  politique de redémarrage après crash natif, arrêt selon le mode performance,
+  et vérification « build exige un runtime réel ».
+- **UI** : carte **« Runtime Frosty officiel »** dans Création Frosty (détection
+  automatique à l'ouverture du jeu, chemin + type + taille), boutons **Démarrer /
+  Arrêter le Worker natif** (PID + RAM affichés), et bouton **« Indexer le jeu »**
+  dans l'Asset Browser qui remplace les données de démonstration par l'inventaire
+  réel scanné (badge « Réel ✓ N fichiers · Go », fallback démo en dev).
+
+### Validation
+
+- 403 tests ✅ (8 nouveaux). tsc ✅, build ✅, audit accent ✅, rustfmt ✅,
+  **Verify natif ✅** (4 nouveaux tests Rust : détection, scan réel, pid courant).
+
 ## [1.77.0] - 2026-08-12
 
 > Frosty Editor — Asset Browser complet, édition EBX, Plugin Manager, export/import

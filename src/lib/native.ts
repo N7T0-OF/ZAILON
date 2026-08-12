@@ -1011,6 +1011,19 @@ export const native = {
     await invoke('save_project_archive', { path: selected, bytes: Array.from(bytes) })
     return true
   },
+  /** Détecte le runtime Frosty officiel (jamais bundle — licence). */
+  detectFrostyRuntime: (gamePath: string, extraPaths: string[]) =>
+    desktopOnly<{ path: string; exe: string; size: number } | null>('frosty_detect_runtime', { gamePath, extraPaths }),
+  /** Inventaire réel des données du jeu (index réelle, spec §16). */
+  scanFrostyGameData: (gamePath: string) =>
+    desktopOnly<Array<{ path: string; size: number; modified: number }>>('frosty_scan_game_data', { gamePath }),
+  /** Démarre le runtime officiel en Worker isolé (§76-78). */
+  frostyWorkerStart: (runtimePath: string) => desktopOnly<number>('frosty_worker_start', { runtimePath }),
+  /** État du Worker natif (running + RAM). */
+  frostyWorkerStatus: (pid: number) =>
+    desktopOnly<{ running: boolean; memoryMb: number | null }>('frosty_worker_status', { pid }),
+  /** Arrête le Worker (§79-81). */
+  frostyWorkerStop: (pid: number) => desktopOnly<void>('frosty_worker_stop', { pid }),
 }
 
 export async function pickExecutable() {

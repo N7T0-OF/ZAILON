@@ -13,6 +13,7 @@ import {
   revertEbxAsset, revertEbxProperty, setEbxProperty, validateEbxAsset,
   type EbxAsset, type EbxProperty, type EbxValue,
 } from '../../lib/frostyEbx'
+import { gameDataSummary, gameFilesToAssetIndex, type GameDataFile } from '../../lib/frostyBridge'
 import {
   enablePlugin, frostyPluginRegistry, loadPluginsForType, pluginCrashed, pluginStats,
   releasePluginsForType, type FrostyPluginRuntime,
@@ -22,8 +23,15 @@ import {
   planBulkExport, startBulkExport, type BulkExportRun,
 } from '../../lib/frostyBulk'
 import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
+import { native } from '../../lib/native'
 
 // ─────────────────────────────── Asset Browser ────────────────────────────
+
+function formatScanBytes(bytes: number): string {
+  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} Go`
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} Mo`
+  return `${Math.round(bytes / 1_000)} Ko`
+}
 
 const TYPE_LABELS: Array<{ type: FrostyAssetType; label: string }> = [
   { type: 'ebx', label: 'EBX' },
@@ -34,8 +42,10 @@ const TYPE_LABELS: Array<{ type: FrostyAssetType; label: string }> = [
   { type: 'audio', label: 'Audio' },
 ]
 
-export function AssetBrowserPanel({ gameKey, frostyVersion, favorites, onToggleFavorite, onAddToProject, onOpenEbx, onBulkExport }: {
+export function AssetBrowserPanel({ gameKey, gamePath, runtimePath, frostyVersion, favorites, onToggleFavorite, onAddToProject, onOpenEbx, onBulkExport }: {
   gameKey: string
+  gamePath?: string
+  runtimePath?: string
   frostyVersion: string
   favorites: string[]
   onToggleFavorite: (assetId: string) => void
@@ -52,7 +62,14 @@ export function AssetBrowserPanel({ gameKey, frostyVersion, favorites, onToggleF
   const [selected, setSelected] = useState<string[]>([])
   const [history, setHistory] = useState<string[]>([])
   const [bundlesOpen, setBundlesOpen] = useState(false)
+  const [realFiles, setRealFiles] = useState<GameDataFile[] | null>(null)
+  const [scanning, setScanning] = useState(false)
   const WINDOW = 12
+
+  // Index réel : les données scannées remplacent la démonstration (spec §16).
+  useEffect(() => {
+    setRealFiles(null)
+  }, [gameKey, gamePath])
 
   // Indexation simulée en arrière-plan (spec §17 : jamais bloquant).
   useEffect(() => {
@@ -87,6 +104,20 @@ export function AssetBrowserPanel({ gameKey, frostyVersion, favorites, onToggleF
   const results = useMemo(() => filterFrostyAssets(allAssets, { types, bundles: bundle ? [bundle] : [], query: debounced }, debounced, 400), [allAssets, types, bundle, debounced])
   const page = virtualizeFrostyAssets(results, offset, WINDOW)
   const indexed = (index?.progress ?? 0) >= 1
+  const summary = realFiles ? gameDataSummary(realFiles) : null
+
+  async function scanRealData() {
+    if (!gamePath || scanning) return
+    setScanning(true)
+    try {
+      const files = await native.scanFrostyGameData(gamePath)
+      setRealFiles(files)
+      setIndex(setFrostyIndexProgress({
+        gameKey, frostyVersion, assets: gameFilesToAssetIndex(gameKey, frostyVersion, files), builtAt: Date.now(), progress: 1,
+      }, 1))
+    } catch { /* runtime indisponible — la démo reste */ }
+    setScanning(false)
+  }
 
   function toggleType(type: FrostyAssetType) {
     setTypes(prev => prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type])
@@ -94,10 +125,15 @@ export function AssetBrowserPanel({ gameKey, frostyVersion, favorites, onToggleF
   }
 
   return <section className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-4">
-    <div className="flex items-center justify-between gap-2">
-      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/40"><Search size={12} />Asset Browser<ZailonInfoPopover text="Index par jeu (cache : gameVersion + profileVersion + frostyVersion). Recherche debounced, liste virtualisée — jamais des centaines de milliers de lignes rendues (§14-18). Les assets s'ajoutent au projet, pas au jeu." /></p>
-      {!indexed && <span className="font-mono text-[10px] text-gold/70">Indexation {Math.round((index?.progress ?? 0) * 100)} %</span>}
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/40"><Search size={12} />Asset Browser<ZailonInfoPopover text="Index par jeu (cache : gameVersion + profileVersion + frostyVersion). Recherche debounced, liste virtualisée — jamais des centaines de milliers de lignes rendues (§14-18). Les assets s'ajoutent au projet, pas au jeu. L'index réel provient du scan des données du jeu (Data/)." /></p>
+      <div className="flex items-center gap-2">
+        {summary && <span className="rounded-md bg-emerald-300/[0.1] px-2 py-1 font-mono text-[9px] text-emerald-200/85">Réel ✓ {summary.count} fichiers · {formatScanBytes(summary.bytes)}</span>}
+        {!summary && realFiles === null && <span className="font-mono text-[10px] text-white/35">démo</span>}
+        {runtimePath && gamePath && <button type="button" onClick={() => void scanRealData()} disabled={scanning || realFiles !== null} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-2.5 py-1 text-[10px] font-semibold text-white/55 hover:border-gold/30 hover:text-gold disabled:opacity-40"><Download size={10} />{scanning ? 'Scan…' : realFiles ? 'Indexé ✓' : 'Indexer le jeu'}</button>}
+      </div>
     </div>
+    {!indexed && <span className="font-mono text-[10px] text-gold/70">Indexation {Math.round((index?.progress ?? 0) * 100)} %</span>}
 
     {!indexed && <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[0.07]">
       <div className="h-full rounded-full bg-gold transition-all" style={{ width: `${Math.round((index?.progress ?? 0) * 100)}%` }} />

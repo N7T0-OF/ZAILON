@@ -1123,6 +1123,23 @@ fn addon_install_dir(app: AppHandle) -> Result<String, String> {
     Ok(dir.to_string_lossy().to_string())
 }
 
+/// Écrit une archive projet `.zailon-frosty-project` de façon atomique
+/// (spec Frosty Editor §108) : temp + rename, jamais d'écriture partielle.
+#[tauri::command]
+fn save_project_archive(path: String, bytes: Vec<u8>) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(to_error)?;
+    }
+    let temp = target.with_extension(format!("tmp-{}", unix_timestamp()));
+    fs::write(&temp, &bytes).map_err(to_error)?;
+    if target.exists() {
+        fs::remove_file(&target).map_err(to_error)?;
+    }
+    fs::rename(&temp, &target).map_err(to_error)?;
+    Ok(())
+}
+
 fn persist_background_tasks(app: &AppHandle, registry: &BackgroundTaskRegistry) {
     let snapshots = registry
         .0
@@ -15557,6 +15574,24 @@ mod tests {
     }
 
     #[test]
+    fn save_project_archive_writes_atomically() {
+        let dir = std::env::temp_dir().join(format!("zailon-frosty-test-{}", unix_timestamp()));
+        let target = dir.join("projet.zailon-frosty-project");
+        save_project_archive(
+            target.to_string_lossy().to_string(),
+            b"contenu de l'archive".to_vec(),
+        )
+        .expect("écriture");
+        let bytes = std::fs::read(&target).expect("lecture");
+        assert_eq!(bytes, b"contenu de l'archive");
+        // Réécriture (remplacement) : toujours atomique.
+        save_project_archive(target.to_string_lossy().to_string(), b"v2".to_vec())
+            .expect("réécriture");
+        assert_eq!(std::fs::read(&target).unwrap(), b"v2");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn verifies_ed25519_addon_signature_and_rejects_tampering() {
         use base64::Engine;
         use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
@@ -16258,6 +16293,7 @@ pub fn run() {
             addon_verify_sha256,
             addon_install_staged,
             addon_install_dir,
+            save_project_archive,
             export_profile,
             preview_profile_import,
             extract_profile_archive,

@@ -1,6 +1,7 @@
 import {
-  Archive, ArrowLeft, Box, Check, CircleDot, ClipboardList, CloudOff, FilePlus2, FolderOpen, Gauge,
-  Hammer, HardDrive, History, Info, Package, Play, Plus, RefreshCw, Save, Server, Sparkles, Trash2, Wrench,
+  Archive, ArrowLeft, Box, Check, CircleDot, ClipboardList, CloudOff, Download, FileArchive, FilePlus2,
+  FolderOpen, Gauge, Hammer, HardDrive, History, Info, Package, Play, Plus, RefreshCw, Save, Server,
+  Sparkles, Trash2, Wrench, X,
 } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { useStore } from '../../store/useStore'
@@ -16,6 +17,10 @@ import {
   type FrostyWorkerStatus,
 } from '../../lib/frostyEditor'
 import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
+import { AssetBrowserPanel, BulkExportDialog, EbxEditorPanel, PluginManagerPanel } from './FrostyPanels'
+import { buildFrostyProjectArchive, frostyProjectArchiveText, parseFrostyProjectExport } from '../../lib/frostyProjectFile'
+import { native } from '../../lib/native'
+import type { FrostyAsset } from '../../lib/frostyAssets'
 
 const WORKER_INITIAL: FrostyWorkerStatus = { state: 'stopped', crashCount: 0, disabledPlugins: [] }
 
@@ -49,6 +54,12 @@ export function FrostyEditorView() {
   const [worker, setWorker] = useState<FrostyWorkerStatus>(WORKER_INITIAL)
   const [pipeline, setPipeline] = useState<FrostyBuildPipeline>({ stage: 'idle', progress: 0, issues: [] })
   const [error, setError] = useState<string | undefined>()
+  const [ebxAsset, setEbxAsset] = useState<FrostyAsset | null>(null)
+  const [bulkAssets, setBulkAssets] = useState<FrostyAsset[] | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importText, setImportText] = useState('')
+  const [importResult, setImportResult] = useState<string | undefined>()
   const tickRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
 
   const selected = projects.find(p => p.id === selectedId)
@@ -242,6 +253,8 @@ export function FrostyEditorView() {
                 <p className="mt-1 text-[11px] text-white/30">Projet hors du dossier du jeu : <span className="font-mono">{selected.projectPath}</span></p>
               </div>
               <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setExporting(true)} title="Exporter le projet (.zailon-frosty-project) — sources d'édition, jamais de caches ni de builds (§108)" className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] font-semibold text-white/62 hover:border-gold/30 hover:text-gold"><Archive size={13} />Exporter</button>
+                <button type="button" onClick={() => setImporting(true)} title="Importer un projet Frosty existant (conversion non destructive §63)" className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] font-semibold text-white/62 hover:border-gold/30 hover:text-gold"><FileArchive size={13} />Importer</button>
                 <button type="button" onClick={autosave} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] font-semibold text-white/62 hover:border-gold/30 hover:text-gold"><Save size={13} />Autosave</button>
                 <button type="button" onClick={() => { if (confirm('Supprimer ce projet ? Les mods déjà buildés sont conservés.')) { removeProject(selected.id); setSelectedId(undefined) } }} className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.09] text-white/45 hover:border-rose-300/30 hover:text-rose-200"><Trash2 size={13} /></button>
               </div>
@@ -362,6 +375,34 @@ export function FrostyEditorView() {
               <p className="mt-3 flex items-start gap-1.5 text-[10px] leading-relaxed text-white/30"><CloudOff size={11} className="mt-0.5 flex-shrink-0" />{FROSTY_LICENSE_POLICY.externalRuntime} — {FROSTY_LICENSE_POLICY.license}. Attribution : {FROSTY_LICENSE_POLICY.attribution}.</p>
             </section>
           </div>
+
+          {/* Asset Browser + éditeur EBX (spec §14-22) */}
+          {ebxAsset
+            ? <EbxEditorPanel
+                asset={ebxAsset}
+                onBack={() => setEbxAsset(null)}
+                onSave={issueCount => { upsert(markAssetInProject(selected, ebxAsset.id, 'modified')); setEbxAsset(null); if (issueCount === 0) setError(undefined) }}
+              />
+            : <AssetBrowserPanel
+                gameKey={selected.gameId}
+                frostyVersion={selected.frostyRuntimeVersion}
+                favorites={selected.favorites}
+                onToggleFavorite={assetId => upsert(toggleFavorite(selected, assetId))}
+                onAddToProject={asset => upsert(markAssetInProject(selected, asset.id, 'modified'))}
+                onOpenEbx={asset => setEbxAsset(asset)}
+                onBulkExport={assets => setBulkAssets(assets)}
+              />}
+
+          {/* Plugin Manager + Bulk Export (spec §40-45) */}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <PluginManagerPanel />
+            <section className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-4">
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/40"><HardDrive size={12} />Bulk Export<ZailonInfoPopover text="Export en masse des assets sélectionnés dans l'Asset Browser : textures DDS, meshes et audio EALayer3 — en arrière-plan, jamais bloquant (§44-45)." /></p>
+              <p className="mt-2 text-[11px] text-white/45">Sélectionnez des assets dans l'Asset Browser, puis lancez l'export en masse.</p>
+              <button type="button" onClick={() => setBulkAssets([])} className="mt-3 flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] font-semibold text-white/55 hover:border-gold/30 hover:text-gold"><Download size={13} />Ouvrir Bulk Export</button>
+              <p className="mt-3 flex items-start gap-1.5 text-[10px] leading-relaxed text-white/30"><Info size={11} className="mt-0.5 flex-shrink-0" />Formats selon les plugins Frosty réels — jamais d'export inventé si le backend ne le supporte pas (§26, §44).</p>
+            </section>
+          </div>
         </div>}
     </div>
 
@@ -380,6 +421,71 @@ export function FrostyEditorView() {
         </div>
       </section>
     </div>}
+
+    {/* Dialogue Export projet (spec §107-108) */}
+    {exporting && selected && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setExporting(false)}>
+      <section className="w-full max-w-lg rounded-2xl border border-white/[0.1] bg-[#111414] p-5 shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-base font-bold text-white">Exporter le projet</h3>
+          <button type="button" onClick={() => setExporting(false)} className="flex h-7 w-7 items-center justify-center rounded-md border border-white/[0.08] text-white/50 hover:text-white"><X size={13} /></button>
+        </div>
+        <p className="mt-1 text-[11px] text-white/45">Sources d'édition (.zailon-frosty-project) — <b className="text-white/70">jamais de caches ni de builds</b>. Le profil partage le .fbmod final ; le projet partage les sources (§107, §109).</p>
+        <div className="mt-3 flex flex-wrap gap-2 text-[10px]">
+          <span className="rounded-md bg-white/[0.05] px-2 py-1 text-white/55">{selected.modifiedAssets.length + selected.addedAssets.length} assets</span>
+          <span className="rounded-md bg-white/[0.05] px-2 py-1 text-white/55">{selected.autosaves.length} autosaves</span>
+          <span className="rounded-md bg-white/[0.05] px-2 py-1 text-white/55">{selected.buildHistory.length} builds (référencés, jamais embarqués)</span>
+        </div>
+        <pre className="mt-3 max-h-52 overflow-y-auto rounded-lg border border-white/[0.07] bg-black/25 p-3 font-mono text-[10px] leading-relaxed text-white/55">{frostyProjectArchiveText(selected)}</pre>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={() => setExporting(false)} className="rounded-lg border border-white/[0.09] px-4 py-2 text-[11px] font-semibold text-white/55 hover:bg-white/[0.05]">Fermer</button>
+          <button type="button" onClick={() => { void native.saveFrostyProjectArchive(buildFrostyProjectArchive(selected), selected.name).then(ok => { if (ok) setExporting(false) }) }} className="flex items-center gap-1.5 rounded-lg bg-[var(--zailon-accent)] px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><Archive size={12} />Enregistrer .zailon-frosty-project</button>
+        </div>
+      </section>
+    </div>}
+
+    {/* Dialogue Import projet (spec §63, §108) */}
+    {importing && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setImporting(false)}>
+      <section className="w-full max-w-lg rounded-2xl border border-white/[0.1] bg-[#111414] p-5 shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="font-display text-base font-bold text-white">Importer un projet</h3>
+          <button type="button" onClick={() => setImporting(false)} className="flex h-7 w-7 items-center justify-center rounded-md border border-white/[0.08] text-white/50 hover:text-white"><X size={13} /></button>
+        </div>
+        <p className="mt-1 text-[11px] text-white/45">Collez le manifest du projet .zailon-frosty-project. Conversion non destructive : l'original reste inchangé, une copie ZAILON est créée (§63).</p>
+        <textarea value={importText} onChange={event => setImportText(event.target.value)} rows={10} placeholder='{ "schema": 1, "kind": "zailon-frosty-project", ... }' className="mt-3 w-full resize-none rounded-lg border border-white/[0.08] bg-black/25 p-3 font-mono text-[10px] leading-relaxed text-white/70 outline-none focus:border-gold/30" spellCheck={false} />
+        {importResult && <p className={`mt-2 rounded-lg px-3 py-2 text-[11px] ${importResult.startsWith('✓') ? 'bg-emerald-300/[0.08] text-emerald-200/85' : 'bg-rose-300/[0.08] text-rose-200/85'}`}>{importResult}</p>}
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={() => setImporting(false)} className="rounded-lg border border-white/[0.09] px-4 py-2 text-[11px] font-semibold text-white/55 hover:bg-white/[0.05]">Fermer</button>
+          <button type="button" onClick={() => {
+            const parsed = parseFrostyProjectExport(importText)
+            if (!parsed.ok) { setImportResult(`✕ ${parsed.error}`); return }
+            const project = createFrostyProject({
+              id: createId(),
+              name: parsed.manifest.name,
+              gameId: parsed.manifest.gameId,
+              gameName: parsed.manifest.gameName,
+              gameVersion: parsed.manifest.gameVersion,
+              editorProjectsRoot: 'ZAILON_DATA/editor-projects',
+              frostyRuntimeVersion: parsed.manifest.frostyRuntimeVersion,
+            })
+            upsert({
+              ...project,
+              modifiedAssets: parsed.manifest.modifiedAssets,
+              addedAssets: parsed.manifest.addedAssets,
+              removedAssets: parsed.manifest.removedAssets,
+              assetNotes: parsed.manifest.assetNotes,
+              favorites: parsed.manifest.favorites,
+              bookmarks: parsed.manifest.bookmarks,
+            })
+            setSelectedId(project.id)
+            setImportResult('✓ Projet importé — copie ZAILON créée, original intact.')
+            setImportText('')
+          }} disabled={!importText.trim()} className="rounded-lg bg-[var(--zailon-accent)] px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-40">Importer</button>
+        </div>
+      </section>
+    </div>}
+
+    {/* Bulk Export (spec §44-45) */}
+    {bulkAssets !== null && <BulkExportDialog assets={bulkAssets} onClose={() => setBulkAssets(null)} />}
   </div>
 }
 

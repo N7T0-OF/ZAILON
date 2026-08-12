@@ -1,5 +1,46 @@
 # Changelog
 
+## [1.77.0] - 2026-08-12
+
+> Frosty Editor — Asset Browser complet, édition EBX, Plugin Manager, export/import
+> de projet `.zailon-frosty-project` et Bulk Export (spec §14-22, §40-45, §107-109).
+> Grosse suite : toute la navigation/édition/export du modéliseur est maintenant
+> fonctionnelle dans l'espace Création Frosty, toujours 100 % lazy et isolée.
+
+### Added
+
+- **`src/lib/frostyAssets.ts`** (6 tests) : index par jeu (cache gameVersion +
+  profileVersion + frostyVersion, §16), ingestion incrémentale + progression
+  (§17), recherche par pertinence (exact > préfixe > sous-chaîne) debounced
+  (§18), filtres types/bundles, **liste virtualisée par fenêtre** (§15), sélection
+  multiple toggle/plage (§46), favoris et historique de recherche (§95-98).
+- **`src/lib/frostyEbx.ts`** (8 tests) : arbre de propriétés EBX typées
+  (primitives, enums, structs, tableaux, TypeRef/ResourceRef/FileRef/PointerRef),
+  **validation par type** avec bornes (§21), diff Original | Modified + revert
+  (§22), actions PointerRef (aller à / copier / nouveau panneau, §20) et
+  impact analysis des références (§100).
+- **`src/lib/frostyPlugins.ts`** (6 tests) : Plugin Manager interne — plugins
+  **jamais dans la page Add-ons** (§42), chargement à la demande par type
+  d'asset (§43), désactivation après 2 crashs + réactivation (§83), compteurs.
+- **`src/lib/frostyProjectFile.ts`** (5 tests) : format `.zailon-frosty-project`
+  (§108) — archive ZIP déterministe (project.json + assets.json + checksum) via
+  le writer pur, **jamais de caches ni de builds** (§109), import par manifest
+  validé, conversion non destructive (§63). Commande native `save_project_archive`
+  (écriture atomique temp+rename, test natif).
+- **`src/lib/frostyBulk.ts`** (4 tests) : Bulk Export (§44-45) — plan filtré par
+  capacités réelles du backend (textures/meshes/audio), noms de sortie,
+  progression en arrière-plan, résumé.
+- **UI « Création Frosty » enrichie** (`FrostyPanels.tsx`) : Asset Browser
+  (recherche, filtres avec compteurs, bundles, historique, sélection, favoris,
+  pagination virtuelle), **éditeur EBX** (propriétés typées avec validation,
+  diff + revert, PointerRef), Plugin Manager, **Bulk Export** (dialogue avec
+  types + dossier + progression) et dialogues **Exporter/Importer projet**.
+
+### Validation
+
+- 395 tests ✅ (34 nouveaux). tsc ✅, build ✅, audit accent ✅, rustfmt ✅,
+  test natif `save_project_archive_writes_atomically` (validé par la CI).
+
 ## [1.76.0] - 2026-08-12
 
 > Add-on officiel **Frosty Editor** (spec Frosty Editor §1-122) : audit profond de la

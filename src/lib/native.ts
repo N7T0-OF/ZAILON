@@ -999,6 +999,18 @@ export const native = {
     channel.onmessage = onEvent
     return invoke<void>('install_update', { onEvent: channel })
   },
+  /** Enregistre une archive `.zailon-frosty-project` (spec Frosty Editor §108). */
+  saveFrostyProjectArchive: async (bytes: Uint8Array, defaultName: string): Promise<boolean> => {
+    if (!isTauri()) return false
+    const selected = await save({
+      title: 'Exporter le projet Frosty',
+      defaultPath: `${defaultName.replace(/[^a-z0-9_-]+/gi, '-')}.zailon-frosty-project`,
+      filters: [{ name: 'Projet Frosty ZAILON', extensions: ['zailon-frosty-project'] }],
+    })
+    if (typeof selected !== 'string') return false
+    await invoke('save_project_archive', { path: selected, bytes: Array.from(bytes) })
+    return true
+  },
 }
 
 export async function pickExecutable() {

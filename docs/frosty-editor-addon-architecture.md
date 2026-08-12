@@ -90,3 +90,22 @@ Le runtime officiel est **externe**, détecté par Frosty Support. Attribution c
 - `docs/frosty-editor-worker.md` — cycle de vie du Worker
 - `docs/frosty-source-audit.md` — audit du dépôt
 - `docs/frosty-plugin-inventory.md` — les 29 plugins
+
+## Suite 1.77.0 — navigation, édition, export
+
+- **Asset Browser** (`src/lib/frostyAssets.ts`) : index par jeu, recherche
+  debounced par pertinence, filtres types/bundles, liste virtualisée par
+  fenêtre (jamais des centaines de milliers de lignes rendues), sélection
+  multiple toggle/plage, favoris et historique.
+- **Éditeur EBX** (`src/lib/frostyEbx.ts`) : propriétés typées, validation par
+  type avec bornes (§21), diff Original | Modified + revert (§22), PointerRef
+  (aller à / copier / nouveau panneau, §20), impact analysis (§100).
+- **Plugin Manager** (`src/lib/frostyPlugins.ts`) : plugins Frosty gérés en
+  interne, jamais dans la page Add-ons (§42), chargés à la demande par type
+  d'asset (§43), désactivés après 2 crashs (§83).
+- **Projets** (`src/lib/frostyProjectFile.ts`) : export/import
+  `.zailon-frosty-project` — sources d'édition uniquement, jamais de caches ni
+  de builds (§109) ; le profil partage le .fbmod final, le projet partage les
+  sources (§107). Écriture atomique native (temp+rename).
+- **Bulk Export** (`src/lib/frostyBulk.ts`) : textures DDS / meshes / audio
+  EALayer3 selon les capacités réelles du backend (§44-45), en arrière-plan.

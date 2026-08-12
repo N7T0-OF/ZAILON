@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.75.0] - 2026-08-12
+
+> Boîte à outils développeur Add-ons (spec §54-56) : template officiel
+> `zailon-addon-template`, CLI `zailon addon` (init / validate / pack) et
+> documentation complète `docs/addon-development/`. Un développeur peut créer,
+> valider et empaqueter un `.zailon-addon` sans toucher au Core.
+
+### Added
+
+- `src/lib/addonZip.ts` : writer ZIP pur et déterministe (pas de fs, testable en
+  node) — `buildZip` (CRC-32, dates DOS valides, central directory) et
+  `packAddonFolder` (manifest requis + validation avant archivage).
+- Template officiel `addon-template/` : manifest valide (passe le valideur réel
+  de ZAILON), module SDK d'exemple, icône, locales fr, LICENSE, README.
+- CLI développeur `.github/scripts/addon-cli.ts` : `zailon addon init`,
+  `zailon addon validate`, `zailon addon pack` (avec scripts npm `addon:*`).
+- Documentation `docs/addon-development/README.md` : 14 sections — Getting
+  Started, Manifest, SDK, Permissions, Game Adapter, Mod Backend, Provider,
+  Theme, UI Extension, Packaging, Testing, Signing, Publishing, Versioning.
+
+### Validation
+
+- 342 tests ✅ (8 nouveaux : ZIP store/déterministe, CRC-32, dates DOS, pack
+  avec manifest requis, rejets). tsc ✅, build ✅, audit accent ✅.
+
 ## [1.74.0] - 2026-08-11
 
 > Signature Ed25519 des add-ons (spec §14, §52) : au-delà du SHA-256, chaque

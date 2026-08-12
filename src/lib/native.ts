@@ -1017,6 +1017,9 @@ export const native = {
   /** Inventaire réel des données du jeu (index réelle, spec §16). */
   scanFrostyGameData: (gamePath: string) =>
     desktopOnly<Array<{ path: string; size: number; modified: number }>>('frosty_scan_game_data', { gamePath }),
+  /** Lit un fichier catalogue `.cat` du jeu (borné à 64 Mo, chemin validé). */
+  readFrostyCatFile: (gamePath: string, relativePath: string) =>
+    desktopOnly<number[]>('frosty_read_cat_file', { gamePath, relativePath }),
   /** Démarre le runtime officiel en Worker isolé (§76-78). */
   frostyWorkerStart: (runtimePath: string) => desktopOnly<number>('frosty_worker_start', { runtimePath }),
   /** État du Worker natif (running + RAM). */

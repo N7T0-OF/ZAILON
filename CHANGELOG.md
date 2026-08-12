@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.79.0] - 2026-08-12
+
+> Frosty Editor — **parsing réel du catalogue Frostbite `.cat`** (spec §16) et
+> **commande palette dédiée** (spec §72-73). Format vérifié contre la source
+> auditée `CatReader.cs` (magic « NyanNyanNyanNyan », entrées Sha1+Offset+Size+
+> LogicalOffset+ArchiveIndex) — jamais deviné.
+
+### Added
+
+- **`src/lib/frostyCat.ts`** (6 tests) : parser pur du catalogue Frostbite —
+  **format legacy** (NFS 2015 : entrées 32 octets, compteur dérivé) et **format
+  moderne** (compteurs explicites, entrées 36 octets, variante avec
+  `EncryptedCount` + entrées chiffrées 80 octets pour MEA/FIFA17/FIFA18),
+  auto-validé par longueur exacte attendue (ressources + chiffrées + correctifs).
+  Ressources → assets (sha1, taille réelle, archive Cas#N) + résumé catalogue.
+- **Commande native `frosty_read_cat_file`** : lecture bornée (64 Mo) d'un
+  catalogue avec **garde anti-traversal** (chemin relatif validé sous la racine
+  du jeu) — test natif `frosty_read_cat_file_rejects_outside_root`.
+- **UI Asset Browser** : bouton **« Catalogue (.cat) »** après l'indexation —
+  lit tous les catalogues du jeu, parse, agrège les **vraies ressources**
+  (badge « Catalogue N ressources · Go · M cas »), bascule Fichiers ⇄ Catalogue.
+- **Commande palette éditeur** (`FrostyCommandPalette`, spec §72-73) : Ctrl+K
+  (palette dédiée quand l'espace Création Frosty est ouvert — la palette globale
+  se désactive sur cette vue), Ctrl+S autosave, Ctrl+B build, Ctrl+P recherche
+  d'asset (focus l'Asset Browser), actions Rechercher/Build/Sauvegarder/Exporter/
+  Créer/Ouvrir Bibliothèque/Add-ons.
+
+### Validation
+
+- 409 tests ✅ (6 nouveaux). tsc ✅, build ✅, audit accent ✅, rustfmt ✅,
+  **Verify natif ✅** (lecture catalogue + garde de chemin).
+
 ## [1.78.0] - 2026-08-12
 
 > Frosty Editor — **pont natif vers le runtime Frosty réel** (spec §76-86, §16) :

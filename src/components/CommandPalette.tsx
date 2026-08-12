@@ -28,6 +28,8 @@ export function CommandPalette() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // L'espace Création Frosty possède sa propre palette (spec Frosty Editor §72).
+      if (useStore.getState().currentView === 'frosty') return
       if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === 'k') {
         event.preventDefault()
         setOpen(current => {

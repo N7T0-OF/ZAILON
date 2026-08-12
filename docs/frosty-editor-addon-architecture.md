@@ -125,3 +125,16 @@ Le runtime officiel est **externe**, détecté par Frosty Support. Attribution c
 - **`src/lib/frostyBridge.ts`** : classification honnête par extension
   (cas/cat/toc/bin-cat → chunks, ebx, dds → texture, mesh → mesh, spk/ea3 → audio),
   résumé du scan, politique de crash, exigence de runtime réel avant build (§102).
+
+## Suite 1.79.0 — parsing réel .cat + command palette
+
+- **`src/lib/frostyCat.ts`** : parser du catalogue Frostbite, vérifié contre
+  `FrostySdk/IO/CatReader.cs` de la source auditée — magic
+  « NyanNyanNyanNyan », legacy (NFS 2015 : 32 o/entrée) et moderne (36 o +
+  variante chiffrée 80 o), auto-validé par la longueur exacte. Les ressources
+  réelles (sha1, taille, archive) alimentent l'Asset Browser en mode
+  « Catalogue (.cat) ».
+- **`frosty_read_cat_file`** : lecture bornée avec garde anti-traversal.
+- **Command palette éditeur** (spec §72-73) : Ctrl+K / Ctrl+P / Ctrl+S / Ctrl+B,
+  actions Build/Sauvegarder/Exporter/Créer/Rechercher — la palette globale se
+  désactive sur la vue Création Frosty.

@@ -14,6 +14,7 @@ import {
   type EbxAsset, type EbxProperty, type EbxValue,
 } from '../../lib/frostyEbx'
 import { gameDataSummary, gameFilesToAssetIndex, type GameDataFile } from '../../lib/frostyBridge'
+import { catEntriesToAssets, parseFrostyCat } from '../../lib/frostyCat'
 import {
   enablePlugin, frostyPluginRegistry, loadPluginsForType, pluginCrashed, pluginStats,
   releasePluginsForType, type FrostyPluginRuntime,
@@ -64,12 +65,28 @@ export function AssetBrowserPanel({ gameKey, gamePath, runtimePath, frostyVersio
   const [bundlesOpen, setBundlesOpen] = useState(false)
   const [realFiles, setRealFiles] = useState<GameDataFile[] | null>(null)
   const [scanning, setScanning] = useState(false)
+  const [catAssets, setCatAssets] = useState<FrostyAsset[] | null>(null)
+  const [catStats, setCatStats] = useState<{ count: number; bytes: number; archives: number } | null>(null)
+  const [catLoading, setCatLoading] = useState(false)
+  const [catView, setCatView] = useState(false)
   const WINDOW = 12
+
+  const searchRef = useRef<HTMLInputElement>(null)
 
   // Index réel : les données scannées remplacent la démonstration (spec §16).
   useEffect(() => {
     setRealFiles(null)
+    setCatAssets(null)
+    setCatStats(null)
+    setCatView(false)
   }, [gameKey, gamePath])
+
+  // Focus de la recherche depuis la command palette (spec §72-73).
+  useEffect(() => {
+    const onFocus = () => { setQuery(''); searchRef.current?.focus() }
+    window.addEventListener('zailon:frosty:focus-search', onFocus)
+    return () => window.removeEventListener('zailon:frosty:focus-search', onFocus)
+  }, [])
 
   // Indexation simulée en arrière-plan (spec §17 : jamais bloquant).
   useEffect(() => {
@@ -99,12 +116,44 @@ export function AssetBrowserPanel({ gameKey, gamePath, runtimePath, frostyVersio
   }, [query])
 
   const allAssets = index?.assets ?? []
-  const counts = useMemo(() => frostyAssetCounts(allAssets), [allAssets])
-  const bundles = useMemo(() => frostyAssetBundles(allAssets), [allAssets])
-  const results = useMemo(() => filterFrostyAssets(allAssets, { types, bundles: bundle ? [bundle] : [], query: debounced }, debounced, 400), [allAssets, types, bundle, debounced])
+  const activeAssets = catView && catAssets ? catAssets : allAssets
+  const counts = useMemo(() => frostyAssetCounts(activeAssets), [activeAssets])
+  const bundles = useMemo(() => frostyAssetBundles(activeAssets), [activeAssets])
+  const results = useMemo(() => filterFrostyAssets(activeAssets, { types, bundles: bundle ? [bundle] : [], query: debounced }, debounced, 400), [activeAssets, types, bundle, debounced])
   const page = virtualizeFrostyAssets(results, offset, WINDOW)
   const indexed = (index?.progress ?? 0) >= 1
   const summary = realFiles ? gameDataSummary(realFiles) : null
+
+  async function loadCatCatalogue() {
+    if (!gamePath || !realFiles || catLoading || catAssets) return
+    setCatLoading(true)
+    try {
+      const catFiles = realFiles.filter(file => {
+        const base = (file.path.split(/[\\/]/).pop() ?? '').toLowerCase()
+        return base.endsWith('.cat') || /^cat[^\/]*\.bin$/.test(base)
+      })
+      const assets: FrostyAsset[] = []
+      let count = 0
+      let bytes = 0
+      const archives = new Set<number>()
+      for (const file of catFiles.slice(0, 24)) {
+        const raw = await native.readFrostyCatFile(gamePath, file.path)
+        const parsed = parseFrostyCat(new Uint8Array(raw))
+        if (parsed.ok) {
+          assets.push(...catEntriesToAssets(file.path, parsed.entries))
+          count += parsed.entries.length
+          for (const entry of parsed.entries) {
+            bytes += entry.size
+            archives.add(entry.archiveIndex)
+          }
+        }
+      }
+      setCatAssets(assets)
+      setCatStats({ count, bytes, archives: archives.size })
+      setCatView(assets.length > 0)
+    } catch { /* catalogue illisible — l'index fichiers reste */ }
+    setCatLoading(false)
+  }
 
   async function scanRealData() {
     if (!gamePath || scanning) return
@@ -127,10 +176,13 @@ export function AssetBrowserPanel({ gameKey, gamePath, runtimePath, frostyVersio
   return <section className="rounded-xl border border-white/[0.07] bg-white/[0.018] p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/40"><Search size={12} />Asset Browser<ZailonInfoPopover text="Index par jeu (cache : gameVersion + profileVersion + frostyVersion). Recherche debounced, liste virtualisée — jamais des centaines de milliers de lignes rendues (§14-18). Les assets s'ajoutent au projet, pas au jeu. L'index réel provient du scan des données du jeu (Data/)." /></p>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {summary && <span className="rounded-md bg-emerald-300/[0.1] px-2 py-1 font-mono text-[9px] text-emerald-200/85">Réel ✓ {summary.count} fichiers · {formatScanBytes(summary.bytes)}</span>}
+        {catStats && <span className="rounded-md bg-gold/10 px-2 py-1 font-mono text-[9px] text-gold/85">Catalogue {catStats.count} ressources · {formatScanBytes(catStats.bytes)} · {catStats.archives} cas</span>}
         {!summary && realFiles === null && <span className="font-mono text-[10px] text-white/35">démo</span>}
+        {catAssets && <button type="button" onClick={() => setCatView(prev => !prev)} className={`rounded-md border px-2 py-1 text-[10px] font-semibold ${catView ? 'border-gold/40 bg-gold/10 text-gold' : 'border-white/[0.08] text-white/45 hover:border-white/16'}`}>{catView ? 'Fichiers' : 'Catalogue (.cat)'}</button>}
         {runtimePath && gamePath && <button type="button" onClick={() => void scanRealData()} disabled={scanning || realFiles !== null} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-2.5 py-1 text-[10px] font-semibold text-white/55 hover:border-gold/30 hover:text-gold disabled:opacity-40"><Download size={10} />{scanning ? 'Scan…' : realFiles ? 'Indexé ✓' : 'Indexer le jeu'}</button>}
+        {runtimePath && gamePath && realFiles && !catAssets && <button type="button" onClick={() => void loadCatCatalogue()} disabled={catLoading} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-2.5 py-1 text-[10px] font-semibold text-white/55 hover:border-gold/30 hover:text-gold disabled:opacity-40">{catLoading ? 'Chargement…' : 'Catalogue (.cat)'}</button>}
       </div>
     </div>
     {!indexed && <span className="font-mono text-[10px] text-gold/70">Indexation {Math.round((index?.progress ?? 0) * 100)} %</span>}
@@ -142,7 +194,7 @@ export function AssetBrowserPanel({ gameKey, gamePath, runtimePath, frostyVersio
     <div className="mt-3 flex items-center gap-2">
       <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-3">
         <Search size={13} className="text-white/30" />
-        <input value={query} onChange={event => setQuery(event.target.value)} placeholder="Rechercher un asset…" className="min-w-0 flex-1 bg-transparent py-2 text-xs text-white/72 outline-none" />
+        <input ref={searchRef} value={query} onChange={event => setQuery(event.target.value)} placeholder="Rechercher un asset…" className="min-w-0 flex-1 bg-transparent py-2 text-xs text-white/72 outline-none" />
       </label>
       <div className="relative">
         <button type="button" onClick={() => setBundlesOpen(prev => !prev)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/58 hover:border-gold/30 hover:text-gold"><FolderOpen size={12} />{bundle ?? 'Bundles'}<ChevronDown size={11} /></button>
@@ -385,6 +437,80 @@ export function PluginManagerPanel({ onTriggerType }: { onTriggerType?: (type: F
       <button type="button" onClick={() => setRegistry(prev => pluginCrashed(prev, 'MeshSetPlugin'))} className="rounded-md border border-rose-300/20 px-2 py-1 text-[10px] text-rose-200/60 hover:border-rose-300/40">Simuler crash MeshSetPlugin</button>
     </div>
   </section>
+}
+
+// ─────────────────────────────── Command Palette éditeur (spec §72-73) ──────
+
+export interface FrostyPaletteAction {
+  id: string
+  label: string
+  detail: string
+  shortcut?: string
+  run: () => void
+}
+
+/** Petite palette de commandes propre à l'éditeur (Ctrl+K, spec §72). */
+export function FrostyCommandPalette({ actions, onClose }: { actions: FrostyPaletteAction[]; onClose: () => void }) {
+  const [query, setQuery] = useState('')
+  const [active, setActive] = useState(0)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return q ? actions.filter(action => (action.label + ' ' + action.detail).toLowerCase().includes(q)) : actions
+  }, [actions, query])
+
+  useEffect(() => { setActive(0) }, [query])
+
+  function pick(index: number) {
+    const action = results[index]
+    if (!action) return
+    action.run()
+    onClose()
+  }
+
+  return <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black/60 p-4 pt-24 backdrop-blur-sm" onClick={onClose}>
+    <section className="w-full max-w-md overflow-hidden rounded-2xl border border-white/[0.1] bg-[#111414] shadow-2xl" onClick={event => event.stopPropagation()}>
+      <label className="flex items-center gap-2 border-b border-white/[0.07] px-4">
+        <Search size={14} className="text-white/30" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={event => setQuery(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'Escape') onClose()
+            if (event.key === 'ArrowDown') { event.preventDefault(); setActive(index => Math.min(index + 1, results.length - 1)) }
+            if (event.key === 'ArrowUp') { event.preventDefault(); setActive(index => Math.max(index - 1, 0)) }
+            if (event.key === 'Enter') pick(active)
+          }}
+          placeholder="Commande Frosty Editor…"
+          className="w-full bg-transparent py-3 text-xs text-white/75 outline-none"
+        />
+        <span className="font-mono text-[9px] text-white/25">Ctrl+K</span>
+      </label>
+      <ul className="max-h-80 overflow-y-auto py-1">
+        {results.length === 0 && <li className="px-4 py-6 text-center text-[11px] text-white/35">Aucune commande.</li>}
+        {results.map((action, index) => (
+          <li key={action.id}>
+            <button
+              type="button"
+              onMouseEnter={() => setActive(index)}
+              onClick={() => pick(index)}
+              className={`flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left ${index === active ? 'bg-white/[0.06]' : ''}`}
+            >
+              <span className="min-w-0">
+                <span className="block text-xs font-semibold text-white/78">{action.label}</span>
+                <span className="block truncate text-[10px] text-white/38">{action.detail}</span>
+              </span>
+              {action.shortcut && <kbd className="shrink-0 rounded border border-white/[0.1] px-1.5 py-0.5 font-mono text-[9px] text-white/40">{action.shortcut}</kbd>}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  </div>
 }
 
 // ─────────────────────────────── Bulk Export ───────────────────────────────

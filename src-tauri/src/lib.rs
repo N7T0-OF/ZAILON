@@ -1268,6 +1268,33 @@ fn frosty_scan_game_data(game_path: String) -> Result<Vec<GameDataFile>, String>
     Ok(out)
 }
 
+/// Lit un fichier catalogue `.cat` du jeu (borné — les catalogues Frostbite
+/// font quelques Mo ; jamais plus de 64 Mo). Renvoie les octets bruts ; le
+/// parsing vit côté TS (src/lib/frostyCat.ts, validé par tests).
+#[tauri::command]
+fn frosty_read_cat_file(game_path: String, relative_path: String) -> Result<Vec<u8>, String> {
+    const MAX_CAT_BYTES: u64 = 64 * 1024 * 1024;
+    let root = std::path::PathBuf::from(&game_path);
+    let target = root.join(&relative_path);
+    // Garde : le chemin relatif doit rester sous la racine du jeu.
+    let canonical_target = target.canonicalize().map_err(to_error)?;
+    let canonical_root = root.canonicalize().map_err(to_error)?;
+    if !canonical_target.starts_with(&canonical_root) {
+        return Err("Chemin hors du dossier du jeu.".to_string());
+    }
+    let meta = canonical_target.metadata().map_err(to_error)?;
+    if !meta.is_file() {
+        return Err("Fichier catalogue introuvable.".to_string());
+    }
+    if meta.len() > MAX_CAT_BYTES {
+        return Err(format!(
+            "Catalogue trop volumineux ({} Mo max).",
+            MAX_CAT_BYTES / 1024 / 1024
+        ));
+    }
+    std::fs::read(&canonical_target).map_err(to_error)
+}
+
 /// Démarre le runtime Frosty officiel en tant que Worker isolé (§76-78).
 #[tauri::command]
 fn frosty_worker_start(runtime_path: String) -> Result<u32, String> {
@@ -15810,6 +15837,24 @@ mod tests {
     }
 
     #[test]
+    fn frosty_read_cat_file_rejects_outside_root() {
+        let dir = std::env::temp_dir().join(format!("zailon-frosty-cat-{}", unix_timestamp()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("cat.bin"), b"NyanNyanNyanNyan").unwrap();
+        // Lecture valide sous la racine.
+        let bytes =
+            frosty_read_cat_file(dir.to_string_lossy().to_string(), "cat.bin".to_string()).unwrap();
+        assert_eq!(bytes, b"NyanNyanNyanNyan");
+        // Chemin relatif qui sort de la racine → refusé.
+        assert!(frosty_read_cat_file(
+            dir.to_string_lossy().to_string(),
+            "../outside.bin".to_string()
+        )
+        .is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn frosty_scan_game_data_lists_real_files() {
         let dir = std::env::temp_dir().join(format!("zailon-frosty-scan-{}", unix_timestamp()));
         std::fs::create_dir_all(dir.join("Data").join("Win32")).unwrap();
@@ -16557,6 +16602,7 @@ pub fn run() {
             addon_install_dir,
             save_project_archive,
             frosty_detect_runtime,
+            frosty_read_cat_file,
             frosty_scan_game_data,
             frosty_worker_start,
             frosty_worker_status,

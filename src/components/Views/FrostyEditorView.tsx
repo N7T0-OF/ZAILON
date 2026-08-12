@@ -17,7 +17,7 @@ import {
   type FrostyWorkerStatus,
 } from '../../lib/frostyEditor'
 import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
-import { AssetBrowserPanel, BulkExportDialog, EbxEditorPanel, PluginManagerPanel } from './FrostyPanels'
+import { AssetBrowserPanel, BulkExportDialog, EbxEditorPanel, FrostyCommandPalette, PluginManagerPanel, type FrostyPaletteAction } from './FrostyPanels'
 import { buildFrostyProjectArchive, frostyProjectArchiveText, parseFrostyProjectExport } from '../../lib/frostyProjectFile'
 import { native } from '../../lib/native'
 import { classifyRuntimeExe, type FrostyRuntime } from '../../lib/frostyBridge'
@@ -61,6 +61,7 @@ export function FrostyEditorView() {
   const [importing, setImporting] = useState(false)
   const [importText, setImportText] = useState('')
   const [importResult, setImportResult] = useState<string | undefined>()
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const [detectedRuntime, setDetectedRuntime] = useState<FrostyRuntime | null>(null)
   const [detecting, setDetecting] = useState(false)
   const [nativeWorker, setNativeWorker] = useState<{ pid: number; running: boolean; memoryMb: number | null } | null>(null)
@@ -185,6 +186,42 @@ export function FrostyEditorView() {
     setNativeWorker(null)
     setWorker(workerReset(worker))
   }
+
+  const editorActions: FrostyPaletteAction[] = useMemo(() => {
+    const actions: FrostyPaletteAction[] = [{
+      id: 'search-asset', label: 'Rechercher un asset', detail: 'Focus l\'Asset Browser', shortcut: 'Ctrl+P',
+      run: () => { window.dispatchEvent(new CustomEvent('zailon:frosty:focus-search')) },
+    }]
+    if (selected) {
+      actions.push({
+        id: 'build', label: 'Build & Test', detail: selected.name, shortcut: 'Ctrl+B',
+        run: () => { if (ready?.ok) buildMod() },
+      })
+      actions.push({ id: 'save', label: 'Sauvegarder le projet', detail: selected.name, shortcut: 'Ctrl+S', run: autosave })
+      actions.push({ id: 'export', label: 'Exporter le projet', detail: selected.name, run: () => setExporting(true) })
+    }
+    actions.push({ id: 'create', label: 'Créer un projet', detail: frostyGame ? `Pour ${frostyGame.name}` : 'Sélectionnez un jeu', run: () => setCreating(true) })
+    actions.push({ id: 'library', label: 'Ouvrir la Bibliothèque', detail: 'Retour aux jeux', run: () => setView('games') })
+    actions.push({ id: 'addons', label: 'Ouvrir Add-ons', detail: 'Installer Frosty Support / Editor', run: () => setView('addons') })
+    return actions
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, frostyGame, ready?.ok])
+
+  // Raccourcis éditeur (spec §73) : Ctrl+S autosave, Ctrl+B build, Ctrl+K
+  // palette, Ctrl+P recherche d'asset.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return
+      const key = event.key.toLocaleLowerCase()
+      if (key === 's') { event.preventDefault(); autosave() }
+      if (key === 'b') { event.preventDefault(); if (selected && ready?.ok) buildMod() }
+      if (key === 'k') { event.preventDefault(); setPaletteOpen(prev => !prev) }
+      if (key === 'p') { event.preventDefault(); setPaletteOpen(true); window.dispatchEvent(new CustomEvent('zailon:frosty:focus-search')) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, ready?.ok, worker, nativeWorker])
 
   if (!hasBackend || !hasEditor) {
     return <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
@@ -548,6 +585,12 @@ export function FrostyEditorView() {
 
     {/* Bulk Export (spec §44-45) */}
     {bulkAssets !== null && <BulkExportDialog assets={bulkAssets} onClose={() => setBulkAssets(null)} />}
+
+    {/* Command palette éditeur (spec §72-73) */}
+    {paletteOpen && <FrostyCommandPalette
+      actions={editorActions}
+      onClose={() => setPaletteOpen(false)}
+    />}
   </div>
 }
 

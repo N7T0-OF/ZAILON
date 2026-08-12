@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  computeMediaState, createAudioSession, effectiveVolume, onFocusLost, onFocusRestored,
+  computeMediaState, createAudioSession, effectiveVolume, mediaDisposePolicy, onFocusLost, onFocusRestored,
   onGameStarted, onGameStopped, onManualPause, setUserMuted, setUserVolume,
 } from '../../src/lib/backgroundMedia.ts'
 
@@ -89,4 +89,14 @@ test('clampVolume — volume hors bornes ramené au défaut §7', () => {
   const session = setUserVolume(createAudioSession(false, 1.5), 0.2)
   assert.equal(session.userVolume, 0.2)
   assert.equal(createAudioSession(false, Number.NaN).userVolume, 0.07)
+})
+
+test('mediaDisposePolicy — Performance/Max → dispose, sinon pause §53', () => {
+  assert.equal(mediaDisposePolicy('performance'), 'dispose')
+  assert.equal(mediaDisposePolicy('max'), 'dispose')
+  assert.equal(mediaDisposePolicy('balanced'), 'pause')
+  assert.equal(mediaDisposePolicy('quality'), 'pause')
+  assert.equal(mediaDisposePolicy('auto'), 'pause')
+  assert.equal(mediaDisposePolicy('custom'), 'pause')
+  assert.equal(mediaDisposePolicy(undefined), 'pause')
 })

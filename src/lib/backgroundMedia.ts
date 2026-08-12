@@ -222,4 +222,13 @@ export function setUserVolume(session: BackgroundAudioSession, volume: number): 
   return { ...session, userVolume: clampVolume(volume) }
 }
 
+/**
+ * Politique du fond vidéo pendant un jeu (spec §53) : Équilibré → pause
+ * (player conservé, reprise instantanée) ; Performance/Max → dispose
+ * (player démonté, RAM/GPU libérés, remonté à la fin du jeu).
+ */
+export function mediaDisposePolicy(performanceMode: string | undefined): 'dispose' | 'pause' {
+  return performanceMode === 'performance' || performanceMode === 'max' ? 'dispose' : 'pause'
+}
+
 export type { GameBackgroundMedia, BackgroundMediaType }

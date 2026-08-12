@@ -32,6 +32,7 @@ export function HomeView() {
   const isPlaying = useStore(state => state.isPlaying)
   const sessionTime = useStore(state => state.sessionTime)
   const backgroundMediaSettings = useStore(state => state.backgroundMediaSettings)
+  const performanceMode = useStore(state => state.performanceModes[state.selectedGameId ?? ''] ?? state.globalPerformanceMode)
   const setGameBackgroundMedia = useStore(state => state.setGameBackgroundMedia)
   const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
   const endSession = useStore(state => state.endSession)
@@ -53,6 +54,10 @@ export function HomeView() {
   // par jeu (mutedOverride/volumeOverride) — jamais un réglage global.
   const heroAudio = resolveAudioSettings(selectedGame ? selectedGame.backgroundMedia : undefined, backgroundMediaSettings)
   const setHeroMedia = (patch: Partial<GameBackgroundMedia>) => { if (selectedGame) setGameBackgroundMedia(selectedGame.id, patch) }
+  // Indicateur « son coupé pour cette session » : l'utilisateur avait activé le
+  // son (intention persistée non muette) mais la politique §44 redémarre muet.
+  const persistedUnmuted = !(selectedGame?.backgroundMedia?.mutedOverride ?? backgroundMediaSettings.bgAlwaysMuted)
+  const sessionCut = Boolean(heroAudio.muted && persistedUnmuted && backgroundMediaSettings.bgAudioEnabled && selectedGame)
 
   // SmartPlayButton — un seul CTA : l'état du jeu pilote le libellé et le
   // comportement (Jouer → Préparation… → Recherche du jeu… → En cours).
@@ -144,6 +149,8 @@ export function HomeView() {
         fallbackImageUrl={background}
         fallbackArtwork={<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_72%_30%,rgba(128,58,111,0.42),transparent_37%),radial-gradient(ellipse_at_68%_54%,rgba(42,78,77,0.18),transparent_40%),linear-gradient(130deg,#141718,#090b0b)]" />}
         paused={mediaDucked || playBusy || sessionRunning}
+        gameRunning={sessionRunning}
+        performanceMode={performanceMode}
         settings={backgroundMediaSettings}
         heroStyle={{ objectFit: heroTransform.fit ?? 'cover', objectPosition: `${heroTransform.x ?? 50}% ${heroTransform.y ?? 50}%`, transform: `scale(${(heroTransform.zoom ?? 100) / 100})` }}
         overlay={<div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(7,9,9,0.82)_0%,rgba(7,9,9,0.55)_42%,rgba(7,9,9,0.18)_68%,rgba(7,9,9,0.30)_100%),linear-gradient(0deg,rgba(9,11,11,0.78)_0%,rgba(9,11,11,0.45)_22%,rgba(9,11,11,0.12)_55%,rgba(9,11,11,0.18)_100%)]" />}
@@ -152,6 +159,7 @@ export function HomeView() {
       <HeroAudioControl
         muted={heroAudio.muted}
         volume={Math.round(heroAudio.volume * 100)}
+        sessionCut={sessionCut}
         onToggle={() => setHeroMedia({ mutedOverride: !heroAudio.muted })}
         onVolume={value => setHeroMedia({ volumeOverride: value / 100, mutedOverride: value === 0 })}
       />
@@ -376,11 +384,13 @@ function QuickGame({ game, summary, active, onSelect, favorite }: { game: Game; 
  * toujours visible, capsule flottante absolute au survol (Favoris jamais
  * déplacé), repli ~400 ms après sortie de TOUTE la zone (icône + slider +
  * fond de la capsule), repli immédiat si la fenêtre perd le focus. */
-function HeroAudioControl({ muted, volume, onToggle, onVolume }: {
+function HeroAudioControl({ muted, volume, onToggle, onVolume, sessionCut = false }: {
   muted: boolean
   volume: number
   onToggle: () => void
   onVolume: (value: number) => void
+  /** Son coupé pour cette session alors que l'intention persistée est active. */
+  sessionCut?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const collapseTimer = useRef<number>()
@@ -409,11 +419,12 @@ function HeroAudioControl({ muted, volume, onToggle, onVolume }: {
       <button
         type="button"
         onClick={() => { onToggle(); setExpanded(true); window.clearTimeout(collapseTimer.current) }}
-        title={muted ? 'Activer le son du fond' : 'Couper le son du fond'}
+        title={muted ? (sessionCut ? 'Son coupé pour cette session — activer le son du fond' : 'Activer le son du fond') : 'Couper le son du fond'}
         aria-label={muted ? 'Activer le son du fond' : 'Couper le son du fond'}
-        className="flex h-6 w-6 items-center justify-center rounded-full text-white/70 hover:bg-white/[0.08] hover:text-white"
+        className="relative flex h-6 w-6 items-center justify-center rounded-full text-white/70 hover:bg-white/[0.08] hover:text-white"
       >
         <VolumeIcon size={13} />
+        {sessionCut && <span className="pointer-events-none absolute right-0 top-0 h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.8)]" />}
       </button>
       {expanded && (
         <input

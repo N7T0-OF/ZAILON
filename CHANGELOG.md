@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.81.0] - 2026-08-12
+
+> Accueil multimédia — **vrai correctif du fond YouTube** (deadlock restant de
+> la 1.80.0), **reprise sans reload après Alt+Tab** (§51), **dispose du player
+> pendant le jeu en mode Performance** (§53) et après longue inactivité (§52),
+> indicateur « son coupé pour cette session ».
+
+### Fixed
+
+- **Deadlock YouTube résiduel** : l'iframe n'était montée que quand `videoReady`
+  était `true`, or `videoReady` ne devient `true` que via `onReady` de l'iframe
+  montée — la vidéo n'était toujours jamais rendue. Corrigé : la source est
+  montée **avant** `onReady`, la visibilité suit `videoReady` (fondu 300 ms,
+  §28-29).
+- **Alt+Tab rechargait la vidéo** (§51) : la perte de focus démontait l'iframe,
+  donc chaque retour rejouait le chargement YouTube. Corrigé : le player reste
+  **monté** et reçoit `pauseVideo` ; au retour, `playVideo` reprend au même
+  point, sans reload. Le démontage n'a plus lieu que sur dispose.
+
+### Added
+
+- **`mediaDisposePolicy`** (`src/lib/backgroundMedia.ts`, 1 test) : pendant un
+  jeu, Équilibré/Qualité/Auto/Custom → pause (player conservé) ;
+  **Performance/Max → dispose** (player démonté, RAM/GPU libérés, remonté à la
+  fin du jeu — spec §53).
+- **Dispose après longue inactivité** (§52) : ZAILON en arrière-plan plus de
+  3 minutes → le player YouTube est démonté ; au retour il est recréé depuis
+  `startSeconds` (reprise approximative).
+- **Indicateur « son coupé pour cette session »** dans le Hero : point ambre
+  + tooltip quand l'intention persistée est non muette mais que la politique
+  §44 a redémarré muet — un clic active le son.
+
 ## [1.80.0] - 2026-08-12
 
 > Accueil multimédia — **correction des trois bugs** (spec correctifs §1-55) :

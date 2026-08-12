@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { BackgroundMediaSettings, GameBackgroundMedia, resolveAudioSettings, resolveMediaType } from '../../lib/backgroundMedia'
+import { BackgroundMediaSettings, GameBackgroundMedia, mediaDisposePolicy, resolveAudioSettings, resolveMediaType } from '../../lib/backgroundMedia'
 import { applyBackgroundAudio, registerBackgroundPlayer, unregisterBackgroundPlayer, type BackgroundPlayerCommands } from '../../lib/backgroundMediaPlayer'
 import { youtubeEmbedUrl } from '../../lib/youtubeUrl'
-import { useStore } from '../../store/useStore'
+
+/** Délai avant dispose du player YouTube quand ZAILON reste en arrière-plan
+ * (spec §52) : au-delà, la vidéo est démontée pour libérer la mémoire. */
+const LONG_BLUR_DISPOSE_MS = 3 * 60_000
 
 /**
  * MediaPlaybackArbiter (spec §49, §74) : un seul fond vidéo ZAILON actif à la
@@ -38,6 +41,10 @@ interface BackgroundMediaLayerProps {
   fallbackArtwork?: ReactNode
   /** True quand le jeu se lance / tourne, ou la fenêtre est masquée (spec §17, §63). */
   paused: boolean
+  /** Un jeu tourne réellement (session GameRunning) — déclenche le dispose §53. */
+  gameRunning?: boolean
+  /** Mode performance du jeu : performance/max → dispose, sinon pause (§53). */
+  performanceMode?: string
   settings: BackgroundMediaSettings
   /** Rendu du Hero actuel (object-fit / position / zoom). */
   heroStyle?: { objectFit: 'cover' | 'contain'; objectPosition: string; transform: string }
@@ -46,19 +53,24 @@ interface BackgroundMediaLayerProps {
 }
 
 /**
- * Fond multimédia de l'Accueil (spec Accueil multimédia + correctifs §15-31).
+ * Fond multimédia de l'Accueil (spec Accueil multimédia + correctifs §15-31,
+ * §51-53).
  *
  * - Démarre TOUJOURS muet (politique d'autoplay des WebViews, spec §5, §44).
  * - Affiche d'abord l'image, puis fondu court quand la vidéo est prête (§28-29).
- * - YouTube : `videoReady` passe à true sur le message `onReady` du lecteur —
- *   sinon la vidéo ne serait jamais rendue (correctif §17-20). Une erreur
- *   (non embeddable / supprimée) → état Error + fallback image (§26-27).
- * - Alt+Tab : suspension temporaire (jamais userMuted), et au retour le son
- *   reprend à la valeur utilisateur si elle n'était pas muette (§9-13).
+ * - YouTube : l'iframe est montée AVANT `onReady` (sinon deadlock — l'événement
+ *   ne peut jamais arriver) ; la visibilité suit `videoReady` (fondu). Une
+ *   erreur (non embeddable / supprimée) → état Error + fallback image (§26-27).
+ * - Alt+Tab (§9-13, §51) : suspension temporaire (jamais userMuted) ; le
+ *   player reste MONTÉ et reçoit `pauseVideo` — au retour, reprise au même
+ *   point, sans recharger la vidéo (§51).
+ * - Jeu en cours (§53) : Équilibré → pause (player conservé) ; Performance/Max
+ *   → player démonté (RAM/GPU libérés), remonté à la fin du jeu. Après
+ *   plusieurs minutes en arrière-plan, dispose également (§52).
  * - Le contrôle audio vit dans HeroAudioControl (pont unifié) — plus aucun
  *   contrôle dupliqué ici (§36, §47-49).
  */
-export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, localVideoUrl, fallbackImageUrl, fallbackArtwork, paused, settings, heroStyle, overlay }: BackgroundMediaLayerProps) {
+export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, localVideoUrl, fallbackImageUrl, fallbackArtwork, paused, gameRunning = false, performanceMode = 'balanced', settings, heroStyle, overlay }: BackgroundMediaLayerProps) {
   const resolvedAudio = resolveAudioSettings(media, settings)
   const hasLocalVideo = Boolean(localVideoUrl)
   const type = resolveMediaType(media, settings, hasLocalVideo)
@@ -69,13 +81,19 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
   const [videoReady, setVideoReady] = useState(false)
   const [videoError, setVideoError] = useState(false)
   const [windowActive, setWindowActive] = useState(() => typeof document === 'undefined' ? true : !document.hidden)
+  const [longBlurDisposed, setLongBlurDisposed] = useState(false)
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const playerReadyRef = useRef(false)
 
-  // Lecture effective : vidéo seulement si tout est aligné (spec §15-16, §88).
+  // §53 : Performance → player démonté pendant le jeu ; Équilibré → pause.
+  const disposeDuringGame = gameRunning && mediaDisposePolicy(performanceMode) === 'dispose'
+  const disposed = disposeDuringGame || longBlurDisposed
+
+  // Lecture effective : la source tient la main tant qu'elle est active (même
+  // en pause — §51), elle est relâchée uniquement quand elle est démontée.
   const pausedByWindow = paused || !windowActive
-  const shouldPlay = !pausedByWindow && type !== 'none' && acquirePlayback(playerKey, priority)
+  const shouldHold = type !== 'none' && !disposed && acquirePlayback(playerKey, priority)
   const holdsPlayback = playbackHolder.key === playerKey
 
   // Alt+Tab (correctif §9-11) : suspendre temporairement en perdant le focus ;
@@ -105,6 +123,16 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
     }
   }, [])
 
+  // §52 : ZAILON reste en arrière-plan plusieurs minutes → dispose du player.
+  useEffect(() => {
+    if (windowActive) {
+      setLongBlurDisposed(false)
+      return
+    }
+    const timer = window.setTimeout(() => setLongBlurDisposed(true), LONG_BLUR_DISPOSE_MS)
+    return () => window.clearTimeout(timer)
+  }, [windowActive])
+
   // Arbitrage : libérer la main à la destruction (spec §49, §74).
   useEffect(() => {
     return () => { releasePlayback(playerKey) }
@@ -115,6 +143,7 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
     setVideoReady(false)
     setVideoError(false)
     setLocalMuted(true)
+    setLongBlurDisposed(false)
     playerReadyRef.current = false
   }, [type, localVideoUrl, media?.youtubeVideoId])
 
@@ -129,7 +158,7 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
       if (event.source !== iframeRef.current?.contentWindow) return
       try {
         const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
-        // Correctif §17-20 : onReady doit rendre la vidéo visible.
+        // Correctif §17-20 : onReady rend la vidéo visible (fondu).
         if (data?.event === 'onReady') {
           playerReadyRef.current = true
           setVideoReady(true)
@@ -154,34 +183,49 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
     return () => unregisterBackgroundPlayer(commands)
   }, [type, postToPlayer])
 
-  // Application audio au player quand le muet/volume de session change (§12).
+  // Pause/reprise SANS reload (§51) : Alt+Tab ou jeu en équilibré → le player
+  // monté reçoit `pauseVideo` (jamais de démontage) ; au retour, reprise au
+  // même point + volume effectif (§12). Le démontage n'a lieu que sur dispose.
   useEffect(() => {
-    if (!shouldPlay || !holdsPlayback) return
-    const player = { mute: () => postToPlayer('mute'), unmute: () => postToPlayer('unMute'), setVolume: (v: number) => postToPlayer('setVolume', [Math.round(v * 100)]), pause: () => postToPlayer('pauseVideo'), resume: () => postToPlayer('playVideo') }
-    if (type === 'youtube') applyBackgroundAudio(player, { muted: localMuted, volume: resolvedAudio.volume })
-  }, [localMuted, resolvedAudio.volume, shouldPlay, holdsPlayback, type, postToPlayer]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!shouldHold || !holdsPlayback) return
+    const player: BackgroundPlayerCommands = {
+      mute: () => postToPlayer('mute'),
+      unmute: () => postToPlayer('unMute'),
+      setVolume: v => postToPlayer('setVolume', [Math.round(Math.min(1, Math.max(0, v)) * 100)]),
+      pause: () => { if (type === 'youtube') postToPlayer('pauseVideo'); else void localVideoRef.current?.pause() },
+      resume: () => { if (type === 'youtube') postToPlayer('playVideo'); else void localVideoRef.current?.play() },
+    }
+    if (pausedByWindow) {
+      player.pause()
+    } else {
+      applyBackgroundAudio(player, { muted: localMuted, volume: resolvedAudio.volume })
+      player.resume()
+    }
+  }, [shouldHold, holdsPlayback, pausedByWindow, localMuted, resolvedAudio.volume, type, postToPlayer]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const muted = localMuted || !settings.bgAudioEnabled
 
-  // Image affichée pendant le chargement, en cas d'erreur, et à la suspension.
-  const showImage = !shouldPlay || !holdsPlayback || !videoReady || videoError
-  const showVideo = shouldPlay && holdsPlayback && videoReady && !videoError
+  // Montage de la source : AVANT `videoReady` — sinon l'iframe ne serait jamais
+  // montée et `onReady` ne pourrait jamais arriver (deadlock). La visibilité
+  // suit `videoReady` : image → fondu vidéo (§28-29).
+  const sourceMounted = shouldHold && holdsPlayback && !videoError && (type === 'youtube' ? Boolean(media?.youtubeVideoId) : type === 'video' ? Boolean(localVideoUrl) : false)
+  const showImage = !sourceMounted || !videoReady || videoError
 
   return <div className="absolute inset-0 overflow-hidden">
     {fallbackImageUrl && <img src={fallbackImageUrl} alt="" className="pointer-events-none absolute inset-0 h-full w-full" style={{ objectFit: heroStyle?.objectFit ?? 'cover', objectPosition: heroStyle?.objectPosition ?? '50% 50%', transform: heroStyle?.transform ?? 'none' }} />}
     {!fallbackImageUrl && fallbackArtwork}
 
-    {showVideo && type === 'youtube' && media?.youtubeVideoId && (
+    {sourceMounted && type === 'youtube' && media?.youtubeVideoId && (
       <iframe
         ref={iframeRef}
         title="Fond vidéo YouTube"
         src={youtubeEmbedUrl(media.youtubeVideoId, { startSeconds: media.startSeconds })}
         allow="autoplay; encrypted-media; picture-in-picture"
         referrerPolicy="strict-origin-when-cross-origin"
-        className="pointer-events-none absolute inset-0 h-full w-full border-0"
+        className={`pointer-events-none absolute inset-0 h-full w-full border-0 transition-opacity duration-300 ${videoReady ? 'opacity-100' : 'opacity-0'}`}
       />
     )}
-    {showVideo && type === 'video' && localVideoUrl && (
+    {sourceMounted && type === 'video' && localVideoUrl && (
       <video
         key={localVideoUrl}
         ref={localVideoRef}
@@ -190,13 +234,9 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
         muted={muted}
         loop
         playsInline
-        className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+        onLoadedData={() => setVideoReady(true)}
+        className={`pointer-events-none absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${videoReady ? 'opacity-100' : 'opacity-0'}`}
       />
-    )}
-
-    {/* Préchargement vidéo locale : image → fondu quand prête (spec §28). */}
-    {type === 'video' && localVideoUrl && !videoReady && !pausedByWindow && (
-      <video key={`preload-${localVideoUrl}`} src={localVideoUrl} muted autoPlay loop playsInline preload="metadata" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-0" onLoadedData={() => setVideoReady(true)} />
     )}
 
     {/* Erreur YouTube (non embeddable / supprimée / hors ligne — spec §26-27). */}

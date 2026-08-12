@@ -96,3 +96,23 @@ du Hero pilote le player du layer via ce pont — jamais de player créé dans u
 
 UI : `HeroAudioControl` refondu (icônes `VolumeX/Volume1/Volume2` selon le niveau) ;
 bloc « Fond actuel : YouTube ✓ » + « Retirer la vidéo » dans Personnaliser l'Accueil.
+
+## Correctifs 1.81.0 (spec §51-53)
+
+- **Deadlock YouTube résiduel corrigé** : l'iframe n'était montée que si
+  `videoReady === true`, or `videoReady` ne devenait `true` que via `onReady`
+  de l'iframe montée — cercle mort, la vidéo n'était toujours jamais rendue.
+  La source est désormais montée **avant** `onReady` ; la visibilité suit
+  `videoReady` (fondu 300 ms). C'est la vraie fin du bug « lien reconnu mais
+  jamais appliqué ».
+- **Alt+Tab sans reload (§51)** : le player reste monté et reçoit
+  `pauseVideo`/`playVideo` — reprise au même point, jamais de rechargement
+  YouTube à chaque focus. Démontage uniquement sur dispose.
+- **Politique de jeu (§53)** : `mediaDisposePolicy` — Équilibré/Qualité/Auto/
+  Custom → pause ; Performance/Max → dispose (démontage, remonté à la fin du
+  jeu, reprise approximative depuis `startSeconds`).
+- **Longue inactivité (§52)** : > 3 minutes en arrière-plan → dispose du player
+  YouTube ; recréation au retour.
+- **Indicateur « son coupé pour cette session »** : point ambre sur l'icône
+  volume quand l'intention persistée est non muette mais que la politique §44
+  a redémarré muet.

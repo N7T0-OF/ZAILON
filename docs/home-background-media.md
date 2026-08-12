@@ -68,3 +68,31 @@ ni d’écran noir bloquant.
 
 - `tsc` ✅, build ✅, 22 tests dédiés (11 `youtubeUrl` + 11 `backgroundMedia`),
   suite complète ✅, Verify native + Verify ZAILON ✅.
+
+## Correctifs 1.80.0 (spec correctifs §1-55)
+
+Trois bugs corrigés, cause racine commune `BackgroundMediaController + audio + YouTube` :
+
+1. **YouTube jamais rendu** — `videoReady` n'était jamais passé à `true` (seul le ref
+   était rempli sur `onReady`) → `showVideo` restait faux. Corrigé : `onReady` →
+   `videoReady = true` → iframe visible après fondu ; erreur (non embeddable /
+   supprimée) → état `Error` + fallback image + badge « Vidéo indisponible ⚠ ».
+2. **Alt+Tab perd le son** — la suspension était confondue avec l'intention
+   utilisateur. Corrigé : perte de focus → suspension temporaire (jamais
+   `userMuted`), retour → restauration de l'intention (muet si muet, volume sinon) ;
+   `effectiveVolume = 0` pendant toute suspension. Séparé : suspension
+   « non focalisé » vs « jeu en cours » (politique Performance).
+3. **Barre de son qui reste ouverte** — état attaché à l'icône seule + timer 2,6 s.
+   Corrigé : zone hover commune (icône + slider + capsule), repli **400 ms** après
+   sortie de toute la zone, repli immédiat si la fenêtre perd le focus, capsule
+   `absolute` flottante (Favoris immobile).
+
+Machine à états (`src/lib/backgroundMedia.ts`, 9 tests) :
+`Inactive / Loading / PlayingMuted / PlayingAudible / SuspendedUnfocused /
+SuspendedGameRunning / Error` — plus aucune combinaison de booléens incohérente.
+
+Pont player (`src/lib/backgroundMediaPlayer.ts`) : un seul player actif, le contrôle
+du Hero pilote le player du layer via ce pont — jamais de player créé dans un render.
+
+UI : `HeroAudioControl` refondu (icônes `VolumeX/Volume1/Volume2` selon le niveau) ;
+bloc « Fond actuel : YouTube ✓ » + « Retirer la vidéo » dans Personnaliser l'Accueil.

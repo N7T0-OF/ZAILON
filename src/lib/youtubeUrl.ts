@@ -31,9 +31,17 @@ const YOUTUBE_HOSTS = new Set([
 
 function parseStartSeconds(value: string | null | undefined): number | undefined {
   if (!value) return undefined
-  const seconds = Number(value)
-  if (!Number.isFinite(seconds) || seconds < 0) return undefined
-  return Math.floor(seconds)
+  // Accepte « 15 », « 15s », « 1m30 » — formats courants de timestamp YouTube.
+  const cleaned = value.trim().toLowerCase()
+  const match = cleaned.match(/^(?:(\d+)m)?(\d+)s?$/)
+  if (match) {
+    const minutes = Number(match[1] ?? 0)
+    const seconds = Number(match[2])
+    if (Number.isFinite(minutes + seconds) && minutes + seconds >= 0) return minutes * 60 + seconds
+  }
+  const plain = Number(cleaned)
+  if (!Number.isFinite(plain) || plain < 0) return undefined
+  return Math.floor(plain)
 }
 
 /**
@@ -62,7 +70,11 @@ export function parseYouTubeUrl(raw: string): ParsedYouTubeUrl | null {
   const host = url.hostname.toLowerCase()
   if (!YOUTUBE_HOSTS.has(host)) return null
 
-  const startSeconds = parseStartSeconds(url.searchParams.get('t')) ?? parseStartSeconds(url.hash.replace(/^#/, '').split('&').find(part => part.startsWith('t='))?.slice(2))
+  // Timestamp de début (spec §25) : ?t=, &start=, ou #t=.
+  const startSeconds =
+    parseStartSeconds(url.searchParams.get('t')) ??
+    parseStartSeconds(url.searchParams.get('start')) ??
+    parseStartSeconds(url.hash.replace(/^#/, '').split('&').find(part => part.startsWith('t='))?.slice(2))
 
   // youtu.be/ID
   if (host === 'youtu.be') {
@@ -106,6 +118,22 @@ export function youtubeEmbedUrl(videoId: string, options?: { startSeconds?: numb
   })
   if (options?.startSeconds) params.set('start', String(Math.max(0, Math.floor(options.startSeconds))))
   return `https://www.youtube-nocookie.com/embed/${videoId}?${params.toString()}`
+}
+
+/** Valide un identifiant de vidéo (11 caractères [A-Za-z0-9_-]). */
+export function isValidYouTubeVideoId(value: string): boolean {
+  return VIDEO_ID_RE.test(value)
+}
+
+/**
+ * Nettoyage d'une URL pour l'aperçu (spec §24) : retire les paramètres de
+ * liste de lecture et de tracking, conserve le timestamp de début.
+ */
+export function cleanYouTubeUrl(raw: string): string {
+  const parsed = parseYouTubeUrl(raw)
+  if (!parsed) return raw.trim()
+  const base = `https://www.youtube.com/watch?v=${parsed.videoId}`
+  return parsed.startSeconds !== undefined ? `${base}&t=${parsed.startSeconds}` : base
 }
 
 /** Miniature YouTube publique (spec §29) — utilisée comme fallback d'image. */

@@ -1,5 +1,46 @@
 # Changelog
 
+## [1.80.0] - 2026-08-12
+
+> Accueil multimédia — **correction des trois bugs** (spec correctifs §1-55) :
+> barre de son qui restait déployée, son perdu après Alt+Tab, et lien YouTube
+> reconnu mais jamais réellement appliqué. Cause racine YouTube : `videoReady`
+> n'était jamais passé à `true` (seul le ref était rempli sur `onReady`), donc
+> le fond vidéo n'était jamais rendu.
+
+### Fixed
+
+- **YouTube réellement appliqué** (spec §17-20, §22-31) : `onReady` →
+  `videoReady = true` → l'iframe devient visible après fondu ; erreur
+  (non embeddable / supprimée) → état `Error` + fallback image + badge
+  « Vidéo indisponible ⚠ » (§26-27) ; l'iframe n'est montée que si le
+  `youtubeVideoId` est présent — la source reçoit les commandes par
+  `postMessage` ciblé `youtube-nocookie.com` (§39).
+- **Alt+Tab — le son revient** (spec §9-13) : perte de focus → suspension
+  temporaire (jamais `userMuted` écrasé) ; retour → restauration de
+  l'intention utilisateur (muet si muet, volume utilisateur sinon).
+  `effectiveVolume` = 0 pendant toute suspension (§12).
+- **Barre de son** (spec §1-5, §47-49) : zone hover commune icône + slider +
+  capsule, repli après **400 ms** hors de toute la zone, repli immédiat si la
+  fenêtre perd le focus, capsule `absolute` flottante — Favoris ne bouge plus.
+
+### Added
+
+- **`src/lib/backgroundMedia.ts`** (9 tests) : machine à états
+  (`Inactive/Loading/PlayingMuted/PlayingAudible/SuspendedUnfocused/
+  SuspendedGameRunning/Error`, spec §15), session audio avec intention
+  utilisateur séparée des suspensions temporaires (§9-11), transitions
+  focus/jeu/pause purement testées (scénarios Alt+Tab §16).
+- **`src/lib/youtubeUrl.ts` étendu** (13 tests) : `start=`/`#t=15s` →
+  `startSeconds`, nettoyage `list`/tracking, export `youtubeEmbedUrl`
+  (start-time + `playlist` ignorée).
+- **`src/lib/backgroundMediaPlayer.ts`** : pont player unifié — un seul player
+  actif, le contrôle du Hero pilote le player du layer via ce pont, jamais de
+  player créé dans le render (§22-23, §32).
+- **UI** : `HeroAudioControl` refondu (icônes `VolumeX`/`Volume1`/`Volume2`
+  selon le niveau), bloc « Fond actuel : **YouTube ✓** » + bouton
+  **« Retirer la vidéo »** dans Personnaliser l'Accueil (spec §33-35).
+
 ## [1.79.0] - 2026-08-12
 
 > Frosty Editor — **parsing réel du catalogue Frostbite `.cat`** (spec §16) et

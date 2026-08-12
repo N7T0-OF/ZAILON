@@ -1,4 +1,4 @@
-import { Boxes, Check, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2, Volume2, VolumeX, X } from 'lucide-react'
+import { Boxes, Check, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2, Volume1, Volume2, VolumeX, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Game, GameBackgroundMedia } from '../../types'
 import { resolveAudioSettings } from '../../lib/backgroundMedia'
@@ -372,8 +372,10 @@ function QuickGame({ game, summary, active, onSelect, favorite }: { game: Game; 
   </button>
 }
 
-/** Contrôle audio discret du Hero (spec Accueil §3-5) : icône toujours visible,
- * slider révélé au survol/clic puis rétracté après quelques secondes. */
+/** Contrôle audio discret du Hero (spec correctifs §1-5, §47-49) : icône
+ * toujours visible, capsule flottante absolute au survol (Favoris jamais
+ * déplacé), repli ~400 ms après sortie de TOUTE la zone (icône + slider +
+ * fond de la capsule), repli immédiat si la fenêtre perd le focus. */
 function HeroAudioControl({ muted, volume, onToggle, onVolume }: {
   muted: boolean
   volume: number
@@ -384,14 +386,25 @@ function HeroAudioControl({ muted, volume, onToggle, onVolume }: {
   const collapseTimer = useRef<number>()
   const scheduleCollapse = () => {
     window.clearTimeout(collapseTimer.current)
-    collapseTimer.current = window.setTimeout(() => setExpanded(false), 2600)
+    collapseTimer.current = window.setTimeout(() => setExpanded(false), 400)
   }
-  useEffect(() => () => window.clearTimeout(collapseTimer.current), [])
+  // Fallback §5 : si la fenêtre n'a plus le focus (Alt+Tab), repli immédiat.
+  useEffect(() => {
+    const onBlur = () => { window.clearTimeout(collapseTimer.current); setExpanded(false) }
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.clearTimeout(collapseTimer.current)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
+  const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 50 ? Volume1 : Volume2
   return (
     <div
-      className="absolute bottom-3 right-4 z-30 flex items-center gap-1.5 rounded-full border border-white/[0.12] bg-black/40 p-1.5 backdrop-blur-md"
+      className="absolute bottom-3 right-4 z-30 flex items-center gap-1.5 rounded-full border border-white/[0.12] bg-black/40 p-1.5 backdrop-blur-md transition-[width,opacity] duration-150"
       onMouseEnter={() => { window.clearTimeout(collapseTimer.current); setExpanded(true) }}
       onMouseLeave={scheduleCollapse}
+      onFocus={() => { window.clearTimeout(collapseTimer.current); setExpanded(true) }}
+      onBlur={scheduleCollapse}
     >
       <button
         type="button"
@@ -400,7 +413,7 @@ function HeroAudioControl({ muted, volume, onToggle, onVolume }: {
         aria-label={muted ? 'Activer le son du fond' : 'Couper le son du fond'}
         className="flex h-6 w-6 items-center justify-center rounded-full text-white/70 hover:bg-white/[0.08] hover:text-white"
       >
-        {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+        <VolumeIcon size={13} />
       </button>
       {expanded && (
         <input

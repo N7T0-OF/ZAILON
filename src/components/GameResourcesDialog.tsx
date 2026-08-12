@@ -337,6 +337,17 @@ function HeroMediaStrip({ game }: { game: Game }) {
       {type === 'image' && <p className="mt-2 text-[11px] text-white/38">Image fixe — choisissez une jaquette, bannière ou arrière-plan ci-contre.</p>}
       {feedback === 'valid' && <p className="mt-1.5 text-[11px] text-emerald-300/85">Vidéo enregistrée — lecteur intégré, aucun téléchargement.</p>}
       {feedback === 'invalid' && <p className="mt-1.5 text-[11px] text-red-300/85">Lien non pris en charge. Accepté : youtube.com/watch, youtu.be, shorts.</p>}
+      {media?.youtubeVideoId && (
+        <div className="mt-2 flex items-center gap-2 rounded-lg border border-emerald-300/14 bg-emerald-300/[0.04] px-2.5 py-1.5">
+          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-300/20 text-emerald-300"><Check size={9} /></span>
+          <p className="min-w-0 flex-1 truncate text-[11px] text-emerald-100/75">Fond actuel : <span className="font-semibold text-emerald-100">YouTube ✓</span></p>
+          <button
+            type="button"
+            onClick={() => setGameBackgroundMedia(game.id, { type: 'image', youtubeVideoId: undefined, youtubeUrl: undefined, startSeconds: undefined })}
+            className="rounded-md border border-white/[0.09] px-2 py-1 text-[10px] text-white/45 hover:border-red-300/30 hover:text-red-200"
+          >Retirer la vidéo</button>
+        </div>
+      )}
     </div>
   )
 }

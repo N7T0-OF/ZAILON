@@ -1,7 +1,7 @@
-import { Volume2, VolumeX } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { BackgroundMediaSettings, GameBackgroundMedia, resolveAudioSettings, resolveMediaType } from '../../lib/backgroundMedia'
+import { applyBackgroundAudio, registerBackgroundPlayer, unregisterBackgroundPlayer, type BackgroundPlayerCommands } from '../../lib/backgroundMediaPlayer'
 import { youtubeEmbedUrl } from '../../lib/youtubeUrl'
 import { useStore } from '../../store/useStore'
 
@@ -46,27 +46,31 @@ interface BackgroundMediaLayerProps {
 }
 
 /**
- * Fond multimédia de l'Accueil (spec Accueil multimédia).
+ * Fond multimédia de l'Accueil (spec Accueil multimédia + correctifs §15-31).
  *
  * - Démarre TOUJOURS muet (politique d'autoplay des WebViews, spec §5, §44).
- * - Affiche d'abord l'image, puis fondu court quand la vidéo est prête (§28).
- * - Pause/destruction hors focus, minimisé, ou quand un jeu démarre (§16-17, §63).
- * - Seul l'identifiant extrait entre dans l'URL du lecteur — jamais l'URL brute
- *   utilisateur, et le domaine est une whitelist stricte (§2, §71-72).
+ * - Affiche d'abord l'image, puis fondu court quand la vidéo est prête (§28-29).
+ * - YouTube : `videoReady` passe à true sur le message `onReady` du lecteur —
+ *   sinon la vidéo ne serait jamais rendue (correctif §17-20). Une erreur
+ *   (non embeddable / supprimée) → état Error + fallback image (§26-27).
+ * - Alt+Tab : suspension temporaire (jamais userMuted), et au retour le son
+ *   reprend à la valeur utilisateur si elle n'était pas muette (§9-13).
+ * - Le contrôle audio vit dans HeroAudioControl (pont unifié) — plus aucun
+ *   contrôle dupliqué ici (§36, §47-49).
  */
 export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, localVideoUrl, fallbackImageUrl, fallbackArtwork, paused, settings, heroStyle, overlay }: BackgroundMediaLayerProps) {
-  const setBackgroundMediaSettings = useStore(state => state.setBackgroundMediaSettings)
-
+  const resolvedAudio = resolveAudioSettings(media, settings)
   const hasLocalVideo = Boolean(localVideoUrl)
   const type = resolveMediaType(media, settings, hasLocalVideo)
-  const resolvedAudio = resolveAudioSettings(media, settings)
+
   // Muet local de SESSION (spec §44 : chaque lancement recommence 🔇 même si
   // l'utilisateur avait activé le son précédemment — jamais persisté).
   const [localMuted, setLocalMuted] = useState(true)
   const [videoReady, setVideoReady] = useState(false)
+  const [videoError, setVideoError] = useState(false)
   const [windowActive, setWindowActive] = useState(() => typeof document === 'undefined' ? true : !document.hidden)
-  const [showVolume, setShowVolume] = useState(false)
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const localVideoRef = useRef<HTMLVideoElement>(null)
   const playerReadyRef = useRef(false)
 
   // Lecture effective : vidéo seulement si tout est aligné (spec §15-16, §88).
@@ -74,10 +78,16 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
   const shouldPlay = !pausedByWindow && type !== 'none' && acquirePlayback(playerKey, priority)
   const holdsPlayback = playbackHolder.key === playerKey
 
-  // Retour muet après toute interruption (spec §44, §65) : blur, minimisé, jeu.
+  // Alt+Tab (correctif §9-11) : suspendre temporairement en perdant le focus ;
+  // au retour, restaurer l'intention utilisateur (muet si elle était muette,
+  // volume utilisateur sinon). Jamais de modification de userMuted ici.
   useEffect(() => {
-    if (pausedByWindow && !localMuted) setLocalMuted(true)
-  }, [pausedByWindow]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (pausedByWindow) {
+      if (!localMuted) setLocalMuted(true)
+    } else {
+      setLocalMuted(resolvedAudio.muted)
+    }
+  }, [pausedByWindow, resolvedAudio.muted]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Visibilité fenêtre : pause immédiate hors focus (spec §16, §89) — aucun
   // décodage en arrière-plan, aucun polling.
@@ -103,11 +113,13 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
   // Remise à zéro du « prêt » quand la source change (nouveau jeu, type).
   useEffect(() => {
     setVideoReady(false)
+    setVideoError(false)
     setLocalMuted(true)
+    playerReadyRef.current = false
   }, [type, localVideoUrl, media?.youtubeVideoId])
 
-  // Message API YouTube (unMute / mute / setVolume) — uniquement depuis la
-  // fenêtre de l'iframe, jamais une source arbitraire (spec §71-72).
+  // Message API YouTube (onReady / onError) — uniquement depuis la fenêtre de
+  // l'iframe, jamais une source arbitraire (spec §71-72).
   const postToPlayer = useCallback((func: string, args: unknown[] = []) => {
     iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func, args }), 'https://www.youtube-nocookie.com')
   }, [])
@@ -117,37 +129,43 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
       if (event.source !== iframeRef.current?.contentWindow) return
       try {
         const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
-        if (data?.event === 'onReady') playerReadyRef.current = true
+        // Correctif §17-20 : onReady doit rendre la vidéo visible.
+        if (data?.event === 'onReady') {
+          playerReadyRef.current = true
+          setVideoReady(true)
+        }
+        if (data?.event === 'onError') setVideoError(true)
       } catch { /* message non-JSON ignoré */ }
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
   }, [])
 
-  const toggleMute = useCallback(() => {
-    const next = !localMuted
-    setLocalMuted(next)
-    // Le lecteur doit être prêt pour recevoir les commandes (spec §6, §39).
-    setTimeout(() => {
-      if (!playerReadyRef.current) return
-      if (next) postToPlayer('mute')
-      else { postToPlayer('unMute'); postToPlayer('setVolume', [Math.round(Math.min(1, Math.max(0, resolvedAudio.volume)) * 100)]) }
-    }, 150)
-  }, [localMuted, postToPlayer, resolvedAudio.volume])
+  // Pont unifié (spec §22, §32, §36-37) : le HeroAudioControl pilote ce player.
+  useEffect(() => {
+    const commands: BackgroundPlayerCommands = {
+      mute: () => { if (type === 'youtube') postToPlayer('mute'); else if (localVideoRef.current) localVideoRef.current.muted = true },
+      unmute: () => { if (type === 'youtube') postToPlayer('unMute'); else if (localVideoRef.current) localVideoRef.current.muted = false },
+      setVolume: volume => { if (type === 'youtube') postToPlayer('setVolume', [Math.round(Math.min(1, Math.max(0, volume)) * 100)]); else if (localVideoRef.current) localVideoRef.current.volume = Math.min(1, Math.max(0, volume)) },
+      pause: () => { if (type === 'youtube') postToPlayer('pauseVideo'); else void localVideoRef.current?.pause() },
+      resume: () => { if (type === 'youtube') postToPlayer('playVideo'); else void localVideoRef.current?.play() },
+    }
+    registerBackgroundPlayer(commands)
+    return () => unregisterBackgroundPlayer(commands)
+  }, [type, postToPlayer])
 
-  const changeVolume = useCallback((value: number) => {
-    const v = Math.min(1, Math.max(0, value))
-    // Volume global persisté (spec §9, §81) — survit au redémarrage.
-    setBackgroundMediaSettings({ bgVolume: v })
-    if (v > 0) postToPlayer('setVolume', [Math.round(v * 100)])
-  }, [setBackgroundMediaSettings, postToPlayer])
+  // Application audio au player quand le muet/volume de session change (§12).
+  useEffect(() => {
+    if (!shouldPlay || !holdsPlayback) return
+    const player = { mute: () => postToPlayer('mute'), unmute: () => postToPlayer('unMute'), setVolume: (v: number) => postToPlayer('setVolume', [Math.round(v * 100)]), pause: () => postToPlayer('pauseVideo'), resume: () => postToPlayer('playVideo') }
+    if (type === 'youtube') applyBackgroundAudio(player, { muted: localMuted, volume: resolvedAudio.volume })
+  }, [localMuted, resolvedAudio.volume, shouldPlay, holdsPlayback, type, postToPlayer]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const volumeLabel = Math.round(resolvedAudio.volume * 100)
   const muted = localMuted || !settings.bgAudioEnabled
 
-  // Image affichée pendant le chargement ET quand la lecture est suspendue.
-  const showImage = !shouldPlay || !holdsPlayback || !videoReady
-  const showVideo = shouldPlay && holdsPlayback && videoReady
+  // Image affichée pendant le chargement, en cas d'erreur, et à la suspension.
+  const showImage = !shouldPlay || !holdsPlayback || !videoReady || videoError
+  const showVideo = shouldPlay && holdsPlayback && videoReady && !videoError
 
   return <div className="absolute inset-0 overflow-hidden">
     {fallbackImageUrl && <img src={fallbackImageUrl} alt="" className="pointer-events-none absolute inset-0 h-full w-full" style={{ objectFit: heroStyle?.objectFit ?? 'cover', objectPosition: heroStyle?.objectPosition ?? '50% 50%', transform: heroStyle?.transform ?? 'none' }} />}
@@ -166,7 +184,7 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
     {showVideo && type === 'video' && localVideoUrl && (
       <video
         key={localVideoUrl}
-        ref={node => { if (node) node.volume = resolvedAudio.volume }}
+        ref={localVideoRef}
         src={localVideoUrl}
         autoPlay
         muted={muted}
@@ -181,40 +199,14 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
       <video key={`preload-${localVideoUrl}`} src={localVideoUrl} muted autoPlay loop playsInline preload="metadata" className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-0" onLoadedData={() => setVideoReady(true)} />
     )}
 
-    {overlay}
-
-    {/* Contrôle audio discret (spec §6, §42-43) : seulement quand le fond a une
-        piste et que la lecture est possible. */}
-    {shouldPlay && holdsPlayback && (type === 'youtube' || type === 'video') && (
-      <div className="absolute bottom-3 right-3 z-20 flex items-center gap-1">
-        <button
-          type="button"
-          onClick={toggleMute}
-          onContextMenu={event => { event.preventDefault(); setShowVolume(value => !value) }}
-          title={muted ? 'Activer le son du fond' : 'Couper le son du fond'}
-          aria-label={muted ? 'Activer le son du fond' : 'Couper le son du fond'}
-          className={`flex h-8 w-8 items-center justify-center rounded-full border backdrop-blur-md transition-colors ${muted ? 'border-white/[0.14] bg-black/30 text-white/55 hover:bg-white/[0.09] hover:text-white' : 'border-[var(--zailon-accent)]/30 bg-[var(--zailon-accent)]/15 text-[var(--zailon-accent)] hover:bg-[var(--zailon-accent)]/25'}`}
-        >
-          {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
-        </button>
-        {showVolume && (
-          <div className="flex h-8 items-center gap-2 rounded-full border border-white/[0.14] bg-black/55 px-3 backdrop-blur-md">
-            <VolumeX size={11} className="text-white/40" />
-            <input
-              type="range"
-              min={0}
-              max={0.2}
-              step={0.01}
-              value={resolvedAudio.volume}
-              onChange={event => changeVolume(Number(event.target.value))}
-              aria-label="Volume du fond"
-              className="h-1 w-24 accent-[var(--zailon-accent)]"
-            />
-            <span className="w-7 text-right font-mono text-[10px] text-white/60">{volumeLabel}%</span>
-          </div>
-        )}
+    {/* Erreur YouTube (non embeddable / supprimée / hors ligne — spec §26-27). */}
+    {type === 'youtube' && videoError && !pausedByWindow && (
+      <div className="pointer-events-none absolute bottom-12 right-4 z-20 flex items-center gap-1.5 rounded-full border border-white/[0.1] bg-black/45 px-3 py-1.5 backdrop-blur-md">
+        <span className="text-[10px] text-amber-200/85">Vidéo indisponible ⚠</span>
       </div>
     )}
+
+    {overlay}
   </div>
 }
 

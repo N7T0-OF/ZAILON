@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parseYouTubeUrl, youtubeEmbedUrl, youtubeThumbnailUrl } from '../../src/lib/youtubeUrl.ts'
+import { cleanYouTubeUrl, isValidYouTubeVideoId, parseYouTubeUrl, youtubeEmbedUrl, youtubeThumbnailUrl } from '../../src/lib/youtubeUrl.ts'
 
 test('watch standard', () => {
   const parsed = parseYouTubeUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
@@ -65,4 +65,19 @@ test('embed URL utilise uniquement le videoId, jamais l\'URL brute', () => {
 
 test('thumbnail publique', () => {
   assert.equal(youtubeThumbnailUrl('dQw4w9WgXcQ'), 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg')
+})
+
+test('start= param supporté (spec §25)', () => {
+  assert.equal(parseYouTubeUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ&start=90')?.startSeconds, 90)
+  assert.equal(parseYouTubeUrl('https://youtu.be/dQw4w9WgXcQ?t=42')?.startSeconds, 42)
+  assert.equal(parseYouTubeUrl('https://youtu.be/dQw4w9WgXcQ#t=15s')?.startSeconds, 15)
+  assert.equal(parseYouTubeUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ')?.startSeconds, undefined)
+})
+
+test('isValidYouTubeVideoId et cleanYouTubeUrl (spec §24)', () => {
+  assert.equal(isValidYouTubeVideoId('dQw4w9WgXcQ'), true)
+  assert.equal(isValidYouTubeVideoId('tropcourt'), false)
+  const cleaned = cleanYouTubeUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL123&si=abc&t=20')
+  assert.equal(cleaned, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=20')
+  assert.ok(!cleaned.includes('list='))
 })

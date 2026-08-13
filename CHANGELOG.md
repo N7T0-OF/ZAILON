@@ -1,6 +1,43 @@
 # Changelog
 
-## [1.83.0] - 2026-08-13
+## [1.84.0] - 2026-08-13
+
+> Add-ons — **premiers packages officiels RÉELS** : Frosty Support et Frosty
+> Editor sont construits, validés et prêts (source `addons/`, pack déterministe,
+> SHA-256 enregistré dans le catalogue) — la carte reste « En développement »
+> tant que la release GitHub n'est pas publiée (spec §16, §38, §49).
+
+### Added
+
+- **`addons/official.zailon.frosty/`** — premier add-on officiel construit
+  (capacité `frosty.backend`) : manifest validé, entrypoint lazy
+  (événements OnGameSelected/OnGameStarted, spec §69-71), permissions
+  minimales, README, licence MIT, icône.
+- **`addons/official.zailon.frosty-editor/`** — premier add-on d'édition
+  construit (capacité `frosty.editor`) : slot UI déclaré, dépendance
+  `official.zailon.frosty` (§31, §34), lazy loading strict (§3, §116).
+  Installé, il active l'espace « Création Frosty » dans la sidebar (gating
+  réel déjà en place).
+- **`scripts/build-official-addons.ts`** (`npm run addon:build:official`, spec
+  §16, §45) : pack déterministe de chaque `addons/<id>/` vers `dist/`, double
+  build vérifié octet-à-octet, SHA-256 + taille + bloc `release` affichés.
+- **`test-official-addons.ts`** (5 tests) : manifestes valides, pack
+  déterministe, archive contenant manifest.json + module, **SHA-256 et taille
+  du catalogue identiques au package construit** (§38), `available: false`
+  tant que la release n'est pas publiée (§49).
+
+### Changed
+
+- **Catalogue** : Frosty Support et Frosty Editor reçoivent leur `sha256` réel,
+  leur taille réelle et leurs métadonnées `release` (tag `frosty-v1.0.0` /
+  `frosty-editor-v1.0.0`, asset exact) — `available` reste `false` : passer à
+  `true` n'aura lieu qu'une fois les assets uploadés sur GitHub (sinon le
+  bouton Installer réintroduirait le 404). `minZailonVersion` aligné sur
+  l'historique réel (1.78.0 / 1.79.0).
+- **`docs/addon-release-process.md`** : section « Add-ons officiels
+  construits » — commandes de rebuild, état exact et action restante
+  (upload + `available: true`).
+
 
 > Add-ons — **fix critique de l'installation** : plus aucune URL `latest/download`
 > fabriquée, le catalogue devient la source de vérité (release explicite + asset

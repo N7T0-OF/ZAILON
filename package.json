@@ -13,6 +13,7 @@
     "addon:init": "node .github/scripts/addon-cli.ts init",
     "addon:validate": "node .github/scripts/addon-cli.ts validate",
     "addon:pack": "node .github/scripts/addon-cli.ts pack",
+    "addon:build:official": "node scripts/build-official-addons.ts",
     "audit:ui": "node .github/scripts/ui-density-audit.mjs",
     "release:notes": "node .github/scripts/generate-release-notes.mjs",
     "preview": "vite preview",

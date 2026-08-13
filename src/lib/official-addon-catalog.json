@@ -7,26 +7,36 @@
       "name": "Frosty Support",
       "version": "1.0.0",
       "category": "game-support",
-      "size": 8400000,
-      "sha256": "catalog",
-      "minZailonVersion": "1.69.0",
+      "size": 7656,
+      "sha256": "de58be495c1553e20a55ef9a3731b39da10f4a6fca72c0845199073d4a478cb4",
+      "minZailonVersion": "1.78.0",
       "permissions": ["game.read", "game.files.write", "mods.read", "mods.write", "network", "process.launch", "game.launch"],
-      "description": "Compatibilité Frosty (.fbmod, runtimes, ordre, lancement) pour les jeux supportés.",
+      "description": "Compatibilité Frosty : détection du runtime officiel, scan des données du jeu, Worker natif isolé et parsing des catalogues .cat pour les jeux Frostbite supportés.",
       "dependencies": [],
-      "available": false
+      "available": false,
+      "release": {
+        "repository": "N7T0-OF/zailon-addons",
+        "tag": "frosty-v1.0.0",
+        "asset": "official.zailon.frosty-v1.0.0.zailon-addon"
+      }
     },
     {
       "id": "official.zailon.frosty-editor",
       "name": "Frosty Editor",
       "version": "1.0.0",
       "category": "modding",
-      "size": 52000000,
-      "sha256": "catalog",
-      "minZailonVersion": "1.76.0",
+      "size": 7313,
+      "sha256": "d5b38b5626deca81de6b6c88b13fa0f17b102064696774024836530b76f47f36",
+      "minZailonVersion": "1.79.0",
       "permissions": ["game.read", "game.files.write", "mods.read", "mods.write", "network", "process.launch", "game.launch", "ui.extend", "filesystem.external"],
-      "description": "Édition avancée des jeux Frostbite : assets, textures, meshes, sons, EBX et création .fbmod (nécessite Frosty Support).",
+      "description": "Édition avancée des jeux Frostbite : Asset Browser, éditeur EBX avec validation, Plugin Manager, projets exportables, Bulk Export et build de mods (nécessite Frosty Support).",
       "dependencies": ["official.zailon.frosty"],
-      "available": false
+      "available": false,
+      "release": {
+        "repository": "N7T0-OF/zailon-addons",
+        "tag": "frosty-editor-v1.0.0",
+        "asset": "official.zailon.frosty-editor-v1.0.0.zailon-addon"
+      }
     },
     {
       "id": "official.zailon.reshade",

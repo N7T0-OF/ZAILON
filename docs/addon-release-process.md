@@ -91,3 +91,24 @@ SHA-256 et affiche le bloc de métadonnées à copier dans le catalogue :
 ```powershell
 .\scripts\release-addon.ps1 -AddonDir .\addon-template -Id official.zailon.frosty -Version 1.0.0
 ```
+
+## 6. Add-ons officiels construits
+
+Deux add-ons sont désormais **réellement construits et validés** dans ce dépôt
+(source : `addons/`) :
+
+| Add-on | Package | SHA-256 (enregistré dans le catalogue) |
+| --- | --- | --- |
+| Frosty Support | `official.zailon.frosty-v1.0.0.zailon-addon` | `de58be…78cb4` |
+| Frosty Editor | `official.zailon.frosty-editor-v1.0.0.zailon-addon` | `d5b38b…7f36` |
+
+- Reconstruire : `npm run addon:build:official` → `dist/` (pack déterministe,
+  SHA-256 vérifiable par le test `test-official-addons.ts`).
+- Le catalogue (`src/lib/official-addon-catalog.json`) contient déjà le
+  `release` (tag + asset) et le `sha256` réels de ces deux add-ons, mais
+  `available: false` : **la carte reste « En développement » tant que la
+  release GitHub n'est pas publiée** (§49).
+- Dès que les assets sont uploadés sur `N7T0-OF/zailon-addons` (tags
+  `frosty-v1.0.0` et `frosty-editor-v1.0.0`), il suffit de passer les deux
+  entrées à `available: true` — les métadonnées sont prêtes et la CI
+  `Validate add-on catalog` vérifiera la cohérence.

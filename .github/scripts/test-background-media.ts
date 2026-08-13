@@ -4,8 +4,10 @@ import {
   DEFAULT_BACKGROUND_MEDIA_SETTINGS,
   clampVolume,
   describeBackgroundMedia,
+  effectiveBackgroundVolume,
   resolveAudioSettings,
   resolveMediaType,
+  shouldStartMuted,
   type BackgroundMediaSettings,
   type GameBackgroundMedia,
 } from '../../src/lib/backgroundMedia.ts'
@@ -39,6 +41,27 @@ test('surcharge par jeu respectée quand l\'audio global est actif', () => {
   const audio = resolveAudioSettings({ type: 'youtube', mutedOverride: false, volumeOverride: 0.12 }, { ...GLOBAL, bgAudioEnabled: true })
   assert.equal(audio.muted, false)
   assert.equal(audio.volume, 0.12)
+})
+
+test('effectiveBackgroundVolume : surcharge par jeu sinon défaut global', () => {
+  assert.equal(effectiveBackgroundVolume(undefined, GLOBAL), 0.07)
+  assert.equal(effectiveBackgroundVolume({ type: 'youtube', volumeOverride: 0.2 }, GLOBAL), 0.2)
+  assert.equal(effectiveBackgroundVolume({ type: 'youtube', volumeOverride: 5 }, GLOBAL), 1)
+  assert.equal(effectiveBackgroundVolume({ type: 'youtube', volumeOverride: 0.2 }, { ...GLOBAL, bgVolume: 0.1 }), 0.2)
+})
+
+test('shouldStartMuted : toujours muet au boot quand bgAlwaysMuted est ON (spec §50)', () => {
+  // Intention persistée non muette → boot quand même muet (politique §44).
+  assert.equal(shouldStartMuted({ type: 'youtube', mutedOverride: false }, GLOBAL), true)
+  assert.equal(shouldStartMuted({ type: 'youtube', mutedOverride: true }, GLOBAL), true)
+  assert.equal(shouldStartMuted(undefined, GLOBAL), true)
+})
+
+test('shouldStartMuted : bgAlwaysMuted OFF → l\'intention persistée est restaurée', () => {
+  const permissive = { ...GLOBAL, bgAlwaysMuted: false }
+  assert.equal(shouldStartMuted({ type: 'youtube', mutedOverride: false }, permissive), false)
+  assert.equal(shouldStartMuted({ type: 'youtube', mutedOverride: true }, permissive), true)
+  assert.equal(shouldStartMuted(undefined, permissive), false)
 })
 
 test('resolveMediaType : youtube si videoId présent', () => {

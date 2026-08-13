@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { BackgroundMediaSettings, GameBackgroundMedia, mediaDisposePolicy, resolveAudioSettings, resolveMediaType } from '../../lib/backgroundMedia'
-import { applyBackgroundAudio, registerBackgroundPlayer, unregisterBackgroundPlayer, type BackgroundPlayerCommands } from '../../lib/backgroundMediaPlayer'
+import { BackgroundMediaSettings, GameBackgroundMedia, mediaDisposePolicy, resolveAudioSettings, resolveMediaType, shouldStartMuted } from '../../lib/backgroundMedia'
+import { applyBackgroundAudio, publishBackgroundPlayerState, registerBackgroundPlayer, unregisterBackgroundPlayer, type BackgroundPlayerCommands } from '../../lib/backgroundMediaPlayer'
 import { youtubeEmbedUrl } from '../../lib/youtubeUrl'
 
 /** Délai avant dispose du player YouTube quand ZAILON reste en arrière-plan
@@ -75,9 +75,10 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
   const hasLocalVideo = Boolean(localVideoUrl)
   const type = resolveMediaType(media, settings, hasLocalVideo)
 
-  // Muet local de SESSION (spec §44 : chaque lancement recommence 🔇 même si
-  // l'utilisateur avait activé le son précédemment — jamais persisté).
-  const [localMuted, setLocalMuted] = useState(true)
+  // Muet local de SESSION (spec §44, §50) : le boot suit la politique
+  // « Toujours démarrer muet » (`shouldStartMuted`), jamais l'intention
+  // persistée seule — un lancement ne peut pas surprendre par du son.
+  const [localMuted, setLocalMuted] = useState(() => shouldStartMuted(media, settings))
   const [videoReady, setVideoReady] = useState(false)
   const [videoError, setVideoError] = useState(false)
   const [windowActive, setWindowActive] = useState(() => typeof document === 'undefined' ? true : !document.hidden)
@@ -96,19 +97,11 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
   const shouldHold = type !== 'none' && !disposed && acquirePlayback(playerKey, priority)
   const holdsPlayback = playbackHolder.key === playerKey
 
-  // Alt+Tab (correctif §9-11) : suspendre temporairement en perdant le focus ;
-  // au retour, restaurer l'intention utilisateur (muet si elle était muette,
-  // volume utilisateur sinon). Jamais de modification de userMuted ici.
-  useEffect(() => {
-    if (pausedByWindow) {
-      if (!localMuted) setLocalMuted(true)
-    } else {
-      setLocalMuted(resolvedAudio.muted)
-    }
-  }, [pausedByWindow, resolvedAudio.muted]) // eslint-disable-line react-hooks/exhaustive-deps
-
   // Visibilité fenêtre : pause immédiate hors focus (spec §16, §89) — aucun
-  // décodage en arrière-plan, aucun polling.
+  // décodage en arrière-plan, aucun polling. Le muet de SESSION (`localMuted`)
+  // survit à l'Alt+Tab (spec §13, §51) : la reprise restaure l'intention de la
+  // session — jamais `resolvedAudio.muted` (persisté), qui ne décide que du
+  // boot via `shouldStartMuted` (§50).
   useEffect(() => {
     const onVisibility = () => setWindowActive(!document.hidden)
     const onBlur = () => setWindowActive(false)
@@ -138,14 +131,15 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
     return () => { releasePlayback(playerKey) }
   }, [playerKey])
 
-  // Remise à zéro du « prêt » quand la source change (nouveau jeu, type).
+  // Remise à zéro du « prêt » quand la source change (nouveau jeu, type) : la
+  // nouvelle source applique la politique de démarrage (§44, §50).
   useEffect(() => {
     setVideoReady(false)
     setVideoError(false)
-    setLocalMuted(true)
+    setLocalMuted(shouldStartMuted(media, settings))
     setLongBlurDisposed(false)
     playerReadyRef.current = false
-  }, [type, localVideoUrl, media?.youtubeVideoId])
+  }, [type, localVideoUrl, media?.youtubeVideoId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Message API YouTube (onReady / onError) — uniquement depuis la fenêtre de
   // l'iframe, jamais une source arbitraire (spec §71-72).
@@ -171,10 +165,12 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
   }, [])
 
   // Pont unifié (spec §22, §32, §36-37) : le HeroAudioControl pilote ce player.
+  // mute/unmute synchronisent AUSSI le muet de SESSION — la bascule du Hero
+  // (setBackgroundSessionMuted) passe par ces commandes, l'état reste cohérent.
   useEffect(() => {
     const commands: BackgroundPlayerCommands = {
-      mute: () => { if (type === 'youtube') postToPlayer('mute'); else if (localVideoRef.current) localVideoRef.current.muted = true },
-      unmute: () => { if (type === 'youtube') postToPlayer('unMute'); else if (localVideoRef.current) localVideoRef.current.muted = false },
+      mute: () => { setLocalMuted(true); if (type === 'youtube') postToPlayer('mute'); else if (localVideoRef.current) localVideoRef.current.muted = true },
+      unmute: () => { setLocalMuted(false); if (type === 'youtube') postToPlayer('unMute'); else if (localVideoRef.current) localVideoRef.current.muted = false },
       setVolume: volume => { if (type === 'youtube') postToPlayer('setVolume', [Math.round(Math.min(1, Math.max(0, volume)) * 100)]); else if (localVideoRef.current) localVideoRef.current.volume = Math.min(1, Math.max(0, volume)) },
       pause: () => { if (type === 'youtube') postToPlayer('pauseVideo'); else void localVideoRef.current?.pause() },
       resume: () => { if (type === 'youtube') postToPlayer('playVideo'); else void localVideoRef.current?.play() },
@@ -210,6 +206,17 @@ export function BackgroundMediaLayer({ playerKey, priority = 'hero', media, loca
   // suit `videoReady` : image → fondu vidéo (§28-29).
   const sourceMounted = shouldHold && holdsPlayback && !videoError && (type === 'youtube' ? Boolean(media?.youtubeVideoId) : type === 'video' ? Boolean(localVideoUrl) : false)
   const showImage = !sourceMounted || !videoReady || videoError
+
+  // Publication de l'état de SESSION (spec §50) : le HeroAudioControl s'abonne
+  // pour afficher la réalité (boot muet + bascules de session), pas seulement
+  // l'intention persistée. `available` = un player est monté et pilotable.
+  useEffect(() => {
+    publishBackgroundPlayerState({
+      muted: muted || !settings.bgAudioEnabled,
+      volume: resolvedAudio.volume,
+      available: sourceMounted && holdsPlayback,
+    })
+  }, [muted, settings.bgAudioEnabled, resolvedAudio.volume, sourceMounted, holdsPlayback]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return <div className="absolute inset-0 overflow-hidden">
     {fallbackImageUrl && <img src={fallbackImageUrl} alt="" className="pointer-events-none absolute inset-0 h-full w-full" style={{ objectFit: heroStyle?.objectFit ?? 'cover', objectPosition: heroStyle?.objectPosition ?? '50% 50%', transform: heroStyle?.transform ?? 'none' }} />}

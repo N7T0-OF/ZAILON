@@ -38,10 +38,29 @@ export function clampVolume(value: number): number {
   return Math.min(1, Math.max(0, value))
 }
 
-/** Résolution audio finale (spécifique au jeu si fournie, sinon global). */
+/** Volume effectif persistant (surcharge par jeu sinon défaut global, spec §8,
+ * §50 : le volume est mémorisé par jeu, indépendamment de l'état muet). */
+export function effectiveBackgroundVolume(media: GameBackgroundMedia | undefined, global: BackgroundMediaSettings): number {
+  return clampVolume(media?.volumeOverride ?? global.bgVolume)
+}
+
+/**
+ * Politique de démarrage (spec §44, §50) : avec « Toujours démarrer muet »
+ * activé (défaut), CHAQUE lancement commence muet quelle que soit l'intention
+ * persistée — l'utilisateur réactive manuellement, le volume restauré est le
+ * volume persisté. Sinon, l'intention persistée du jeu (mutedOverride) est
+ * restaurée au boot.
+ */
+export function shouldStartMuted(media: GameBackgroundMedia | undefined, global: BackgroundMediaSettings): boolean {
+  return global.bgAlwaysMuted ? true : (media?.mutedOverride ?? false)
+}
+
+/** Résolution audio persistée (spécifique au jeu si fournie, sinon global).
+ * L'intention ICI ne décide PAS du boot — `shouldStartMuted` fait foi (§50) ;
+ * elle sert de référence pour la synchronisation après interaction. */
 export function resolveAudioSettings(media: GameBackgroundMedia | undefined, global: BackgroundMediaSettings): { muted: boolean; volume: number } {
   const muted = media?.mutedOverride ?? global.bgAlwaysMuted
-  const volume = clampVolume(media?.volumeOverride ?? global.bgVolume)
+  const volume = effectiveBackgroundVolume(media, global)
   // Règle §9 : on ne se fait jamais surprendre par du son au lancement.
   return { muted: muted || !global.bgAudioEnabled, volume }
 }

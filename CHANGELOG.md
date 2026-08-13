@@ -1,6 +1,55 @@
 # Changelog
 
-## [1.81.0] - 2026-08-12
+## [1.82.0] - 2026-08-13
+
+> Accueil multimédia — **volume et état muet persistants par jeu** (spec §8,
+> §50), **politique « toujours démarrer muet » réellement appliquée au boot**
+> (§44) et indicateur « son coupé pour cette session » enfin fonctionnel.
+
+### Fixed
+
+- **Boot qui restauré le son** : avec « toujours démarrer muet » (défaut), le
+  layer synchronisait `localMuted` vers `resolvedAudio.muted` au montage — un
+  unmute persisté (mutedOverride=false) rendait le lancement AUDIBLE au boot,
+  contre la politique §44/§50. Corrigé : le boot suit désormais
+  `shouldStartMuted` (toujours muet si `bgAlwaysMuted`, sinon intention
+  persistée) ; le muet de session ne change plus qu'à la demande de
+  l'utilisateur.
+- **Indicateur « son coupé pour cette session » mort** : `sessionCut` était
+  calculé avec `heroAudio.muted && persistedUnmuted` — deux valeurs exactement
+  opposées (`mutedOverride ?? bgAlwaysMuted`), donc TOUJOURS faux. Corrigé :
+  l'indicateur lit maintenant l'état de SESSION publié par le layer (muet
+  effectif) croisé avec l'intention persistée (non muette) + un fond actif —
+  le point ambre apparaît au boot quand l'utilisateur avait activé le son la
+  fois précédente.
+
+### Added
+
+- **`shouldStartMuted`** (`src/lib/backgroundMedia.ts`, 2 tests) : politique de
+  démarrage — `bgAlwaysMuted` ON → chaque lancement commence 🔇 quelle que soit
+  l'intention persistée ; OFF → `mutedOverride` restauré.
+- **`effectiveBackgroundVolume`** (1 test) : volume effectif persisté (surcharge
+  par jeu sinon défaut global 7 %), extrait de `resolveAudioSettings`.
+- **État de session du pont player** (`src/lib/backgroundMediaPlayer.ts`, 6
+  tests) : `publishBackgroundPlayerState` / `subscribeBackgroundPlayerState` /
+  `backgroundPlayerState` — le Hero affiche la RÉALITÉ (boot muet + bascules),
+  pas seulement l'intention persistée ; `setBackgroundSessionMuted` (unmute
+  restaure le volume persisté, §50) et `setBackgroundSessionVolume` commandent
+  le player sans toucher à la préférence persistée.
+- **Toggle « Toujours démarrer muet »** dans Personnaliser l'Accueil
+  (ZailonSwitch, `bgAlwaysMuted`) — l'option recommandée du spec §50 était
+  définie dans le store sans aucune UI.
+
+### Changed
+
+- `BackgroundMediaLayer` : les commandes `mute`/`unmute` synchronisent
+  `localMuted` (l'état de session reste cohérent à chaque bascule) ; l'état
+  publié inclut `available` (player monté) — sans source, le Hero retombe sur
+  la politique de démarrage.
+- `HomeView` : le toggle audio du Hero commande la SESSION via le pont ET écrit
+  l'intention persistée (`mutedOverride`) — le slider mémorise `volumeOverride`
+  par jeu, restauré quand l'utilisateur réactive le son.
+
 
 > Accueil multimédia — **vrai correctif du fond YouTube** (deadlock restant de
 > la 1.80.0), **reprise sans reload après Alt+Tab** (§51), **dispose du player

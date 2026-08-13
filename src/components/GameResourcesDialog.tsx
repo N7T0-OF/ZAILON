@@ -7,6 +7,7 @@ import { ArtworkCandidate, GameResourceKind, native, pickGameResource, resourceU
 import { artworkProvidersWithState, artworkSearchPlan, dedupeArtworkCandidates, resultSourceLabels } from '../lib/artworkRegistry'
 import { parseYouTubeUrl, youtubeThumbnailUrl } from '../lib/youtubeUrl'
 import { addonCapabilities, hasCapability } from '../lib/addonGating'
+import { ZailonSwitch } from './UI/ZailonSwitch'
 import { useStore } from '../store/useStore'
 
 type ResourceKey = 'coverPath' | 'logoPath' | 'iconPath' | 'backgroundPath' | 'bannerPath' | 'videoPath'
@@ -305,6 +306,8 @@ function PositionControls({ draft, fields, onChange }: {
  * lien YouTube collable directement, persisté par jeu (setGameBackgroundMedia). */
 function HeroMediaStrip({ game }: { game: Game }) {
   const setGameBackgroundMedia = useStore(state => state.setGameBackgroundMedia)
+  const backgroundMediaSettings = useStore(state => state.backgroundMediaSettings)
+  const setBackgroundMediaSettings = useStore(state => state.setBackgroundMediaSettings)
   const [urlDraft, setUrlDraft] = useState('')
   const [feedback, setFeedback] = useState<'idle' | 'valid' | 'invalid'>('idle')
   const media = game.backgroundMedia
@@ -348,6 +351,18 @@ function HeroMediaStrip({ game }: { game: Game }) {
           >Retirer la vidéo</button>
         </div>
       )}
+      <div className="mt-2 flex items-center justify-between gap-3 border-t border-white/[0.06] pt-2">
+        <div>
+          <p className="text-[11px] font-medium text-white/60">Toujours démarrer muet</p>
+          <p className="mt-0.5 text-[10px] leading-relaxed text-white/32">Chaque lancement commence 🔇, quelle que soit l'intention persistée — le volume du jeu est restauré quand vous réactivez le son. Le volume réglé sur l'Accueil reste mémorisé par jeu.</p>
+        </div>
+        <ZailonSwitch
+          size="compact"
+          checked={backgroundMediaSettings.bgAlwaysMuted}
+          onChange={enabled => setBackgroundMediaSettings({ bgAlwaysMuted: enabled })}
+          aria-label="Toujours démarrer muet"
+        />
+      </div>
     </div>
   )
 }

@@ -1,7 +1,8 @@
 import { Boxes, Check, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2, Volume1, Volume2, VolumeX, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Game, GameBackgroundMedia } from '../../types'
-import { resolveAudioSettings } from '../../lib/backgroundMedia'
+import { resolveAudioSettings, resolveMediaType, shouldStartMuted } from '../../lib/backgroundMedia'
+import { backgroundPlayerState, setBackgroundSessionMuted, setBackgroundSessionVolume, subscribeBackgroundPlayerState, type BackgroundPlayerState } from '../../lib/backgroundMediaPlayer'
 import { resourceUrl, native } from '../../lib/native'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
 import { isRed4extActive } from '../../lib/frameworkValidator'
@@ -50,14 +51,11 @@ export function HomeView() {
   // sur Jouer, avant même que la préparation démarre.
   const [mediaDucked, setMediaDucked] = useState(false)
 
-  // Contrôle audio du Hero (spec Accueil §3-5) : mute/unmute + volume persistés
-  // par jeu (mutedOverride/volumeOverride) — jamais un réglage global.
+  // Contrôle audio du Hero (spec Accueil §3-5) : volume persisté par jeu
+  // (volumeOverride), état muet de SESSION (pont player) + intention persistée
+  // (mutedOverride) écrite à part — jamais un réglage global.
   const heroAudio = resolveAudioSettings(selectedGame ? selectedGame.backgroundMedia : undefined, backgroundMediaSettings)
   const setHeroMedia = (patch: Partial<GameBackgroundMedia>) => { if (selectedGame) setGameBackgroundMedia(selectedGame.id, patch) }
-  // Indicateur « son coupé pour cette session » : l'utilisateur avait activé le
-  // son (intention persistée non muette) mais la politique §44 redémarre muet.
-  const persistedUnmuted = !(selectedGame?.backgroundMedia?.mutedOverride ?? backgroundMediaSettings.bgAlwaysMuted)
-  const sessionCut = Boolean(heroAudio.muted && persistedUnmuted && backgroundMediaSettings.bgAudioEnabled && selectedGame)
 
   // SmartPlayButton — un seul CTA : l'état du jeu pilote le libellé et le
   // comportement (Jouer → Préparation… → Recherche du jeu… → En cours).
@@ -125,6 +123,23 @@ export function HomeView() {
       ? { x: selectedGame.resources.bannerPositionX, y: selectedGame.resources.bannerPositionY, zoom: selectedGame.resources.bannerZoom, fit: selectedGame.resources.bannerFit }
       : { x: selectedGame.resources?.coverPositionX, y: selectedGame.resources?.coverPositionY, zoom: selectedGame.resources?.coverZoom, fit: selectedGame.resources?.coverFit }
   const video = resourceUrl(selectedGame.resources?.videoPath)
+  // État de SESSION du fond (spec §44, §50) : le boot démarre muet selon la
+  // politique « toujours démarrer muet » (jamais l'intention persistée seule) ;
+  // les bascules du Hero agissent sur la session via le pont, et l'intention
+  // persistée est écrite à part (store) pour les prochains lancements.
+  const [sessionAudio, setSessionAudio] = useState<BackgroundPlayerState>(() => ({
+    muted: shouldStartMuted(selectedGame.backgroundMedia, backgroundMediaSettings),
+    volume: heroAudio.volume,
+    available: false,
+  }))
+  useEffect(() => subscribeBackgroundPlayerState(() => setSessionAudio(backgroundPlayerState())), [])
+  const heroMuted = sessionAudio.available ? sessionAudio.muted : shouldStartMuted(selectedGame.backgroundMedia, backgroundMediaSettings)
+  const hasBackgroundSource = resolveMediaType(selectedGame.backgroundMedia, backgroundMediaSettings, Boolean(video)) !== 'none'
+  // Indicateur « son coupé pour cette session » : l'utilisateur avait activé le
+  // son (intention persistée non muette) mais la politique §44/§50 a démarré ce
+  // lancement muet — la session est muette alors que l'intention est active.
+  const persistedUnmuted = !(selectedGame.backgroundMedia?.mutedOverride ?? backgroundMediaSettings.bgAlwaysMuted)
+  const sessionCut = Boolean(heroMuted && persistedUnmuted && backgroundMediaSettings.bgAudioEnabled && hasBackgroundSource)
   const logo = resourceUrl(selectedGame.resources?.logoPath)
   const gameIcon = resourceUrl(selectedGame.resources?.iconPath || selectedGame.resources?.coverPath || selectedGame.resources?.bannerPath)
   const visibleGames = games.filter(game => !game.hidden || game.id === selectedGame.id)
@@ -157,11 +172,11 @@ export function HomeView() {
       />
 
       <HeroAudioControl
-        muted={heroAudio.muted}
-        volume={Math.round(heroAudio.volume * 100)}
+        muted={heroMuted}
+        volume={Math.round((sessionAudio.available ? sessionAudio.volume : heroAudio.volume) * 100)}
         sessionCut={sessionCut}
-        onToggle={() => setHeroMedia({ mutedOverride: !heroAudio.muted })}
-        onVolume={value => setHeroMedia({ volumeOverride: value / 100, mutedOverride: value === 0 })}
+        onToggle={() => { const next = !heroMuted; setBackgroundSessionMuted(next); setHeroMedia({ mutedOverride: next }) }}
+        onVolume={value => { const next = value / 100; setBackgroundSessionVolume(next); setHeroMedia({ volumeOverride: next, mutedOverride: value === 0 }) }}
       />
 
       <div className="relative flex h-full min-h-[520px] flex-col px-[clamp(1.25rem,4vw,4.5rem)] pb-4 pt-5">

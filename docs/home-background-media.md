@@ -116,3 +116,19 @@ bloc « Fond actuel : YouTube ✓ » + « Retirer la vidéo » dans Personnalise
 - **Indicateur « son coupé pour cette session »** : point ambre sur l'icône
   volume quand l'intention persistée est non muette mais que la politique §44
   a redémarré muet.
+
+## Persistance 1.82.0 (spec §8, §44, §50)
+
+- **Volume et état muet persistants par jeu** : le slider du Hero écrit
+  `volumeOverride` dans `backgroundMedia` du jeu (persisté par le store) ;
+  la bascule muet/son écrit `mutedOverride`. Au redémarrage, le volume
+  mémorisé est restauré quand l'utilisateur réactive le son.
+- **`shouldStartMuted`** : politique de démarrage — « Toujours démarrer muet »
+  (`bgAlwaysMuted`, défaut ON) → chaque lancement commence 🔇 quelle que soit
+  l'intention persistée ; désactivé → l'intention persistée (`mutedOverride`)
+  est restaurée au boot. L'option est réglable dans Personnaliser l'Accueil.
+- **État de session publié** (`backgroundMediaPlayer.ts`) : le Hero affiche la
+  réalité (boot muet + bascules de session via `setBackgroundSessionMuted` /
+  `setBackgroundSessionVolume`), jamais seulement l'intention persistée.
+  `sessionCut` (point ambre) est désormais fiable : session muette alors que
+  l'intention persistée est active.

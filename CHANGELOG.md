@@ -1,6 +1,55 @@
 # Changelog
 
-## [1.82.0] - 2026-08-13
+## [1.83.0] - 2026-08-13
+
+> Add-ons — **fix critique de l'installation** : plus aucune URL `latest/download`
+> fabriquée, le catalogue devient la source de vérité (release explicite + asset
+> exact), et un add-on sans package publié affiche **En développement** avec un
+> bouton Installer désactivé (spec « Fix critique installation add-ons » §2-5,
+> §13, §25, §49).
+
+### Fixed
+
+- **404 « Add-on download failed »** : les 17 cartes du catalogue construisaient
+  leur URL avec `releases/latest/download/<id>.zailon-addon` — fragile et
+  inventée tant que les packages ne sont pas publiés. Corrigé : suppression
+  totale de ce schéma (§2-3, §39) ; le catalogue embarque désormais des
+  métadonnées de release (repository + tag + asset exact) et l'URL n'est
+  résolue qu'à partir d'elles (§5) — jamais dérivée de l'ID.
+- **Carte « Installer » trompeuse** : un add-on planifié affichait un bouton
+  Installer qui échouait en 404. Corrigé : trois états visibles —
+  **Disponible / En développement / Installé** (§26-27). Le bouton Installer
+  est désactivé (« Indisponible » + tooltip) tant que `available: false` ou que
+  le package réel (release + SHA-256 officiel) n'est pas publié (§13, §49).
+
+### Added
+
+- **`src/lib/official-addon-catalog.json`** — catalogue officiel JSON, source
+  de vérité unique importée par le TS (les 17 entrées, toutes `available:
+  false` — aucun package publié à ce jour).
+- **`resolveAddonDownloadUrl`** (spec §2-5) : construit l'URL uniquement depuis
+  `release.repository/tag/asset` ; refuse toute URL `latest/download` et tout
+  tag littéralement nommé `latest`.
+- **`catalogAddonAvailability`** (§13, §20, §25, §49) : `installable` seulement
+  si `available` + release explicite + SHA-256 réel (officiels).
+- **`describeAddonDownloadError`** (§23, §40-41) : 404 → « Add-on indisponible »
+  sans retry ; 403/429 → « GitHub temporairement indisponible » ; erreur réseau
+  → retry. Détails techniques dans le message, actions [Réessayer] [Importer
+  manuellement] [Voir la release].
+- **CI `Validate add-on catalog`** (§37-38) : `validate-addon-catalog.mjs` — un
+  add-on `available` sans release explicite + SHA-256 réel fait échouer le
+  pipeline ; aucune URL `latest` autorisée dans le catalogue.
+- **`docs/addon-release-process.md`** (§44) + **`scripts/release-addon.ps1`**
+  (§45) : processus build → pack → hash → tag → release → catalogue.
+
+### Changed
+
+- `parseAddonCatalog` : `download` devient optionnel, accepte `available` et
+  `release` (tag/asset validés, `latest` refusé) — compat avec les catalogues
+  distants déjà publiés.
+- Cache du catalogue forcé à v2 (invalidation du v1 contenant les URL fragiles,
+  §33) ; horodatage « Catalogue mis à jour : il y a X min » (§35).
+
 
 > Accueil multimédia — **volume et état muet persistants par jeu** (spec §8,
 > §50), **politique « toujours démarrer muet » réellement appliquée au boot**

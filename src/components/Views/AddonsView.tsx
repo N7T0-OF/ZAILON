@@ -5,12 +5,14 @@ import {
   ADDON_CATEGORY_LABELS,
   ADDON_PERMISSION_LABELS,
   ADDON_INSTALL_PHASES,
+  catalogAddonAvailability,
   checkAddonCompatibility,
   estimateInstalledSize,
   formatAddonSize,
   OFFICIAL_ADDON_CATALOG,
   planAddonUninstall,
   resolveAddonDependencies,
+  resolveAddonDownloadUrl,
   validateAddonManifest,
   ZAILON_CURRENT_VERSION,
   type AddonCatalog,
@@ -19,14 +21,16 @@ import {
   type InstalledAddon,
   type ZailonAddonManifest,
 } from '../../lib/addons'
-import { ADDON_INSTALL_INITIAL_STATE, addonInstallReducer, addonSignaturePolicy, addonStorageReport, fetchAddonCatalog, hasAddonSignature, type CatalogFetchResult } from '../../lib/addonsInstall'
+import { ADDON_INSTALL_INITIAL_STATE, addonInstallReducer, addonSignaturePolicy, addonStorageReport, describeAddonDownloadError, fetchAddonCatalog, hasAddonSignature, type CatalogFetchResult } from '../../lib/addonsInstall'
 import { native } from '../../lib/native'
 import { useStore } from '../../store/useStore'
 import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
 import { ZailonSwitch } from '../UI/ZailonSwitch'
 
 const ADDON_DOCS_URL = 'https://github.com/N7T0-OF/ZAILON/tree/main/docs/addon-development'
-const CATALOG_CACHE_KEY = 'zailon:addon-catalog:v1'
+// v2 : le cache v1 contenait des URLs `latest/download` fragiles (spec §3, §33)
+// — invalidation forcée au changement de schéma du catalogue.
+const CATALOG_CACHE_KEY = 'zailon:addon-catalog:v2'
 
 const FILTERS: Array<{ id: 'all' | 'installed' | AddonCatalog['addons'][number]['category']; label: string }> = [
   { id: 'all', label: 'Tous' },
@@ -44,6 +48,13 @@ const CATEGORY_ICON = (category: AddonCatalog['addons'][number]['category']) => 
 interface CatalogRow {
   entry: AddonCatalogEntry
   installed?: InstalledAddon
+}
+
+const timeAgoShort = (at: number) => {
+  const seconds = Math.max(0, Math.floor((Date.now() - at) / 1000))
+  if (seconds < 60) return `il y a ${seconds} s`
+  if (seconds < 3600) return `il y a ${Math.floor(seconds / 60)} min`
+  return `il y a ${Math.floor(seconds / 3600)} h`
 }
 
 const readCatalogCache = (): AddonCatalog | undefined => {
@@ -167,10 +178,10 @@ export function AddonsView() {
     <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/34">
       <span>{visible.length} add-on(s) · {addons.length} installé(s) · {formatAddonSize(storage.totalBytes)} installés</span>
       <span className="flex items-center gap-1.5">
-        {catalogState?.source === 'remote' && <span className="text-emerald-200/70">Catalogue officiel à jour</span>}
-        {catalogState?.source === 'cache' && <span>Catalogue en cache (hors ligne)</span>}
+        {catalogState?.source === 'remote' && <span className="text-emerald-200/70">Catalogue officiel à jour{catalogState.fetchedAt ? ` · ${timeAgoShort(catalogState.fetchedAt)}` : ''}</span>}
+        {catalogState?.source === 'cache' && <span>Catalogue en cache{catalogState.fetchedAt ? ` · ${timeAgoShort(catalogState.fetchedAt)}` : ''}</span>}
         {catalogState?.source === 'fallback' && <span>Hors ligne — catalogue de référence</span>}
-        <ZailonInfoPopover text="Le catalogue officiel est mis en cache — ZAILON fonctionne sans connexion. Les add-ons installés continuent de fonctionner hors ligne (spec §6). Installation : HTTPS → vérification SHA-256 → extraction → échange atomique → vérification de santé, avec rollback en cas d'échec (§14-15, §65)." />
+        <ZailonInfoPopover text="Le catalogue officiel est mis en cache — ZAILON fonctionne sans connexion. Les add-ons installés continuent de fonctionner hors ligne (spec §6). Un add-on n'a de bouton Installer que si un package réel est publié (release explicite + SHA-256 officiel) — jamais d'URL dérivée de l'ID (spec §2-5, §49). Installation : HTTPS → vérification SHA-256 → extraction → échange atomique → vérification de santé, avec rollback (§14-15, §65)." />
       </span>
     </div>
 
@@ -196,6 +207,7 @@ export function AddonsView() {
       catalogEntries={catalogRows.map(item => item.entry)}
       onClose={() => setConfirming(undefined)}
       onInstalled={manifest => { installAddon(manifest, 'official'); setConfirming(undefined) }}
+      onImportLocal={() => { setConfirming(undefined); startImport() }}
     />}
     {removing && <AddonRemoveDialog
       row={removing}
@@ -244,6 +256,9 @@ function AddonCard({ row, onInstall, onEnable, onRemove }: {
   const compatibility = checkAddonCompatibility(entry, { zailonVersion: ZAILON_CURRENT_VERSION, addonApiVersion: ADDON_API_VERSION, installedIds: [] })
   const incompatible = !compatibility.ok && !installed
   const installedSize = installed ? estimateInstalledSize(entry.size || 1_000_000) : 0
+  // Disponibilité réelle (spec §13, §25-27, §49) : le bouton Installer n'existe
+  // que si un package réel est publié — jamais pour un add-on planifié.
+  const availability = catalogAddonAvailability(entry)
 
   return <article className={`flex flex-col rounded-xl border bg-white/[0.018] p-4 transition-colors ${installed ? 'border-gold/14' : 'border-white/[0.07] hover:border-white/15'} ${installed && !installed.enabled ? 'opacity-75' : ''}`}>
     <div className="flex items-start gap-3">
@@ -252,6 +267,13 @@ function AddonCard({ row, onInstall, onEnable, onRemove }: {
         <div className="flex flex-wrap items-center gap-1.5">
           <h2 className="truncate text-sm font-semibold text-white/84">{entry.name}</h2>
           {entry.official ? <span className="rounded-full bg-gold/12 px-2 py-0.5 text-[10px] font-semibold text-gold">Officiel ✓</span> : <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] font-semibold text-white/42">Local</span>}
+          {installed ? (
+            updateAvailable
+              ? <span className="rounded-full bg-emerald-300/12 px-2 py-0.5 text-[10px] font-semibold text-emerald-200/80">Màj disponible</span>
+              : <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] font-semibold text-white/42">Installé</span>
+          ) : availability.installable
+            ? <span className="rounded-full bg-emerald-300/12 px-2 py-0.5 text-[10px] font-semibold text-emerald-200/80">Disponible</span>
+            : <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] font-semibold text-white/42">En développement</span>}
           {installed && !installed.enabled && <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] text-white/42">Désactivé</span>}
         </div>
         <p className="mt-1 text-[10px] font-mono text-white/28" title={entry.id}>{entry.id}</p>
@@ -281,27 +303,40 @@ function AddonCard({ row, onInstall, onEnable, onRemove }: {
             <button type="button" onClick={onRemove} className="flex items-center gap-1.5 rounded-lg border border-red-300/15 px-3 py-1.5 text-[11px] font-semibold text-red-200/65 hover:bg-red-400/10"><Trash2 size={12} />Désinstaller</button>
           </div>
         </>
-      ) : (
+      ) : availability.installable ? (
         <button type="button" onClick={onInstall} className="ml-auto flex items-center gap-1.5 rounded-lg bg-[var(--zailon-accent)] px-3.5 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] transition-colors hover:bg-white"><Download size={12} />Installer</button>
+      ) : (
+        <div className="ml-auto flex items-center gap-1.5" title={availability.reason}>
+          <span className="text-[10px] text-white/30">{availability.reason}</span>
+          <button type="button" disabled className="flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-white/[0.08] px-3.5 py-1.5 text-[11px] font-semibold text-white/25 opacity-60"><Package size={12} />Indisponible</button>
+        </div>
       )}
     </div>
   </article>
 }
 
-function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInstalled }: {
+function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInstalled, onImportLocal }: {
   row: CatalogRow
   installedIds: string[]
   catalogEntries: AddonCatalogEntry[]
   onClose: () => void
   onInstalled: (manifest: ZailonAddonManifest) => void
+  /** Bascule vers « Importer un add-on » (fallback manuel, spec §23-24). */
+  onImportLocal: () => void
 }) {
   const { entry } = row
   const catalogById = new Map(catalogEntries.map(item => [item.id, item]))
   const dependencyPlan = resolveAddonDependencies(entry.id, catalogById, new Set(installedIds))
   const signaturePolicy = addonSignaturePolicy(entry)
   const compatibility = checkAddonCompatibility(entry, { zailonVersion: ZAILON_CURRENT_VERSION, addonApiVersion: ADDON_API_VERSION, installedIds })
+  // Garde absolue (spec §13, §49) : jamais d'installation sans package réel.
+  const availability = catalogAddonAvailability(entry)
+  const releaseUrl = entry.release
+    ? `https://github.com/${entry.release.repository}/releases/tag/${entry.release.tag}`
+    : undefined
   const [deps, setDeps] = useState(entry.dependencies?.length ? true : false)
   const [run, setRun] = useState<{ state: ReturnType<typeof addonInstallReducer> | undefined; error?: string }>({ state: undefined })
+  const [lastError, setLastError] = useState<ReturnType<typeof describeAddonDownloadError>>()
 
   const manifestFor = (item: AddonCatalogEntry): ZailonAddonManifest => ({
     schema: 1,
@@ -332,6 +367,7 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
 
   const startInstall = async () => {
     const manifest = manifestFor(entry)
+    if (!availability.installable || !availability.downloadUrl) return
     let state = ADDON_INSTALL_INITIAL_STATE
     setRun({ state })
     try {
@@ -340,10 +376,11 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
       const cachePath = `${cacheDir}/${entry.id.replace(/\./g, '-')}.zailon-addon`
       const targetDir = `${installDir}/${entry.id}`
 
-      // 1. Téléchargement HTTPS (spec §14).
+      // 1. Téléchargement HTTPS (spec §14) — URL résolue depuis les métadonnées
+      // de release, jamais construite à la volée (§2-5).
       state = addonInstallReducer(state, { type: 'phase', phase: 'download', message: phaseLabel('download') })
       setRun({ state })
-      await native.addonDownload(entry.download, cachePath, () => undefined)
+      await native.addonDownload(availability.downloadUrl, cachePath, () => undefined)
       state = addonInstallReducer(state, { type: 'phase', phase: 'verify', message: phaseLabel('verify') })
       setRun({ state })
 
@@ -398,8 +435,13 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
       setRun({ state })
       onInstalled(manifest)
     } catch (reason) {
-      state = addonInstallReducer(state, { type: 'failed', message: reason instanceof Error ? reason.message : String(reason) })
+      const raw = reason instanceof Error ? reason.message : String(reason)
+      // Classement (spec §23, §40-41) : 404 = package absent (jamais de retry) ;
+      // 403/429 = GitHub limité ; sinon erreur réseau. Détails techniques ⓘ.
+      const info = describeAddonDownloadError(raw)
+      state = addonInstallReducer(state, { type: 'failed', message: `${info.title}. ${info.detail || ''}` })
       setRun({ state })
+      setLastError(info)
     }
   }
 
@@ -420,7 +462,19 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
 
       {!compatibility.ok && !running && <div className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.05] px-3 py-2 text-[11px] text-amber-100/80">{compatibility.reasons.join(' ')}</div>}
 
-      {!run.state && (
+      {!availability.installable && !running && (
+        <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.05] px-4 py-3">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-100/85"><Package size={13} />Add-on indisponible</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-white/55">{availability.reason} Le bouton Installer n'est jamais proposé pour un add-on dont le package n'est pas réellement publié (spec §13, §25, §49).</p>
+          <footer className="mt-3 flex flex-wrap justify-end gap-2">
+            {releaseUrl && <button type="button" onClick={() => void native.openExternalUrl(releaseUrl)} className="rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/65 hover:bg-white/[0.05]">Voir la release</button>}
+            <button type="button" onClick={onImportLocal} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/65 hover:bg-white/[0.05]"><Import size={12} />Importer manuellement</button>
+            <button type="button" onClick={onClose} className="rounded-lg bg-gold px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)]">Fermer</button>
+          </footer>
+        </div>
+      )}
+
+      {availability.installable && !run.state && (
         <>
           <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/15 p-3">
             <p className="text-[11px] font-semibold text-white/68">Ce module demande :</p>
@@ -461,7 +515,18 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
       )}
 
       {finished && run.state?.status === 'done' && <footer className="mt-4 flex justify-end"><button type="button" onClick={onClose} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]">Terminé</button></footer>}
-      {finished && run.state?.status !== 'done' && <footer className="mt-4 flex justify-end"><button type="button" onClick={onClose} className="rounded-lg border border-white/[0.12] px-4 py-2 text-[11px] font-semibold text-white/70">Fermer</button></footer>}
+      {finished && run.state?.status !== 'done' && (
+        <footer className="mt-4 flex flex-wrap justify-end gap-2">
+          {run.state?.status === 'failed' && (
+            <>
+              {lastError?.retryable && <button type="button" onClick={() => void startInstall()} className="rounded-lg border border-white/[0.12] px-3 py-2 text-[11px] font-semibold text-white/70 hover:bg-white/[0.05]">Réessayer</button>}
+              <button type="button" onClick={onImportLocal} className="flex items-center gap-1.5 rounded-lg border border-white/[0.12] px-3 py-2 text-[11px] font-semibold text-white/70 hover:bg-white/[0.05]"><Import size={12} />Importer manuellement</button>
+              {releaseUrl && <button type="button" onClick={() => void native.openExternalUrl(releaseUrl)} className="rounded-lg border border-white/[0.12] px-3 py-2 text-[11px] font-semibold text-white/70 hover:bg-white/[0.05]">Voir la release</button>}
+            </>
+          )}
+          <button type="button" onClick={onClose} className="rounded-lg border border-white/[0.12] px-4 py-2 text-[11px] font-semibold text-white/70">Fermer</button>
+        </footer>
+      )}
     </section>
   </div>
 }

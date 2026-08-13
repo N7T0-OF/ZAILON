@@ -12,6 +12,7 @@ import {
   ADDON_INSTALL_INITIAL_STATE,
   addonInstallReducer,
   addonStorageReport,
+  describeAddonDownloadError,
   fetchAddonCatalog,
   isOfficialCatalogUrl,
   isSafeDownloadUrl,
@@ -96,4 +97,37 @@ test('addonStorageReport: tailles par add-on + cache', () => {
   const report = addonStorageReport(installed, { knownSizes: { 'a.b': 4_000_000 }, cacheEntries: [{ id: 'cache', bytes: 2_000_000 }] })
   assert.equal(report.totalBytes, 10_000_000)
   assert.equal(report.cacheBytes, 2_000_000)
+})
+
+test('describeAddonDownloadError: 404 = package absent, jamais de retry (spec §40)', () => {
+  const missing = describeAddonDownloadError('Add-on download failed: 404 Not Found')
+  assert.equal(missing.title, 'Add-on indisponible')
+  assert.equal(missing.retryable, false)
+  assert.match(missing.detail || '', /404/)
+})
+
+test('describeAddonDownloadError: 403/429 = GitHub limité, retry plus tard (spec §41)', () => {
+  const limited = describeAddonDownloadError('HTTP status 403 Forbidden (rate limit)')
+  assert.equal(limited.retryable, true)
+  assert.match(limited.title, /GitHub/)
+  const tooMany = describeAddonDownloadError('429 Too Many Requests')
+  assert.equal(tooMany.retryable, true)
+})
+
+test('describeAddonDownloadError: erreur réseau générique retryable', () => {
+  const network = describeAddonDownloadError('error sending request for url (connection refused)')
+  assert.equal(network.retryable, true)
+  assert.equal(network.title, 'Impossible d’installer l’add-on')
+})
+
+test('fetchAddonCatalog: fetchedAt renseigné sur synchronisation réseau (spec §35)', async () => {
+  const options = {
+    url: OFFICIAL_CATALOG_URL,
+    fallback: OFFICIAL_ADDON_CATALOG,
+    fetchJson: async () => OFFICIAL_ADDON_CATALOG,
+    readCache: () => undefined,
+    writeCache: () => undefined,
+  }
+  const remote = await fetchAddonCatalog(options)
+  assert.ok(remote.fetchedAt !== undefined && remote.fetchedAt > 0)
 })

@@ -45,6 +45,18 @@ jobs:
       - run: npm run test:visual-safety
       - run: npm run build
 
+  addon-catalog:
+    name: Validate add-on catalog
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Spec §37-38, §49 : impossible de publier un catalogue cassé — un add-on
+      # « disponible » doit référencer une release explicite + un SHA-256 réel.
+      - run: node .github/scripts/validate-addon-catalog.mjs
+
   native:
     name: Native tests (${{ matrix.os }})
     strategy:

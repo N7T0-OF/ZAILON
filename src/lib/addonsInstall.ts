@@ -137,6 +137,8 @@ export interface CatalogFetchResult {
   catalog: AddonCatalog
   source: 'remote' | 'cache' | 'fallback'
   errors: string[]
+  /** Horodatage de la dernière synchronisation réseau (spec §35). */
+  fetchedAt?: number
 }
 
 /**
@@ -177,7 +179,7 @@ export async function fetchAddonCatalog(options: {
       if (parsed.ok && parsed.catalog) {
         const merged = mergeCatalogs(parsed.catalog, options.fallback)
         options.writeCache(merged)
-        return { catalog: merged, source: 'remote', errors: parsed.errors }
+        return { catalog: merged, source: 'remote', errors: parsed.errors, fetchedAt: Date.now() }
       }
       return { catalog: options.fallback, source: 'fallback', errors: parsed.errors }
     } catch (reason) {
@@ -192,7 +194,7 @@ export async function fetchAddonCatalog(options: {
   try {
     const json = await options.fetchJson(url)
     const parsed = parseAddonCatalog(json)
-    if (parsed.ok && parsed.catalog) return { catalog: parsed.catalog, source: 'remote', errors: parsed.errors }
+    if (parsed.ok && parsed.catalog) return { catalog: parsed.catalog, source: 'remote', errors: parsed.errors, fetchedAt: Date.now() }
     return { catalog: options.fallback, source: 'fallback', errors: parsed.errors }
   } catch (reason) {
     return { catalog: options.fallback, source: 'fallback', errors: [messageOf(reason)] }
@@ -200,6 +202,41 @@ export async function fetchAddonCatalog(options: {
 }
 
 const messageOf = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
+
+// ─────────────────────────────── Erreurs de téléchargement ──────────────────
+// Spec §23, §40-41 : un 404 = package ABSENT (aucun retry, affiché
+// immédiatement) ; 403/429 = GitHub temporairement limité (retry plus tard) ;
+// sinon erreur réseau générique. Les détails techniques passent dans ⓘ.
+
+export interface AddonDownloadErrorInfo {
+  title: string
+  detail?: string
+  /** Vrai si un retry a du sens (jamais pour 404 — spec §40). */
+  retryable: boolean
+}
+
+/** Classe une erreur de téléchargement d'add-on (pur, testable). */
+export function describeAddonDownloadError(raw: string): AddonDownloadErrorInfo {
+  if (/404|not found/i.test(raw)) {
+    return {
+      title: 'Add-on indisponible',
+      detail: 'Le package de cette version n’est pas publié (404 — asset introuvable). Le catalogue référence une release sans asset correspondant.',
+      retryable: false,
+    }
+  }
+  if (/403|429|rate limit/i.test(raw)) {
+    return {
+      title: 'GitHub temporairement indisponible',
+      detail: 'La limite de requêtes GitHub a été atteinte. Réessayez plus tard.',
+      retryable: true,
+    }
+  }
+  return {
+    title: 'Impossible d’installer l’add-on',
+    detail: raw,
+    retryable: true,
+  }
+}
 
 // ─────────────────────────────── Rapport de stockage ────────────────────────
 

@@ -16,6 +16,7 @@
  */
 
 import { versionCompare } from './reshade.ts'
+import officialCatalogJson from './official-addon-catalog.json' with { type: 'json' }
 
 // ─────────────────────────────── Types de base ──────────────────────────────
 
@@ -109,13 +110,22 @@ export interface InstalledAddon {
   dataKept: boolean
 }
 
+export interface AddonReleaseMeta {
+  /** Repository GitHub de la release (ex. `N7T0-OF/zailon-addons`). */
+  repository: string
+  /** Tag explicite de la release (ex. `frosty-v1.0.0`) — jamais `latest` (§3). */
+  tag: string
+  /** Nom EXACT de l'asset publié (ex. `official.zailon.frosty-v1.0.0.zailon-addon`) —
+   * jamais déduit de l'ID (§12). */
+  asset: string
+}
+
 export interface AddonCatalogEntry {
   id: string
   name: string
   version: string
   category: AddonCategory
   size: number
-  download: string
   sha256: string
   minZailonVersion: string
   maxZailonVersion?: string
@@ -129,6 +139,16 @@ export interface AddonCatalogEntry {
   /** Clé publique Ed25519 (base64, 32 octets) ayant signé le package. */
   signaturePublicKey?: string
   official: boolean
+  /** Un package RÉEL est publié (spec §13, §25-27) : false = planifié, jamais
+   * de bouton Installer. `available` n'est pas déduit — le catalogue l'écrit. */
+  available?: boolean
+  /** Métadonnées de release GitHub (spec §2-4) — la SEULE source de l'URL de
+   * téléchargement. Jamais d'URL construite à la volée depuis l'ID (§2, §39). */
+  release?: AddonReleaseMeta
+  /** Ancien format « URL directe » (compatibilité catalogues déjà publiés) —
+   * accepté seulement si c'est une URL de release EXPLICITE (tag, jamais
+   * `latest`, §3, §5). */
+  download?: string
 }
 
 export interface AddonCatalog {
@@ -224,7 +244,7 @@ export function parseAddonCatalog(json: unknown): ParseCatalogResult {
 
     const required: Array<[string, string]> = [
       ['name', 'string'], ['version', 'string'], ['category', 'string'], ['size', 'number'],
-      ['download', 'string'], ['sha256', 'string'], ['minZailonVersion', 'string'],
+      ['sha256', 'string'], ['minZailonVersion', 'string'],
       ['description', 'string'], ['permissions', 'object'],
     ]
     let valid = true
@@ -236,6 +256,45 @@ export function parseAddonCatalog(json: unknown): ParseCatalogResult {
       }
     }
     if (!valid) continue
+
+    // Disponibilité réelle (spec §25) : booléen facultatif, non déduit.
+    const available = typeof entry.available === 'boolean' ? entry.available : true
+
+    // Métadonnées de release (spec §2-4) : repository/tag/asset non vides.
+    // Un `release` invalide rend l'entrée non installable, jamais 404 au
+    // téléchargement.
+    let release: AddonReleaseMeta | undefined
+    if (entry.release !== undefined) {
+      if (typeof entry.release !== 'object' || entry.release === null) {
+        errors.push(`[${id}] release doit être un objet.`)
+        valid = false
+      } else {
+        const meta = entry.release as Record<string, unknown>
+        const repository = typeof meta.repository === 'string' ? meta.repository.trim() : ''
+        const tag = typeof meta.tag === 'string' ? meta.tag.trim() : ''
+        const asset = typeof meta.asset === 'string' ? meta.asset.trim() : ''
+        if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
+          errors.push(`[${id}] release.repository invalide.`)
+          valid = false
+        }
+        if (!/^[A-Za-z0-9._-]+$/.test(tag) || tag.toLocaleLowerCase() === 'latest') {
+          errors.push(`[${id}] release.tag invalide (espaces interdits, tag \`latest\` interdit).`)
+          valid = false
+        }
+        if (!/^[A-Za-z0-9._-]+\.zailon-addon$/.test(asset)) {
+          errors.push(`[${id}] release.asset invalide (doit être un .zailon-addon).`)
+          valid = false
+        }
+        if (valid) release = { repository, tag, asset }
+      }
+    }
+
+    // URL directe de l'ancien format (compat) : acceptée seulement si explicite
+    // (tag) — jamais une URL `latest/download` (§3, §39).
+    let download: string | undefined
+    if (typeof entry.download === 'string' && entry.download.trim().length > 0) {
+      download = entry.download.trim()
+    }
 
     const rawPermissions = entry.permissions as unknown[]
     const permissions = (rawPermissions as string[]).filter(isAddonPermission)
@@ -262,7 +321,6 @@ export function parseAddonCatalog(json: unknown): ParseCatalogResult {
         version: entry.version as string,
         category: category as AddonCategory,
         size: entry.size as number,
-        download: entry.download as string,
         sha256: entry.sha256 as string,
         minZailonVersion: entry.minZailonVersion as string,
         maxZailonVersion: typeof entry.maxZailonVersion === 'string' ? entry.maxZailonVersion : undefined,
@@ -274,6 +332,9 @@ export function parseAddonCatalog(json: unknown): ParseCatalogResult {
         signature: hasSignature ? (entry.signature as string) : undefined,
         signaturePublicKey: hasSignature ? (entry.signaturePublicKey as string) : undefined,
         official: true,
+        available,
+        release,
+        download,
       })
     }
   }
@@ -538,254 +599,82 @@ export function validateAddonManifest(json: unknown): ManifestValidationResult {
   return { ok: true, manifest }
 }
 
+// ──────────────────────── Résolution de release + disponibilité ─────────────
+// Spec §2-5, §13, §25-27, §49 : le bouton « Installer » n'existe QUE si un
+// package réel est référencé par le catalogue (release explicite avec tag +
+// asset exact) et, pour les officiels, si le SHA-256 réel est publié. Jamais
+// d'URL construite à la volée depuis l'ID — c'est la règle qui évite les 404.
+
+/** Vrai si le SHA-256 est réel (pas le placeholder 'catalog' de référence). */
+export function hasRealAddonHash(sha256: string): boolean {
+  return Boolean(sha256 && sha256 !== 'catalog')
+}
+
+/** Vrai si l'URL est une URL de release GitHub EXPLICITE (tag + asset), jamais
+ * `latest/download` (spec §3, §39) — les URL `latest` sont fragiles : une
+ * release suivante casse l'installation d'une version ancienne. */
+export function isExplicitReleaseUrl(url: string): boolean {
+  if (!/^https:\/\/github\.com\//i.test(url)) return false
+  if (url.includes('/releases/latest/download/')) return false
+  const match = /\/releases\/download\/([^/]+)\/[^/]+$/.exec(url)
+  if (!match) return false
+  return match[1].toLocaleLowerCase() !== 'latest'
+}
+
+/**
+ * Résout l'URL de téléchargement réelle d'une entrée (spec §2-5) : depuis les
+ * métadonnées `release` (recommandé) ou une URL directe explicite de l'ancien
+ * format. Ne renvoie JAMAIS une URL dérivée de l'ID ni une URL `latest`.
+ */
+export function resolveAddonDownloadUrl(entry: AddonCatalogEntry): string | undefined {
+  if (entry.release && entry.release.tag.toLocaleLowerCase() !== 'latest') {
+    return `https://github.com/${entry.release.repository}/releases/download/${entry.release.tag}/${entry.release.asset}`
+  }
+  if (entry.download && isExplicitReleaseUrl(entry.download)) return entry.download
+  return undefined
+}
+
+export interface AddonAvailability {
+  /** Un package téléchargeable réel existe (bouton Installer autorisé). */
+  installable: boolean
+  /** Le package est marqué publié dans le catalogue (spec §25). */
+  published: boolean
+  /** Raison lisible si non installable (tooltip / panneau). */
+  reason?: string
+  /** URL de téléchargement réelle (si installable). */
+  downloadUrl?: string
+}
+
+/**
+ * Disponibilité réelle d'une entrée de catalogue (spec §13, §25-27, §49) :
+ * installable seulement si le catalogue déclare un package publié (release
+ * explicite) et que le SHA-256 réel est fourni pour les officiels (§20).
+ * Un add-on planifié n'a JAMAIS de bouton Installer.
+ */
+export function catalogAddonAvailability(entry: AddonCatalogEntry): AddonAvailability {
+  if (entry.available === false) {
+    return { installable: false, published: false, reason: 'En développement — le package n’a pas encore été publié.' }
+  }
+  const downloadUrl = resolveAddonDownloadUrl(entry)
+  if (!downloadUrl) {
+    return { installable: false, published: false, reason: 'Aucune release publiée pour cette version.' }
+  }
+  if (entry.official && !hasRealAddonHash(entry.sha256)) {
+    return { installable: false, published: true, reason: 'Le SHA-256 officiel du package n’est pas encore publié.' }
+  }
+  return { installable: true, published: true, downloadUrl }
+}
+
 // ─────────────────────────────── Catalogue officiel ─────────────────────────
 
 /**
- * Catalogue officiel de référence (spec §5, §79) — utilisé comme cache hors
- * ligne (§6). En production, ZAILON téléchargera catalog.json depuis le
- * repository officiel ; cette liste garantit le fonctionnement offline.
- * Les entrées listent les add-ons planifiés Phase 1-3.
+ * Catalogue officiel de référence (spec §5, §79) — source de vérité :
+ * `src/lib/official-addon-catalog.json` (importé, jamais dupliqué). Utilisé
+ * comme cache hors ligne (§6) ; en production, ZAILON télécharge catalog.json
+ * depuis le repository officiel et fusionne avec ce fallback. Les entrées
+ * `available: false` sont planifiées — aucune URL de package avant qu'un vrai
+ * `.zailon-addon` ne soit publié (spec §13, §25-27, §49).
  */
-export const OFFICIAL_ADDON_CATALOG: AddonCatalog = {
-  schema: 1,
-  addons: [
-    {
-      id: 'official.zailon.frosty',
-      name: 'Frosty Support',
-      version: '1.0.0',
-      category: 'game-support',
-      size: 8_400_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.frosty.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['game.read', 'game.files.write', 'mods.read', 'mods.write', 'network', 'process.launch', 'game.launch'],
-      description: 'Compatibilité Frosty (.fbmod, runtimes, ordre, lancement) pour les jeux supportés.',
-      dependencies: [],
-      official: true,
-    },
-    {
-      id: 'official.zailon.frosty-editor',
-      name: 'Frosty Editor',
-      version: '1.0.0',
-      category: 'modding',
-      size: 52_000_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.frosty-editor.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.76.0',
-      permissions: ['game.read', 'game.files.write', 'mods.read', 'mods.write', 'network', 'process.launch', 'game.launch', 'ui.extend', 'filesystem.external'],
-      description: 'Édition avancée des jeux Frostbite : assets, textures, meshes, sons, EBX et création .fbmod (nécessite Frosty Support).',
-      dependencies: ['official.zailon.frosty'],
-      official: true,
-    },
-    {
-      id: 'official.zailon.reshade',
-      name: 'ReShade Manager',
-      version: '1.0.0',
-      category: 'visual',
-      size: 4_200_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.reshade.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['game.read', 'game.files.write', 'mods.read', 'network', 'settings', 'ui.extend'],
-      description: 'Installation et mise à jour de ReShade, presets, shaders et profils par jeu.',
-      dependencies: [],
-      official: true,
-    },
-    {
-      id: 'official.zailon.discord',
-      name: 'Discord Presence',
-      version: '1.0.0',
-      category: 'utilities',
-      size: 1_100_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.discord.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['game.read', 'process.read', 'network', 'settings'],
-      description: 'Rich Presence Discord pour les jeux et applications actifs.',
-      dependencies: [],
-      official: true,
-    },
-    {
-      id: 'official.zailon.provider.nexus',
-      name: 'Nexus Provider',
-      version: '1.0.0',
-      category: 'sources',
-      size: 2_600_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.provider.nexus.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['network', 'provider', 'settings'],
-      description: 'Recherche, téléchargement et mises à jour Nexus Mods dans Explorer.',
-      dependencies: [],
-      official: true,
-    },
-    {
-      id: 'official.zailon.provider.gamebanana',
-      name: 'GameBanana Provider',
-      version: '1.0.0',
-      category: 'sources',
-      size: 1_900_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.provider.gamebanana.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['network', 'provider'],
-      description: 'Catalogue GameBanana dans Explorer.',
-      dependencies: [],
-      official: true,
-    },
-    {
-      id: 'official.zailon.provider.curseforge',
-      name: 'CurseForge Provider',
-      version: '1.0.0',
-      category: 'sources',
-      size: 2_100_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.provider.curseforge.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['network', 'provider', 'settings'],
-      description: 'Recherche CurseForge dans Explorer (clé partenaire requise).',
-      dependencies: [],
-      official: true,
-    },
-    {
-      id: 'official.zailon.game.cyberpunk',
-      name: 'Cyberpunk Advanced',
-      version: '1.0.0',
-      category: 'game-support',
-      size: 2_800_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.game.cyberpunk.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['game.read', 'game.files.write', 'mods.read', 'mods.write', 'process.read'],
-      description: 'RED4ext, redscript, TweakXL, ArchiveXL et REDmod pour Cyberpunk 2077.',
-      dependencies: [],
-      official: true,
-    },
-    {
-      id: 'official.zailon.game.nte',
-      name: 'NTE Support',
-      version: '1.0.0',
-      category: 'game-support',
-      size: 1_600_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.game.nte.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['game.read', 'game.launch', 'process.read', 'mods.read', 'mods.write'],
-      description: 'Chaîne launcher → UAC → vrai processus NTE + PAK.',
-      dependencies: [],
-      official: true,
-    },
-    {
-      id: 'official.zailon.game.fivem',
-      name: 'FiveM Profiles',
-      version: '1.0.0',
-      category: 'game-support',
-      size: 2_200_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.game.fivem.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['game.read', 'game.files.write', 'mods.read', 'mods.write', 'settings'],
-      description: 'Profils FiveM : roads, visual mods et dossiers spécifiques.',
-      dependencies: [],
-      official: true,
-    },
-    {
-      id: 'official.zailon.importer.mo2',
-      name: 'MO2 Importer',
-      version: '1.0.0',
-      category: 'utilities',
-      size: 3_300_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.importer.mo2.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['game.read', 'game.files.read', 'mods.read', 'mods.write', 'profile.write', 'filesystem.external'],
-      description: 'Migration d’une installation ou de profils MO2 (désinstallable après).',
-      dependencies: [],
-      official: true,
-    },
-    {
-      id: 'official.zailon.importer.vortex',
-      name: 'Vortex Importer',
-      version: '1.0.0',
-      category: 'utilities',
-      size: 2_700_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.importer.vortex.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['game.read', 'game.files.read', 'mods.read', 'mods.write', 'profile.write', 'filesystem.external'],
-      description: 'Migration d’une installation Vortex (désinstallable après).',
-      dependencies: [],
-      official: true,
-    },
-    {
-      id: 'official.zailon.importer.frosty',
-      name: 'Frosty Importer',
-      version: '1.0.0',
-      category: 'utilities',
-      size: 1_400_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.importer.frosty.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['game.read', 'game.files.read', 'mods.read', 'profile.write'],
-      description: 'Importe une installation Frosty existante (profils, mods, ordre).',
-      dependencies: ['official.zailon.frosty'],
-      official: true,
-    },
-    {
-      id: 'official.zailon.steam-advanced',
-      name: 'Steam Advanced',
-      version: '1.0.0',
-      category: 'utilities',
-      size: 1_800_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.steam-advanced.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['game.read', 'process.read', 'network', 'game.launch'],
-      description: 'Scan Steam avancé, playtime, artwork et intégration de raccourcis.',
-      dependencies: [],
-      official: true,
-    },
-    {
-      id: 'official.zailon.artwork',
-      name: 'Artwork+',
-      version: '1.0.0',
-      category: 'appearance',
-      size: 1_200_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.artwork.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['network', 'settings'],
-      description: 'Fournisseurs d’illustrations supplémentaires (SteamGridDB, IGDB…).',
-      dependencies: [],
-      official: true,
-    },
-    {
-      id: 'official.zailon.themes',
-      name: 'Theme Packs',
-      version: '1.0.0',
-      category: 'appearance',
-      size: 3_900_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.themes.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['ui.extend', 'settings'],
-      description: 'Apparences supplémentaires (OLED, Minimal, Console…).',
-      dependencies: [],
-      official: true,
-    },
-    {
-      id: 'official.zailon.performance',
-      name: 'Performance+',
-      version: '1.0.0',
-      category: 'utilities',
-      size: 1_300_000,
-      download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.performance.zailon-addon',
-      sha256: 'catalog',
-      minZailonVersion: '1.69.0',
-      permissions: ['game.read', 'process.read', 'process.launch', 'settings'],
-      description: 'Profils CPU/GPU/FPS avancés par jeu.',
-      dependencies: [],
-      official: true,
-    },
-  ],
-}
+// Les entrées JSON sont toutes officielles (`official: true` implicite) — le
+// cast passe par `unknown` car le fichier ne répète pas le champ par entrée.
+export const OFFICIAL_ADDON_CATALOG: AddonCatalog = officialCatalogJson as unknown as AddonCatalog

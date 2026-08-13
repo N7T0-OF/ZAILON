@@ -2,29 +2,44 @@
 
 ## [1.85.0] - 2026-08-13
 
-> Nouveautés restaurées + audio Accueil repositionné + statuts Add-ons unifiés.
->
-> **Nouveautés après mise à jour** : la micro-fenêtre revenait plus après une
-> mise à jour — la cause racine était `APP_VERSION` figé à 1.65.0 dans le Core
-> (le release bumpait package.json mais pas cette constante). Corrigé : la
-> version est désormais lue depuis package.json (source de vérité), la popup
-> réapparaît à chaque vraie nouvelle version (une seule fois, `lastSeenReleaseNotesVersion`),
-> sépare **ZAILON Core** des **Add-ons installés** (§23-24), reste scrollable
-> avec header/footer fixes, et les notes sont conservées dans un **historique
-> permanent** (Paramètres > À propos > Historique des versions, §7). Badge
-> « Nouveau » temporaire sur Add-ons après une mise à jour (§22).
->
-> **Audio de l'Accueil** : le contrôle n'était plus « trop bas » — il chevauchait
-> la rangée des panneaux (Favoris) en position absolue. Corrigé : rangée alignée
-> à droite **dans le flux**, toujours au-dessus de Favoris quelle que soit la
-> hauteur du Hero, capsule qui s'étend vers la gauche (§12), repli 400 ms et
-> fallback blur conservés (§13), stable face au parallaxe (§27).
->
-> **Statuts Add-ons** : suppression du doublon « En développement + Indisponible »
-> — un seul statut principal par carte (**Disponible / Installé / Màj disponible /
-> Non publié / Erreur de publication / Désactivé**). « Non publié ⓘ » remplace
-> « En développement » ; un `available: true` sans release/SHA réels devient
-> « Erreur de publication » (§20-21) ; l'explication passe dans la bulle (§17).
+> Nouveautés restaurées après chaque mise à jour, audio de l'Accueil
+> repositionné au-dessus de Favoris, statuts Add-ons unifiés (un seul statut
+> par carte).
+
+### Fixed
+
+- **La fenêtre « Nouveautés » ne revenait plus après une mise à jour** —
+  cause racine : `APP_VERSION` était figé à 1.65.0 dans le Core alors que le
+  processus de release ne bumpait que package.json/tauri.conf.json, donc
+  `lastInstalledUpdate.version` ne correspondait jamais à la version courante.
+  Corrigé : la version est désormais lue depuis package.json (source de vérité
+  unique bumpée à chaque release). La popup réapparaît à chaque vraie nouvelle
+  version, une seule fois (`lastSeenReleaseNotesVersion`), affichée après le
+  chargement de l'interface (jamais au boot), scrollable avec header et bouton
+  Fermer fixes (spec §1-4, §25-26).
+- **Icône audio de l'Accueil trop basse** — le contrôle était positionné en
+  absolu (`bottom-3`) sur la page et chevauchait la rangée des panneaux
+  (Favoris). Corrigé : rangée alignée à droite **dans le flux**, toujours
+  au-dessus de Favoris quelle que soit la hauteur du Hero ; capsule qui
+  s'étend vers la gauche (spec §8-13, §27).
+- **Doublon de statut « En développement + Indisponible » sur les cartes
+  Add-ons** — remplacé par un seul statut principal par carte (spec §14-17) :
+  « Non publié » (fiche au catalogue, aucun package téléchargeable), avec
+  l'explication dans une bulle ⓘ. Un `available: true` sans release/SHA-256
+  réels devient « Erreur de publication », jamais confondu avec un add-on
+  simplement non publié (spec §20-21).
+
+### Added
+
+- **Historique des versions** dans Paramètres > À propos : les notes de chaque
+  version sont conservées (`releaseNotesHistory`, persisté) et consultables
+  dans une modale scrollable après fermeture de la popup (spec §7).
+- **Séparation « ZAILON Core » / « Add-ons installés »** dans la popup de mise
+  à jour : seuls les add-ons réellement installés sont listés (spec §23-24).
+- **Badge « Nouveau » temporaire** sur Add-ons dans la navigation après une
+  mise à jour, effacé à la première visite (spec §22).
+- **`recordReleaseNotes`** dans le store : API publique pour enregistrer les
+  notes d'une version dans l'historique permanent.
 
 ## [1.84.0] - 2026-08-13
 

@@ -1,46 +1,59 @@
 # Publication des add-ons officiels
 
-Processus de release d'un add-on officiel `.zailon-addon` (spec « Fix critique
-installation add-ons » §44, §9-11, §37-38). La règle d'or : **un bouton
-Installer ne doit JAMAIS apparaître pour un add-on sans fichier téléchargeable**
-(§49) — le catalogue ne passe l'entrée à `available: true` qu'après publication
-réelle.
+Processus de publication d'un add-on officiel `.zailon-addon` (spec
+« Simplification totale du système d'Add-ons GitHub » §1-51).
 
-## 1. Cycle complet
+**Modèle : UN SEUL repository statique — AUCUNE GitHub Release.** Le
+catalogue `zailon-addons/catalog.json` (schema 2) référence des chemins
+RELATIFS de packages versionnés, et ZAILON télécharge directement le fichier
+demandé via `raw.githubusercontent.com` (§1-3, §27-28). Pas de release, pas de
+tag, pas de `releases/latest/download`, pas de `GitHubReleaseResolver`, pas de
+clone Git chez l'utilisateur (§46-48).
 
-1. **Bump version** — `version` du manifest, tag explicite `addon-vX.Y.Z`.
-2. **Build** — construire le module (UI, worker, resources).
-3. **Valider** — manifest, permissions, plateforme, dépendances.
-4. **Empaqueter** — `npm run addon:pack <dir> -o dist/<id>-vX.Y.Z.zailon-addon`
-   (ou `node .github/scripts/addon-cli.ts pack …`) — archive ZIP déterministe.
-5. **Tester localement** — ZAILON → Add-ons → **Importer un add-on** →
+La règle d'or reste : **un bouton Installer ne doit JAMAIS apparaître pour un
+add-on sans fichier téléchargeable** (§5, §49).
+
+## 1. Où vivent les fichiers
+
+Le dépôt dédié `N7T0-OF/zailon-addons` n'existe pas encore (404) : les
+packages sont hébergés dans le dépôt ZAILON sous `zailon-addons/`, structurés
+exactement comme le dépôt autonome cible. Quand `N7T0-OF/zailon-addons` sera
+créé, il suffit de changer `ADDON_REPOSITORY.repo` dans `src/lib/addons.ts`
+(§3, §25) — rien d'autre.
+
+```
+zailon-addons/
+├── catalog.json                  ← schema 2, source de vérité unique (§4, §19)
+├── packages/
+│   ├── frosty/
+│   │   └── official.zailon.frosty-1.0.0.zailon-addon
+│   └── frosty-editor/
+│       └── official.zailon.frosty-editor-1.0.0.zailon-addon
+├── docs/addon-development/       ← bouton 📄 (spec §30)
+└── templates/                    ← templates de créateurs (§31)
+```
+
+Le nom de fichier est VERSIONNÉ (`<id>-<version>.zailon-addon`) : aucun
+problème de cache CDN, rollback naturel vers l'ancienne version (§16-18).
+
+## 2. Cycle complet
+
+1. **Modifier** la source de l'add-on dans `addons/<id>/`.
+2. **Build + pack + catalogue** — `node scripts/build-official-addons.ts`
+   (ou `npm run addon:build:official`) : pack déterministe vers
+   `zailon-addons/packages/<dir>/<id>-<version>.zailon-addon`, SHA-256,
+   tailles, version et métadonnées du manifest mis à jour automatiquement
+   dans `catalog.json` (§19) — **jamais de valeurs éditées à la main**.
+3. **Tester localement** — ZAILON → Add-ons → **Importer un add-on** →
    sélectionner le `.zailon-addon` → vérifier installation, registre, UI slot,
-   dépendances, worker, désinstallation. Le chemin de référence
-   (`G:\2_Logiciel\CLAUDE CODE\EXEMPLE\Frosty Editor` par ex.) sert de source,
-   jamais d'installation directe (§17).
-6. **Tag + release GitHub** — les packages officiels sont publiés dans une
-   release dédiée du **dépôt ZAILON lui-même** (`N7T0-OF/ZAILON`, tag explicite
-   `addons-vX.Y.Z` — jamais `latest`) via le workflow
-   `.github/workflows/release-addons.yml` :
-   ```text
-   addons-v1.0.0
-   ```
-   Le tag `addons-v*` déclenche ce workflow (build déterministe → validation
-   catalogue → release avec les `.zailon-addon` + `checksums-sha256.txt`).
-   Il ne déclenche PAS `release.yml` (installateurs, qui n'écoute que `v*`).
-   Une seule release héberge tous les add-ons officiels d'une même version.
-7. **Hash + signature** — SHA-256 du fichier + signature Ed25519 du hash
-   (spec §14, §20). Pour un add-on officiel, l'installation exige un SHA-256
-   réel et une signature (§14, §52).
-8. **Publier le catalogue** — mettre à jour
-   `src/lib/official-addon-catalog.json` (source de vérité unique, spec §4,
-   §38) : `available: true` + `release` (repository `N7T0-OF/ZAILON`, tag
-   `addons-vX.Y.Z`, asset exact) + `sha256` réel (celui du pack déterministe,
-   vérifié par `test-official-addons.ts`). La CI `Validate add-on catalog` de
-   ZAILON refuse tout catalogue où un add-on `available` n'a pas ces
-   métadonnées (§37).
+   dépendances, désinstallation.
+4. **Commit + push** — c'est tout. Aucune étape « Create Release / Upload
+   Asset / Create Tag » (§7). La CI `Validate add-on catalog` vérifie que
+   chaque package déclaré existe réellement, que son manifest interne
+   correspond (ID + version), que le SHA-256 et la taille sont exacts, que les
+   dépendances existent (§6) — un catalogue cassé fait échouer le pipeline.
 
-## 2. Format d'entrée du catalogue
+## 3. Entrée de catalogue (schema 2)
 
 ```json
 {
@@ -48,74 +61,65 @@ réelle.
   "name": "Frosty Support",
   "version": "1.0.0",
   "category": "game-support",
-  "size": 8400000,
-  "sha256": "<64 hex réels>",
-  "minZailonVersion": "1.69.0",
-  "permissions": ["game.read", "game.files.write", "mods.read", "mods.write", "network", "process.launch", "game.launch"],
   "description": "…",
-  "available": true,
-  "release": {
-    "repository": "N7T0-OF/ZAILON",
-    "tag": "addons-v1.0.0",
-    "asset": "official.zailon.frosty-v1.0.0.zailon-addon"
-  },
-  "signature": "<base64>",
-  "signaturePublicKey": "<base64>"
+  "package": "packages/frosty/official.zailon.frosty-1.0.0.zailon-addon",
+  "sha256": "<64 hex réels>",
+  "downloadSize": 7656,
+  "installedSize": 19140,
+  "platforms": ["windows", "linux", "macos"],
+  "minZailonVersion": "1.78.0",
+  "permissions": ["game.read", "…"],
+  "dependencies": [],
+  "optionalDependencies": []
 }
 ```
 
-Règles :
+- `package` : chemin RELATIF dans le repository (§2) — jamais d'URL
+  construite à la volée, jamais `releases/latest` (§1, §39) ;
+- `package: null` : add-on en développement, aucun bouton Installer (§5) ;
+- `sha256` réel obligatoire pour tout add-on avec package (§20, §36) ;
+- le nom de l'asset n'est JAMAIS déduit de l'ID (§12) — le catalogue l'écrit.
 
-- l'URL de téléchargement est TOUJOURS construite par ZAILON depuis
-  `release` : `https://github.com/{repository}/releases/download/{tag}/{asset}`
-  (§5) — jamais `latest/download`, jamais déduite de l'ID (§2-3, §39) ;
-- l'asset est publié sous un **tag explicite** : une release suivante ne casse
-  pas l'installation d'une version ancienne (§3) ;
-- le nom de l'asset n'est JAMAIS déduit de l'ID (§12).
+## 4. Résolution côté ZAILON
 
-## 3. Statuts d'une carte
+`AddonRepositoryClient` (spec §2-3, §39) :
 
-| Statut                 | Condition                                                         |
-| ---------------------- | ----------------------------------------------------------------- |
-| `Non publié`           | `available: false` — fiche au catalogue, aucun package (§16-17)   |
-| `Disponible`           | `available: true` + release explicite + SHA-256 réel (officiel)   |
-| `Erreur de publication`| `available: true` sans release/SHA réels — catalogue incohérent (§20-21) |
-| `Installé`             | add-on présent dans le store                                      |
-| `Màj disponible`       | version catalogue > version installée                             |
-
-## 4. Erreurs de téléchargement
-
-- **404** — package absent : affiché immédiatement, **aucun retry** (§40) ;
-  boutons [Voir la release] [Importer manuellement].
-- **403/429** — GitHub limité : retry plus tard (§41).
-- **Réseau** — erreur générique, retry possible.
-
-## 5. Script local
-
-`scripts/release-addon.ps1` empaquette un dossier d'add-on, calcule le
-SHA-256 et affiche le bloc de métadonnées à copier dans le catalogue :
-
-```powershell
-.\scripts\release-addon.ps1 -AddonDir .\addon-template -Id official.zailon.frosty -Version 1.0.0
+```text
+BASE_URL = raw.githubusercontent.com/N7T0-OF/ZAILON/main/zailon-addons/
+catalogUrl  = BASE_URL + catalog.json
+packageUrl  = BASE_URL + entry.package
+docsUrl     = github.com/N7T0-OF/ZAILON/tree/main/zailon-addons/docs/addon-development
 ```
 
-## 6. Add-ons officiels construits
+Le catalogue n'est jamais fetché au boot (§23) — uniquement à l'ouverture
+d'Add-ons (cache frais 6 h) ou sur le bouton « Actualiser » (revalidation
+forcée, §24, §34). Hors ligne : catalogue en cache + fallback embarqué ;
+les add-ons installés continuent de fonctionner (§22).
 
-Deux add-ons sont désormais **réellement construits et validés** dans ce dépôt
-(source : `addons/`) :
+## 5. Statuts d'une carte (spec §49)
 
-| Add-on | Package | SHA-256 (enregistré dans le catalogue) |
-| --- | --- | --- |
-| Frosty Support | `official.zailon.frosty-v1.0.0.zailon-addon` | `de58be…78cb4` |
-| Frosty Editor | `official.zailon.frosty-editor-v1.0.0.zailon-addon` | `d5b38b…7f36` |
+| Statut                    | Condition                                                      |
+| ------------------------- | -------------------------------------------------------------- |
+| `Disponible`              | `package` présent + SHA-256 réel                               |
+| `Installé`                | add-on présent dans le store                                   |
+| `Mise à jour disponible`  | version catalogue > version installée                          |
+| `En développement`        | `package: null` — bouton Installer désactivé                   |
+| `Incompatible`            | version ZAILON / plateforme / dépendances manquantes           |
+| `Hors connexion`          | catalogue de référence servi, aucun téléchargement possible    |
+| `Erreur`                  | package déclaré mais irrésoluble / SHA invalide                |
 
-- Reconstruire : `npm run addon:build:official` → `dist/` (pack déterministe,
-  SHA-256 vérifiable par le test `test-official-addons.ts`).
-- Le catalogue (`src/lib/official-addon-catalog.json`) contient déjà le
-  `release` (tag + asset) et le `sha256` réels de ces deux add-ons, mais
-  `available: false` : **la carte reste « En développement » tant que la
-  release GitHub n'est pas publiée** (§49).
-- Dès que les assets sont uploadés sur `N7T0-OF/zailon-addons` (tags
-  `frosty-v1.0.0` et `frosty-editor-v1.0.0`), il suffit de passer les deux
-  entrées à `available: true` — les métadonnées sont prêtes et la CI
-  `Validate add-on catalog` vérifiera la cohérence.
+## 6. Erreurs
+
+- **404 au téléchargement** → « Package introuvable » : le package référencé
+  est absent du repository — actualiser le catalogue ou importer
+  manuellement. Jamais de retry automatique (404 = fichier absent, §48).
+- **403/429** → « GitHub temporairement indisponible » : retry plus tard.
+- **SHA invalide** → installation refusée, rollback (§14, §35).
+
+## 7. Migration depuis l'ancien système (schema 1 → 2)
+
+- L'ancien modèle (GitHub Releases, `release`/`available`, URLs
+  `releases/latest/download`) a été supprimé (§46).
+- Le cache local du catalogue est invalidé (`catalogSchemaVersion` 1 → 2,
+  clé de cache `v3` → `v4`) : sans invalidation, un ancien catalogue aux
+  mauvaises URLs serait servi (§47).

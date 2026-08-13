@@ -16,7 +16,11 @@
  */
 
 import { versionCompare } from './reshade.ts'
-import officialCatalogJson from './official-addon-catalog.json' with { type: 'json' }
+// Source de vérité unique (spec « Simplification totale » §3-4, §19) : le
+// catalogue vit dans `zailon-addons/catalog.json` à la racine du dépôt,
+// importé tel quel (jamais dupliqué). Le même fichier est servi par
+// raw.githubusercontent.com pour la synchronisation distante.
+import officialCatalogJson from '../../zailon-addons/catalog.json' with { type: 'json' }
 
 // ─────────────────────────────── Types de base ──────────────────────────────
 
@@ -110,23 +114,24 @@ export interface InstalledAddon {
   dataKept: boolean
 }
 
-export interface AddonReleaseMeta {
-  /** Repository GitHub de la release (ex. `N7T0-OF/zailon-addons`). */
-  repository: string
-  /** Tag explicite de la release (ex. `frosty-v1.0.0`) — jamais `latest` (§3). */
-  tag: string
-  /** Nom EXACT de l'asset publié (ex. `official.zailon.frosty-v1.0.0.zailon-addon`) —
-   * jamais déduit de l'ID (§12). */
-  asset: string
-}
-
 export interface AddonCatalogEntry {
   id: string
   name: string
   version: string
   category: AddonCategory
-  size: number
-  sha256: string
+  /** Chemin RELATIF du package dans le repository statique (spec §2, §4) :
+   * `packages/<dir>/<id>-<version>.zailon-addon`. `null` = en développement,
+   * aucun package construit → jamais de bouton Installer (§5). Le fichier est
+   * VERSIONNÉ dans son nom (§16) : cache CDN inoffensif, rollback naturel. */
+  package?: string | null
+  /** URL absolue alternative (catalogue communautaire / dev hors repository). */
+  download?: string
+  sha256?: string
+  /** Taille du package `.zailon-addon` (octets). */
+  downloadSize?: number
+  /** Taille estimée une fois déployée (octets). */
+  installedSize?: number
+  platforms?: Array<'windows' | 'linux' | 'macos'>
   minZailonVersion: string
   maxZailonVersion?: string
   minAddonApiVersion?: string
@@ -138,21 +143,13 @@ export interface AddonCatalogEntry {
   signature?: string
   /** Clé publique Ed25519 (base64, 32 octets) ayant signé le package. */
   signaturePublicKey?: string
+  /** Notes de version (spec §41) : chargées à la demande, jamais au boot. */
+  changelogPath?: string | null
   official: boolean
-  /** Un package RÉEL est publié (spec §13, §25-27) : false = planifié, jamais
-   * de bouton Installer. `available` n'est pas déduit — le catalogue l'écrit. */
-  available?: boolean
-  /** Métadonnées de release GitHub (spec §2-4) — la SEULE source de l'URL de
-   * téléchargement. Jamais d'URL construite à la volée depuis l'ID (§2, §39). */
-  release?: AddonReleaseMeta
-  /** Ancien format « URL directe » (compatibilité catalogues déjà publiés) —
-   * accepté seulement si c'est une URL de release EXPLICITE (tag, jamais
-   * `latest`, §3, §5). */
-  download?: string
 }
 
 export interface AddonCatalog {
-  schema: 1
+  schema: 2
   addons: AddonCatalogEntry[]
   /** Horodatage de mise en cache (enveloppe de cache, spec §35) — absent du
    * catalogue parse ; utilisé pour la revalidation TTL (spec §34, §45). */
@@ -226,12 +223,12 @@ export interface ParseCatalogResult {
   errors: string[]
 }
 
-/** Valide un catalogue officiel (schema 1). Les entrées invalides sont rejetées. */
+/** Valide un catalogue officiel (schema 2). Les entrées invalides sont rejetées. */
 export function parseAddonCatalog(json: unknown): ParseCatalogResult {
   const errors: string[] = []
   if (typeof json !== 'object' || json === null) return { ok: false, errors: ['Catalogue non JSON.'] }
   const raw = json as Record<string, unknown>
-  if (raw.schema !== 1) { errors.push(`Schema inattendu : ${String(raw.schema)}.`) }
+  if (raw.schema !== 2) { errors.push(`Schema inattendu : ${String(raw.schema)} (attendu 2).`) }
   if (!Array.isArray(raw.addons)) { errors.push('Champ addons manquant ou invalide.') }
 
   const seen = new Set<string>()
@@ -246,9 +243,8 @@ export function parseAddonCatalog(json: unknown): ParseCatalogResult {
     seen.add(id)
 
     const required: Array<[string, string]> = [
-      ['name', 'string'], ['version', 'string'], ['category', 'string'], ['size', 'number'],
-      ['sha256', 'string'], ['minZailonVersion', 'string'],
-      ['description', 'string'], ['permissions', 'object'],
+      ['name', 'string'], ['version', 'string'], ['category', 'string'],
+      ['minZailonVersion', 'string'], ['description', 'string'], ['permissions', 'object'],
     ]
     let valid = true
     for (const [key, type] of required) {
@@ -260,44 +256,30 @@ export function parseAddonCatalog(json: unknown): ParseCatalogResult {
     }
     if (!valid) continue
 
-    // Disponibilité réelle (spec §25) : booléen facultatif, non déduit.
-    const available = typeof entry.available === 'boolean' ? entry.available : true
-
-    // Métadonnées de release (spec §2-4) : repository/tag/asset non vides.
-    // Un `release` invalide rend l'entrée non installable, jamais 404 au
-    // téléchargement.
-    let release: AddonReleaseMeta | undefined
-    if (entry.release !== undefined) {
-      if (typeof entry.release !== 'object' || entry.release === null) {
-        errors.push(`[${id}] release doit être un objet.`)
-        valid = false
-      } else {
-        const meta = entry.release as Record<string, unknown>
-        const repository = typeof meta.repository === 'string' ? meta.repository.trim() : ''
-        const tag = typeof meta.tag === 'string' ? meta.tag.trim() : ''
-        const asset = typeof meta.asset === 'string' ? meta.asset.trim() : ''
-        if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
-          errors.push(`[${id}] release.repository invalide.`)
-          valid = false
-        }
-        if (!/^[A-Za-z0-9._-]+$/.test(tag) || tag.toLocaleLowerCase() === 'latest') {
-          errors.push(`[${id}] release.tag invalide (espaces interdits, tag \`latest\` interdit).`)
-          valid = false
-        }
-        if (!/^[A-Za-z0-9._-]+\.zailon-addon$/.test(asset)) {
-          errors.push(`[${id}] release.asset invalide (doit être un .zailon-addon).`)
-          valid = false
-        }
-        if (valid) release = { repository, tag, asset }
-      }
+    // Package (spec §2, §5) : chemin RELATIF dans le repository statique, ou
+    // `null`/absent = en développement. Un package déclaré exige un SHA-256
+    // réel et une taille positive — sinon l'entrée est invalide (jamais 404).
+    let packagePath: string | null | undefined
+    if (entry.package === null || entry.package === undefined) {
+      packagePath = null
+    } else if (typeof entry.package === 'string' && /^[A-Za-z0-9_./-]+\.zailon-addon$/.test(entry.package.trim())) {
+      packagePath = entry.package.trim()
+    } else {
+      errors.push(`[${id}] package invalide (doit être un chemin relatif .zailon-addon ou null).`)
+      valid = false
     }
 
-    // URL directe de l'ancien format (compat) : acceptée seulement si explicite
-    // (tag) — jamais une URL `latest/download` (§3, §39).
-    let download: string | undefined
-    if (typeof entry.download === 'string' && entry.download.trim().length > 0) {
-      download = entry.download.trim()
+    const sha256 = typeof entry.sha256 === 'string' ? entry.sha256 : ''
+    const downloadSize = typeof entry.downloadSize === 'number' ? entry.downloadSize : 0
+    if (packagePath && (!/^[0-9a-f]{64}$/i.test(sha256) || downloadSize <= 0)) {
+      errors.push(`[${id}] package déclaré sans SHA-256 réel (64 hex) et taille positive.`)
+      valid = false
     }
+
+    // URL absolue alternative (catalogue communautaire / dev) : `download`.
+    const download = typeof entry.download === 'string' && entry.download.trim().length > 0
+      ? entry.download.trim()
+      : undefined
 
     const rawPermissions = entry.permissions as unknown[]
     const permissions = (rawPermissions as string[]).filter(isAddonPermission)
@@ -318,13 +300,20 @@ export function parseAddonCatalog(json: unknown): ParseCatalogResult {
       valid = false
     }
     if (valid) {
+      const platforms = Array.isArray(entry.platforms)
+        ? (entry.platforms as string[]).filter((value): value is 'windows' | 'linux' | 'macos' => value === 'windows' || value === 'linux' || value === 'macos')
+        : undefined
       addons.push({
         id: id as string,
         name: entry.name as string,
         version: entry.version as string,
         category: category as AddonCategory,
-        size: entry.size as number,
-        sha256: entry.sha256 as string,
+        package: packagePath,
+        download,
+        sha256: packagePath ? sha256 : undefined,
+        downloadSize: packagePath ? downloadSize : undefined,
+        installedSize: typeof entry.installedSize === 'number' ? entry.installedSize : undefined,
+        platforms,
         minZailonVersion: entry.minZailonVersion as string,
         maxZailonVersion: typeof entry.maxZailonVersion === 'string' ? entry.maxZailonVersion : undefined,
         minAddonApiVersion: typeof entry.minAddonApiVersion === 'string' ? entry.minAddonApiVersion : undefined,
@@ -334,16 +323,14 @@ export function parseAddonCatalog(json: unknown): ParseCatalogResult {
         optionalDependencies: Array.isArray(entry.optionalDependencies) ? (entry.optionalDependencies as string[]).filter(isValidAddonId) : undefined,
         signature: hasSignature ? (entry.signature as string) : undefined,
         signaturePublicKey: hasSignature ? (entry.signaturePublicKey as string) : undefined,
+        changelogPath: typeof entry.changelogPath === 'string' ? entry.changelogPath : undefined,
         official: true,
-        available,
-        release,
-        download,
       })
     }
   }
 
   if (errors.length > 0 && addons.length === 0) return { ok: false, errors }
-  return { ok: true, catalog: { schema: 1, addons }, errors }
+  return { ok: true, catalog: { schema: 2, addons }, errors }
 }
 
 /** Vérifie le SHA-256 (comparaison insensible à la casse). */
@@ -602,87 +589,91 @@ export function validateAddonManifest(json: unknown): ManifestValidationResult {
   return { ok: true, manifest }
 }
 
-// ──────────────────────── Résolution de release + disponibilité ─────────────
-// Spec §2-5, §13, §25-27, §49 : le bouton « Installer » n'existe QUE si un
-// package réel est référencé par le catalogue (release explicite avec tag +
-// asset exact) et, pour les officiels, si le SHA-256 réel est publié. Jamais
-// d'URL construite à la volée depuis l'ID — c'est la règle qui évite les 404.
+// ────────────────── Repository statique + disponibilité ─────────────────────
+// Spec « Simplification totale » §1-5, §16, §39 : AUCUNE GitHub Release. Un
+// SEUL repository contient `catalog.json` + tous les packages, servis en
+// contenu brut (raw.githubusercontent.com). Le catalogue référence un chemin
+// RELATIF (`package`), jamais une URL construite à la volée depuis l'ID.
 
-/** Vrai si le SHA-256 est réel (pas le placeholder 'catalog' de référence). */
+/** Configuration du repository officiel des add-ons (spec §3, §25, §39).
+ * Une seule racine — catalog, packages et docs dérivent de cette config. */
+export const ADDON_REPOSITORY = {
+  owner: 'N7T0-OF',
+  // Le dépôt dédié `zailon-addons` n'existe pas encore (404) : les packages
+  // sont hébergés dans le dépôt ZAILON sous `zailon-addons/`, structurés
+  // exactement comme le dépôt autonome cible. Quand `N7T0-OF/zailon-addons`
+  // sera créé, il suffit de changer ce nom — rien d'autre.
+  repo: 'ZAILON',
+  branch: 'main',
+  /** Préfixe des chemins du catalogue dans le dépôt (racine du repository add-ons). */
+  prefix: 'zailon-addons/',
+} as const
+
+export const OFFICIAL_ADDON_REPOSITORY_URL = `https://raw.githubusercontent.com/${ADDON_REPOSITORY.owner}/${ADDON_REPOSITORY.repo}/${ADDON_REPOSITORY.branch}/${ADDON_REPOSITORY.prefix}`
+
+/** URL du catalogue officiel (spec §4, §23) — jamais fetché au boot. */
+export const OFFICIAL_CATALOG_URL = `${OFFICIAL_ADDON_REPOSITORY_URL}catalog.json`
+
+/** Vrai si le SHA-256 est réel (64 hex). */
 export function hasRealAddonHash(sha256: string): boolean {
-  return Boolean(sha256 && sha256 !== 'catalog')
-}
-
-/** Vrai si l'URL est une URL de release GitHub EXPLICITE (tag + asset), jamais
- * `latest/download` (spec §3, §39) — les URL `latest` sont fragiles : une
- * release suivante casse l'installation d'une version ancienne. */
-export function isExplicitReleaseUrl(url: string): boolean {
-  if (!/^https:\/\/github\.com\//i.test(url)) return false
-  if (url.includes('/releases/latest/download/')) return false
-  const match = /\/releases\/download\/([^/]+)\/[^/]+$/.exec(url)
-  if (!match) return false
-  return match[1].toLocaleLowerCase() !== 'latest'
+  return /^[0-9a-f]{64}$/i.test(sha256)
 }
 
 /**
- * Résout l'URL de téléchargement réelle d'une entrée (spec §2-5) : depuis les
- * métadonnées `release` (recommandé) ou une URL directe explicite de l'ancien
- * format. Ne renvoie JAMAIS une URL dérivée de l'ID ni une URL `latest`.
+ * Résout l'URL de téléchargement réelle (spec §2) : `BASE_URL + package` pour
+ * le chemin relatif officiel, ou l'URL absolue `download` d'un catalogue
+ * communautaire/dev. Ne renvoie JAMAIS une URL dérivée de l'ID ni une URL
+ * `releases/latest`.
  */
 export function resolveAddonDownloadUrl(entry: AddonCatalogEntry): string | undefined {
-  if (entry.release && entry.release.tag.toLocaleLowerCase() !== 'latest') {
-    return `https://github.com/${entry.release.repository}/releases/download/${entry.release.tag}/${entry.release.asset}`
-  }
-  if (entry.download && isExplicitReleaseUrl(entry.download)) return entry.download
+  if (entry.package) return `${OFFICIAL_ADDON_REPOSITORY_URL}${entry.package}`
+  if (entry.download && /^https:\/\//i.test(entry.download) && !entry.download.includes('/releases/latest/')) return entry.download
   return undefined
 }
+
+export type AddonAvailabilityStatus = 'available' | 'development' | 'error'
 
 export interface AddonAvailability {
   /** Un package téléchargeable réel existe (bouton Installer autorisé). */
   installable: boolean
-  /** Le package est marqué publié dans le catalogue (spec §25). */
-  published: boolean
-  /** Raison lisible si non installable (tooltip / panneau). */
+  /** Statut principal de la carte (spec §49). */
+  status: AddonAvailabilityStatus
+  /** Raison lisible si non installable (bulle ⓘ). */
   reason?: string
   /** URL de téléchargement réelle (si installable). */
   downloadUrl?: string
 }
 
 /**
- * Disponibilité réelle d'une entrée de catalogue (spec §13, §25-27, §49) :
- * installable seulement si le catalogue déclare un package publié (release
- * explicite) et que le SHA-256 réel est fourni pour les officiels (§20).
- * Un add-on planifié n'a JAMAIS de bouton Installer.
+ * Disponibilité réelle d'une entrée (spec §5, §49) : installable seulement si
+ * le catalogue déclare un package. Pas de package → « En développement »
+ * (aucun bouton Installer, aucune requête 404). Package déclaré mais
+ * irrésoluble / SHA manquant → « Erreur » (catalogue incohérent).
  */
 export function catalogAddonAvailability(entry: AddonCatalogEntry): AddonAvailability {
-  // « Non publié » : la fiche existe dans le catalogue mais aucun package
-  // téléchargeable n'a encore été publié (spec §16-17). Jamais de doublon
-  // « En développement + Indisponible ».
-  if (entry.available === false) {
-    return { installable: false, published: false, reason: 'Non publié — cette version possède une fiche dans le catalogue, mais aucun package téléchargeable n’a encore été publié.' }
+  if (!entry.package) {
+    return { installable: false, status: 'development', reason: 'En développement — aucun package construit pour cette version.' }
   }
   const downloadUrl = resolveAddonDownloadUrl(entry)
-  // « Erreur de publication » : le catalogue marque l'add-on publié mais les
-  // métadonnées de release manquent — incohérence du catalogue, jamais
-  // confondue avec un add-on simplement non publié (spec §20-21).
   if (!downloadUrl) {
-    return { installable: false, published: true, reason: 'Erreur de publication — le catalogue marque cet add-on publié mais aucune release explicite n’est définie.' }
+    return { installable: false, status: 'error', reason: 'Package introuvable dans le catalogue.' }
   }
-  if (entry.official && !hasRealAddonHash(entry.sha256)) {
-    return { installable: false, published: true, reason: 'Erreur de publication — le SHA-256 officiel du package n’est pas encore publié.' }
+  if (entry.official && !hasRealAddonHash(entry.sha256 || '')) {
+    return { installable: false, status: 'error', reason: 'Le SHA-256 officiel du package est manquant ou invalide.' }
   }
-  return { installable: true, published: true, downloadUrl }
+  return { installable: true, status: 'available', downloadUrl }
 }
 
 // ─────────────────────────────── Catalogue officiel ─────────────────────────
 
 /**
  * Catalogue officiel de référence (spec §5, §79) — source de vérité :
- * `src/lib/official-addon-catalog.json` (importé, jamais dupliqué). Utilisé
- * comme cache hors ligne (§6) ; en production, ZAILON télécharge catalog.json
- * depuis le repository officiel et fusionne avec ce fallback. Les entrées
- * `available: false` sont planifiées — aucune URL de package avant qu'un vrai
- * `.zailon-addon` ne soit publié (spec §13, §25-27, §49).
+ * `zailon-addons/catalog.json` à la racine du dépôt (importé, jamais
+ * dupliqué). Utilisé comme cache hors ligne (§6) ; en production, ZAILON
+ * télécharge catalog.json depuis le repository statique et fusionne avec ce
+ * fallback. Les entrées `package: null` sont en développement — aucun bouton
+ * Installer tant qu'un vrai `.zailon-addon` n'est pas committé (spec §5,
+ * §49).
  */
 // Les entrées JSON sont toutes officielles (`official: true` implicite) — le
 // cast passe par `unknown` car le fichier ne répète pas le champ par entrée.

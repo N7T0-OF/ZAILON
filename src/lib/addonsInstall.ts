@@ -8,7 +8,9 @@
  * appelle les commandes natives.
  */
 
-import { ADDON_INSTALL_PHASES, estimateInstalledSize, parseAddonCatalog, type AddonCatalog, type AddonCatalogEntry, type InstalledAddon, type ParseCatalogResult } from './addons.ts'
+import { ADDON_INSTALL_PHASES, estimateInstalledSize, OFFICIAL_CATALOG_URL, parseAddonCatalog, type AddonCatalog, type AddonCatalogEntry, type InstalledAddon, type ParseCatalogResult } from './addons.ts'
+
+export { OFFICIAL_CATALOG_URL } from './addons.ts'
 import type { AddonInstallPhase } from './addons.ts'
 
 // ─────────────────────────────── Machine à états ────────────────────────────
@@ -105,13 +107,10 @@ export function addonInstallReducer(state: AddonInstallRunState, event: AddonIns
 }
 
 // ─────────────────────────────── Catalogue distant ──────────────────────────
-
-/** Source officielle du catalogue (spec §5, §9) — jamais de mirror tiers.
- * Le catalogue vit dans le dépôt ZAILON lui-même (le dépôt séparé
- * `zailon-addons` n'existe pas) : la source distante est le fichier JSON
- * committé, la source embarquée (`OFFICIAL_ADDON_CATALOG`) sert de fallback
- * hors ligne (spec §6). */
-export const OFFICIAL_CATALOG_URL = 'https://raw.githubusercontent.com/N7T0-OF/ZAILON/main/src/lib/official-addon-catalog.json'
+// Spec « Simplification totale » §1-5 : AUCUNE GitHub Release. Le catalogue
+// officiel est servi en contenu brut depuis le repository statique
+// (`OFFICIAL_CATALOG_URL` défini dans addons.ts) ; la source embarquée
+// (`OFFICIAL_ADDON_CATALOG`) sert de fallback hors ligne (spec §6).
 
 const OFFICIAL_CATALOG_HOSTS = ['raw.githubusercontent.com', 'github.com']
 
@@ -154,7 +153,7 @@ export function mergeCatalogs(remote: AddonCatalog, fallback: AddonCatalog): Add
   const byId = new Map<string, AddonCatalogEntry>()
   for (const entry of fallback.addons) byId.set(entry.id, entry)
   for (const entry of remote.addons) byId.set(entry.id, entry)
-  return { schema: 1, addons: [...byId.values()] }
+  return { schema: 2, addons: [...byId.values()] }
 }
 
 /**
@@ -180,8 +179,9 @@ export async function fetchAddonCatalog(options: {
     const cached = options.readCache()
     // Cache frais → réponse instantanée ; cache périmé → revalidation réseau.
     // `force` (Actualiser, spec §34) court-circuite toujours le cache — sinon
-    // une ancienne version (ex. `available:false`) ne serait jamais rafraîchie.
-    if (cached && cached.schema === 1 && !options.force) {
+    // un ancien catalogue (schema 1, chemins `release`/URL 404) ne serait
+    // jamais rafraîchi (spec §47 : invalider l'ancien cache).
+    if (cached && cached.schema === 2 && !options.force) {
       const age = Date.now() - (cached.fetchedAt ?? 0)
       if (age < maxAgeMs) return { catalog: cached, source: 'cache', errors: [], fetchedAt: cached.fetchedAt }
     }
@@ -235,8 +235,8 @@ export interface AddonDownloadErrorInfo {
 export function describeAddonDownloadError(raw: string): AddonDownloadErrorInfo {
   if (/404|not found/i.test(raw)) {
     return {
-      title: 'Erreur de publication',
-      detail: 'Le catalogue marque cet add-on publié mais le package est introuvable (404 — asset absent de la release référencée). Actualisez le catalogue ou importez le fichier manuellement.',
+      title: 'Package introuvable',
+      detail: 'Le package référencé par le catalogue est absent du repository (404). Actualisez le catalogue ou importez le fichier manuellement.',
       retryable: false,
     }
   }

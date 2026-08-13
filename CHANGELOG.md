@@ -1,5 +1,49 @@
 # Changelog
 
+## [1.87.0] - 2026-08-13
+
+> **Suppression totale des GitHub Releases pour les add-ons** — un seul
+> repository statique : `catalog.json` (schema 2) + packages versionnés dans
+> `zailon-addons/packages/`, téléchargés en direct via raw.githubusercontent.com.
+> Plus de release, de tag, de `releases/latest/download`, de resolver de release.
+
+### Changed
+
+- **Modèle de publication** (spec « Simplification totale » §1-7, §46-48) : le
+  catalogue référence désormais un chemin RELATIF versionné (`package`), résolu
+  en `BASE_URL + package` — jamais une URL construite à la volée depuis l'ID.
+  Les champs `release`/`available` et les URLs `releases/...` sont interdits et
+  rejetés par le parseur.
+- **Catalogue schema 2** (`zailon-addons/catalog.json`, source de vérité
+  unique importée par le Core) : `package`, `sha256`, `downloadSize`,
+  `installedSize`, `platforms`, `dependencies`, `updatedAt`. Les entrées sans
+  package (`package: null`) sont « En développement » — aucun bouton
+  Installer, aucune requête 404 (§5, §49).
+- **Build automatique du catalogue** (`scripts/build-official-addons.ts`, §19) :
+  pack déterministe vers `zailon-addons/packages/<dir>/<id>-<version>.zailon-addon`,
+  SHA-256/tailles/version/métadonnées mis à jour automatiquement — plus jamais
+  de valeurs éditées à la main. Frosty Support et Frosty Editor sont committés
+  avec leurs packages réels (version 1.0.0 dans le nom, §16).
+- **Statuts des cartes** (§49) : Disponible / Installé / Mise à jour
+  disponible / En développement / Incompatible / Hors connexion / Erreur.
+  « Non publié » et « Erreur de publication » (concepts liés aux Releases)
+  sont supprimés ; un 404 de téléchargement devient « Package introuvable »
+  (§48).
+- **Documentation développeur** : bouton 📄 vers
+  `zailon-addons/docs/addon-development` dans le même repository (§30).
+
+### Added
+
+- **CI `Validate add-on catalog` renforcée** (§6) : chaque package déclaré doit
+  EXISTER dans le dépôt, son manifest interne doit correspondre (ID + version),
+  son SHA-256 réel et sa taille doivent être exacts, ses dépendances doivent
+  exister — un catalogue cassé fait échouer le pipeline.
+- **Hors connexion** (§22) : cartes des add-ons publiés désactivées avec le
+  statut « Hors connexion » quand seul le catalogue de référence est servi.
+- **`ADDON_REPOSITORY`** centralisé (§3, §25) : owner/repo/branch/préfixe en
+  un seul endroit — basculer vers le dépôt autonome `zailon-addons` sera un
+  changement d'une ligne.
+
 ## [1.86.0] - 2026-08-13
 
 > Add-ons **réellement publiés** : Frosty Support et Frosty Editor passent de

@@ -58,7 +58,7 @@ test('isSafeDownloadUrl: HTTPS sans identifiants', () => {
 
 test('mergeCatalogs: le distant prime, le fallback complète', () => {
   const remote = {
-    schema: 1 as const,
+    schema: 2 as const,
     addons: [
       { ...OFFICIAL_ADDON_CATALOG.addons[0], version: '2.0.0' },
     ],
@@ -112,9 +112,9 @@ test('addonStorageReport: tailles par add-on + cache', () => {
   assert.equal(report.cacheBytes, 2_000_000)
 })
 
-test('describeAddonDownloadError: 404 = Erreur de publication, jamais de retry (spec §20-21, §40)', () => {
+test('describeAddonDownloadError: 404 = Package introuvable, jamais de retry (spec §48)', () => {
   const missing = describeAddonDownloadError('Add-on download failed: 404 Not Found')
-  assert.equal(missing.title, 'Erreur de publication')
+  assert.equal(missing.title, 'Package introuvable')
   assert.equal(missing.retryable, false)
   assert.match(missing.detail || '', /404/)
 })

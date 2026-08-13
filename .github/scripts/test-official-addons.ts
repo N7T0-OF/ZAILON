@@ -1,13 +1,16 @@
 /**
- * Tests des add-ons officiels RÉELS (spec §16, §38, §45, §49).
+ * Tests des add-ons officiels RÉELS (spec « Simplification totale » §6, §16,
+ * §38, §49).
  *
  * — chaque dossier `addons/<id>/` a un manifest valide ;
  * — le pack est DÉTERMINISTE (deux builds = mêmes octets, SHA-256 fiable) ;
  * — l'archive contient manifest.json + module/index.ts ;
- * — le catalogue officiel référence le même SHA-256 + taille que le package
- *   construit (les métadonnées ne peuvent pas diverger de la réalité) ;
- * — `available` reste false tant que la release GitHub n'est pas publiée
- *   (§49 : jamais de bouton Installer sans fichier téléchargeable).
+ * — le catalogue officiel (schema 2) référence le même SHA-256 + taille que
+ *   le package construit (les métadonnées ne peuvent pas diverger de la
+ *   réalité) ;
+ * — le package est VERSIONNÉ dans son nom et servi par raw.githubusercontent
+ *   (repository statique — AUCUNE GitHub Release, spec §1-2) ;
+ * — le package existe réellement dans `zailon-addons/packages/` (§6).
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -17,7 +20,8 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { packAddonFolder } from './addon-cli.ts'
 import { readZipEntryNames } from '../../src/lib/addonZip.ts'
-import { OFFICIAL_ADDON_CATALOG, catalogAddonAvailability, resolveAddonDownloadUrl, validateAddonManifest } from '../../src/lib/addons.ts'
+import { OFFICIAL_ADDON_CATALOG, OFFICIAL_ADDON_REPOSITORY_URL, catalogAddonAvailability, resolveAddonDownloadUrl, validateAddonManifest } from '../../src/lib/addons.ts'
+import { existsSync } from 'node:fs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const addonsRoot = join(root, 'addons')
@@ -51,32 +55,32 @@ test('pack déterministe : deux builds donnent exactement les mêmes octets', ()
   }
 })
 
-test('le catalogue référence le SHA-256 et la taille réels des packages (spec §38)', () => {
+test('le catalogue référence le SHA-256 et la taille réels des packages (spec §6, §38)', () => {
   for (const id of officialIds) {
     const entry = OFFICIAL_ADDON_CATALOG.addons.find(item => item.id === id)
     assert.ok(entry, `${id} dans le catalogue`)
     const packed = packAddonFolder(join(addonsRoot, id))
     const sha = createHash('sha256').update(Buffer.from(packed.bytes as Uint8Array)).digest('hex')
     assert.equal(entry.sha256, sha, `${id} : SHA-256 du catalogue = SHA-256 du package`)
-    assert.equal(entry.size, (packed.bytes as Uint8Array).length, `${id} : taille du catalogue = taille du package`)
-    // Published : la release addons-v1.0.0 existe sur N7T0-OF/ZAILON — URL
-    // explicite (tag + asset), jamais `latest/download` (spec §2-3, §5).
-    assert.equal(entry.available, true, `${id} : available:true — release publiée (§49)`)
-    assert.ok(entry.release, `${id} : release explicite prête`)
+    assert.equal(entry.downloadSize, (packed.bytes as Uint8Array).length, `${id} : taille du catalogue = taille du package`)
+    // Repository statique (spec §1-2, §16) : chemin relatif versionné, fichier
+    // réellement présent dans zailon-addons/packages/, URL raw résolue.
+    assert.ok(entry.package, `${id} : package versionné présent`)
+    assert.ok(entry.package && entry.package.includes(`-v${entry.version}.zailon-addon`), `${id} : version dans le nom du fichier`)
+    const absPath = join(root, 'zailon-addons', entry.package!)
+    assert.ok(existsSync(absPath), `${id} : fichier package présent dans le dépôt`)
     const url = resolveAddonDownloadUrl(entry)
-    assert.ok(url, `${id} : URL résolue depuis release`)
-    assert.ok(url && url.includes('/releases/download/addons-v1.0.0/'), `${id} : URL explicite sur la release addons-v1.0.0`)
-    assert.ok(url && url.includes('N7T0-OF/ZAILON'), `${id} : hébergée sur le dépôt ZAILON`)
+    assert.ok(url && url === `${OFFICIAL_ADDON_REPOSITORY_URL}${entry.package}`, `${id} : URL = BASE_URL + package`)
   }
 })
 
-test('catalogAddonAvailability : les deux add-ons publiés sont installables (spec §13, §25)', () => {
+test('catalogAddonAvailability : les deux add-ons avec package sont installables (spec §5, §49)', () => {
   for (const id of officialIds) {
     const entry = OFFICIAL_ADDON_CATALOG.addons.find(item => item.id === id)
     assert.ok(entry, `${id} dans le catalogue`)
     const availability = catalogAddonAvailability(entry)
     assert.equal(availability.installable, true, `${id} : Installer disponible`)
-    assert.equal(availability.published, true, `${id} : publié`)
+    assert.equal(availability.status, 'available', `${id} : statut Disponible`)
     assert.ok(availability.downloadUrl, `${id} : URL de téléchargement`)
   }
 })
@@ -85,7 +89,7 @@ test('Frosty Editor déclare la dépendance à Frosty Support (spec §31, §34)'
   const editor = OFFICIAL_ADDON_CATALOG.addons.find(item => item.id === 'official.zailon.frosty-editor')
   assert.ok(editor?.dependencies?.includes('official.zailon.frosty'))
   const frosty = OFFICIAL_ADDON_CATALOG.addons.find(item => item.id === 'official.zailon.frosty')
-  assert.equal(frosty?.dependencies?.length, 0, 'Frosty Support n\'a pas de dépendance')
+  assert.ok(!frosty?.dependencies || frosty.dependencies.length === 0, 'Frosty Support n\'a pas de dépendance')
 })
 
 test('aucune URL latest/download dans le catalogue construit (spec §3, §39)', () => {

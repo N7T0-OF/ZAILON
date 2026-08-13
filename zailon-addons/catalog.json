@@ -1,0 +1,291 @@
+{
+  "schema": 2,
+  "catalogSchemaVersion": 2,
+  "updatedAt": "2026-08-13",
+  "addons": [
+    {
+      "id": "official.zailon.frosty",
+      "name": "Frosty Support",
+      "version": "1.0.0",
+      "category": "game-support",
+      "description": "Compatibilité Frosty : détection du runtime officiel, scan des données du jeu, Worker natif isolé et parsing des catalogues .cat pour les jeux Frostbite supportés.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "game.read",
+        "game.files.write",
+        "mods.read",
+        "mods.write",
+        "network",
+        "process.launch",
+        "game.launch"
+      ],
+      "package": "packages/frosty/official.zailon.frosty-v1.0.0.zailon-addon",
+      "sha256": "de58be495c1553e20a55ef9a3731b39da10f4a6fca72c0845199073d4a478cb4",
+      "downloadSize": 7656,
+      "installedSize": 19140,
+      "platforms": [
+        "windows"
+      ],
+      "minAddonApiVersion": "1"
+    },
+    {
+      "id": "official.zailon.frosty-editor",
+      "name": "Frosty Editor",
+      "version": "1.0.0",
+      "category": "modding",
+      "description": "Édition avancée des jeux Frostbite : Asset Browser, éditeur EBX avec validation, Plugin Manager, projets exportables, Bulk Export et build de mods. Nécessite Frosty Support.",
+      "minZailonVersion": "1.79.0",
+      "permissions": [
+        "game.read",
+        "game.files.write",
+        "mods.read",
+        "mods.write",
+        "network",
+        "process.launch",
+        "game.launch",
+        "ui.extend",
+        "filesystem.external"
+      ],
+      "dependencies": [
+        "official.zailon.frosty"
+      ],
+      "package": "packages/frosty-editor/official.zailon.frosty-editor-v1.0.0.zailon-addon",
+      "sha256": "d5b38b5626deca81de6b6c88b13fa0f17b102064696774024836530b76f47f36",
+      "downloadSize": 7313,
+      "installedSize": 18283,
+      "platforms": [
+        "windows"
+      ],
+      "minAddonApiVersion": "1"
+    },
+    {
+      "id": "official.zailon.reshade",
+      "name": "ReShade Manager",
+      "version": "1.0.0",
+      "category": "visual",
+      "description": "Installation et mise à jour de ReShade, presets, shaders et profils par jeu.",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "game.read",
+        "game.files.write",
+        "mods.read",
+        "network",
+        "settings",
+        "ui.extend"
+      ],
+      "package": null
+    },
+    {
+      "id": "official.zailon.discord",
+      "name": "Discord Presence",
+      "version": "1.0.0",
+      "category": "utilities",
+      "description": "Rich Presence Discord pour les jeux et applications actifs.",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "game.read",
+        "process.read",
+        "network",
+        "settings"
+      ],
+      "package": null
+    },
+    {
+      "id": "official.zailon.provider.nexus",
+      "name": "Nexus Provider",
+      "version": "1.0.0",
+      "category": "sources",
+      "description": "Recherche, téléchargement et mises à jour Nexus Mods dans Explorer.",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "network",
+        "provider",
+        "settings"
+      ],
+      "package": null
+    },
+    {
+      "id": "official.zailon.provider.gamebanana",
+      "name": "GameBanana Provider",
+      "version": "1.0.0",
+      "category": "sources",
+      "description": "Catalogue GameBanana dans Explorer.",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "network",
+        "provider"
+      ],
+      "package": null
+    },
+    {
+      "id": "official.zailon.provider.curseforge",
+      "name": "CurseForge Provider",
+      "version": "1.0.0",
+      "category": "sources",
+      "description": "Recherche CurseForge dans Explorer (clé partenaire requise).",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "network",
+        "provider",
+        "settings"
+      ],
+      "package": null
+    },
+    {
+      "id": "official.zailon.game.cyberpunk",
+      "name": "Cyberpunk Advanced",
+      "version": "1.0.0",
+      "category": "game-support",
+      "description": "RED4ext, redscript, TweakXL, ArchiveXL et REDmod pour Cyberpunk 2077.",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "game.read",
+        "game.files.write",
+        "mods.read",
+        "mods.write",
+        "process.read"
+      ],
+      "package": null
+    },
+    {
+      "id": "official.zailon.game.nte",
+      "name": "NTE Support",
+      "version": "1.0.0",
+      "category": "game-support",
+      "description": "Chaîne launcher → UAC → vrai processus NTE + PAK.",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "game.read",
+        "game.launch",
+        "process.read",
+        "mods.read",
+        "mods.write"
+      ],
+      "package": null
+    },
+    {
+      "id": "official.zailon.game.fivem",
+      "name": "FiveM Profiles",
+      "version": "1.0.0",
+      "category": "game-support",
+      "description": "Profils FiveM : roads, visual mods et dossiers spécifiques.",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "game.read",
+        "game.files.write",
+        "mods.read",
+        "mods.write",
+        "settings"
+      ],
+      "package": null
+    },
+    {
+      "id": "official.zailon.importer.mo2",
+      "name": "MO2 Importer",
+      "version": "1.0.0",
+      "category": "utilities",
+      "description": "Migration d’une installation ou de profils MO2 (désinstallable après).",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "game.read",
+        "game.files.read",
+        "mods.read",
+        "mods.write",
+        "profile.write",
+        "filesystem.external"
+      ],
+      "package": null
+    },
+    {
+      "id": "official.zailon.importer.vortex",
+      "name": "Vortex Importer",
+      "version": "1.0.0",
+      "category": "utilities",
+      "description": "Migration d’une installation Vortex (désinstallable après).",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "game.read",
+        "game.files.read",
+        "mods.read",
+        "mods.write",
+        "profile.write",
+        "filesystem.external"
+      ],
+      "package": null
+    },
+    {
+      "id": "official.zailon.importer.frosty",
+      "name": "Frosty Importer",
+      "version": "1.0.0",
+      "category": "utilities",
+      "description": "Importe une installation Frosty existante (profils, mods, ordre).",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "game.read",
+        "game.files.read",
+        "mods.read",
+        "profile.write"
+      ],
+      "dependencies": [
+        "official.zailon.frosty"
+      ],
+      "package": null
+    },
+    {
+      "id": "official.zailon.steam-advanced",
+      "name": "Steam Advanced",
+      "version": "1.0.0",
+      "category": "utilities",
+      "description": "Scan Steam avancé, playtime, artwork et intégration de raccourcis.",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "game.read",
+        "process.read",
+        "network",
+        "game.launch"
+      ],
+      "package": null
+    },
+    {
+      "id": "official.zailon.artwork",
+      "name": "Artwork+",
+      "version": "1.0.0",
+      "category": "appearance",
+      "description": "Fournisseurs d’illustrations supplémentaires (SteamGridDB, IGDB…).",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "network",
+        "settings"
+      ],
+      "package": null
+    },
+    {
+      "id": "official.zailon.themes",
+      "name": "Theme Packs",
+      "version": "1.0.0",
+      "category": "appearance",
+      "description": "Apparences supplémentaires (OLED, Minimal, Console…).",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "ui.extend",
+        "settings"
+      ],
+      "package": null
+    },
+    {
+      "id": "official.zailon.performance",
+      "name": "Performance+",
+      "version": "1.0.0",
+      "category": "utilities",
+      "description": "Profils CPU/GPU/FPS avancés par jeu.",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "game.read",
+        "process.read",
+        "process.launch",
+        "settings"
+      ],
+      "package": null
+    }
+  ]
+}

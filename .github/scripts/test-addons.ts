@@ -27,7 +27,6 @@ import {
   formatAddonSize,
   hasRealAddonHash,
   isAddonPermission,
-  isExplicitReleaseUrl,
   isValidAddonId,
   parseAddonCatalog,
   planAddonInstall,
@@ -104,10 +103,10 @@ test('parseAddonCatalog: valide le seed officiel et les entrées propres', () =>
 
 test('parseAddonCatalog: rejette les entrées invalides', () => {
   const bad = parseAddonCatalog({
-    schema: 1,
+    schema: 2,
     addons: [
-      { id: 'BAD ID', name: 'x', version: '1.0.0', category: 'utilities', size: 1, download: 'u', sha256: 'h', minZailonVersion: '1.0.0', permissions: ['game.read'] },
-      { id: 'ok.entry', name: 'ok', version: '1.0.0', category: 'utilities', size: 1, download: 'u', sha256: 'h', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok' },
+      { id: 'BAD ID', name: 'x', version: '1.0.0', category: 'utilities', package: null, minZailonVersion: '1.0.0', permissions: ['game.read'] },
+      { id: 'ok.entry', name: 'ok', version: '1.0.0', category: 'utilities', package: null, minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok' },
     ],
   })
   assert.equal(bad.ok, true, 'au moins une entrée valide reste importée')
@@ -203,74 +202,63 @@ test('estimateInstalledSize + formatAddonSize', () => {
   assert.match(formatAddonSize(512), /o/)
 })
 
-test('catalogue officiel : seuls les packages réellement publiés sont disponibles (spec §13, §25, §49)', () => {
+test('catalogue officiel : schema 2, seuls les packages construits sont disponibles (spec §4-5, §49)', () => {
   assert.ok(OFFICIAL_ADDON_CATALOG.addons.length >= 15)
+  assert.equal(OFFICIAL_ADDON_CATALOG.schema, 2)
   for (const entry of OFFICIAL_ADDON_CATALOG.addons) {
     const serialized = JSON.stringify(entry)
-    assert.ok(!serialized.includes('/releases/latest/download/'), `${entry.id} ne doit pas référencer latest/download (spec §3)`)
-    if (entry.available === true) {
-      // Un add-on « disponible » DOIT avoir une release explicite + SHA réel.
-      assert.ok(entry.release, `${entry.id} disponible → release explicite`)
-      assert.match(entry.sha256 || '', /^[0-9a-f]{64}$/, `${entry.id} disponible → SHA-256 réel`)
+    assert.ok(!serialized.includes('/releases/'), `${entry.id} ne doit référencer aucune URL de release (spec §1)`)
+    if (entry.package) {
+      // Un add-on avec package DOIT avoir un SHA-256 réel et une taille.
+      assert.match(entry.sha256 || '', /^[0-9a-f]{64}$/, `${entry.id} package → SHA-256 réel`)
+      assert.ok((entry.downloadSize || 0) > 0, `${entry.id} package → taille positive`)
     }
   }
-  // Exactement les deux add-ons Frosty sont publiés aujourd'hui ; les 15
-  // autres restent « Non publié » (fiche au catalogue, aucun package).
-  const published = OFFICIAL_ADDON_CATALOG.addons.filter(entry => entry.available === true)
-  assert.equal(published.length, 2, 'seuls Frosty Support + Frosty Editor sont publiés')
+  // Exactement les deux add-ons Frosty ont un package construit ; les 15
+  // autres sont en développement (package null).
+  const published = OFFICIAL_ADDON_CATALOG.addons.filter(entry => entry.package)
+  assert.equal(published.length, 2, 'seuls Frosty Support + Frosty Editor ont un package')
   assert.deepEqual(published.map(entry => entry.id).sort(), ['official.zailon.frosty', 'official.zailon.frosty-editor'])
 })
 
-test('isExplicitReleaseUrl : tag explicite oui, latest/non-GitHub non (spec §3, §39)', () => {
-  assert.equal(isExplicitReleaseUrl('https://github.com/N7T0-OF/zailon-addons/releases/download/frosty-v1.0.0/official.zailon.frosty-v1.0.0.zailon-addon'), true)
-  assert.equal(isExplicitReleaseUrl('https://github.com/N7T0-OF/zailon-addons/releases/latest/download/zailon.frosty.zailon-addon'), false)
-  assert.equal(isExplicitReleaseUrl('https://example.com/frosty.zailon-addon'), false)
-  assert.equal(isExplicitReleaseUrl('https://github.com/x/y/releases/download/tag/'), false)
-})
-
-test('resolveAddonDownloadUrl : depuis release, jamais dérivée de l\'ID (spec §2-5)', () => {
+test('resolveAddonDownloadUrl : BASE_URL + package, jamais dérivée de l\'ID ni latest (spec §1-2)', () => {
   const entry: AddonCatalogEntry = {
-    id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', size: 10, sha256: 'catalog',
-    minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'x', official: true, available: true,
-    release: { repository: 'N7T0-OF/zailon-addons', tag: 'frosty-v1.0.0', asset: 'official.zailon.frosty-v1.0.0.zailon-addon' },
+    id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', sha256: 'a'.repeat(64),
+    downloadSize: 10, minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'x', official: true,
+    package: 'packages/frosty/official.zailon.frosty-1.0.0.zailon-addon',
   }
-  assert.equal(resolveAddonDownloadUrl(entry), 'https://github.com/N7T0-OF/zailon-addons/releases/download/frosty-v1.0.0/official.zailon.frosty-v1.0.0.zailon-addon')
-  const legacy: AddonCatalogEntry = { ...entry, release: undefined, download: 'https://github.com/N7T0-OF/zailon-addons/releases/download/v1/x.zailon-addon' }
-  assert.equal(resolveAddonDownloadUrl(legacy), legacy.download)
-  const latest: AddonCatalogEntry = { ...entry, release: undefined, download: 'https://github.com/N7T0-OF/zailon-addons/releases/latest/download/x.zailon-addon' }
-  assert.equal(resolveAddonDownloadUrl(latest), undefined, 'latest/download jamais acceptée')
-  assert.equal(resolveAddonDownloadUrl({ ...entry, release: undefined }), undefined, 'sans métadonnées : aucune URL inventée')
+  assert.equal(resolveAddonDownloadUrl(entry), 'https://raw.githubusercontent.com/N7T0-OF/ZAILON/main/zailon-addons/packages/frosty/official.zailon.frosty-1.0.0.zailon-addon')
+  const dev: AddonCatalogEntry = { ...entry, package: null, download: 'https://example.com/frosty.zailon-addon' }
+  assert.equal(resolveAddonDownloadUrl(dev), dev.download)
+  const latest: AddonCatalogEntry = { ...entry, package: null, download: 'https://github.com/N7T0-OF/ZAILON/releases/latest/download/x.zailon-addon' }
+  assert.equal(resolveAddonDownloadUrl(latest), undefined, 'releases/latest jamais acceptée')
+  assert.equal(resolveAddonDownloadUrl({ ...entry, package: null, download: undefined }), undefined, 'sans package : aucune URL inventée')
 })
 
-test('catalogAddonAvailability : Disponible / Non publié / Erreur de publication (spec §13, §16-17, §20-21, §25)', () => {
+test('catalogAddonAvailability : Disponible / En développement / Erreur (spec §5, §49)', () => {
   const base: AddonCatalogEntry = {
-    id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', size: 10, sha256: 'catalog',
-    minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'x', official: true,
+    id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', sha256: 'a'.repeat(64),
+    downloadSize: 10, minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'x', official: true,
+    package: 'packages/frosty/official.zailon.frosty-1.0.0.zailon-addon',
   }
-  // Non publié : fiche au catalogue, aucun package — UN SEUL statut, jamais
-  // « En développement + Indisponible » (spec §15-16).
-  const planned = catalogAddonAvailability({ ...base, available: false, release: { repository: 'a/b', tag: 'v1', asset: 'x.zailon-addon' } })
+  // En développement : fiche au catalogue, aucun package — UN SEUL statut,
+  // jamais « Non publié + Indisponible » (spec §5, §49).
+  const planned = catalogAddonAvailability({ ...base, package: null })
   assert.equal(planned.installable, false)
-  assert.equal(planned.published, false)
-  assert.match(planned.reason || '', /Non publié/)
-  assert.doesNotMatch(planned.reason || '', /Indisponible/)
-  // Erreur de publication : le catalogue marque publié mais aucune release
-  // référencée (spec §20) — pas « Non publié ».
-  const missingRelease = catalogAddonAvailability(base)
-  assert.equal(missingRelease.installable, false)
-  assert.equal(missingRelease.published, true)
-  assert.match(missingRelease.reason || '', /Erreur de publication/)
-  // Release présente mais SHA officiel encore 'catalog' → Erreur de publication.
-  const withRelease = { ...base, available: true, release: { repository: 'a/b', tag: 'v1', asset: 'x.zailon-addon' } }
-  assert.equal(catalogAddonAvailability(withRelease).installable, false)
-  assert.equal(catalogAddonAvailability(withRelease).published, true)
-  assert.match(catalogAddonAvailability(withRelease).reason || '', /SHA-256/)
-  // Release + SHA réel → installable, URL résolue.
-  const ready = catalogAddonAvailability({ ...withRelease, sha256: 'a'.repeat(64) })
+  assert.equal(planned.status, 'development')
+  assert.match(planned.reason || '', /En développement/)
+  // Package déclaré mais SHA invalide → Erreur (catalogue incohérent).
+  const badHash = catalogAddonAvailability({ ...base, sha256: 'catalog' })
+  assert.equal(badHash.installable, false)
+  assert.equal(badHash.status, 'error')
+  assert.match(badHash.reason || '', /SHA-256/)
+  // Package + SHA réel → installable, URL résolue (repository statique).
+  const ready = catalogAddonAvailability(base)
   assert.equal(ready.installable, true)
-  assert.equal(ready.downloadUrl, 'https://github.com/a/b/releases/download/v1/x.zailon-addon')
+  assert.equal(ready.status, 'available')
+  assert.ok(ready.downloadUrl && ready.downloadUrl.includes('/zailon-addons/packages/'))
   // Communautaire : installable sans SHA réel (permissions affichées).
-  const community = catalogAddonAvailability({ ...withRelease, official: false })
+  const community = catalogAddonAvailability({ ...base, official: false, sha256: 'catalog' })
   assert.equal(community.installable, true)
 })
 
@@ -280,23 +268,23 @@ test('hasRealAddonHash : placeholder \'catalog\' ≠ hash réel (spec §20)', ()
   assert.equal(hasRealAddonHash('a'.repeat(64)), true)
 })
 
-test('parseAddonCatalog : accepte release/available, rejette release invalide (spec §2-4)', () => {
+test('parseAddonCatalog : schema 2, package chemin relatif ou null (spec §2, §4-5)', () => {
   const good = parseAddonCatalog({
-    schema: 1,
+    schema: 2,
     addons: [
-      { id: 'official.zailon.discord', name: 'Discord', version: '1.0.0', category: 'utilities', size: 1, sha256: 'catalog', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok', available: false },
-      { id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', size: 1, sha256: 'a'.repeat(64), minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok', available: true, release: { repository: 'N7T0-OF/zailon-addons', tag: 'frosty-v1.0.0', asset: 'official.zailon.frosty-v1.0.0.zailon-addon' } },
+      { id: 'official.zailon.discord', name: 'Discord', version: '1.0.0', category: 'utilities', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok', package: null },
+      { id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok', package: 'packages/frosty/official.zailon.frosty-1.0.0.zailon-addon', sha256: 'a'.repeat(64), downloadSize: 100 },
     ],
   })
   assert.equal(good.ok, true)
   assert.equal(good.catalog!.addons.length, 2)
-  assert.equal(good.catalog!.addons[0].available, false)
-  assert.equal(good.catalog!.addons[1].release?.asset, 'official.zailon.frosty-v1.0.0.zailon-addon')
-  assert.equal(good.catalog!.addons[1].download, undefined)
+  assert.equal(good.catalog!.addons[0].package, null)
+  assert.equal(good.catalog!.addons[1].package, 'packages/frosty/official.zailon.frosty-1.0.0.zailon-addon')
+  assert.equal(good.catalog!.addons[1].downloadSize, 100)
 
-  const badRelease = parseAddonCatalog({
-    schema: 1,
-    addons: [{ id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', size: 1, sha256: 'catalog', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok', release: { repository: 'a/b', tag: 'latest', asset: 'x.exe' } }],
+  const badPackage = parseAddonCatalog({
+    schema: 2,
+    addons: [{ id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok', package: 'packages/x.zailon-addon', sha256: 'catalog', downloadSize: 100 }],
   })
-  assert.equal(badRelease.ok, false, 'release tag latest / asset non .zailon-addon → entrée rejetée')
+  assert.equal(badPackage.ok, false, 'package déclaré sans SHA-256 réel → entrée rejetée (jamais 404)')
 })

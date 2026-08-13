@@ -30,7 +30,10 @@ import { ZailonSwitch } from '../UI/ZailonSwitch'
 const ADDON_DOCS_URL = 'https://github.com/N7T0-OF/ZAILON/tree/main/docs/addon-development'
 // v2 : le cache v1 contenait des URLs `latest/download` fragiles (spec §3, §33)
 // — invalidation forcée au changement de schéma du catalogue.
-const CATALOG_CACHE_KEY = 'zailon:addon-catalog:v2'
+// v3 : invalide le cache v2 (URLs `latest/download` et `available:false` de
+// la 1.83.0/1.84.0) — sans bump, les utilisateurs verraient un catalogue
+// périmé « Non publié » malgré les releases publiées (spec §33).
+const CATALOG_CACHE_KEY = 'zailon:addon-catalog:v3'
 
 const FILTERS: Array<{ id: 'all' | 'installed' | AddonCatalog['addons'][number]['category']; label: string }> = [
   { id: 'all', label: 'Tous' },
@@ -93,10 +96,13 @@ export function AddonsView() {
   const [importError, setImportError] = useState<string>()
   const [removing, setRemoving] = useState<CatalogRow>()
 
-  const syncCatalog = async () => {
+  // Ouverture d'Add-ons : cache frais (6 h) sinon réseau (spec §45 — jamais
+  // au boot, uniquement à l'ouverture). Le bouton « Actualiser » force la
+  // revalidation (§34).
+  const syncCatalog = async (force = false) => {
     setSyncing(true)
     try {
-      const result = await fetchAddonCatalog({ fallback: OFFICIAL_ADDON_CATALOG, fetchJson: fetchCatalogJson, readCache: readCatalogCache, writeCache: writeCatalogCache })
+      const result = await fetchAddonCatalog({ fallback: OFFICIAL_ADDON_CATALOG, fetchJson: fetchCatalogJson, readCache: readCatalogCache, writeCache: writeCatalogCache, force })
       setCatalog(result.catalog)
       setCatalogState(result)
     } finally {
@@ -163,7 +169,7 @@ export function AddonsView() {
       </div>
       <div className="flex items-center gap-2">
         <button type="button" onClick={() => void native.openExternalUrl(ADDON_DOCS_URL)} title="Créer un add-on — documentation développeur" aria-label="Créer un add-on" className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.09] text-white/62 hover:bg-white/[0.05] hover:text-white"><BookOpen size={14} /></button>
-        <button type="button" onClick={() => void syncCatalog()} disabled={syncing} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-40"><RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />Catalogue</button>
+        <button type="button" onClick={() => void syncCatalog(true)} disabled={syncing} title="Actualiser le catalogue officiel" className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-40"><RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />Catalogue</button>
         <button type="button" onClick={startImport} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold"><Import size={13} />Importer un add-on</button>
       </div>
     </header>

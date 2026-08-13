@@ -154,6 +154,9 @@ export interface AddonCatalogEntry {
 export interface AddonCatalog {
   schema: 1
   addons: AddonCatalogEntry[]
+  /** Horodatage de mise en cache (enveloppe de cache, spec §35) — absent du
+   * catalogue parse ; utilisé pour la revalidation TTL (spec §34, §45). */
+  fetchedAt?: number
 }
 
 // ─────────────────────────────── IDs immuables ──────────────────────────────

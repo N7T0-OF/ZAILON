@@ -106,8 +106,12 @@ export function addonInstallReducer(state: AddonInstallRunState, event: AddonIns
 
 // ─────────────────────────────── Catalogue distant ──────────────────────────
 
-/** Source officielle du catalogue (spec §5, §9) — jamais de mirror tiers. */
-export const OFFICIAL_CATALOG_URL = 'https://raw.githubusercontent.com/N7T0-OF/zailon-addons/main/catalog.json'
+/** Source officielle du catalogue (spec §5, §9) — jamais de mirror tiers.
+ * Le catalogue vit dans le dépôt ZAILON lui-même (le dépôt séparé
+ * `zailon-addons` n'existe pas) : la source distante est le fichier JSON
+ * committé, la source embarquée (`OFFICIAL_ADDON_CATALOG`) sert de fallback
+ * hors ligne (spec §6). */
+export const OFFICIAL_CATALOG_URL = 'https://raw.githubusercontent.com/N7T0-OF/ZAILON/main/src/lib/official-addon-catalog.json'
 
 const OFFICIAL_CATALOG_HOSTS = ['raw.githubusercontent.com', 'github.com']
 
@@ -164,12 +168,23 @@ export async function fetchAddonCatalog(options: {
   fetchJson: (url: string) => Promise<unknown>
   readCache: () => AddonCatalog | undefined
   writeCache: (catalog: AddonCatalog) => void
+  /** Âge max du cache (ms) avant revalidation réseau (défaut : 6 h). */
+  maxAgeMs?: number
+  /** Ignore le cache même s'il est frais (bouton « Actualiser », spec §34). */
+  force?: boolean
 }): Promise<CatalogFetchResult> {
   const url = options.url || OFFICIAL_CATALOG_URL
+  const maxAgeMs = options.maxAgeMs ?? 6 * 60 * 60 * 1000
 
   if (isOfficialCatalogUrl(url)) {
     const cached = options.readCache()
-    if (cached && cached.schema === 1) return { catalog: cached, source: 'cache', errors: [] }
+    // Cache frais → réponse instantanée ; cache périmé → revalidation réseau.
+    // `force` (Actualiser, spec §34) court-circuite toujours le cache — sinon
+    // une ancienne version (ex. `available:false`) ne serait jamais rafraîchie.
+    if (cached && cached.schema === 1 && !options.force) {
+      const age = Date.now() - (cached.fetchedAt ?? 0)
+      if (age < maxAgeMs) return { catalog: cached, source: 'cache', errors: [], fetchedAt: cached.fetchedAt }
+    }
   }
 
   if (isOfficialCatalogUrl(url)) {
@@ -178,8 +193,9 @@ export async function fetchAddonCatalog(options: {
       const parsed = parseAddonCatalog(json)
       if (parsed.ok && parsed.catalog) {
         const merged = mergeCatalogs(parsed.catalog, options.fallback)
-        options.writeCache(merged)
-        return { catalog: merged, source: 'remote', errors: parsed.errors, fetchedAt: Date.now() }
+        const stamped = { ...merged, fetchedAt: Date.now() }
+        options.writeCache(stamped)
+        return { catalog: stamped, source: 'remote', errors: parsed.errors, fetchedAt: stamped.fetchedAt }
       }
       return { catalog: options.fallback, source: 'fallback', errors: parsed.errors }
     } catch (reason) {
@@ -219,8 +235,8 @@ export interface AddonDownloadErrorInfo {
 export function describeAddonDownloadError(raw: string): AddonDownloadErrorInfo {
   if (/404|not found/i.test(raw)) {
     return {
-      title: 'Add-on indisponible',
-      detail: 'Le package de cette version n’est pas publié (404 — asset introuvable). Le catalogue référence une release sans asset correspondant.',
+      title: 'Erreur de publication',
+      detail: 'Le catalogue marque cet add-on publié mais le package est introuvable (404 — asset absent de la release référencée). Actualisez le catalogue ou importez le fichier manuellement.',
       retryable: false,
     }
   }

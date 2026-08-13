@@ -203,13 +203,22 @@ test('estimateInstalledSize + formatAddonSize', () => {
   assert.match(formatAddonSize(512), /o/)
 })
 
-test('catalogue officiel : aucun package fictif — tout est planifié (spec §13, §25, §49)', () => {
+test('catalogue officiel : seuls les packages réellement publiés sont disponibles (spec §13, §25, §49)', () => {
   assert.ok(OFFICIAL_ADDON_CATALOG.addons.length >= 15)
   for (const entry of OFFICIAL_ADDON_CATALOG.addons) {
-    assert.equal(entry.available, false, `${entry.id} doit être disponible:false (pas de package publié)`)
     const serialized = JSON.stringify(entry)
     assert.ok(!serialized.includes('/releases/latest/download/'), `${entry.id} ne doit pas référencer latest/download (spec §3)`)
+    if (entry.available === true) {
+      // Un add-on « disponible » DOIT avoir une release explicite + SHA réel.
+      assert.ok(entry.release, `${entry.id} disponible → release explicite`)
+      assert.match(entry.sha256 || '', /^[0-9a-f]{64}$/, `${entry.id} disponible → SHA-256 réel`)
+    }
   }
+  // Exactement les deux add-ons Frosty sont publiés aujourd'hui ; les 15
+  // autres restent « Non publié » (fiche au catalogue, aucun package).
+  const published = OFFICIAL_ADDON_CATALOG.addons.filter(entry => entry.available === true)
+  assert.equal(published.length, 2, 'seuls Frosty Support + Frosty Editor sont publiés')
+  assert.deepEqual(published.map(entry => entry.id).sort(), ['official.zailon.frosty', 'official.zailon.frosty-editor'])
 })
 
 test('isExplicitReleaseUrl : tag explicite oui, latest/non-GitHub non (spec §3, §39)', () => {

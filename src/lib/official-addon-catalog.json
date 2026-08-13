@@ -13,10 +13,10 @@
       "permissions": ["game.read", "game.files.write", "mods.read", "mods.write", "network", "process.launch", "game.launch"],
       "description": "Compatibilité Frosty : détection du runtime officiel, scan des données du jeu, Worker natif isolé et parsing des catalogues .cat pour les jeux Frostbite supportés.",
       "dependencies": [],
-      "available": false,
+      "available": true,
       "release": {
-        "repository": "N7T0-OF/zailon-addons",
-        "tag": "frosty-v1.0.0",
+        "repository": "N7T0-OF/ZAILON",
+        "tag": "addons-v1.0.0",
         "asset": "official.zailon.frosty-v1.0.0.zailon-addon"
       }
     },
@@ -31,10 +31,10 @@
       "permissions": ["game.read", "game.files.write", "mods.read", "mods.write", "network", "process.launch", "game.launch", "ui.extend", "filesystem.external"],
       "description": "Édition avancée des jeux Frostbite : Asset Browser, éditeur EBX avec validation, Plugin Manager, projets exportables, Bulk Export et build de mods (nécessite Frosty Support).",
       "dependencies": ["official.zailon.frosty"],
-      "available": false,
+      "available": true,
       "release": {
-        "repository": "N7T0-OF/zailon-addons",
-        "tag": "frosty-editor-v1.0.0",
+        "repository": "N7T0-OF/ZAILON",
+        "tag": "addons-v1.0.0",
         "asset": "official.zailon.frosty-editor-v1.0.0.zailon-addon"
       }
     },

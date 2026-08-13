@@ -18,21 +18,27 @@ réelle.
    dépendances, worker, désinstallation. Le chemin de référence
    (`G:\2_Logiciel\CLAUDE CODE\EXEMPLE\Frosty Editor` par ex.) sert de source,
    jamais d'installation directe (§17).
-6. **Tag + release GitHub** — tag explicite (jamais `latest`) :
+6. **Tag + release GitHub** — les packages officiels sont publiés dans une
+   release dédiée du **dépôt ZAILON lui-même** (`N7T0-OF/ZAILON`, tag explicite
+   `addons-vX.Y.Z` — jamais `latest`) via le workflow
+   `.github/workflows/release-addons.yml` :
    ```text
-   frosty-v1.0.0
+   addons-v1.0.0
    ```
-   Asset :
-   ```text
-   official.zailon.frosty-v1.0.0.zailon-addon
-   ```
+   Le tag `addons-v*` déclenche ce workflow (build déterministe → validation
+   catalogue → release avec les `.zailon-addon` + `checksums-sha256.txt`).
+   Il ne déclenche PAS `release.yml` (installateurs, qui n'écoute que `v*`).
+   Une seule release héberge tous les add-ons officiels d'une même version.
 7. **Hash + signature** — SHA-256 du fichier + signature Ed25519 du hash
    (spec §14, §20). Pour un add-on officiel, l'installation exige un SHA-256
    réel et une signature (§14, §52).
-8. **Publier le catalogue** — mettre à jour `catalog.json` (repository officiel
-   `N7T0-OF/zailon-addons`) : `available: true` + `release` (repository, tag,
-   asset) + `sha256` réel. La CI `Validate add-on catalog` de ZAILON refuse tout
-   catalogue où un add-on `available` n'a pas ces métadonnées (§37).
+8. **Publier le catalogue** — mettre à jour
+   `src/lib/official-addon-catalog.json` (source de vérité unique, spec §4,
+   §38) : `available: true` + `release` (repository `N7T0-OF/ZAILON`, tag
+   `addons-vX.Y.Z`, asset exact) + `sha256` réel (celui du pack déterministe,
+   vérifié par `test-official-addons.ts`). La CI `Validate add-on catalog` de
+   ZAILON refuse tout catalogue où un add-on `available` n'a pas ces
+   métadonnées (§37).
 
 ## 2. Format d'entrée du catalogue
 
@@ -49,8 +55,8 @@ réelle.
   "description": "…",
   "available": true,
   "release": {
-    "repository": "N7T0-OF/zailon-addons",
-    "tag": "frosty-v1.0.0",
+    "repository": "N7T0-OF/ZAILON",
+    "tag": "addons-v1.0.0",
     "asset": "official.zailon.frosty-v1.0.0.zailon-addon"
   },
   "signature": "<base64>",
@@ -71,8 +77,9 @@ Règles :
 
 | Statut                 | Condition                                                         |
 | ---------------------- | ----------------------------------------------------------------- |
-| `En développement`     | `available: false` — bouton Installer désactivé, tooltip (§13)    |
+| `Non publié`           | `available: false` — fiche au catalogue, aucun package (§16-17)   |
 | `Disponible`           | `available: true` + release explicite + SHA-256 réel (officiel)   |
+| `Erreur de publication`| `available: true` sans release/SHA réels — catalogue incohérent (§20-21) |
 | `Installé`             | add-on présent dans le store                                      |
 | `Màj disponible`       | version catalogue > version installée                             |
 

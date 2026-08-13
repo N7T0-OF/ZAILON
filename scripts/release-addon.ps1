@@ -4,7 +4,7 @@
 # affiche le bloc de métadonnées à copier dans `catalog.json`.
 #
 # Usage :
-#   .\scripts\release-addon.ps1 -AddonDir .\addon-template -Id official.zailon.frosty -Version 1.0.0 [-Repository N7T0-OF/zailon-addons]
+#   .\scripts\release-addon.ps1 -AddonDir .\addon-template -Id official.zailon.frosty -Version 1.0.0 [-Repository N7T0-OF/ZAILON]
 #
 # Puis : tester localement (Add-ons > Importer un add-on), tag + release
 # GitHub avec l'asset, signer, et passer l'entrée du catalogue à available:true.
@@ -13,7 +13,7 @@ param(
     [Parameter(Mandatory = $true)][string]$AddonDir,
     [Parameter(Mandatory = $true)][string]$Id,
     [Parameter(Mandatory = $true)][string]$Version,
-    [string]$Repository = "N7T0-OF/zailon-addons"
+    [string]$Repository = "N7T0-OF/ZAILON"
 )
 
 $ErrorActionPreference = 'Stop'

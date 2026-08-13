@@ -60,7 +60,7 @@ for (const id of directories) {
   console.log(`✓ ${id} v${manifest.version} — ${a.length} o — SHA-256 ${sha256.slice(0, 16)}…`)
   console.log(`  → ${fileName}`)
   console.log('  Bloc catalogue :')
-  console.log(`    "release": { "repository": "N7T0-OF/zailon-addons", "tag": "${id.split('.').pop()}-v${manifest.version}", "asset": "${fileName}" },`)
+  console.log(`    "release": { "repository": "N7T0-OF/ZAILON", "tag": "addons-v${manifest.version}", "asset": "${fileName}" },`)
   console.log(`    "sha256": "${sha256}", "size": ${a.length},`)
   console.log('')
 }

@@ -69,7 +69,7 @@ test('mergeCatalogs: le distant prime, le fallback complète', () => {
   assert.equal(updated?.version, '2.0.0', 'la version distante prime')
 })
 
-test('fetchAddonCatalog: cache d’abord, réseau ensuite, fallback hors ligne', async () => {
+test('fetchAddonCatalog: cache frais d’abord, réseau sinon, fallback hors ligne', async () => {
   const fallback = OFFICIAL_ADDON_CATALOG
   let fetched = 0
   const options = {
@@ -83,9 +83,22 @@ test('fetchAddonCatalog: cache d’abord, réseau ensuite, fallback hors ligne',
   assert.equal(first.source, 'remote')
   assert.equal(fetched, 1)
 
-  const cached = await fetchAddonCatalog({ ...options, readCache: () => fallback })
+  // Cache frais (fetchedAt récent) → réponse instantanée, aucun re-fetch.
+  const freshCache = { ...fallback, fetchedAt: Date.now() }
+  const cached = await fetchAddonCatalog({ ...options, readCache: () => freshCache })
   assert.equal(cached.source, 'cache')
-  assert.equal(fetched, 1, 'pas de re-fetch quand le cache existe')
+  assert.equal(fetched, 1, 'pas de re-fetch quand le cache est frais')
+
+  // Cache périmé (> 6 h) → revalidation réseau (spec §34, §45).
+  const staleCache = { ...fallback, fetchedAt: Date.now() - 7 * 60 * 60 * 1000 }
+  const revalidated = await fetchAddonCatalog({ ...options, readCache: () => staleCache })
+  assert.equal(revalidated.source, 'remote')
+  assert.equal(fetched, 2, 'cache périmé → re-fetch')
+
+  // force (bouton « Actualiser », spec §34) → re-fetch même cache frais.
+  const forced = await fetchAddonCatalog({ ...options, readCache: () => freshCache, force: true })
+  assert.equal(forced.source, 'remote')
+  assert.equal(fetched, 3, 'force → re-fetch')
 
   const offline = await fetchAddonCatalog({ ...options, readCache: () => undefined, fetchJson: async () => { throw new Error('offline') } })
   assert.equal(offline.source, 'fallback')
@@ -99,9 +112,9 @@ test('addonStorageReport: tailles par add-on + cache', () => {
   assert.equal(report.cacheBytes, 2_000_000)
 })
 
-test('describeAddonDownloadError: 404 = package absent, jamais de retry (spec §40)', () => {
+test('describeAddonDownloadError: 404 = Erreur de publication, jamais de retry (spec §20-21, §40)', () => {
   const missing = describeAddonDownloadError('Add-on download failed: 404 Not Found')
-  assert.equal(missing.title, 'Add-on indisponible')
+  assert.equal(missing.title, 'Erreur de publication')
   assert.equal(missing.retryable, false)
   assert.match(missing.detail || '', /404/)
 })

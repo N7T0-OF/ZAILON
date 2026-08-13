@@ -1,0 +1,71 @@
+name: Publish official add-ons
+
+# Publie les packages `.zailon-addon` officiels dans une release dédiée du
+# dépôt ZAILON (tag explicite `addons-vX.Y.Z`, jamais `latest/download`).
+# Le catalogue (`src/lib/official-addon-catalog.json`) référence ces tags et
+# assets exacts — voir docs/addon-release-process.md (spec §9-11, §37-38).
+#
+# Déclencheurs :
+#   - push d'un tag `addons-v*` (ex. `addons-v1.0.0`) ;
+#   - workflow_dispatch (re-publication de la release courante).
+#
+# Le tag `addons-v*` ne déclenche PAS `release.yml` (Build desktop installers,
+# qui n'écoute que `v*`) — les deux pipelines restent indépendants.
+
+on:
+  push:
+    tags: ['addons-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    name: Build and publish official add-ons
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          # Node 24 : stripping de types natif — les scripts de build add-ons
+          # sont en TS pur (imports explicites `.ts`).
+          node-version: 24
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Build official add-ons (deterministic pack)
+        run: node scripts/build-official-addons.ts
+
+      - name: Validate catalog against built packages
+        run: node .github/scripts/validate-addon-catalog.mjs
+
+      - name: Compute SHA-256 checksums
+        run: |
+          cd dist
+          sha256sum *.zailon-addon > checksums-sha256.txt
+          cat checksums-sha256.txt
+
+      - name: Publish GitHub release with add-on packages
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ZAILON Add-ons ${{ github.ref_name }}
+          body: |
+            Packages officiels `.zailon-addon` — pack déterministe, SHA-256
+            vérifié par le catalogue (installations via Add-ons → Installer,
+            jamais d'URL `latest/download` construite à la volée).
+
+            - `official.zailon.frosty` — Frosty Support (capacité `frosty.backend`)
+            - `official.zailon.frosty-editor` — Frosty Editor (capacité `frosty.editor`)
+
+            Le catalogue passe chaque entrée à `available: true` uniquement
+            lorsque cette release existe réellement.
+          draft: false
+          prerelease: false
+          files: |
+            dist/*.zailon-addon
+            dist/checksums-sha256.txt

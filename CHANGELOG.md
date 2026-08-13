@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.86.0] - 2026-08-13
+
+> Add-ons **réellement publiés** : Frosty Support et Frosty Editor passent de
+> « Non publié » à **« Disponible »** — les packages `.zailon-addon` sont
+> hébergés dans une release dédiée du dépôt ZAILON (`addons-v1.0.0`, tag
+> explicite) et le catalogue pointe vers ces assets réels.
+
+### Added
+
+- **Workflow `.github/workflows/release-addons.yml`** (spec §9-11, §37-38) :
+  déclenché par un tag `addons-v*` (jamais par `v*`, donc indépendant des
+  installateurs) — `npm ci` → build déterministe (`build-official-addons.ts`)
+  → validation du catalogue → publication d'une release dédiée avec les
+  `.zailon-addon` + `checksums-sha256.txt`. Le dépôt `N7T0-OF/zailon-addons`
+  n'existant pas (404), les packages sont hébergés sur `N7T0-OF/ZAILON` —
+  structure équivalente documentée dans `docs/addon-release-process.md`.
+- **Revalidation du catalogue** (spec §34, §45) : `fetchAddonCatalog` accepte
+  un TTL (6 h) et `force` — le bouton « Actualiser » re-fetch toujours ; un
+  cache périmé est revalidé au lieu d'être servi indéfiniment. Clé de cache
+  bumpée en `v3` : invalide le cache `v2` (URLs `latest/download` et
+  `available:false`) qui aurait affiché « Non publié » malgré les releases
+  publiées (spec §33).
+- **`fetchedAt`** sur le catalogue en cache (enveloppe de cache, spec §35).
+
+### Changed
+
+- **Catalogue** : `official.zailon.frosty` et `official.zailon.frosty-editor`
+  passent à `available: true` avec `release.repository` `N7T0-OF/ZAILON` et
+  `release.tag` `addons-v1.0.0` (asset exact, SHA-256 réel vérifié par
+  `test-official-addons.ts`). Les 15 autres entrées restent « Non publié ».
+- **Erreur 404 au téléchargement** : titre « Erreur de publication » (jamais
+  « Add-on indisponible ») — un `available: true` dont l'asset est absent de
+  la release référencée est une incohérence de publication, pas un add-on
+  planifié (spec §20-21).
+- **`OFFICIAL_CATALOG_URL`** pointe désormais sur le catalogue committé du
+  dépôt ZAILON (`raw.githubusercontent.com/N7T0-OF/ZAILON/main/...`) au lieu
+  du dépôt inexistant.
+
 ## [1.85.0] - 2026-08-13
 
 > Nouveautés restaurées après chaque mise à jour, audio de l'Accueil

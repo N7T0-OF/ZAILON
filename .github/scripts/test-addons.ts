@@ -33,6 +33,7 @@ import {
   planAddonUninstall,
   recordAddonCrash,
   reenableAddon,
+  OFFICIAL_ADDON_REPOSITORY_URL,
   resolveAddonDependencies,
   resolveAddonDownloadUrl,
   shouldEnterSafeMode,
@@ -227,7 +228,8 @@ test('resolveAddonDownloadUrl : BASE_URL + package, jamais dérivée de l\'ID ni
     downloadSize: 10, minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'x', official: true,
     package: 'packages/frosty/official.zailon.frosty-1.0.0.zailon-addon',
   }
-  assert.equal(resolveAddonDownloadUrl(entry), 'https://raw.githubusercontent.com/N7T0-OF/ZAILON/main/zailon-addons/packages/frosty/official.zailon.frosty-1.0.0.zailon-addon')
+  assert.equal(resolveAddonDownloadUrl(entry), `${OFFICIAL_ADDON_REPOSITORY_URL}packages/frosty/official.zailon.frosty-1.0.0.zailon-addon`)
+  assert.ok(resolveAddonDownloadUrl(entry)!.includes('/zailon-addons/packages/'), 'URL construite depuis BASE_URL + package')
   const dev: AddonCatalogEntry = { ...entry, package: null, download: 'https://example.com/frosty.zailon-addon' }
   assert.equal(resolveAddonDownloadUrl(dev), dev.download)
   const latest: AddonCatalogEntry = { ...entry, package: null, download: 'https://github.com/N7T0-OF/ZAILON/releases/latest/download/x.zailon-addon' }

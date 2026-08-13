@@ -604,7 +604,10 @@ export const ADDON_REPOSITORY = {
   // exactement comme le dépôt autonome cible. Quand `N7T0-OF/zailon-addons`
   // sera créé, il suffit de changer ce nom — rien d'autre.
   repo: 'ZAILON',
-  branch: 'main',
+  // Branche STABLE dédiée (spec §39) : les URLs raw doivent servir le contenu
+  // publié immédiatement — `main` peut être en retard (branche d'intégration).
+  // Après chaque release d'add-on : `git push origin <HEAD>:zailon-addons-stable`.
+  branch: 'zailon-addons-stable',
   /** Préfixe des chemins du catalogue dans le dépôt (racine du repository add-ons). */
   prefix: 'zailon-addons/',
 } as const

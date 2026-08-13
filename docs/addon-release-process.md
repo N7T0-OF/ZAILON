@@ -52,6 +52,11 @@ problème de cache CDN, rollback naturel vers l'ancienne version (§16-18).
    chaque package déclaré existe réellement, que son manifest interne
    correspond (ID + version), que le SHA-256 et la taille sont exacts, que les
    dépendances existent (§6) — un catalogue cassé fait échouer le pipeline.
+5. **Branche stable** — pousser le contenu publié sur la branche dédiée que
+   ZAILON utilise pour les téléchargements (spec §39) :
+   `git push origin <HEAD>:zailon-addons-stable`. `main` peut être en retard
+   (branche d'intégration) — la branche `zailon-addons-stable` garantit que
+   les URLs raw servent la dernière version publiée immédiatement.
 
 ## 3. Entrée de catalogue (schema 2)
 
@@ -85,7 +90,7 @@ problème de cache CDN, rollback naturel vers l'ancienne version (§16-18).
 `AddonRepositoryClient` (spec §2-3, §39) :
 
 ```text
-BASE_URL = raw.githubusercontent.com/N7T0-OF/ZAILON/main/zailon-addons/
+BASE_URL = raw.githubusercontent.com/N7T0-OF/ZAILON/zailon-addons-stable/zailon-addons/
 catalogUrl  = BASE_URL + catalog.json
 packageUrl  = BASE_URL + entry.package
 docsUrl     = github.com/N7T0-OF/ZAILON/tree/main/zailon-addons/docs/addon-development

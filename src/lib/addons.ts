@@ -652,15 +652,21 @@ export interface AddonAvailability {
  * Un add-on planifié n'a JAMAIS de bouton Installer.
  */
 export function catalogAddonAvailability(entry: AddonCatalogEntry): AddonAvailability {
+  // « Non publié » : la fiche existe dans le catalogue mais aucun package
+  // téléchargeable n'a encore été publié (spec §16-17). Jamais de doublon
+  // « En développement + Indisponible ».
   if (entry.available === false) {
-    return { installable: false, published: false, reason: 'En développement — le package n’a pas encore été publié.' }
+    return { installable: false, published: false, reason: 'Non publié — cette version possède une fiche dans le catalogue, mais aucun package téléchargeable n’a encore été publié.' }
   }
   const downloadUrl = resolveAddonDownloadUrl(entry)
+  // « Erreur de publication » : le catalogue marque l'add-on publié mais les
+  // métadonnées de release manquent — incohérence du catalogue, jamais
+  // confondue avec un add-on simplement non publié (spec §20-21).
   if (!downloadUrl) {
-    return { installable: false, published: false, reason: 'Aucune release publiée pour cette version.' }
+    return { installable: false, published: true, reason: 'Erreur de publication — le catalogue marque cet add-on publié mais aucune release explicite n’est définie.' }
   }
   if (entry.official && !hasRealAddonHash(entry.sha256)) {
-    return { installable: false, published: true, reason: 'Le SHA-256 officiel du package n’est pas encore publié.' }
+    return { installable: false, published: true, reason: 'Erreur de publication — le SHA-256 officiel du package n’est pas encore publié.' }
   }
   return { installable: true, published: true, downloadUrl }
 }

@@ -132,3 +132,17 @@ bloc « Fond actuel : YouTube ✓ » + « Retirer la vidéo » dans Personnalise
   `setBackgroundSessionVolume`), jamais seulement l'intention persistée.
   `sessionCut` (point ambre) est désormais fiable : session muette alors que
   l'intention persistée est active.
+
+## Position du contrôle audio 1.85.0 (spec §8-13, §27-28)
+
+- **Le contrôle appartient au Hero, pas aux panneaux** : plus de position
+  `absolute bottom-3` sur toute la page (qui chevauchait la rangée Favoris).
+  `HeroAudioControl` est rendu dans le flux, dans un bloc `mt-auto` aligné à
+  droite, TOUJOURS au-dessus des panneaux quelle que soit la hauteur du Hero.
+- **Expansion vers la gauche (§12)** : la capsule s'étend à gauche de l'icône
+  (`flex-row-reverse`) — elle ne descend jamais sur Favoris.
+- **Repli (§13)** : 400 ms après sortie de toute la zone (icône + slider +
+  capsule), repli immédiat si la fenêtre perd le focus. Stable face au
+  parallaxe (§27) : le contrôle reste dans la couche UI, jamais transformé.
+- **Accent (§28)** : le slider utilise `accent-[var(--zailon-accent)]` — suit
+  le système global d'accent, persisté après redémarrage.

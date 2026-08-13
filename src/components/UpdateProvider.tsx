@@ -80,6 +80,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const showReleaseNotesOnUpdate = useStore(state => state.showReleaseNotesOnUpdate)
   const setLastSeenReleaseNotes = useStore(state => state.setLastSeenReleaseNotes)
   const setShowReleaseNotesOnUpdate = useStore(state => state.setShowReleaseNotesOnUpdate)
+  const installedAddons = useStore(state => state.addons)
   const [status, setStatus] = useState<UpdateStatus>('idle')
   const [update, setUpdate] = useState<UpdateMetadata>()
   const [progress, setProgress] = useState<UpdateProgress>(emptyProgress)
@@ -236,10 +237,11 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       {children}
 
       {/* Notes de mise à jour : modale scrollable — header et footer fixes, le
-          corps défile. La modale ne dépasse jamais la fenêtre. */}
+          corps défile. La modale ne dépasse jamais la fenêtre. §23-24 : le
+          changelog sépare ZAILON Core des add-ons réellement installés. */}
       {notesOpen && (
         <ScrollableModal
-          title={`ZAILON ${appVersion}`}
+          title={`ZAILON Core ${appVersion}`}
           subtitle={lastInstalledUpdate?.date ? `Mise à jour du ${new Date(lastInstalledUpdate.date).toLocaleDateString()}` : 'Cette version apporte des changements importants.'}
           footer={
             <>
@@ -259,6 +261,19 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
           }
           onClose={closeReleaseNotes}
         >
+          {installedAddons.length > 0 && (
+            <div className="mb-3 rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">Add-ons installés</p>
+              <ul className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+                {installedAddons.map(addon => (
+                  <li key={addon.manifest.id} className="flex items-center gap-1.5 text-[11px] text-white/62">
+                    <span className="h-1 w-1 rounded-full bg-gold/70" />
+                    {addon.manifest.name} <span className="font-mono text-[10px] text-white/30">v{addon.manifest.version}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {notesFailed ? (
             <div className="flex flex-col items-start gap-3 py-2">
               <p className="text-xs leading-relaxed text-white/55">Impossible d’afficher les notes de cette version.</p>

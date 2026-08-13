@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.85.0] - 2026-08-13
+
+> Nouveautés restaurées + audio Accueil repositionné + statuts Add-ons unifiés.
+>
+> **Nouveautés après mise à jour** : la micro-fenêtre revenait plus après une
+> mise à jour — la cause racine était `APP_VERSION` figé à 1.65.0 dans le Core
+> (le release bumpait package.json mais pas cette constante). Corrigé : la
+> version est désormais lue depuis package.json (source de vérité), la popup
+> réapparaît à chaque vraie nouvelle version (une seule fois, `lastSeenReleaseNotesVersion`),
+> sépare **ZAILON Core** des **Add-ons installés** (§23-24), reste scrollable
+> avec header/footer fixes, et les notes sont conservées dans un **historique
+> permanent** (Paramètres > À propos > Historique des versions, §7). Badge
+> « Nouveau » temporaire sur Add-ons après une mise à jour (§22).
+>
+> **Audio de l'Accueil** : le contrôle n'était plus « trop bas » — il chevauchait
+> la rangée des panneaux (Favoris) en position absolue. Corrigé : rangée alignée
+> à droite **dans le flux**, toujours au-dessus de Favoris quelle que soit la
+> hauteur du Hero, capsule qui s'étend vers la gauche (§12), repli 400 ms et
+> fallback blur conservés (§13), stable face au parallaxe (§27).
+>
+> **Statuts Add-ons** : suppression du doublon « En développement + Indisponible »
+> — un seul statut principal par carte (**Disponible / Installé / Màj disponible /
+> Non publié / Erreur de publication / Désactivé**). « Non publié ⓘ » remplace
+> « En développement » ; un `available: true` sans release/SHA réels devient
+> « Erreur de publication » (§20-21) ; l'explication passe dans la bulle (§17).
+
 ## [1.84.0] - 2026-08-13
 
 > Add-ons — **premiers packages officiels RÉELS** : Frosty Support et Frosty

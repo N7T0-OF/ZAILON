@@ -13,6 +13,9 @@ import { ZailonSwitch } from '../UI/ZailonSwitch'
 import { AccordionSection } from '../UI/AccordionSection'
 import { artworkProvidersWithState } from '../../lib/artworkRegistry'
 import { addonCapabilities, hasCapability, type ZailonCapability } from '../../lib/addonGating'
+import { ScrollableModal } from '../UI/ScrollableModal'
+import { SafeMarkdown } from '../UI/SafeMarkdown'
+import { parseMarkdown, summarizeBlocks } from '../../lib/safeMarkdown'
 
 function formatDate(value?: number | string) {
   if (!value) return 'Never'
@@ -171,6 +174,9 @@ export function SettingsView() {
   // que si l'add-on correspondant est installé et activé. Sans l'add-on, ni
   // Discord, ni les clés providers, ni les sources d'illustrations n'apparaissent.
   const addonList = useStore(state => state.addons)
+  const releaseNotesHistory = useStore(state => state.releaseNotesHistory)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyVersion, setHistoryVersion] = useState<string>(appVersion)
   const capabilities = useMemo(() => addonCapabilities(addonList), [addonList])
   const hasCap = (capability: ZailonCapability) => hasCapability(capabilities, capability)
   const hasProviderCaps = (['provider.nexus', 'provider.gamebanana', 'provider.curseforge'] as ZailonCapability[]).some(capability => hasCapability(capabilities, capability))
@@ -432,9 +438,70 @@ export function SettingsView() {
       <AccordionSection id="library-stats" title="Library statistics" subtitle="Jeux, mods, temps de jeu" icon=<Database size={13} /> open={openSection === 'library-stats'} onToggle={() => toggleSection('library-stats')}><div className="grid grid-cols-3 gap-2 text-center"><Stat label="Games" value={String(games.length)} /><Stat label="Mods" value={String(games.reduce((sum, game) => sum + game.installedMods.length, 0))} /><Stat label="Playtime" value={formatTime(totalPlaytime)} /></div></AccordionSection>
       <AccordionSection id="storage" title="Stockage" subtitle="Espace, nettoyage" icon=<HardDrive size={13} /> open={openSection === 'storage'} onToggle={() => toggleSection('storage')}><div className="grid grid-cols-2 gap-2 xl:grid-cols-4"><Stat label="Mods (paquets ZAILON)" value={formatBytes(games.reduce((sum, game) => sum + game.installedMods.reduce((total, mod) => total + (mod.sizeBytes || 0), 0), 0))} /><Stat label="Tâches conservées" value={String(backgroundTasks.length)} /><Stat label="Points de restauration" value={String(restorePoints.length)} /><Stat label="Cache / temporaire" value="Non mesuré" /></div><div className="mt-3 flex flex-wrap items-center gap-2"><button type="button" onClick={() => { if (window.confirm('Nettoyer l’historique des tâches terminées et en erreur ? Les mods installés et les tâches en cours ne sont pas touchés.')) clearBackgroundTasks() }} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/64 hover:bg-white/[0.05]"><Trash2 size={12} />Nettoyer l’historique des tâches</button></div>{!reduceExplanations && <p className="mt-3 text-[11px] leading-relaxed text-white/32">Tailles réelles calculées depuis les paquets locaux. Cache, miniatures et fichiers temporaires : mesurables en Phase 3 — rien n’est supprimé sans confirmation, et jamais un fichier utilisé par un profil, un rollback ou une Collection.</p>}</AccordionSection>
 
-      <AccordionSection id="about" title="ZAILON · À propos" subtitle="Version, visite guidée, liens" icon=<Info size={13} /> open={openSection === 'about'} onToggle={() => toggleSection('about')}><p className="text-xs text-white/55">Universal Mod Launcher · v{appVersion}</p><p className="mt-1 text-[11px] text-white/30">Runtime: {native.isDesktop() ? 'Application native Tauri' : 'aperçu web (opérations natives désactivées)'}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => native.isDesktop() && void native.openUpdateLog()} disabled={!native.isDesktop()} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-30"><FileClock size={12} />Historique des versions</button><button type="button" onClick={() => { restartTour(); setView('home') }} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05]"><Compass size={12} />Revoir la visite guidée</button><button type="button" onClick={() => { if (window.confirm('Réinitialiser les conseils et la visite guidée ?')) resetTour() }} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05]"><RefreshCw size={12} />Réinitialiser les conseils</button></div><label className="mt-3 flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/55"><span className="flex items-center gap-2"><Heart size={14} className="text-rose-200/70" />Afficher « Me soutenir » dans la barre latérale</span><ZailonSwitch checked={showSupportButton} onChange={setShowSupportButton} /></label><div className="mt-3 flex flex-wrap gap-2">{CREATOR_LINKS.map(link => <button key={link.id} type="button" onClick={() => void native.openExternalUrl(link.url)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05]"><ExternalLink size={12} />{link.label}</button>)}</div><p className="mt-3 text-[11px] text-white/28">Les liens ouvrent des sites HTTPS autorisés. ZAILON ne collecte aucune donnée de paiement ni télémétrie associée.</p></AccordionSection>
+      <AccordionSection id="about" title="ZAILON · À propos" subtitle="Version, visite guidée, liens" icon=<Info size={13} /> open={openSection === 'about'} onToggle={() => toggleSection('about')}><p className="text-xs text-white/55">Universal Mod Launcher · v{appVersion}</p><p className="mt-1 text-[11px] text-white/30">Runtime: {native.isDesktop() ? 'Application native Tauri' : 'aperçu web (opérations natives désactivées)'}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => { setHistoryVersion(appVersion); setHistoryOpen(true) }} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05]"><FileClock size={12} />Historique des versions</button><button type="button" onClick={() => { restartTour(); setView('home') }} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05]"><Compass size={12} />Revoir la visite guidée</button><button type="button" onClick={() => { if (window.confirm('Réinitialiser les conseils et la visite guidée ?')) resetTour() }} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05]"><RefreshCw size={12} />Réinitialiser les conseils</button></div><label className="mt-3 flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/55"><span className="flex items-center gap-2"><Heart size={14} className="text-rose-200/70" />Afficher « Me soutenir » dans la barre latérale</span><ZailonSwitch checked={showSupportButton} onChange={setShowSupportButton} /></label><div className="mt-3 flex flex-wrap gap-2">{CREATOR_LINKS.map(link => <button key={link.id} type="button" onClick={() => void native.openExternalUrl(link.url)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05]"><ExternalLink size={12} />{link.label}</button>)}</div><p className="mt-3 text-[11px] text-white/28">Les liens ouvrent des sites HTTPS autorisés. ZAILON ne collecte aucune donnée de paiement ni télémétrie associée.</p></AccordionSection>
+
+      {historyOpen && <ReleaseNotesHistoryModal
+        versions={[{ version: appVersion, notes: releaseNotesHistory.find(item => item.version === appVersion)?.notes, date: releaseNotesHistory.find(item => item.version === appVersion)?.date }, ...releaseNotesHistory.filter(item => item.version !== appVersion)]}
+        selectedVersion={historyVersion}
+        onSelectVersion={setHistoryVersion}
+        onClose={() => setHistoryOpen(false)}
+      />}
     </div>
   </div>
+}
+
+/** Modale « Historique des versions » (spec §7) : les notes de chaque version
+ * restent consultables après fermeture de la popup de mise à jour. Scrollable,
+ * header + footer fixes, jamais de blocage du launcher. */
+function ReleaseNotesHistoryModal({ versions, selectedVersion, onSelectVersion, onClose }: {
+  versions: Array<{ version: string; notes?: string; date?: string }>
+  selectedVersion: string
+  onSelectVersion: (version: string) => void
+  onClose: () => void
+}) {
+  const entry = versions.find(item => item.version === selectedVersion)
+  const notes = entry?.notes ?? ''
+  const parsed = useMemo(() => {
+    try {
+      return parseMarkdown(notes)
+    } catch {
+      return []
+    }
+  }, [notes])
+  const notesFailed = notes.trim() !== '' && parsed.length === 0
+  const summary = summarizeBlocks(parsed, 40)
+  return (
+    <ScrollableModal
+      title={`Historique des versions — ZAILON`}
+      subtitle="Notes de mise à jour, consultables à tout moment"
+      footer={
+        <>
+          <a href="https://github.com/N7T0-OF/ZAILON/releases" onClick={event => { event.preventDefault(); void native.openExternalUrl('https://github.com/N7T0-OF/ZAILON/releases') }} className="flex items-center gap-1.5 rounded-lg border border-white/[0.12] px-3 py-2 text-[11px] font-semibold text-white/70 hover:bg-white/[0.06]"><ExternalLink size={12} />Toutes les notes sur GitHub</a>
+          <button type="button" onClick={onClose} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90">Fermer</button>
+        </>
+      }
+      onClose={onClose}
+    >
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        {versions.slice(0, 24).map(item => (
+          <button key={item.version} type="button" onClick={() => onSelectVersion(item.version)} className={`rounded-lg border px-2.5 py-1.5 font-mono text-[11px] transition-colors ${item.version === selectedVersion ? 'border-gold/40 bg-gold/10 text-gold' : 'border-white/[0.08] text-white/50 hover:bg-white/[0.04] hover:text-white/75'}`}>{item.version === appVersion ? `${item.version} · actuelle` : item.version}</button>
+        ))}
+      </div>
+      {notesFailed ? (
+        <div className="flex flex-col items-start gap-3 py-2">
+          <p className="text-xs leading-relaxed text-white/55">Les notes détaillées de la version {selectedVersion} sont indisponibles localement.</p>
+          <button type="button" onClick={() => void native.openExternalUrl('https://github.com/N7T0-OF/ZAILON/releases')} className="flex items-center gap-1.5 rounded-lg border border-white/[0.12] px-3 py-2 text-[11px] font-semibold text-white/70 hover:bg-white/[0.06]"><FileText size={12} />Voir les notes sur GitHub</button>
+        </div>
+      ) : summary.truncated ? (
+        <>
+          <SafeMarkdown blocks={summary.blocks} />
+          <p className="mt-2 border-t border-white/[0.06] pt-2 text-[10px] uppercase tracking-widest text-white/30">↓ Faire défiler pour la suite</p>
+        </>
+      ) : (
+        <SafeMarkdown text={notes} />
+      )}
+    </ScrollableModal>
+  )
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {

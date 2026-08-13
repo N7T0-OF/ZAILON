@@ -171,14 +171,6 @@ export function HomeView() {
         overlay={<div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(7,9,9,0.82)_0%,rgba(7,9,9,0.55)_42%,rgba(7,9,9,0.18)_68%,rgba(7,9,9,0.30)_100%),linear-gradient(0deg,rgba(9,11,11,0.78)_0%,rgba(9,11,11,0.45)_22%,rgba(9,11,11,0.12)_55%,rgba(9,11,11,0.18)_100%)]" />}
       />
 
-      <HeroAudioControl
-        muted={heroMuted}
-        volume={Math.round((sessionAudio.available ? sessionAudio.volume : heroAudio.volume) * 100)}
-        sessionCut={sessionCut}
-        onToggle={() => { const next = !heroMuted; setBackgroundSessionMuted(next); setHeroMedia({ mutedOverride: next }) }}
-        onVolume={value => { const next = value / 100; setBackgroundSessionVolume(next); setHeroMedia({ volumeOverride: next, mutedOverride: value === 0 }) }}
-      />
-
       <div className="relative flex h-full min-h-[520px] flex-col px-[clamp(1.25rem,4vw,4.5rem)] pb-4 pt-5">
         <header className="flex items-start justify-between gap-4">
           <div className="pt-1">
@@ -282,7 +274,19 @@ export function HomeView() {
           </div>}
         </div>
 
-        <div className="mt-auto grid gap-2 pt-8 min-[800px]:grid-cols-[1.08fr_0.92fr_1.14fr]">
+        {/* Contrôle audio du Hero (spec §8-13, §27) : dans le flux, aligné à
+            droite, TOUJOURS au-dessus des panneaux (Favoris) — jamais en
+            position absolue sur toute la page. Le Hero bouge / la vidéo peut
+            défiler derrière, le contrôle reste stable et cliquable. */}
+        <div className="mt-auto">
+          <HeroAudioControl
+            muted={heroMuted}
+            volume={Math.round((sessionAudio.available ? sessionAudio.volume : heroAudio.volume) * 100)}
+            sessionCut={sessionCut}
+            onToggle={() => { const next = !heroMuted; setBackgroundSessionMuted(next); setHeroMedia({ mutedOverride: next }) }}
+            onVolume={value => { const next = value / 100; setBackgroundSessionVolume(next); setHeroMedia({ volumeOverride: next, mutedOverride: value === 0 }) }}
+          />
+        <div className="grid gap-2 pt-8 min-[800px]:grid-cols-[1.08fr_0.92fr_1.14fr]">
           <DashboardPanel eyebrow="Activité des profils" footer="Voir les profils" onFooter={() => { setGamesBrowsing(false); setView('games') }}>
             <div className="flex h-[72px] items-end gap-3">
               <div className="flex h-10 w-10 flex-none items-center justify-center overflow-hidden rounded-full border border-white/[0.10] bg-white/[0.035]">
@@ -317,6 +321,7 @@ export function HomeView() {
                 </div>}
             <p className="mt-1 truncate text-[11px] text-white/26">{favoriteGames.length > 0 ? `${favoriteGames.length} favori${favoriteGames.length !== 1 ? 's' : ''} · clic droit sur un jeu pour en ajouter` : `${visibleGames.length} élément${visibleGames.length !== 1 ? 's' : ''} dans ZAILON`}</p>
           </DashboardPanel>
+          </div>
         </div>
       </div>
     </section>
@@ -395,10 +400,12 @@ function QuickGame({ game, summary, active, onSelect, favorite }: { game: Game; 
   </button>
 }
 
-/** Contrôle audio discret du Hero (spec correctifs §1-5, §47-49) : icône
- * toujours visible, capsule flottante absolute au survol (Favoris jamais
- * déplacé), repli ~400 ms après sortie de TOUTE la zone (icône + slider +
- * fond de la capsule), repli immédiat si la fenêtre perd le focus. */
+/** Contrôle audio discret du Hero (spec correctifs §1-5, §8-13, §27-28) :
+ * icône toujours visible, rangée alignée à droite DANS LE FLUX — positionnée
+ * au-dessus de la section Favoris, jamais en absolu sur toute la page. La
+ * capsule s'étend vers la GAUCHE de l'icône (spec §12) ; repli ~400 ms après
+ * sortie de TOUTE la zone (icône + slider + fond de la capsule), repli
+ * immédiat si la fenêtre perd le focus. */
 function HeroAudioControl({ muted, volume, onToggle, onVolume, sessionCut = false }: {
   muted: boolean
   volume: number
@@ -424,34 +431,36 @@ function HeroAudioControl({ muted, volume, onToggle, onVolume, sessionCut = fals
   }, [])
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 50 ? Volume1 : Volume2
   return (
-    <div
-      className="absolute bottom-3 right-4 z-30 flex items-center gap-1.5 rounded-full border border-white/[0.12] bg-black/40 p-1.5 backdrop-blur-md transition-[width,opacity] duration-150"
-      onMouseEnter={() => { window.clearTimeout(collapseTimer.current); setExpanded(true) }}
-      onMouseLeave={scheduleCollapse}
-      onFocus={() => { window.clearTimeout(collapseTimer.current); setExpanded(true) }}
-      onBlur={scheduleCollapse}
-    >
-      <button
-        type="button"
-        onClick={() => { onToggle(); setExpanded(true); window.clearTimeout(collapseTimer.current) }}
-        title={muted ? (sessionCut ? 'Son coupé pour cette session — activer le son du fond' : 'Activer le son du fond') : 'Couper le son du fond'}
-        aria-label={muted ? 'Activer le son du fond' : 'Couper le son du fond'}
-        className="relative flex h-6 w-6 items-center justify-center rounded-full text-white/70 hover:bg-white/[0.08] hover:text-white"
+    <div className="relative z-30 mb-1.5 flex items-center justify-end">
+      <div
+        className="flex flex-row-reverse items-center gap-1.5 rounded-full border border-white/[0.12] bg-black/40 p-1.5 backdrop-blur-md transition-[width,opacity] duration-150"
+        onMouseEnter={() => { window.clearTimeout(collapseTimer.current); setExpanded(true) }}
+        onMouseLeave={scheduleCollapse}
+        onFocus={() => { window.clearTimeout(collapseTimer.current); setExpanded(true) }}
+        onBlur={scheduleCollapse}
       >
-        <VolumeIcon size={13} />
-        {sessionCut && <span className="pointer-events-none absolute right-0 top-0 h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.8)]" />}
-      </button>
-      {expanded && (
-        <input
-          type="range"
-          min={0}
-          max={100}
-          value={volume}
-          onChange={event => onVolume(Number(event.target.value))}
-          aria-label="Volume du fond"
-          className="h-1 w-24 accent-[var(--zailon-accent)]"
-        />
-      )}
+        <button
+          type="button"
+          onClick={() => { onToggle(); setExpanded(true); window.clearTimeout(collapseTimer.current) }}
+          title={muted ? (sessionCut ? 'Son coupé pour cette session — activer le son du fond' : 'Activer le son du fond') : 'Couper le son du fond'}
+          aria-label={muted ? 'Activer le son du fond' : 'Couper le son du fond'}
+          className="relative flex h-6 w-6 items-center justify-center rounded-full text-white/70 hover:bg-white/[0.08] hover:text-white"
+        >
+          <VolumeIcon size={13} />
+          {sessionCut && <span className="pointer-events-none absolute right-0 top-0 h-1.5 w-1.5 rounded-full bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.8)]" />}
+        </button>
+        {expanded && (
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={volume}
+            onChange={event => onVolume(Number(event.target.value))}
+            aria-label="Volume du fond"
+            className="h-1 w-24 accent-[var(--zailon-accent)]"
+          />
+        )}
+      </div>
     </div>
   )
 }

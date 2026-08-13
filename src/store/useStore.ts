@@ -21,6 +21,11 @@ import { buildDiscordActivity, DISCORD_APPLICATION_ID, DISCORD_PRIORITY_DEBOUNCE
 import { modMatchesRemote, remoteIdentityFromCatalog, remoteModKey } from '../lib/remoteInstallState'
 import { resolveDiscordAsset } from '../lib/discordAssets'
 import { DEFAULT_BACKGROUND_MEDIA_SETTINGS, type BackgroundMediaSettings } from '../lib/backgroundMedia'
+// Source de vérité de la version : package.json est bumpé à CHAQUE release
+// (même commit que tauri.conf.json). Un constant hardcodée ici n'était JAMAIS
+// mise à jour — `appVersion` restait à 1.65.0 et la fenêtre « Nouveautés » ne
+// pouvait plus s'afficher (installedVersion ≠ appVersion après mise à jour).
+import { version as PACKAGE_VERSION } from '../../package.json' with { type: 'json' }
 
 // Sauvegarde debounced des réglages continus (spec §17) : le color picker
 // d'accent n'écrit pas sur disque à chaque pixel — coalescence 250 ms, flush
@@ -35,7 +40,7 @@ let discordPublishedGameId: string | undefined
 let discordSwitchTimer: ReturnType<typeof setTimeout> | undefined
 import { evaluateSessionEnd } from '../lib/sessionEnd'
 
-const APP_VERSION = '1.65.0'
+const APP_VERSION = PACKAGE_VERSION
 const loaderTypes = new Set<LoaderType>(['GIMI', 'ZZMI', 'SRMI', 'WWMI', 'EFMI', 'UE5', 'BepInEx', 'ASI', 'CLEO', 'REF', 'MelonLoader', 'DLL', 'Archive', 'Folder', 'Manual'])
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 /** Instant du démarrage du store : sert à distinguer « Jeu détecté par ZAILON »
@@ -379,6 +384,12 @@ export interface Store {
   lastInstalledUpdate?: { version: string; notes?: string; date?: string; previousVersion?: string; installedAt: number }
   lastSeenReleaseNotesVersion?: string
   showReleaseNotesOnUpdate: boolean
+  /** Historique permanent des notes de version (spec §7) : conservé après
+   * fermeture de la popup, consultable dans Paramètres > À propos. */
+  releaseNotesHistory: Array<{ version: string; notes?: string; date?: string }>
+  /** Badge « Nouveau » temporaire sur Add-ons après une mise à jour (§22) :
+   * posé par prepareInstalledUpdate, effacé à la première visite d'Add-ons. */
+  addonsNudgePending: boolean
   isLaunching: boolean
   launchProgress?: DeploymentProgressEvent
   isPlaying: boolean
@@ -454,6 +465,7 @@ export interface Store {
   setAddonEnabled: (id: string, enabled: boolean) => void
   importAddonManifest: (manifest: ZailonAddonManifest) => { ok: boolean; error?: string }
   setView: (view: ViewType) => void
+  clearAddonsNudge: () => void
   setActiveGameTab: (tab: GameTab) => void
   setSelectedGame: (gameId: string) => void
   setSelectedProfile: (profileId: string) => Promise<void>
@@ -545,6 +557,7 @@ export interface Store {
   recordUpdateCheck: (version?: string, error?: string) => void
   prepareInstalledUpdate: (update: { version: string; notes?: string; date?: string }) => void
   dismissInstalledUpdate: () => void
+  recordReleaseNotes: (entry: { version: string; notes?: string; date?: string }) => void
   setLastSeenReleaseNotes: (version: string) => void
   setShowReleaseNotesOnUpdate: (enabled: boolean) => void
   launchSelectedGame: (options?: { withoutMods?: boolean }) => Promise<void>
@@ -845,10 +858,13 @@ export const useStore = create<Store>()(persist((set, get) => ({
   showSupportButton: true,
   autoAttachGames: [],
   showReleaseNotesOnUpdate: true,
+  releaseNotesHistory: [],
+  addonsNudgePending: false,
   accentColor: '#f3faf8',
   bulkHistory: [],
   notificationHistory: [],
-  setView: currentView => set({ currentView }),
+  setView: currentView => set(state => ({ currentView, addonsNudgePending: currentView === 'addons' ? false : state.addonsNudgePending })),
+  clearAddonsNudge: () => set({ addonsNudgePending: false }),
   setActiveGameTab: activeGameTab => set({ activeGameTab, currentView: 'games' }),
   // Add-ons (spec §1-83) : l'installation remplace proprement une version
   // existante (même id) en conservant l'état et les données utilisateur.
@@ -1590,8 +1606,16 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setAutoInstallModUpdates: autoInstallModUpdates => set(state => ({ autoInstallModUpdates, autoDownloadModUpdates: autoInstallModUpdates ? true : state.autoDownloadModUpdates })),
   setUpdateChannel: updateChannel => set({ updateChannel }),
   recordUpdateCheck: (lastUpdateVersion, lastUpdateError) => set({ lastUpdateCheck: Date.now(), lastUpdateVersion, lastUpdateError }),
-  prepareInstalledUpdate: update => set({ lastInstalledUpdate: { ...update, previousVersion: APP_VERSION, installedAt: Date.now() } }),
+  prepareInstalledUpdate: update => {
+    const entry = { version: update.version, notes: update.notes, date: update.date }
+    set(state => ({
+      lastInstalledUpdate: { ...update, previousVersion: APP_VERSION, installedAt: Date.now() },
+      releaseNotesHistory: [{ ...entry }, ...state.releaseNotesHistory.filter(item => item.version !== entry.version)].slice(0, 24),
+      addonsNudgePending: true,
+    }))
+  },
   dismissInstalledUpdate: () => set({ lastInstalledUpdate: undefined }),
+  recordReleaseNotes: entry => set(state => ({ releaseNotesHistory: [{ ...entry }, ...state.releaseNotesHistory.filter(item => item.version !== entry.version)].slice(0, 24) })),
   setLastSeenReleaseNotes: lastSeenReleaseNotesVersion => set({ lastSeenReleaseNotesVersion }),
   setShowReleaseNotesOnUpdate: showReleaseNotesOnUpdate => set({ showReleaseNotesOnUpdate }),
   launchSelectedGame: async (options?: { withoutMods?: boolean }) => {
@@ -2902,6 +2926,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
     lastInstalledUpdate: state.lastInstalledUpdate,
     lastSeenReleaseNotesVersion: state.lastSeenReleaseNotesVersion,
     showReleaseNotesOnUpdate: state.showReleaseNotesOnUpdate,
+    releaseNotesHistory: state.releaseNotesHistory,
+    addonsNudgePending: state.addonsNudgePending,
     backgroundMediaSettings: state.backgroundMediaSettings,
     explorePlatform: state.explorePlatform,
     exploreGameId: state.exploreGameId,

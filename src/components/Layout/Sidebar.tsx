@@ -24,6 +24,7 @@ export function Sidebar() {
   const showSupportButton = useStore(state => state.showSupportButton)
   const language = useStore(state => state.language)
   const addons = useStore(state => state.addons)
+  const addonsNudgePending = useStore(state => state.addonsNudgePending)
   const [supportOpen, setSupportOpen] = useState(false)
   // Gating réel : « Création Frosty » n'existe que si Frosty Support ET Frosty
   // Editor sont installés et activés (spec Add-ons §10-24, Frosty Editor §1-4).
@@ -36,7 +37,7 @@ export function Sidebar() {
     </button>
 
     <nav className="flex w-full flex-col items-center gap-2" aria-label="Navigation principale">
-      {NAV.map(item => (item.id === 'frosty' && !showFrosty ? null : <NavButton key={item.id} item={item} active={currentView === item.id} onClick={() => {
+      {NAV.map(item => (item.id === 'frosty' && !showFrosty ? null : <NavButton key={item.id} item={item} active={currentView === item.id} badge={item.id === 'addons' && addonsNudgePending ? 'Nouveau' : undefined} onClick={() => {
         // Clic « Bibliothèque » → toujours la vitrine (grille plein écran).
         if (item.id === 'games') setGamesBrowsing(true)
         setView(item.id)
@@ -50,7 +51,7 @@ export function Sidebar() {
   </aside>{supportOpen && <SupportModal onClose={() => setSupportOpen(false)} />}</>
 }
 
-function NavButton({ item, active, onClick }: { item: { id: ViewType; icon: LucideIcon; label: string }; active: boolean; onClick: () => void }) {
+function NavButton({ item, active, badge, onClick }: { item: { id: ViewType; icon: LucideIcon; label: string }; active: boolean; badge?: string; onClick: () => void }) {
   const Icon = item.icon
   return <button
     type="button"
@@ -61,5 +62,6 @@ function NavButton({ item, active, onClick }: { item: { id: ViewType; icon: Luci
     className={`relative flex h-8 w-8 items-center justify-center rounded-full transition-all ${active ? 'bg-[var(--zailon-accent)] text-[var(--zailon-accent-text)] shadow-[0_8px_22px_rgba(0,0,0,0.32)]' : 'text-white/32 hover:bg-white/[0.06] hover:text-white/74'}`}
   >
     <Icon size={13} strokeWidth={active ? 2.35 : 1.7} />
+    {badge && <span className="absolute -right-1.5 -top-1 rounded-full bg-gold px-1 py-px text-[7px] font-bold uppercase tracking-wide text-[var(--zailon-accent-text)]">{badge}</span>}
   </button>
 }

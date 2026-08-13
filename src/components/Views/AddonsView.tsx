@@ -273,7 +273,9 @@ function AddonCard({ row, onInstall, onEnable, onRemove }: {
               : <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] font-semibold text-white/42">Installé</span>
           ) : availability.installable
             ? <span className="rounded-full bg-emerald-300/12 px-2 py-0.5 text-[10px] font-semibold text-emerald-200/80">Disponible</span>
-            : <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] font-semibold text-white/42">En développement</span>}
+            : availability.published
+              ? <span className="rounded-full bg-red-300/12 px-2 py-0.5 text-[10px] font-semibold text-red-200/80">Erreur de publication ⚠</span>
+              : <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] font-semibold text-white/42">Non publié</span>}
           {installed && !installed.enabled && <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] text-white/42">Désactivé</span>}
         </div>
         <p className="mt-1 text-[10px] font-mono text-white/28" title={entry.id}>{entry.id}</p>
@@ -306,9 +308,9 @@ function AddonCard({ row, onInstall, onEnable, onRemove }: {
       ) : availability.installable ? (
         <button type="button" onClick={onInstall} className="ml-auto flex items-center gap-1.5 rounded-lg bg-[var(--zailon-accent)] px-3.5 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] transition-colors hover:bg-white"><Download size={12} />Installer</button>
       ) : (
-        <div className="ml-auto flex items-center gap-1.5" title={availability.reason}>
-          <span className="text-[10px] text-white/30">{availability.reason}</span>
-          <button type="button" disabled className="flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-white/[0.08] px-3.5 py-1.5 text-[11px] font-semibold text-white/25 opacity-60"><Package size={12} />Indisponible</button>
+        <div className="ml-auto flex items-center gap-1.5">
+          <ZailonInfoPopover text={availability.reason ?? (availability.published ? 'Cette version est marquée publiée mais le package est introuvable — réactualisez le catalogue.' : 'Cette version possède une fiche dans le catalogue, mais aucun package téléchargeable n’a encore été publié.')} />
+          <button type="button" disabled className={`flex cursor-not-allowed items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-[11px] font-semibold opacity-60 ${availability.published ? 'border-red-300/15 text-red-200/45' : 'border-white/[0.08] text-white/25'}`}><Package size={12} />{availability.published ? 'Erreur de publication' : 'Non publié'}</button>
         </div>
       )}
     </div>
@@ -463,8 +465,8 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
       {!compatibility.ok && !running && <div className="mt-3 rounded-lg border border-amber-300/20 bg-amber-300/[0.05] px-3 py-2 text-[11px] text-amber-100/80">{compatibility.reasons.join(' ')}</div>}
 
       {!availability.installable && !running && (
-        <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/[0.05] px-4 py-3">
-          <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-100/85"><Package size={13} />Add-on indisponible</p>
+        <div className={`mt-3 rounded-xl border px-4 py-3 ${availability.published ? 'border-red-300/20 bg-red-300/[0.04]' : 'border-amber-300/20 bg-amber-300/[0.05]'}`}>
+          <p className={`flex items-center gap-1.5 text-[11px] font-semibold ${availability.published ? 'text-red-200/85' : 'text-amber-100/85'}`}><Package size={13} />{availability.published ? 'Erreur de publication' : 'Non publié'}</p>
           <p className="mt-1 text-[11px] leading-relaxed text-white/55">{availability.reason} Le bouton Installer n'est jamais proposé pour un add-on dont le package n'est pas réellement publié (spec §13, §25, §49).</p>
           <footer className="mt-3 flex flex-wrap justify-end gap-2">
             {releaseUrl && <button type="button" onClick={() => void native.openExternalUrl(releaseUrl)} className="rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/65 hover:bg-white/[0.05]">Voir la release</button>}

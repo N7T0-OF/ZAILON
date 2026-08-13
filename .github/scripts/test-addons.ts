@@ -233,19 +233,25 @@ test('resolveAddonDownloadUrl : depuis release, jamais dérivée de l\'ID (spec 
   assert.equal(resolveAddonDownloadUrl({ ...entry, release: undefined }), undefined, 'sans métadonnées : aucune URL inventée')
 })
 
-test('catalogAddonAvailability : Disponible / En développement / SHA manquant (spec §13, §20, §25)', () => {
+test('catalogAddonAvailability : Disponible / Non publié / Erreur de publication (spec §13, §16-17, §20-21, §25)', () => {
   const base: AddonCatalogEntry = {
     id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', size: 10, sha256: 'catalog',
     minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'x', official: true,
   }
-  // Planifié : jamais de bouton Installer.
+  // Non publié : fiche au catalogue, aucun package — UN SEUL statut, jamais
+  // « En développement + Indisponible » (spec §15-16).
   const planned = catalogAddonAvailability({ ...base, available: false, release: { repository: 'a/b', tag: 'v1', asset: 'x.zailon-addon' } })
   assert.equal(planned.installable, false)
   assert.equal(planned.published, false)
-  assert.match(planned.reason || '', /développement/)
-  // Pas de release référencée.
-  assert.equal(catalogAddonAvailability(base).installable, false)
-  // Release présente mais SHA officiel encore 'catalog'.
+  assert.match(planned.reason || '', /Non publié/)
+  assert.doesNotMatch(planned.reason || '', /Indisponible/)
+  // Erreur de publication : le catalogue marque publié mais aucune release
+  // référencée (spec §20) — pas « Non publié ».
+  const missingRelease = catalogAddonAvailability(base)
+  assert.equal(missingRelease.installable, false)
+  assert.equal(missingRelease.published, true)
+  assert.match(missingRelease.reason || '', /Erreur de publication/)
+  // Release présente mais SHA officiel encore 'catalog' → Erreur de publication.
   const withRelease = { ...base, available: true, release: { repository: 'a/b', tag: 'v1', asset: 'x.zailon-addon' } }
   assert.equal(catalogAddonAvailability(withRelease).installable, false)
   assert.equal(catalogAddonAvailability(withRelease).published, true)

@@ -28,6 +28,7 @@ export type ZailonCapability =
   | 'artwork.plus'
   | 'themes.packs'
   | 'performance.plus'
+  | 'visual.profiles'
   | 'ue.modding'
 
 /** Mapping unique capacité → id d'add-on (spec §33 : jamais d'ID hardcodé dans les composants). */
@@ -49,6 +50,7 @@ export const CAPABILITY_ADDON: Record<ZailonCapability, string> = {
   'artwork.plus': 'official.zailon.artwork',
   'themes.packs': 'official.zailon.themes',
   'performance.plus': 'official.zailon.performance',
+  'visual.profiles': 'official.zailon.visual-profiles',
   'ue.modding': 'official.zailon.ue',
 }
 

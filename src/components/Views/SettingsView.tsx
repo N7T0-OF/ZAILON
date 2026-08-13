@@ -146,6 +146,8 @@ export function SettingsView() {
   const taskToastsEnabled = useStore(state => state.taskToastsEnabled)
   const taskAutoReduceImports = useStore(state => state.taskAutoReduceImports)
   const setTaskToastsEnabled = useStore(state => state.setTaskToastsEnabled)
+  const notificationCenterEnabled = useStore(state => state.notificationCenterEnabled)
+  const setNotificationCenterEnabled = useStore(state => state.setNotificationCenterEnabled)
   const toastRuntimeConnected = useStore(state => state.toastRuntimeConnected)
   const setToastRuntimeConnected = useStore(state => state.setToastRuntimeConnected)
   const toastSessionEnded = useStore(state => state.toastSessionEnded)
@@ -184,11 +186,13 @@ export function SettingsView() {
   // (localStorage) — la dernière section ouverte est restaurée au prochain
   // lancement (§33). La recherche et les liens internes ouvrent la section.
   const [openSection, setOpenSection] = useState<string | null>(() => {
+    // Spec §62-64 : « Launcher Updates » est visible immédiatement — section
+    // ouverte par défaut tant que l'utilisateur n'a pas choisi autre chose.
     try {
       const stored =      sessionStorage.getItem('zailon.settingsOpenSection')
-      return stored && stored !== '' ? stored : null
+      return stored && stored !== '' ? stored : 'app-updates'
     } catch {
-      return null
+      return 'app-updates'
     }
   })
   const toggleSection = (sectionId: string) => {
@@ -356,7 +360,7 @@ export function SettingsView() {
       </AccordionSection>
 
 
-      <AccordionSection id="notifications" title="Tâches et notifications" subtitle="Cartes de progression, toasts de session" icon=<Settings2 size={13} /> open={openSection === 'notifications'} onToggle={() => toggleSection('notifications')}><div className="grid gap-2 sm:grid-cols-2"><label className="flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/58">Afficher les cartes de progression<ZailonSwitch checked={taskToastsEnabled} onChange={setTaskToastsEnabled} /></label><label className="flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/58">Réduire automatiquement l’import<ZailonSwitch checked={taskAutoReduceImports} onChange={setTaskAutoReduceImports} /></label></div><div className="mt-2 grid gap-2 sm:grid-cols-2"><label className="flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/58">« En cours via ZAILON »<ZailonSwitch checked={toastRuntimeConnected} onChange={setToastRuntimeConnected} /></label><label className="flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/58">« Session terminée »<ZailonSwitch checked={toastSessionEnded} onChange={setToastSessionEnded} /></label></div><p className="mt-2 text-[11px] text-white/32">La bulle « En cours via ZAILON » apparaît uniquement quand le vrai processus du jeu est détecté et les fonctions runtime initialisées — jamais à l'ouverture du launcher ou de Steam. Elle rappelle le raccourci du panneau rapide (Ctrl+Alt+Z) seulement les 3 premières sessions.</p>{!reduceExplanations && <p className="mt-2 text-[11px] text-white/32">Masquer une carte ne supprime jamais la tâche. L’historique complet reste disponible dans Téléchargements.</p>}</AccordionSection>
+      <AccordionSection id="notifications" title="Tâches et notifications" subtitle="Cartes de progression, toasts de session" icon=<Settings2 size={13} /> open={openSection === 'notifications'} onToggle={() => toggleSection('notifications')}><div className="grid gap-2 sm:grid-cols-2"><label className="flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/58">Afficher les cartes de progression<ZailonSwitch checked={taskToastsEnabled} onChange={setTaskToastsEnabled} /></label><label className="flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/58">Réduire automatiquement l’import<ZailonSwitch checked={taskAutoReduceImports} onChange={setTaskAutoReduceImports} /></label></div><div className="mt-2 grid gap-2 sm:grid-cols-2"><label className="flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/58">« En cours via ZAILON »<ZailonSwitch checked={toastRuntimeConnected} onChange={setToastRuntimeConnected} /></label><label className="flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/58">« Session terminée »<ZailonSwitch checked={toastSessionEnded} onChange={setToastSessionEnded} /></label></div><p className="mt-2 text-[11px] text-white/32">La bulle « En cours via ZAILON » apparaît uniquement quand le vrai processus du jeu est détecté et les fonctions runtime initialisées — jamais à l'ouverture du launcher ou de Steam. Elle rappelle le raccourci du panneau rapide (Ctrl+Alt+Z) seulement les 3 premières sessions.</p>{!reduceExplanations && <><p className="mt-2 text-[11px] text-white/32">Masquer une carte ne supprime jamais la tâche. L’historique complet reste disponible dans Téléchargements.</p><label className="mt-2 flex items-center justify-between gap-4 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/58"><span className="flex items-center gap-2"><strong className="text-white/76">Centre de notifications</strong><ZailonInfoPopover text="Désactivé : le bouton Historique, le badge et le centre disparaissent de toute l’interface, et son historique n’est pas rendu. Les erreurs critiques (corruption, sécurité, perte de données, action obligatoire) restent toujours affichées en dialogue ou toast (§23)." /></span><ZailonSwitch checked={notificationCenterEnabled} onChange={setNotificationCenterEnabled} /></label></>}</AccordionSection>
 
       {hasCap('artwork.plus') && <AccordionSection id="illustrations" title="Illustrations" subtitle="Images automatiques, sources, état" icon=<Palette size={13} /> open={openSection === 'illustrations'} onToggle={() => toggleSection('illustrations')}>
         <label className="flex items-center justify-between gap-4 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/62"><span className="flex items-center gap-2"><strong className="text-white/76">Images automatiques pour les nouveaux jeux</strong><ZailonInfoPopover text="ZAILON peut proposer des illustrations pour les nouveaux jeux détectés. La copie locale reste toujours soumise à confirmation. Priorité : art officiel Steam d'abord, puis les sources configurées (SteamGridDB, IGDB, GameBanana)." /></span><ZailonSwitch checked={autoArtwork} onChange={setAutoArtwork} /></label>

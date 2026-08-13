@@ -88,6 +88,7 @@ export default function App() {
   const clearNotice = useStore(s => s.clearNotice)
   const recordNotice = useStore(s => s.recordNotice)
   const notificationHistory = useStore(s => s.notificationHistory)
+  const notificationCenterEnabled = useStore(s => s.notificationCenterEnabled)
   const sessionToast = useStore(s => s.sessionToast)
   const setSessionToast = useStore(s => s.setSessionToast)
   const dismissNotification = useStore(s => s.dismissNotification)
@@ -682,7 +683,10 @@ export default function App() {
       </UpdateProvider>
       <CommandPalette />
       <SessionToast toast={sessionToast} games={games} shortcutLabel={quickPanelShortcut} shortcutHintCount={shortcutHintCount} toastRuntimeConnected={toastRuntimeConnected} toastSessionEnded={toastSessionEnded} onShortcutHintShown={markShortcutHintShown} onDismiss={() => setSessionToast(undefined)} />
-      <NotificationCenter history={notificationHistory} onDismiss={dismissNotification} onClear={clearCompletedNotifications} onClearAll={clearNotificationHistory} />
+      {/* Spec §22-24, §103 : Centre de notifications désactivable partout —
+          OFF = aucun bouton, aucun badge, aucun rendu. Les erreurs critiques
+          passent toujours par dialogue/toast (§23). */}
+      {notificationCenterEnabled && <NotificationCenter history={notificationHistory} onDismiss={dismissNotification} onClear={clearCompletedNotifications} onClearAll={clearNotificationHistory} />}
       {externalInstalls[0] && <ExternalInstallDialog request={externalInstalls[0]} games={games} onCancel={() => void native.consumeExternalInstall(externalInstalls[0].requestId).finally(() => setExternalInstalls(current => current.slice(1)))} onContinue={(gameId, profileId) => void resolveExternalInstall(externalInstalls[0], gameId, profileId)} />}
       {exclusiveNoticeOpen && <QuickPanelExclusiveNotice onClose={() => setExclusiveNoticeOpen(false)} />}
     </div>

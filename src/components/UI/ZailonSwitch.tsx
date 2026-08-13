@@ -37,7 +37,7 @@ export function ZailonSwitch({ checked, onChange, disabled, loading, size = 'nor
       aria-label={ariaLabel}
       disabled={disabled || busy}
       onClick={() => onChange(!checked)}
-      className={`zailon-switch relative shrink-0 rounded-full outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-[var(--zailon-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1111] disabled:cursor-not-allowed ${compact ? 'h-[18px] w-[34px]' : 'h-[22px] w-[42px]'} ${disabled || busy ? 'opacity-40' : ''} ${checked ? 'bg-[var(--zailon-accent)]' : 'bg-white/[0.14]'} ${className ?? ''}`}
+      className={`zailon-switch relative flex-none self-center rounded-full outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-[var(--zailon-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0d1111] disabled:cursor-not-allowed ${compact ? 'h-[18px] w-[34px]' : 'h-[22px] w-[42px]'} ${disabled || busy ? 'opacity-40' : ''} ${checked ? 'bg-[var(--zailon-accent)]' : 'bg-white/[0.14]'} ${className ?? ''}`}
     >
       <span
         aria-hidden

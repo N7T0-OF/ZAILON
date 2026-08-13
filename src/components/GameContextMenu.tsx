@@ -1,4 +1,4 @@
-import { FolderCog, FolderOpen, Heart, MonitorDown, MoreHorizontal, Palette, Play, Tag, Trash2, Wrench, X } from 'lucide-react'
+import { FolderCog, FolderOpen, Heart, MonitorDown, MoreHorizontal, Palette, Play, Tag, Trash2, Wrench } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -34,7 +34,6 @@ export function GameContextMenu({ game, position, onClose, onEditResources }: Ga
   const gameFolder = game.installDirectory || game.execPath?.replace(/[\\/][^\\/]+$/, '')
   const items: MenuEntry[] = [
     { label: 'Jouer', icon: Play, action: () => { setSelectedGame(game.id); void launchSelectedGame(); onClose() } },
-    { label: 'Lancer sans mods', icon: X, disabled: true, hint: 'Indisponible tant que le moteur de déploiement ne peut pas restaurer les fichiers sans risque après le lancement.' },
     { separator: true },
     { label: 'Gérer les mods', icon: Wrench, action: () => { setSelectedGame(game.id); setActiveGameTab('mods'); onClose() } },
     { label: 'Modifier l’apparence', icon: Palette, action: () => { setSelectedGame(game.id); onEditResources(); onClose() } },

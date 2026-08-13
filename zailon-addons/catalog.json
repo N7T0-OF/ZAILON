@@ -286,6 +286,26 @@
         "settings"
       ],
       "package": null
+    },
+    {
+      "id": "official.zailon.visual-profiles",
+      "package": "packages/visual-profiles/official.zailon.visual-profiles-v1.0.0.zailon-addon",
+      "name": "Visual Profiles",
+      "version": "1.0.0",
+      "category": "visual",
+      "description": "Profils visuels par jeu : luminosité, contraste, saturation, gamma et restauration automatique en fin de session. Fournit l'onglet Visuels, le panneau rapide et le diagnostic visuel.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "game.read",
+        "display.profiles"
+      ],
+      "minAddonApiVersion": "1",
+      "sha256": "12115e42bdf62bc344aec47a521b1ed7f2ce98d08510ce0285e6aafe6450cfac",
+      "downloadSize": 6884,
+      "installedSize": 17210,
+      "platforms": [
+        "windows"
+      ]
     }
   ]
 }

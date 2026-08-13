@@ -11,6 +11,7 @@ import { StatusBar } from './StatusBar'
 import { VisualProfilesPage } from '../../visual-profiles/ui/VisualProfilesPage'
 import { AddonsView } from '../Views/AddonsView'
 import { FrostyEditorView } from '../Views/FrostyEditorView'
+import { StatisticsView } from '../Views/StatisticsView'
 
 export function AppWindow() {
   const { currentView } = useStore()
@@ -25,6 +26,7 @@ export function AppWindow() {
     settings: SettingsView,
     addons: AddonsView,
     frosty: FrostyEditorView,
+    statistics: StatisticsView,
   } as const)[currentView] ?? HomeView
 
   return (

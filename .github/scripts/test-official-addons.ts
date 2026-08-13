@@ -26,12 +26,13 @@ import { existsSync } from 'node:fs'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const addonsRoot = join(root, 'addons')
 
-const officialIds = ['official.zailon.frosty', 'official.zailon.frosty-editor']
+const officialIds = ['official.zailon.frosty', 'official.zailon.frosty-editor', 'official.zailon.visual-profiles']
 
 test('chaque add-on officiel a un manifest valide (validateAddonManifest)', () => {
   const dirs = readdirSync(addonsRoot, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name)
   assert.ok(dirs.includes('official.zailon.frosty'), 'Frosty Support présent')
   assert.ok(dirs.includes('official.zailon.frosty-editor'), 'Frosty Editor présent')
+  assert.ok(dirs.includes('official.zailon.visual-profiles'), 'Visual Profiles présent')
   for (const id of officialIds) {
     const raw = readFileSync(join(addonsRoot, id, 'manifest.json'), 'utf8')
     const result = validateAddonManifest(JSON.parse(raw))
@@ -74,7 +75,7 @@ test('le catalogue référence le SHA-256 et la taille réels des packages (spec
   }
 })
 
-test('catalogAddonAvailability : les deux add-ons avec package sont installables (spec §5, §49)', () => {
+test('catalogAddonAvailability : les add-ons avec package sont installables (spec §5, §49)', () => {
   for (const id of officialIds) {
     const entry = OFFICIAL_ADDON_CATALOG.addons.find(item => item.id === id)
     assert.ok(entry, `${id} dans le catalogue`)

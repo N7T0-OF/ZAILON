@@ -215,11 +215,14 @@ test('catalogue officiel : schema 2, seuls les packages construits sont disponib
       assert.ok((entry.downloadSize || 0) > 0, `${entry.id} package → taille positive`)
     }
   }
-  // Exactement les deux add-ons Frosty ont un package construit ; les 15
-  // autres sont en développement (package null).
+  // Les add-ons réellement construits ont un package (spec §49) ; les autres
+  // sont en développement (package null). Frosty + Frosty Editor + Visual
+  // Profiles sont les trois premiers livrés.
   const published = OFFICIAL_ADDON_CATALOG.addons.filter(entry => entry.package)
-  assert.equal(published.length, 2, 'seuls Frosty Support + Frosty Editor ont un package')
-  assert.deepEqual(published.map(entry => entry.id).sort(), ['official.zailon.frosty', 'official.zailon.frosty-editor'])
+  assert.ok(published.length >= 3, 'au moins Frosty Support + Frosty Editor + Visual Profiles ont un package')
+  for (const built of ['official.zailon.frosty', 'official.zailon.frosty-editor', 'official.zailon.visual-profiles']) {
+    assert.ok(published.some(entry => entry.id === built), `${built} doit avoir un package construit`)
+  }
 })
 
 test('resolveAddonDownloadUrl : BASE_URL + package, jamais dérivée de l\'ID ni latest (spec §1-2)', () => {

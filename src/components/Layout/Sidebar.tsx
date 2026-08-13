@@ -27,9 +27,12 @@ export function Sidebar() {
   const addonsNudgePending = useStore(state => state.addonsNudgePending)
   const [supportOpen, setSupportOpen] = useState(false)
   // Gating réel : « Création Frosty » n'existe que si Frosty Support ET Frosty
-  // Editor sont installés et activés (spec Add-ons §10-24, Frosty Editor §1-4).
+  // Editor sont installés et activés (spec Add-ons §10-24, Frosty Editor §1-4) ;
+  // « Visual Profiles » n'existe que si l'add-on visual-profiles est installé
+  // (spec §57-58, §102) — jamais de fonction Visual Profile dans le Core seul.
   const capabilities = addonCapabilities(addons)
   const showFrosty = hasCapability(capabilities, 'frosty.editor')
+  const showVisuals = hasCapability(capabilities, 'visual.profiles')
 
   return <><aside className="relative z-20 flex w-[56px] flex-shrink-0 flex-col items-center border-r border-white/[0.045] bg-[#0a0c0c]/95 px-2 py-3 shadow-[12px_0_34px_rgba(0,0,0,0.15)]">
     <button type="button" onClick={() => setView('home')} title="ZAILON — Accueil" className="mb-6 flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.11] bg-[#111515] shadow-[0_9px_22px_rgba(0,0,0,0.32)]">
@@ -37,7 +40,7 @@ export function Sidebar() {
     </button>
 
     <nav className="flex w-full flex-col items-center gap-2" aria-label="Navigation principale">
-      {NAV.map(item => (item.id === 'frosty' && !showFrosty ? null : <NavButton key={item.id} item={item} active={currentView === item.id} badge={item.id === 'addons' && addonsNudgePending ? 'Nouveau' : undefined} onClick={() => {
+      {NAV.map(item => ((item.id === 'frosty' && !showFrosty) || (item.id === 'visuals' && !showVisuals) ? null : <NavButton key={item.id} item={item} active={currentView === item.id} badge={item.id === 'addons' && addonsNudgePending ? 'Nouveau' : undefined} onClick={() => {
         // Clic « Bibliothèque » → toujours la vitrine (grille plein écran).
         if (item.id === 'games') setGamesBrowsing(true)
         setView(item.id)

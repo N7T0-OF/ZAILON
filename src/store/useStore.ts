@@ -21,6 +21,7 @@ import { buildDiscordActivity, DISCORD_APPLICATION_ID, DISCORD_PRIORITY_DEBOUNCE
 import { modMatchesRemote, remoteIdentityFromCatalog, remoteModKey } from '../lib/remoteInstallState'
 import { resolveDiscordAsset } from '../lib/discordAssets'
 import { DEFAULT_BACKGROUND_MEDIA_SETTINGS, type BackgroundMediaSettings } from '../lib/backgroundMedia'
+import { applyHomeLayoutPreset, HOME_WIDGET_DEFAULTS, normalizeHomeWidgets, type HomeLayoutPreset, type HomeWidgetConfig } from '../lib/homeWidgets'
 // Source de vérité de la version : package.json est bumpé à CHAQUE release
 // (même commit que tauri.conf.json). Un constant hardcodée ici n'était JAMAIS
 // mise à jour — `appVersion` restait à 1.65.0 et la fenêtre « Nouveautés » ne
@@ -420,6 +421,17 @@ export interface Store {
    * couvertures plein écran, `false` = page du jeu (hero + onglets). État de
    * session, non persisté — la grille garde recherche/filtre/scroll au retour. */
   gamesBrowsing: boolean
+  /** Accueil modulaire (spec §1-28, §82-84) : widgets configurables — un widget
+   * désactivé n'est ni rendu, ni calculé, ni sondé (§7). Persisté. */
+  homeWidgets: HomeWidgetConfig[]
+  homeLayoutPreset: HomeLayoutPreset
+  /** Notification Center désactivable partout (spec §22-24, §103) : OFF coupe
+   * le bouton, le badge et le rendu — jamais les erreurs critiques (§23). */
+  notificationCenterEnabled: boolean
+  setHomeWidget: (id: string, patch: Partial<HomeWidgetConfig>) => void
+  setHomeLayoutPreset: (preset: HomeLayoutPreset) => void
+  resetHomeLayout: () => void
+  setNotificationCenterEnabled: (enabled: boolean) => void
   activityMaxEvents: number
   downloadRetention: DownloadRetention
   remapSuspendShortcut: string
@@ -737,6 +749,9 @@ export function migratePersistedState(persisted: unknown) {
     taskToastsEnabled: state.taskToastsEnabled ?? true,
     taskAutoReduceImports: state.taskAutoReduceImports ?? true,
     libraryViewMode: state.libraryViewMode || 'grid',
+    homeWidgets: normalizeHomeWidgets(state.homeWidgets),
+    homeLayoutPreset: state.homeLayoutPreset ?? (state.homeWidgets ? 'custom' : 'standard'),
+    notificationCenterEnabled: state.notificationCenterEnabled ?? true,
     activityMaxEvents: state.activityMaxEvents || 250,
     downloadRetention: state.downloadRetention || 'startup',
     remapSuspendShortcut: state.remapSuspendShortcut || 'Ctrl+Alt+K',
@@ -836,6 +851,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
   taskAutoReduceImports: true,
   libraryViewMode: 'grid',
   gamesBrowsing: true,
+  homeWidgets: [...HOME_WIDGET_DEFAULTS],
+  homeLayoutPreset: 'standard',
+  notificationCenterEnabled: true,
   activityMaxEvents: 250,
   downloadRetention: 'startup',
   remapSuspendShortcut: 'Ctrl+Alt+K',
@@ -865,6 +883,17 @@ export const useStore = create<Store>()(persist((set, get) => ({
   notificationHistory: [],
   setView: currentView => set(state => ({ currentView, addonsNudgePending: currentView === 'addons' ? false : state.addonsNudgePending })),
   clearAddonsNudge: () => set({ addonsNudgePending: false }),
+  // Accueil modulaire (spec §1-28) : toute modification manuelle bascule le
+  // preset en « Personnalisé » ; un preset réapplique les états (spec §111).
+  setHomeWidget: (id, patch) => set(state => ({
+    homeWidgets: state.homeWidgets.map(widget => widget.id === id ? { ...widget, ...patch } : widget),
+    homeLayoutPreset: 'custom',
+  })),
+  setHomeLayoutPreset: preset => set(state => preset === 'custom'
+    ? { homeLayoutPreset: preset }
+    : { homeLayoutPreset: preset, homeWidgets: applyHomeLayoutPreset(state.homeWidgets, preset) }),
+  resetHomeLayout: () => set({ homeWidgets: [...HOME_WIDGET_DEFAULTS], homeLayoutPreset: 'standard' }),
+  setNotificationCenterEnabled: notificationCenterEnabled => set({ notificationCenterEnabled }),
   setActiveGameTab: activeGameTab => set({ activeGameTab, currentView: 'games' }),
   // Add-ons (spec §1-83) : l'installation remplace proprement une version
   // existante (même id) en conservant l'état et les données utilisateur.
@@ -2940,6 +2969,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
     taskToastsEnabled: state.taskToastsEnabled,
     taskAutoReduceImports: state.taskAutoReduceImports,
     libraryViewMode: state.libraryViewMode,
+    homeWidgets: state.homeWidgets,
+    homeLayoutPreset: state.homeLayoutPreset,
+    notificationCenterEnabled: state.notificationCenterEnabled,
     activityMaxEvents: state.activityMaxEvents,
     downloadRetention: state.downloadRetention,
     remapSuspendShortcut: state.remapSuspendShortcut,
@@ -2962,7 +2994,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     restorePoints: state.restorePoints,
     autoRestorePoints: state.autoRestorePoints,
   }),
-  version: 3,
+  version: 4,
   migrate: persisted => migratePersistedState(persisted) as never,
 }))
 

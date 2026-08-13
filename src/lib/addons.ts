@@ -57,6 +57,7 @@ export const ADDON_PERMISSIONS = [
   'settings',
   'provider',
   'filesystem.external',
+  'display.profiles',
 ] as const
 
 export type AddonPermission = typeof ADDON_PERMISSIONS[number]
@@ -77,6 +78,7 @@ export const ADDON_PERMISSION_LABELS: Record<AddonPermission, string> = {
   settings: 'Accéder aux paramètres ZAILON',
   provider: 'Agir comme fournisseur Explorer',
   'filesystem.external': 'Accéder au système de fichiers hors des dossiers ZAILON',
+  'display.profiles': 'Appliquer et restaurer les profils d\'affichage système',
 }
 
 export const isAddonPermission = (value: string): value is AddonPermission =>

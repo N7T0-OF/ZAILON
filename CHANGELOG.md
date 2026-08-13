@@ -1,5 +1,57 @@
 # Changelog
 
+## [1.88.0] - 2026-08-13
+
+> **Accueil modulaire en widgets configurables** — Favoris / Statistiques /
+> Activité deviennent de vrais widgets (activé, ordre, variante), ZAILON
+> réorganise la grille automatiquement, un widget désactivé ne coûte rien.
+> Nouvelle page Statistiques (par jeu et par profil), Hero corrigé (étoile
+> favori, profil rapide ⌃, bloc descendu, plus de « Lancer sans mods »),
+> switchs proportionnés, « Launcher Updates » visible par défaut, Bibliothèque
+> affiche le temps de jeu, et **Visual Profiles devient un add-on officiel**
+> livré avec un vrai package (onglet et backend invisibles sans lui).
+
+### Changed
+
+- **Accueil = widgets** (spec §1-28, §73-90) : `homeWidgets` persisté (id,
+  enabled, order, variant, size), moteur de rendu qui n'affiche que les
+  widgets activés (aucun trou, §4), presets Minimal/Standard/Complet/
+  Personnalisé (§111), bouton « Personnaliser l'Accueil » avec micro-fenêtre
+  (toggles, ordre par flèches, variantes, Réinitialiser). Normalisation des
+  ids inconnus (add-on désinstallé, §84). Logique pure testée
+  (`test-home-widgets.ts`).
+- **Hero Accueil** : « Jeu favori » → étoile (§13) ; profil rapide — nom =
+  liste complète, flèche = profil suivant en boucle (§16-19) ; bloc Hero
+  descendu, relatif au Hero (§14-15, §108) ; `Lancer sans mods` retiré du menu
+  contextuel (§20-21).
+- **ZailonSwitch** (§66-72) : `flex-none self-center` — le rond ne flotte plus
+  dans un conteneur étiré (piste 42×22, thumb 18, translateX calculé).
+- **Paramètres** (§62-64) : section « Application updates » ouverte par défaut
+  (Launcher Updates visible immédiatement).
+- **Bibliothèque** (§53-55) : la vitrine affiche le temps de jeu (« X jouées »,
+  « Jamais lancé », « ● En cours · durée ») au lieu de « 0 mods actifs » ; le
+  détail garde les mods actifs (§56).
+
+### Added
+
+- **Page Statistiques** (spec §25-52, §29) : totaux (temps total, sessions,
+  le plus joué, cette semaine), répartition par jeu ET par profil, données
+  100 % locales. Ouverte depuis le widget (footer « Voir toutes les
+  statistiques »), sans entrée Sidebar. Vue `statistics`.
+- **Widget Favoris** : variante Compact (liste avec temps), plus de
+  « 0 actif(s) » (§10-11). **Widget Statistiques** : global, sans
+  « 0/0 mods » (§26-28). **Widget Activité** : variante « Dernières actions »
+  lisible (§74).
+- **Notification Center désactivable partout** (§22-24, §103) :
+  `notificationCenterEnabled` — OFF = plus de bouton/badge/rendu ; les erreurs
+  critiques restent en dialogue/toast (§23).
+- **Add-on `official.zailon.visual-profiles`** (spec §57-61, §101-102) :
+  manifest (capacité `visual.profiles`, permission `display.profiles`),
+  module lazy, package construit et **Disponible** dans Add-ons. Sans lui :
+  pas d'onglet Sidebar, pas d'onglet Visuels, pas de badge visuel, aucun
+  appel backend. 3 packages livrés (Frosty Support, Frosty Editor, Visual
+  Profiles).
+
 ## [1.87.0] - 2026-08-13
 
 > **Suppression totale des GitHub Releases pour les add-ons** — un seul

@@ -1,6 +1,6 @@
-import { Boxes, Check, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2, Volume1, Volume2, VolumeX, X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
-import { Game, GameBackgroundMedia } from '../../types'
+import { Boxes, Check, ChevronDown, ChevronRight, ChevronUp, Clock3, FolderPlus, Gamepad2, Loader2, MoreHorizontal, Palette, Play, Radar, Settings2, SlidersHorizontal, Star, Volume1, Volume2, VolumeX, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Game, GameBackgroundMedia, GameSession } from '../../types'
 import { resolveAudioSettings, resolveMediaType, shouldStartMuted } from '../../lib/backgroundMedia'
 import { backgroundPlayerState, setBackgroundSessionMuted, setBackgroundSessionVolume, subscribeBackgroundPlayerState, type BackgroundPlayerState } from '../../lib/backgroundMediaPlayer'
 import { resourceUrl, native } from '../../lib/native'
@@ -9,13 +9,17 @@ import { isRed4extActive } from '../../lib/frameworkValidator'
 import { SESSION_STATE_LABELS } from '../../lib/launchAdapters'
 import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
-import { formatSeconds, formatTime, timeAgo } from '../../utils'
+import { formatElapsedDuration, formatSeconds, formatTime, timeAgo } from '../../utils'
+import { addonCapabilities, hasCapability } from '../../lib/addonGating'
+import { HOME_PRESET_LABELS, HOME_WIDGET_DEFAULTS, HOME_WIDGET_VARIANTS, orderHomeWidgets, widgetGridClass, type HomeLayoutPreset, type HomeWidgetConfig } from '../../lib/homeWidgets'
 import { GameContextMenu } from '../GameContextMenu'
 import { GameResourcesDialog } from '../GameResourcesDialog'
 import { FallbackArtwork } from '../UI/FallbackArtwork'
 import { SessionStopModal } from '../SessionStopModal'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
 import { BackgroundMediaLayer } from '../UI/BackgroundMediaLayer'
+import { ProfileSwitcherPopover } from '../UI/ProfileSwitcherPopover'
+import { ZailonSwitch } from '../UI/ZailonSwitch'
 
 export function HomeView() {
   const summaries = useWorkspaceCache()
@@ -36,11 +40,29 @@ export function HomeView() {
   const performanceMode = useStore(state => state.performanceModes[state.selectedGameId ?? ''] ?? state.globalPerformanceMode)
   const setGameBackgroundMedia = useStore(state => state.setGameBackgroundMedia)
   const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
+  const allSessions = useStore(state => state.gameSessions)
   const endSession = useStore(state => state.endSession)
   const cancelSession = useStore(state => state.cancelSession)
   const setView = useStore(state => state.setView)
   const setActiveGameTab = useStore(state => state.setActiveGameTab)
+  const addons = useStore(state => state.addons)
+  const homeWidgets = useStore(state => state.homeWidgets)
+  const homeLayoutPreset = useStore(state => state.homeLayoutPreset)
+  const setHomeWidget = useStore(state => state.setHomeWidget)
+  const setHomeLayoutPreset = useStore(state => state.setHomeLayoutPreset)
+  const resetHomeLayout = useStore(state => state.resetHomeLayout)
+  const setSelectedProfile = useStore(state => state.setSelectedProfile)
+  const addProfile = useStore(state => state.addProfile)
+  const setGameFavorite = useStore(state => state.setGameFavorite)
+  const recordNotice = useStore(state => state.recordNotice)
+  // Gating add-ons (spec §57-58) : le badge visuel n'existe que si l'add-on
+  // Visual Profiles est installé et activé — jamais dans le Core seul.
+  const capabilities = useMemo(() => addonCapabilities(addons), [addons])
+  const hasVisualProfiles = hasCapability(capabilities, 'visual.profiles')
   const [discoveryOpen, setDiscoveryOpen] = useState(false)
+  const [customizeOpen, setCustomizeOpen] = useState(false)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const profileButtonRef = useRef<HTMLButtonElement>(null)
   const [visualName, setVisualName] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ game: Game; position: { x: number; y: number } }>()
   const [quitOpen, setQuitOpen] = useState(false)
@@ -74,7 +96,9 @@ export function HomeView() {
 
   const resourcesGame = games.find(game => game.id === resourcesGameId)
   useEffect(() => {
-    if (!selectedGame || !selectedProfile || !native.isDesktop()) return
+    // Add-on gating (spec §57-58) : sans l'add-on Visual Profiles, aucun
+    // backend visuel n'est interrogé — le Core ne contient plus la fonction.
+    if (!hasVisualProfiles || !selectedGame || !selectedProfile || !native.isDesktop()) return
     let cancelled = false
     Promise.all([native.visualProfiles.association(selectedGame.id, selectedProfile.id), native.visualProfiles.list()])
       .then(([associationId, profiles]) => {
@@ -86,7 +110,7 @@ export function HomeView() {
       })
       .catch(() => { if (!cancelled) setVisualName(null) })
     return () => { cancelled = true }
-  }, [selectedGame, selectedProfile])
+  }, [selectedGame, selectedProfile, hasVisualProfiles])
   if (!selectedGame || !selectedProfile) {
     return <>
       <div className="relative flex h-full min-h-[480px] items-center justify-center overflow-hidden bg-[#0c0e0e] p-7 text-center">
@@ -109,8 +133,6 @@ export function HomeView() {
 
   const profileMods = resolveProfileMods(selectedGame, selectedProfile)
   const activeMods = profileMods.filter(mod => mod.enabled).length
-  const installedMods = profileMods.length
-  const activePercent = installedMods ? Math.round((activeMods / installedMods) * 100) : 0
   // Badge framework honnête (spec #38-39) : RED4ext ⚠ quand le loader est actif
   // dans le profil mais le chargement réel n'est PAS confirmé — jamais ✓ sans
   // confirmation runtime post-lancement.
@@ -146,11 +168,31 @@ export function HomeView() {
   // Favoris Accueil (spec « Quick Overlay + Favoris ») : les jeux marqués
   // favoris remplacent « Bibliothèque récente », 6 max, ordre d'ajout.
   const favoriteGames = visibleGames.filter(game => game.favorite).slice(0, 6)
-  const activity = Array.from({ length: 7 }, (_, index) => selectedGame.profiles[index]?.playtime ?? 0)
-  const activityMaximum = Math.max(1, ...activity)
-  const profileActivity = selectedGame.profiles.reduce((total, profile) => total + profile.playtime, 0)
+  // Ordre des widgets (spec §3-4) : seuls les activés sont rendus, dans
+  // l'ordre configuré — aucun trou, réorganisation automatique.
+  const widgets = orderHomeWidgets(homeWidgets)
 
   const openMenu = (position: { x: number; y: number }) => setMenu({ game: selectedGame, position })
+  // Choix rapide du profil (spec §16-19) : le nom ouvre la liste complète, la
+  // flèche passe au profil suivant (boucle). Jamais pendant une session active
+  // si le backend ne peut pas changer en runtime — message honnête (§18).
+  const cycleToNextProfile = () => {
+    if (sessionRunning) { recordNotice('Changement de profil disponible après la fermeture du jeu.'); return }
+    const profiles = selectedGame.profiles
+    if (profiles.length < 2) return
+    const index = profiles.findIndex(profile => profile.id === selectedProfile.id)
+    void setSelectedProfile(profiles[(index + 1) % profiles.length].id)
+  }
+  // Réordonnancement vertical dans la micro-fenêtre (spec §5, §79-80) : les
+  // flèches échangent la position de deux widgets voisins.
+  const moveWidget = (id: string, delta: number) => {
+    const sorted = [...homeWidgets].sort((a, b) => a.order - b.order || (['favorites', 'statistics', 'activity'] as string[]).indexOf(a.id) - (['favorites', 'statistics', 'activity'] as string[]).indexOf(b.id))
+    const index = sorted.findIndex(widget => widget.id === id)
+    const target = sorted[index + delta]
+    if (!target) return
+    setHomeWidget(id, { order: target.order })
+    setHomeWidget(target.id, { order: sorted[index].order })
+  }
 
   return <div className="relative h-full min-h-0 overflow-y-auto bg-[#0a0c0c] thin-scroll">
     <section
@@ -185,6 +227,7 @@ export function HomeView() {
             </div>
             <CircleAction label="Détecter" onClick={() => setDiscoveryOpen(true)}><Radar size={11} /></CircleAction>
             <CircleAction label="Modifier l’apparence" onClick={() => setResourcesGameId(selectedGame.id)}><Palette size={11} /></CircleAction>
+            <CircleAction label="Personnaliser l’Accueil" onClick={() => setCustomizeOpen(true)}><SlidersHorizontal size={11} /></CircleAction>
             <CircleAction label="Actions du jeu" onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); openMenu({ x: rect.right - 252, y: rect.bottom + 5 }) }}><MoreHorizontal size={12} /></CircleAction>
             <button type="button" onClick={() => { setGamesBrowsing(false); setView('games') }} title="Ouvrir les paramètres du jeu" className="ml-1 flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/[0.14] bg-[#111515] shadow-[0_8px_24px_rgba(0,0,0,0.35)] hover:border-white/30">
               {gameIcon ? <img src={gameIcon} alt="" className="h-full w-full object-cover" /> : <span className="font-display text-sm font-black text-[var(--zailon-accent)]">{selectedGame.name.charAt(0).toUpperCase()}</span>}
@@ -192,12 +235,25 @@ export function HomeView() {
           </div>
         </header>
 
-        <div className="mt-[clamp(2.2rem,8vh,6.5rem)] max-w-[min(690px,72vw)]">
-          <p className="font-mono text-[11px] uppercase tracking-[0.25em] text-white/32">{selectedGame.favorite ? 'Jeu favori' : selectedGame.itemKind === 'software' ? 'Application locale' : 'Jeu sélectionné'}</p>
+        <div className="mt-[clamp(3.6rem,12vh,9rem)] max-w-[min(690px,72vw)]">
+          <div className="flex items-center gap-2.5">
+            <p className="font-mono text-[11px] uppercase tracking-[0.25em] text-white/32">{selectedGame.itemKind === 'software' ? 'Application locale' : 'Jeu sélectionné'}</p>
+            {/* Spec §13 : « Jeu favori » devient une simple étoile — remplie si
+                favori, outline sinon ; tooltip clair. Jamais de texte. */}
+            <button type="button" onClick={() => setGameFavorite(selectedGame.id)} title={selectedGame.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'} aria-label={selectedGame.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'} className={`flex h-5 w-5 items-center justify-center rounded-full transition-colors ${selectedGame.favorite ? 'bg-gold/15 text-gold' : 'text-white/26 hover:bg-white/[0.07] hover:text-gold'}`}><Star size={12} className={selectedGame.favorite ? 'fill-gold text-gold' : ''} /></button>
+          </div>
           {logo
             ? <img src={logo} alt={selectedGame.name} className="mt-4 max-h-28 max-w-[min(430px,72vw)] object-contain object-left" />
             : <h1 className="mt-3 max-w-3xl font-display text-[clamp(3.2rem,6.7vw,7rem)] font-black uppercase leading-[0.78] tracking-[-0.025em] text-white">{selectedGame.shortName || selectedGame.name}</h1>}
-          <p className="mt-5 text-[11px] text-white/38">Profil <span className="font-semibold text-white/70">{selectedProfile.name}</span><span className="mx-2 text-white/18">•</span>{activeMods} mod{activeMods !== 1 ? 's' : ''} actif{activeMods !== 1 ? 's' : ''}</p>
+          {/* Choix rapide du profil (spec §16-19) : nom = liste complète,
+              flèche = profil suivant en boucle. */}
+          <div className="mt-5 flex flex-wrap items-center gap-2 text-[11px] text-white/38">
+            <span>Profil</span>
+            <button ref={profileButtonRef} type="button" onClick={() => setProfileMenuOpen(open => !open)} className="flex items-center gap-1 rounded-full border border-white/[0.12] bg-black/25 px-2.5 py-1 font-semibold text-white/75 backdrop-blur hover:border-white/25">{selectedProfile.name}<ChevronDown size={10} className={`transition-transform ${profileMenuOpen ? 'rotate-180' : ''}`} /></button>
+            <button type="button" onClick={cycleToNextProfile} title="Profil suivant" aria-label="Profil suivant" className="flex h-6 w-6 items-center justify-center rounded-full border border-white/[0.1] bg-black/25 text-white/45 backdrop-blur hover:bg-white/[0.08] hover:text-white"><ChevronRight size={11} /></button>
+            <span className="mx-1 text-white/18">•</span>
+            <span>{activeMods} mod{activeMods !== 1 ? 's' : ''} actif{activeMods !== 1 ? 's' : ''}</span>
+          </div>
           {(() => {
             const badges = [
               ...(activeMods > 0 ? [{ label: `${activeMods} mods`, title: 'Mods actifs du profil' }] : []),
@@ -286,48 +342,88 @@ export function HomeView() {
             onToggle={() => { const next = !heroMuted; setBackgroundSessionMuted(next); setHeroMedia({ mutedOverride: next }) }}
             onVolume={value => { const next = value / 100; setBackgroundSessionVolume(next); setHeroMedia({ volumeOverride: next, mutedOverride: value === 0 }) }}
           />
-        <div className="grid gap-2 pt-8 min-[800px]:grid-cols-[1.08fr_0.92fr_1.14fr]">
-          <DashboardPanel eyebrow="Activité des profils" footer="Voir les profils" onFooter={() => { setGamesBrowsing(false); setView('games') }}>
-            <div className="flex h-[72px] items-end gap-3">
-              <div className="flex h-10 w-10 flex-none items-center justify-center overflow-hidden rounded-full border border-white/[0.10] bg-white/[0.035]">
-                {gameIcon ? <img src={gameIcon} alt="" className="h-full w-full object-cover" /> : <Gamepad2 size={13} className="text-white/40" />}
+        {/* Moteur de widgets (spec §1-28, §73-90) : seuls les widgets ACTIVÉS
+            sont rendus — un widget désactivé ne coûte ni rendu, ni calcul, ni
+            sondage (§7). Disposition automatique (§4) : Wide sur sa propre
+            ligne, Medium à deux par ligne (§85-87). En mode Personnalisation :
+            contour discret (§80). */}
+        {widgets.length > 0 && (
+          <div className={`grid gap-3 pt-8 min-[900px]:grid-cols-6 ${customizeOpen ? 'widget-customize-mode' : ''}`}>
+            {widgets.map(widget => (
+              <div key={widget.id} className={widgetGridClass(widget.size)}>
+                {widget.id === 'favorites' && <FavoritesWidget variant={widget.variant} favoriteGames={favoriteGames} summaries={summaries} visibleGames={visibleGames} selectedId={selectedGame.id} onSelect={setSelectedGame} onBrowse={() => { setGamesBrowsing(true); setView('games') }} />}
+                {widget.id === 'statistics' && <StatisticsWidget variant={widget.variant} games={games} onOpen={() => setView('statistics')} />}
+                {widget.id === 'activity' && <ActivityWidget variant={widget.variant} gameSessions={allSessions} games={games} selectedGame={selectedGame} gameIcon={gameIcon} onProfiles={() => { setGamesBrowsing(false); setView('games') }} />}
               </div>
-              <div className="flex min-w-0 flex-1 items-end justify-between gap-1.5">
-                {activity.map((value, index) => <div key={index} className="flex min-w-0 flex-1 flex-col items-center gap-1" title={selectedGame.profiles[index]?.name || 'Aucun profil'}>
-                  <span className="w-full max-w-3 rounded-[2px] bg-[var(--zailon-accent)]/75" style={{ height: `${Math.max(4, Math.round((value / activityMaximum) * 38))}px`, opacity: value ? 1 : 0.14 }} />
-                  <span className="max-w-full truncate font-mono text-[11px] uppercase text-white/18">{selectedGame.profiles[index]?.name.charAt(0) || '·'}</span>
-                </div>)}
-              </div>
-            </div>
-            <p className="mt-1 text-[11px] text-white/26">{profileActivity ? `${formatTime(profileActivity)} sur les profils` : 'Aucune activité enregistrée'}</p>
-          </DashboardPanel>
-
-          <DashboardPanel eyebrow="Vos statistiques" footer="Gérer les mods" onFooter={() => setActiveGameTab('mods')}>
-            <div className="grid h-[72px] grid-cols-2 divide-x divide-white/[0.07]">
-              <MiniStat icon={Boxes} value={`${activePercent}%`} label={`${activeMods}/${installedMods} mods`} />
-              <MiniStat icon={Clock3} value={formatTime(selectedGame.totalPlaytime)} label="temps de jeu" />
-            </div>
-            <p className="mt-1 truncate text-[11px] text-white/26">{selectedGame.lastPlayed ? `Dernière session ${timeAgo(selectedGame.lastPlayed)}` : 'Prêt pour une première session'}</p>
-          </DashboardPanel>
-
-          <DashboardPanel eyebrow="Favoris" footer="Toute la bibliothèque" onFooter={() => { setGamesBrowsing(true); setView('games') }}>
-            {favoriteGames.length > 0
-              ? <div className={`grid grid-cols-3 gap-2 ${favoriteGames.length > 3 ? 'h-[156px]' : 'h-[72px]'}`}>
-                  {favoriteGames.map(game => <QuickGame key={game.id} game={game} summary={summaries[game.id]} active={game.id === selectedGame.id} onSelect={() => setSelectedGame(game.id)} favorite />)}
-                </div>
-              : <div className="flex h-[72px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-white/[0.06] bg-black/10 px-3 text-center">
-                  <p className="text-[11px] leading-relaxed text-white/34">Ajoutez vos jeux et applications préférés depuis la Bibliothèque.</p>
-                  <button type="button" onClick={() => { setGamesBrowsing(true); setView('games') }} className="rounded-lg border border-white/[0.1] px-3 py-1.5 text-[10px] font-semibold text-white/60 hover:bg-white/[0.06] hover:text-white/85">Ouvrir la Bibliothèque</button>
-                </div>}
-            <p className="mt-1 truncate text-[11px] text-white/26">{favoriteGames.length > 0 ? `${favoriteGames.length} favori${favoriteGames.length !== 1 ? 's' : ''} · clic droit sur un jeu pour en ajouter` : `${visibleGames.length} élément${visibleGames.length !== 1 ? 's' : ''} dans ZAILON`}</p>
-          </DashboardPanel>
+            ))}
           </div>
+        )}
         </div>
       </div>
     </section>
 
     {discoveryOpen && <SteamDetectionDialog onClose={() => setDiscoveryOpen(false)} onImport={importDetectedGames} />}
     {resourcesGame && <GameResourcesDialog game={resourcesGame} onClose={() => setResourcesGameId(undefined)} onChange={resources => setGameResources(resourcesGame.id, resources)} />}
+    {/* Choix rapide du profil (spec §16-19) : le nom ouvre la liste complète. */}
+    <ProfileSwitcherPopover
+      open={profileMenuOpen}
+      anchorRef={profileButtonRef}
+      profiles={selectedGame.profiles}
+      selectedProfileId={selectedProfile.id}
+      running={sessionRunning}
+      countFor={profile => resolveProfileMods(selectedGame, profile).filter(mod => mod.enabled).length}
+      onSelect={profileId => void setSelectedProfile(profileId)}
+      onCreate={name => addProfile(name)}
+      onManage={() => { setActiveGameTab('profiles'); setGamesBrowsing(false); setView('games') }}
+      onClose={() => setProfileMenuOpen(false)}
+    />
+    {customizeOpen && (
+      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setCustomizeOpen(false)}>
+        <div className="w-full max-w-md overflow-hidden rounded-2xl border border-white/[0.09] bg-[#141818] shadow-[0_24px_70px_rgba(0,0,0,0.6)]" onClick={event => event.stopPropagation()}>
+          <div className="border-b border-white/[0.06] px-5 py-4">
+            <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-white/30">Personnaliser l’Accueil</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-white/42">Activez, ordonnez et choisissez la variante de chaque widget. ZAILON réorganise la grille automatiquement — aucun trou, aucune case vide (spec §3-4).</p>
+          </div>
+          <div className="max-h-[58vh] space-y-3 overflow-y-auto px-5 py-4 thin-scroll">
+            <label className="block text-[11px] text-white/45">Disposition
+              <select value={homeLayoutPreset} onChange={event => setHomeLayoutPreset(event.target.value as HomeLayoutPreset)} className="mt-1.5 block w-full rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/70">
+                {(Object.keys(HOME_PRESET_LABELS) as HomeLayoutPreset[]).map(value => <option key={value} value={value}>{HOME_PRESET_LABELS[value]}</option>)}
+              </select>
+              <span className="mt-1 block text-[10px] leading-relaxed text-white/28">Minimal : Favoris · Standard : Favoris + Statistiques · Complet : tout · Personnalisé : vos choix (spec §111).</span>
+            </label>
+            {[...homeWidgets].sort((a, b) => a.order - b.order || (['favorites', 'statistics', 'activity'] as string[]).indexOf(a.id) - (['favorites', 'statistics', 'activity'] as string[]).indexOf(b.id)).map((widget, index, all) => (
+              <div key={widget.id} className={`rounded-lg border p-3 ${widget.enabled ? 'border-white/[0.07] bg-white/[0.02]' : 'border-white/[0.04] bg-black/10 opacity-70'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex flex-none flex-col">
+                      <button type="button" disabled={index === 0} onClick={() => moveWidget(widget.id, -1)} title="Monter" aria-label={`Monter ${WIDGET_LABELS[widget.id]}`} className="rounded p-0.5 text-white/30 hover:bg-white/[0.07] hover:text-white disabled:opacity-15"><ChevronUp size={11} /></button>
+                      <button type="button" disabled={index === all.length - 1} onClick={() => moveWidget(widget.id, 1)} title="Descendre" aria-label={`Descendre ${WIDGET_LABELS[widget.id]}`} className="rounded p-0.5 text-white/30 hover:bg-white/[0.07] hover:text-white disabled:opacity-15"><ChevronDown size={11} /></button>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold text-white/75">{WIDGET_LABELS[widget.id]}</p>
+                      <p className="text-[10px] text-white/30">{widget.size === 'wide' ? 'Large — ligne entière' : 'Moyen — partage la ligne'}</p>
+                    </div>
+                  </div>
+                  <ZailonSwitch checked={widget.enabled} onChange={enabled => setHomeWidget(widget.id, { enabled })} aria-label={`Activer ${WIDGET_LABELS[widget.id]}`} />
+                </div>
+                {widget.enabled && (
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-[10px] text-white/35">Variante</span>
+                    <select value={widget.variant} onChange={event => setHomeWidget(widget.id, { variant: event.target.value })} className="rounded border border-white/[0.08] bg-ink-200 px-2 py-1 text-[10px] text-white/70">
+                      {HOME_WIDGET_VARIANTS[widget.id].map(variant => <option key={variant.value} value={variant.value}>{variant.label}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between border-t border-white/[0.06] px-5 py-3.5">
+            <button type="button" onClick={() => { resetHomeLayout() }} className="text-[11px] text-white/40 hover:text-white/70">Réinitialiser l’Accueil</button>
+            <button type="button" onClick={() => setCustomizeOpen(false)} className="rounded-lg bg-[var(--zailon-accent)] px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]">Terminé</button>
+          </div>
+        </div>
+      </div>
+    )}
     {menu && <GameContextMenu game={menu.game} position={menu.position} onClose={() => setMenu(undefined)} onEditResources={() => setResourcesGameId(menu.game.id)} />}
     {stopSearchingOpen && activeSession && <SessionStopModal gameName={selectedGame.name} searching onCancel={() => setStopSearchingOpen(false)} onConfirm={() => { setStopSearchingOpen(false); cancelSession(selectedGame.id) }} />}
     {quitOpen && (
@@ -386,18 +482,130 @@ function HomeBadge({ label, title }: { label: string; title?: string }) {
   return <span title={title} className="flex items-center gap-1 rounded-full border border-white/[0.09] bg-black/25 px-2 py-0.5 text-[10px] font-medium text-white/58 backdrop-blur-sm"><Check size={9} className="text-emerald-300/80" />{label}</span>
 }
 
-function QuickGame({ game, summary, active, onSelect, favorite }: { game: Game; summary?: { health?: { verdict: 'ok' | 'vigilance' | 'attention' }; profileCounts?: Record<string, { active: number }> }; active: boolean; onSelect: () => void; favorite?: boolean }) {
+function QuickGame({ game, summary, active, onSelect, favorite }: { game: Game; summary?: GameSummary; active: boolean; onSelect: () => void; favorite?: boolean }) {
   const cover = resourceUrl(game.resources?.coverPath || game.resources?.bannerPath || game.resources?.backgroundPath) || game.backgroundArt
-  const firstProfileId = game.profiles[0]?.id
-  const activeCount = firstProfileId ? summary?.profileCounts?.[firstProfileId]?.active : undefined
   const healthTone = summary?.health ? (summary.health.verdict === 'ok' ? 'bg-emerald-300/85' : summary.health.verdict === 'vigilance' ? 'bg-amber-300/85' : 'bg-red-300/85') : undefined
   return <button type="button" onClick={onSelect} title={game.name} className={`group/quick relative min-w-0 overflow-hidden rounded-lg border text-left ${active ? 'border-[#dbe8e5]/28' : 'border-white/[0.06] hover:border-white/20'}`}>
     {cover ? <img src={cover} alt="" className="absolute inset-0 h-full w-full object-cover opacity-68 transition-transform group-hover/quick:scale-105" /> : <FallbackArtwork name={game.name} kind={game.itemKind} />}
     <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
     {healthTone && <span className={`absolute right-1 top-1 h-2 w-2 rounded-full ${healthTone}`} title={`Santé : ${summary?.health?.verdict}`} />}
     {favorite && <span className="absolute left-1 top-1 text-[10px] text-amber-300/90" title="Favori">★</span>}
-    <span className="absolute inset-x-1.5 bottom-1.5 flex items-center gap-1 truncate text-[11px] font-semibold text-white/78"><span className="min-w-0 flex-1 truncate">{game.name}</span>{activeCount !== undefined && <span className="shrink-0 font-mono text-[9px] text-white/40">{activeCount} actif(s)</span>}</span>
+    {/* Spec §10-11 : couverture, nom, temps de jeu — jamais « 0 actif(s) ». */}
+    <span className="absolute inset-x-1.5 bottom-1.5 flex items-center gap-1 truncate text-[11px] font-semibold text-white/78"><span className="min-w-0 flex-1 truncate">{game.name}</span>{game.totalPlaytime ? <span className="shrink-0 font-mono text-[9px] text-white/40">{formatTime(game.totalPlaytime)}</span> : null}</span>
   </button>
+}
+
+const WIDGET_LABELS: Record<string, string> = {
+  favorites: 'Favoris',
+  statistics: 'Vos statistiques',
+  activity: 'Activité des profils',
+}
+
+type GameSummary = { health?: { verdict: 'ok' | 'vigilance' | 'attention' }; profileCounts?: Record<string, { active: number }> }
+
+/** Widget Favoris (spec §10-12, §86) : Wide par défaut, variantes Cartes/Compact. */
+function FavoritesWidget({ variant, favoriteGames, summaries, visibleGames, selectedId, onSelect, onBrowse }: {
+  variant: string
+  favoriteGames: Game[]
+  summaries: Record<string, GameSummary | undefined>
+  visibleGames: Game[]
+  selectedId: string
+  onSelect: (gameId: string) => void
+  onBrowse: () => void
+}) {
+  return <DashboardPanel eyebrow="Favoris" footer="Toute la bibliothèque" onFooter={onBrowse}>
+    {favoriteGames.length > 0
+      ? variant === 'compact'
+        ? <ul className="space-y-1.5">{favoriteGames.map(game => <FavoriteRow key={game.id} game={game} active={game.id === selectedId} onSelect={() => onSelect(game.id)} />)}</ul>
+        : <div className={`grid grid-cols-3 gap-2 ${favoriteGames.length > 3 ? 'h-[156px]' : 'h-[72px]'}`}>
+            {favoriteGames.map(game => <QuickGame key={game.id} game={game} summary={summaries[game.id]} active={game.id === selectedId} onSelect={() => onSelect(game.id)} favorite />)}
+          </div>
+      : <div className="flex h-[72px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-white/[0.06] bg-black/10 px-3 text-center">
+          <p className="text-[11px] leading-relaxed text-white/34">Ajoutez vos jeux et applications préférés depuis la Bibliothèque.</p>
+          <button type="button" onClick={onBrowse} className="rounded-lg border border-white/[0.1] px-3 py-1.5 text-[10px] font-semibold text-white/60 hover:bg-white/[0.06] hover:text-white/85">Ouvrir la Bibliothèque</button>
+        </div>}
+    <p className="mt-1 truncate text-[11px] text-white/26">{favoriteGames.length > 0 ? `${favoriteGames.length} favori${favoriteGames.length !== 1 ? 's' : ''} · clic droit sur un jeu pour en ajouter` : `${visibleGames.length} élément${visibleGames.length !== 1 ? 's' : ''} dans ZAILON`}</p>
+  </DashboardPanel>
+}
+
+/** Ligne compacte du widget Favoris (spec §11) : icône, nom, temps de jeu. */
+function FavoriteRow({ game, active, onSelect }: { game: Game; active: boolean; onSelect: () => void }) {
+  const cover = resourceUrl(game.resources?.coverPath || game.resources?.bannerPath || game.resources?.backgroundPath) || game.backgroundArt
+  return <button type="button" onClick={onSelect} className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors ${active ? 'border-[#dbe8e5]/25 bg-white/[0.04]' : 'border-white/[0.055] bg-white/[0.02] hover:border-white/15 hover:bg-white/[0.04]'}`}>
+    {cover ? <img src={cover} alt="" className="h-8 w-8 flex-none rounded object-cover" /> : <span className="flex h-8 w-8 flex-none items-center justify-center rounded bg-white/[0.05] font-display text-xs font-black text-[var(--zailon-accent)]">{game.name.charAt(0).toUpperCase()}</span>}
+    <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-white/72">{game.name}</span>
+    {game.totalPlaytime ? <span className="shrink-0 font-mono text-[10px] text-white/38">{formatTime(game.totalPlaytime)}</span> : null}
+  </button>
+}
+
+/** Widget « Vos statistiques » (spec §25-28) : données GLOBALES (tous jeux),
+ * variantes Résumé/Minimal — jamais « 0/0 mods » ni pourcentage vide (§26-27). */
+function StatisticsWidget({ variant, games, onOpen }: { variant: string; games: Game[]; onOpen: () => void }) {
+  const totalPlaytime = games.reduce((sum, game) => sum + (game.totalPlaytime || 0), 0)
+  const mostPlayed = [...games].sort((a, b) => (b.totalPlaytime || 0) - (a.totalPlaytime || 0))[0]
+  const lastSession = [...games].filter(game => game.lastPlayed).sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0))[0]
+  return <DashboardPanel eyebrow="Vos statistiques" footer="Voir toutes les statistiques" onFooter={onOpen}>
+    {variant === 'summary'
+      ? <div className="grid h-[72px] grid-cols-2 divide-x divide-white/[0.07]">
+          <MiniStat icon={Clock3} value={totalPlaytime ? formatTime(totalPlaytime) : '0h'} label="temps de jeu" />
+          <MiniStat icon={Gamepad2} value={mostPlayed?.totalPlaytime ? mostPlayed.shortName || mostPlayed.name : '—'} label={mostPlayed?.totalPlaytime ? 'le plus joué' : 'aucune session'} />
+        </div>
+      : <div className="flex h-[72px] flex-col justify-center">
+          <p className="font-display text-xl font-bold text-white/88">{totalPlaytime ? formatTime(totalPlaytime) : '0h'}</p>
+          <p className="mt-1 text-[11px] text-white/24">temps de jeu total</p>
+        </div>}
+    <p className="mt-1 truncate text-[11px] text-white/26">{lastSession ? `Dernière session ${timeAgo(lastSession.lastPlayed!)}` : 'Prêt pour une première session'}</p>
+  </DashboardPanel>
+}
+
+/** Widget « Activité des profils » (spec §73-75) : variante Profils = répartition
+ * par profil, variante Dernières actions = sessions récentes lisibles. */
+function ActivityWidget({ variant, gameSessions, games, selectedGame, gameIcon, onProfiles }: {
+  variant: string
+  gameSessions: GameSession[]
+  games: Game[]
+  selectedGame: Game
+  gameIcon?: string
+  onProfiles: () => void
+}) {
+  if (variant === 'profiles') {
+    const activity = Array.from({ length: 7 }, (_, index) => selectedGame.profiles[index]?.playtime ?? 0)
+    const activityMaximum = Math.max(1, ...activity)
+    const profileActivity = selectedGame.profiles.reduce((total, profile) => total + (profile.playtime || 0), 0)
+    return <DashboardPanel eyebrow="Activité des profils" footer="Voir les profils" onFooter={onProfiles}>
+      <div className="flex h-[72px] items-end gap-3">
+        <div className="flex h-10 w-10 flex-none items-center justify-center overflow-hidden rounded-full border border-white/[0.10] bg-white/[0.035]">
+          {gameIcon ? <img src={gameIcon} alt="" className="h-full w-full object-cover" /> : <Gamepad2 size={13} className="text-white/40" />}
+        </div>
+        <div className="flex min-w-0 flex-1 items-end justify-between gap-1.5">
+          {activity.map((value, index) => <div key={index} className="flex min-w-0 flex-1 flex-col items-center gap-1" title={selectedGame.profiles[index]?.name || 'Aucun profil'}>
+            <span className="w-full max-w-3 rounded-[2px] bg-[var(--zailon-accent)]/75" style={{ height: `${Math.max(4, Math.round((value / activityMaximum) * 38))}px`, opacity: value ? 1 : 0.14 }} />
+            <span className="max-w-full truncate font-mono text-[11px] uppercase text-white/18">{selectedGame.profiles[index]?.name.charAt(0) || '·'}</span>
+          </div>)}
+        </div>
+      </div>
+      <p className="mt-1 text-[11px] text-white/26">{profileActivity ? `${formatTime(profileActivity)} sur les profils` : 'Aucune activité enregistrée'}</p>
+    </DashboardPanel>
+  }
+  // Variante « Dernières actions » (spec §74) : sessions récentes lisibles,
+  // jamais une grille de points vide incompréhensible.
+  const recent = [...gameSessions].filter(session => session.state !== 'Failed').sort((a, b) => b.startedAt - a.startedAt).slice(0, 3)
+  return <DashboardPanel eyebrow="Activité des profils" footer="Voir les profils" onFooter={onProfiles}>
+    {recent.length > 0
+      ? <ul className="flex h-[72px] flex-col justify-center space-y-1.5">
+          {recent.map(session => {
+            const game = games.find(item => item.id === session.gameId)
+            const duration = session.endedAt ? formatElapsedDuration(session.startedAt, session.endedAt) : undefined
+            return <li key={session.id} className="flex items-center gap-2 text-[11px]">
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${session.endedAt ? 'bg-white/20' : 'bg-emerald-300/80'}`} />
+              <span className="min-w-0 flex-1 truncate text-white/60">{game?.name || 'Jeu inconnu'}{duration ? ` · ${duration}` : ''}</span>
+              <span className="shrink-0 text-white/30">{timeAgo(session.startedAt)}</span>
+            </li>
+          })}
+        </ul>
+      : <div className="flex h-[72px] items-center text-[11px] text-white/30">Aucune activité récente.</div>}
+    <p className="mt-1 text-[11px] text-white/26">Sessions de cette exécution — l'historique complet reste dans Statistiques.</p>
+  </DashboardPanel>
 }
 
 /** Contrôle audio discret du Hero (spec correctifs §1-5, §8-13, §27-28) :

@@ -103,14 +103,24 @@
       "name": "Nexus Provider",
       "version": "1.0.0",
       "category": "sources",
-      "description": "Recherche, téléchargement et mises à jour Nexus Mods dans Explorer.",
-      "minZailonVersion": "1.69.0",
+      "description": "Source Explorer Nexus Mods : recherche, galerie, pagination, états de mise à jour et téléchargement — clé API personnelle en coffre système et liens nxm://. Sans cet add-on, Nexus n'existe ni dans Explorer ni dans les Paramètres.",
+      "minZailonVersion": "1.78.0",
       "permissions": [
         "network",
-        "provider",
+        "game.read",
+        "mods.write",
         "settings"
       ],
-      "package": null
+      "package": "packages/nexus/official.zailon.provider.nexus-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "76a1a3c2ef832366050edec911f149485bdb94ec5aea82e53f0851ae332a72b2",
+      "downloadSize": 6576,
+      "installedSize": 16440,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
     },
     {
       "id": "official.zailon.provider.gamebanana",

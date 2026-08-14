@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.97.0] - 2026-08-14
+
+> **Nexus Provider devient un add-on installable** — 6 add-ons officiels
+> Disponibles ; les lignes de clé API ne s'affichent plus sans leur add-on.
+
+### Added
+
+- **Add-on `official.zailon.provider.nexus`** (Disponible, package + SHA-256
+  réel, 6,6 Ko) : source Explorer Nexus Mods — recherche, galerie, états de
+  mise à jour, téléchargement ; clé API en coffre système, liens `nxm://`.
+- **Lignes de fournisseur individuelles** (§57) : la saisie de clé Nexus ne
+  s'affiche plus dans « Fournisseurs de mods » sans l'add-on Nexus (idem
+  CurseForge à venir) — fini les champs fantômes.
+- Test dédié `test-nexus-provider.ts` (5 tests) — **492 tests au total ✅**.
+
 ## [1.96.0] - 2026-08-14
 
 > **GameBanana Provider devient un add-on installable** — le gating Explorer

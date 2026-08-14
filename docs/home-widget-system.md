@@ -66,6 +66,12 @@ ZAILON réorganise la grille automatiquement — aucune case vide (§4).
 - `Lancer sans mods` supprimé du menu contextuel Accueil (§20) ; il reste
   uniquement dans État & Diagnostic (Bibliothèque) si le backend le permet
   (§21).
+- **Widget « En cours »** (§77, 1.90.0) : 4ᵉ widget (`session`) — rendu
+  UNIQUEMENT pendant une session active (le moteur le filtre sinon, aucune case
+  vide §7). Session prioritaire (épinglée > premier plan > plus récente),
+  durée en direct, profil, point vert si `GameRunning`, footer « Ouvrir le
+  panneau rapide ». Activé par défaut (ajouté en position 4 aux utilisateurs
+  existants), désactivé par les presets Minimal/Standard, actif en Complet.
 
 ## Notifications
 
@@ -75,5 +81,8 @@ de données, action obligatoire) restent en dialogue/toast.
 
 ## Tests
 
-`test-home-widgets.ts` : ordre, OFF sans case vide, réordonnancement, presets,
-normalisation (ids inconnus), grille responsive, états corrompus.
+`test-home-widgets.ts` : ordre (dont `session` en position 4), OFF sans case
+vide, réordonnancement, presets, normalisation (ids inconnus, ajout du widget
+session aux utilisateurs existants), grille responsive, états corrompus.
+`test-session-stats.ts` : agrégats, fenêtres, heatmap (semaines, futurs omis,
+niveaux), checkpoints, recovery.

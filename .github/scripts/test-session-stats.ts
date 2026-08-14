@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import {
   checkpointDue,
   dailyBreakdown,
+  heatmapCells,
   minutesWithin,
   perGame,
   perProfile,
@@ -85,6 +86,29 @@ test('perProfile : répartition par profil pour un jeu (spec §32, §49)', () =>
   assert.equal(profiles[0].minutes, 60 + 120)
   assert.equal(profiles[1].profileName, 'Photo')
   assert.equal(profiles[1].minutes, 45)
+})
+
+test('heatmapCells : 12 semaines, colonnes lundi→dimanche, jours futurs omis, niveaux 0-4 (spec §48)', () => {
+  const cells = heatmapCells(history, now, 12)
+  // 12 semaines × 7 jours, moins les jours futurs de la semaine courante
+  // (midi local → lundi..jeudi restants selon le jour).
+  assert.ok(cells.length > 12 * 7 - 7 && cells.length <= 12 * 7)
+  assert.ok(cells.every(cell => cell.level >= 0 && cell.level <= 4))
+  // Aujourd'hui (session 'a' = 60 min, 'b' = 30 min) → niveau ≥ 3 (≥ 120).
+  const today = cells.find(cell => cell.minutes > 0 && cell.level >= 3)
+  assert.ok(today, 'une cellule active au moins au niveau élevé')
+  // Aucune cellule ne doit pointer dans le futur.
+  const future = cells.filter(cell => new Date(`${cell.date}T00:00:00`).getTime() > now)
+  assert.equal(future.length, 0)
+  // La session 'd' (45 min, il y a 2 jours) → niveau 2 (30-119 min).
+  const dayD = cells.find(cell => cell.minutes === 45)
+  assert.equal(dayD?.level, 2)
+})
+
+test('heatmapCells : semaine vide = niveau 0, zéro historique = grille à zéro', () => {
+  const empty = heatmapCells([], now, 4)
+  assert.ok(empty.length > 0)
+  assert.ok(empty.every(cell => cell.level === 0 && cell.minutes === 0))
 })
 
 test('checkpointDue : dû après ~5 min, pas avant, jamais sans checkpoint (spec §44)', () => {

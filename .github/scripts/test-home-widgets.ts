@@ -15,8 +15,8 @@ import {
   type HomeWidgetConfig,
 } from '../../src/lib/homeWidgets.ts'
 
-test('ordre par défaut : Favoris, Statistiques, Activité (spec §83)', () => {
-  assert.deepEqual(enabledWidgetIds(HOME_WIDGET_DEFAULTS), ['favorites', 'statistics', 'activity'])
+test('ordre par défaut : Favoris, Statistiques, Activité, Session active (spec §77, §83)', () => {
+  assert.deepEqual(enabledWidgetIds(HOME_WIDGET_DEFAULTS), ['favorites', 'statistics', 'activity', 'session'])
 })
 
 test("un widget désactivé n'est jamais rendu — aucun id, aucune case vide (spec §4, §7)", () => {
@@ -45,19 +45,32 @@ test('normalisation : ids inconnus (add-on désinstallé) ignorés, manquants aj
     { id: 'unknown.widget', enabled: true, order: 99, variant: 'x', size: 'wide' },
   ]
   const normalized = normalizeHomeWidgets(raw)
-  assert.deepEqual(normalized.map(widget => widget.id), ['favorites', 'statistics', 'activity'])
+  assert.deepEqual(normalized.map(widget => widget.id), ['favorites', 'statistics', 'activity', 'session'])
   assert.equal(normalized[0].enabled, false, 'favorites désactivé conservé')
   assert.equal(normalized[1].variant, 'summary', 'variante par défaut pour les ajoutés')
   assert.ok(!normalized.some(widget => widget.id === 'unknown.widget'))
 })
 
-test('presets (spec §111-112) : Minimal = Favoris seul, Standard = Favoris + Stats', () => {
+test('widget Session active : ajouté aux utilisateurs existants, désactivé en Minimal/Standard (spec §77, §111)', () => {
+  // Un utilisateur existant (sans session) reçoit le widget en position 4.
+  const legacy = [
+    { id: 'favorites', enabled: true, order: 1, variant: 'cards', size: 'wide' },
+    { id: 'statistics', enabled: true, order: 2, variant: 'summary', size: 'medium' },
+    { id: 'activity', enabled: true, order: 3, variant: 'recent', size: 'medium' },
+  ]
+  const migrated = normalizeHomeWidgets(legacy)
+  assert.deepEqual(migrated.map(widget => widget.id), ['favorites', 'statistics', 'activity', 'session'])
+  assert.equal(migrated[3].enabled, true)
+  assert.equal(migrated[3].variant, 'active')
+})
+
+test('presets (spec §111-112) : Minimal = Favoris seul, Standard = Favoris + Stats, Complet = tout', () => {
   const minimal = applyHomeLayoutPreset(HOME_WIDGET_DEFAULTS, 'minimal')
   assert.deepEqual(enabledWidgetIds(minimal), ['favorites'])
   const standard = applyHomeLayoutPreset(HOME_WIDGET_DEFAULTS, 'standard')
   assert.deepEqual(enabledWidgetIds(standard), ['favorites', 'statistics'])
   const complete = applyHomeLayoutPreset(HOME_WIDGET_DEFAULTS, 'complete')
-  assert.deepEqual(enabledWidgetIds(complete), ['favorites', 'statistics', 'activity'])
+  assert.deepEqual(enabledWidgetIds(complete), ['favorites', 'statistics', 'activity', 'session'])
 })
 
 test('grille responsive : Wide = ligne entière, Medium = moitié de ligne (spec §85-87)', () => {
@@ -66,7 +79,7 @@ test('grille responsive : Wide = ligne entière, Medium = moitié de ligne (spec
 })
 
 test('entrées invalides rejetées par normalize (pas de crash sur état corrompu)', () => {
-  assert.deepEqual(normalizeHomeWidgets(null).map(widget => widget.id), ['favorites', 'statistics', 'activity'])
-  assert.deepEqual(normalizeHomeWidgets('nope').map(widget => widget.id), ['favorites', 'statistics', 'activity'])
-  assert.deepEqual(normalizeHomeWidgets([{}]).map(widget => widget.id), ['favorites', 'statistics', 'activity'])
+  assert.deepEqual(normalizeHomeWidgets(null).map(widget => widget.id), ['favorites', 'statistics', 'activity', 'session'])
+  assert.deepEqual(normalizeHomeWidgets('nope').map(widget => widget.id), ['favorites', 'statistics', 'activity', 'session'])
+  assert.deepEqual(normalizeHomeWidgets([{}]).map(widget => widget.id), ['favorites', 'statistics', 'activity', 'session'])
 })

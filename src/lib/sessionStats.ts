@@ -95,6 +95,52 @@ export function perProfile(history: TrackedSession[], gameId: string): Array<{ p
   return [...map.values()].sort((a, b) => b.minutes - a.minutes)
 }
 
+/** Cellule de la heatmap (spec §48) : un jour, sa durée en minutes et son
+ * niveau 0-4 (teinte de la cellule — jamais de librairie graphique). */
+export interface HeatmapCell {
+  /** Date locale YYYY-MM-DD. */
+  date: string
+  minutes: number
+  level: number
+}
+
+function heatmapLevel(minutes: number): number {
+  if (minutes <= 0) return 0
+  if (minutes < 30) return 1
+  if (minutes < 120) return 2
+  if (minutes < 300) return 3
+  return 4
+}
+
+/** Heatmap de contribution (spec §48) : N semaines, colonnes = semaines
+ * (lundi en premier), lignes = lundi→dimanche, les jours futurs sont omis.
+ * Logique pure — la teinte est calculée ici, le rendu reste léger (div). */
+export function heatmapCells(history: TrackedSession[], nowMs: number, weeks = 12): HeatmapCell[] {
+  const byDay = new Map<string, number>()
+  for (const session of history) {
+    if (!session.durationMin) continue
+    const day = startOfDay(session.endedAt)
+    byDay.set(day, (byDay.get(day) ?? 0) + session.durationMin)
+  }
+  // Lundi de la semaine courante (ancrage local, cohérent avec startOfDay).
+  const monday = new Date(nowMs)
+  monday.setHours(0, 0, 0, 0)
+  const dow = (monday.getDay() + 6) % 7 // 0 = lundi
+  monday.setDate(monday.getDate() - dow)
+  const cells: HeatmapCell[] = []
+  for (let week = weeks - 1; week >= 0; week--) {
+    for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+      const day = new Date(monday)
+      day.setDate(monday.getDate() - week * 7 + dayIndex)
+      if (day.getTime() > nowMs) continue
+      const date = startOfDay(day.getTime())
+      const minutes = byDay.get(date) ?? 0
+      cells.push({ date, minutes, level: heatmapLevel(minutes) })
+    }
+  }
+  return cells
+}
+
 /** Checkpoint dû ? (spec §44 : toutes les ~5 minutes). */
 export function checkpointDue(lastCheckpointAt: number | undefined, nowMs: number, intervalMs = 5 * 60 * 1000): boolean {
   if (lastCheckpointAt === undefined) return false

@@ -5,7 +5,7 @@
  * node --test (spec §123). Un widget désactivé n'est jamais rendu ni calculé.
  */
 
-export type HomeWidgetId = 'favorites' | 'statistics' | 'activity'
+export type HomeWidgetId = 'favorites' | 'statistics' | 'activity' | 'session'
 export type HomeLayoutPreset = 'minimal' | 'standard' | 'complete' | 'custom'
 
 export interface HomeWidgetConfig {
@@ -17,13 +17,15 @@ export interface HomeWidgetConfig {
   size: 'wide' | 'medium'
 }
 
-/** Ordre de référence (migration + reset) : Favoris, Statistiques, Activité. */
-export const HOME_WIDGET_ORDER: HomeWidgetId[] = ['favorites', 'statistics', 'activity']
+/** Ordre de référence (migration + reset) : Favoris, Statistiques, Activité,
+ * Session active (§77 — rendu uniquement pendant une session). */
+export const HOME_WIDGET_ORDER: HomeWidgetId[] = ['favorites', 'statistics', 'activity', 'session']
 
 export const HOME_WIDGET_DEFAULTS: HomeWidgetConfig[] = [
   { id: 'favorites', enabled: true, order: 1, variant: 'cards', size: 'wide' },
   { id: 'statistics', enabled: true, order: 2, variant: 'summary', size: 'medium' },
   { id: 'activity', enabled: true, order: 3, variant: 'recent', size: 'medium' },
+  { id: 'session', enabled: true, order: 4, variant: 'active', size: 'medium' },
 ]
 
 /** Variantes par widget — 2 maximum (spec §6, §74). */
@@ -40,13 +42,18 @@ export const HOME_WIDGET_VARIANTS: Record<HomeWidgetId, Array<{ value: string; l
     { value: 'recent', label: 'Dernières actions' },
     { value: 'profiles', label: 'Profils' },
   ],
+  session: [
+    { value: 'active', label: 'Session active' },
+  ],
 }
 
-/** Presets (spec §111-112) : Minimal = Favoris seul, Standard = Favoris + Stats. */
+/** Presets (spec §111-112) : Minimal = Favoris seul, Standard = Favoris +
+ * Stats. Le widget Session active n'est actif que dans « Complet » — il
+ * n'apparaît de toute façon que pendant une session (§77). */
 export const HOME_LAYOUT_PRESETS: Record<Exclude<HomeLayoutPreset, 'custom'>, Partial<Record<HomeWidgetId, boolean>>> = {
-  minimal: { favorites: true, statistics: false, activity: false },
-  standard: { favorites: true, statistics: true, activity: false },
-  complete: { favorites: true, statistics: true, activity: true },
+  minimal: { favorites: true, statistics: false, activity: false, session: false },
+  standard: { favorites: true, statistics: true, activity: false, session: false },
+  complete: { favorites: true, statistics: true, activity: true, session: true },
 }
 
 export const HOME_PRESET_LABELS: Record<HomeLayoutPreset, string> = {

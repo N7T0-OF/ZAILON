@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.90.0] - 2026-08-14
+
+> **Statistiques complètes** — la page Statistiques gagne les onglets Jeux /
+> Applications / Tout, les plages 7 jours / 30 jours / Tout avec heatmap des 12
+> dernières semaines, la recherche et le tri, l'affichage séparé du temps Steam
+> (add-on) — et l'Accueil reçoit le widget « En cours » qui apparaît pendant
+> une session active.
+
+### Added
+
+- **Statistiques — vues Jeux / Applications / Tout** (spec §97) : l'onglet
+  filtre l'historique entier par type (`itemKind`), totaux et graphiques
+  compris — Photoshop ne se mélange jamais avec les jeux.
+- **Statistiques — plages et graphiques** (§47-48) : 7 jours / 30 jours en
+  barres, « Tout » en **heatmap des 12 dernières semaines** (niveaux 0-4,
+  `heatmapCells`, sans bibliothèque graphique).
+- **Statistiques — recherche et tri** (§98) : filtre par nom, tri plus joué /
+  récent / nom / sessions.
+- **Temps Steam séparé** (§96) : si un add-on fournit `steamPlaytimeHours`,
+  la ligne jeu affiche « Suivi ZAILON : X · Steam : Y » — jamais fusionné.
+- **Widget « En cours »** (§77) : 4ᵉ widget de l'Accueil, rendu uniquement
+  pendant une session (session prioritaire, durée en direct, profil, point
+  vert, bouton panneau rapide) — aucune case vide quand rien ne tourne.
+
+### Changed
+
+- Moteur pur étendu : `heatmapCells` (semaines, jours futurs omis, niveaux) —
+  9 tests de plus (`test-session-stats.ts`, `test-home-widgets.ts`), 462 au
+  total.
+- Docs : `statistics-engine.md` (phase 3) et `home-widget-system.md` (widget
+  session) mis à jour.
+
 ## [1.89.0] - 2026-08-14
 
 > **Suivi du temps en arrière-plan** — l'historique des sessions devient

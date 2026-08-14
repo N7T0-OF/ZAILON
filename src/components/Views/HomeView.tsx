@@ -12,6 +12,7 @@ import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } fro
 import { formatElapsedDuration, formatSeconds, formatTime, timeAgo } from '../../utils'
 import { addonCapabilities, hasCapability } from '../../lib/addonGating'
 import { HOME_PRESET_LABELS, HOME_WIDGET_DEFAULTS, HOME_WIDGET_VARIANTS, orderHomeWidgets, widgetGridClass, type HomeLayoutPreset, type HomeWidgetConfig } from '../../lib/homeWidgets'
+import { pickPrioritySession } from '../../lib/sessionPriority'
 import { GameContextMenu } from '../GameContextMenu'
 import { GameResourcesDialog } from '../GameResourcesDialog'
 import { FallbackArtwork } from '../UI/FallbackArtwork'
@@ -168,9 +169,14 @@ export function HomeView() {
   // Favoris Accueil (spec « Quick Overlay + Favoris ») : les jeux marqués
   // favoris remplacent « Bibliothèque récente », 6 max, ordre d'ajout.
   const favoriteGames = visibleGames.filter(game => game.favorite).slice(0, 6)
+  // Sessions actives (spec §77) : le widget « En cours » n'est rendu QUE pendant
+  // une session — sinon il disparaît sans laisser de case vide (§7).
+  const activeSessionsNow = allSessions.filter(session => session.state !== 'Ended' && session.state !== 'Failed')
+  const pinnedPriorityGameId = useStore(state => state.pinnedPriorityGameId)
+  const foregroundGameId = useStore(state => state.foregroundGameId)
   // Ordre des widgets (spec §3-4) : seuls les activés sont rendus, dans
   // l'ordre configuré — aucun trou, réorganisation automatique.
-  const widgets = orderHomeWidgets(homeWidgets)
+  const widgets = orderHomeWidgets(homeWidgets).filter(widget => widget.id !== 'session' || activeSessionsNow.length > 0)
 
   const openMenu = (position: { x: number; y: number }) => setMenu({ game: selectedGame, position })
   // Choix rapide du profil (spec §16-19) : le nom ouvre la liste complète, la
@@ -354,6 +360,7 @@ export function HomeView() {
                 {widget.id === 'favorites' && <FavoritesWidget variant={widget.variant} favoriteGames={favoriteGames} summaries={summaries} visibleGames={visibleGames} selectedId={selectedGame.id} onSelect={setSelectedGame} onBrowse={() => { setGamesBrowsing(true); setView('games') }} />}
                 {widget.id === 'statistics' && <StatisticsWidget variant={widget.variant} games={games} onOpen={() => setView('statistics')} />}
                 {widget.id === 'activity' && <ActivityWidget variant={widget.variant} gameSessions={allSessions} games={games} selectedGame={selectedGame} gameIcon={gameIcon} onProfiles={() => { setGamesBrowsing(false); setView('games') }} />}
+                {widget.id === 'session' && <SessionWidget sessions={activeSessionsNow} games={games} pinned={pinnedPriorityGameId} foreground={foregroundGameId} />}
               </div>
             ))}
           </div>
@@ -499,6 +506,7 @@ const WIDGET_LABELS: Record<string, string> = {
   favorites: 'Favoris',
   statistics: 'Vos statistiques',
   activity: 'Activité des profils',
+  session: 'Session active',
 }
 
 type GameSummary = { health?: { verdict: 'ok' | 'vigilance' | 'attention' }; profileCounts?: Record<string, { active: number }> }
@@ -536,6 +544,36 @@ function FavoriteRow({ game, active, onSelect }: { game: Game; active: boolean; 
     <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-white/72">{game.name}</span>
     {game.totalPlaytime ? <span className="shrink-0 font-mono text-[10px] text-white/38">{formatTime(game.totalPlaytime)}</span> : null}
   </button>
+}
+
+/** Widget « En cours » (spec §77) : rendu UNIQUEMENT pendant une session active
+ * (le moteur le filtre sinon — aucune case vide §7). Session prioritaire
+ * (épinglée > premier plan > plus récente), durée en direct, profil, et
+ * raccourci vers le panneau rapide. */
+function SessionWidget({ sessions, games, pinned, foreground }: {
+  sessions: GameSession[]
+  games: Game[]
+  pinned?: string
+  foreground?: string
+}) {
+  const priorityId = pickPrioritySession(sessions, pinned, foreground)
+  const session = sessions.find(item => item.gameId === priorityId) ?? sessions[0]
+  if (!session) return null
+  const game = games.find(item => item.id === session.gameId)
+  const profile = game?.profiles.find(item => item.id === session.profileId)
+  const running = session.state === 'GameRunning'
+  return <DashboardPanel eyebrow="En cours" footer="Ouvrir le panneau rapide" onFooter={() => { if (native.isDesktop()) void native.quickPanel.toggle() }}>
+    <div className="flex h-[72px] items-center gap-3">
+      <div className="relative flex h-10 w-10 flex-none items-center justify-center overflow-hidden rounded-full border border-white/[0.10] bg-white/[0.035]">
+        {game?.resources?.iconPath ? <img src={resourceUrl(game.resources.iconPath)} alt="" className="h-full w-full object-cover" /> : <Gamepad2 size={13} className="text-white/40" />}
+        {running && <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#0d1111] bg-emerald-300" />}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-semibold text-white/78">{game?.name || 'Jeu inconnu'}</p>
+        <p className="mt-0.5 text-[11px] text-white/40">{formatElapsedDuration(session.startedAt, Date.now())} · {profile?.name || 'Profil par défaut'}{running ? '' : ' · en préparation'}</p>
+      </div>
+    </div>
+  </DashboardPanel>
 }
 
 /** Widget « Vos statistiques » (spec §25-28) : données GLOBALES (tous jeux),

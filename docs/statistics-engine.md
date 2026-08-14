@@ -1,7 +1,8 @@
 # Statistiques — page et moteur
 
 Spec « Accueil modulaire » §25-52, §90-91, §96-100. Phase 1 livrée en
-**1.88.0**, phase 2 (historique persistant + agrégats) en **1.89.0**.
+**1.88.0**, phase 2 (historique persistant + agrégats) en **1.89.0**, phase 3
+(graphiques + heatmap + vues + tri) en **1.90.0**.
 
 ## Page Statistiques
 
@@ -12,15 +13,25 @@ statistiques`, §28). **Pas d'entrée permanente dans la Sidebar** (§29). Vue
 - **Totaux** (§30) : temps total suivi (sessions archivées + session en cours),
   nombre de sessions (avec compteur des récupérées), jeu le plus joué, cette
   semaine.
-- **7 derniers jours** (§47) : barres SVG/CSS légères (`dailyBreakdown`) —
-  Aujourd'hui, Hier, puis `jj/mm`. Aucune bibliothèque graphique (§47).
+- **Onglets Jeux / Applications / Tout** (§97) : l'historique entier est
+  filtré par `itemKind` (totaux, graphiques, export compris) — Photoshop ne se
+  mélange jamais avec NTE.
+- **Plages 7 jours / 30 jours / Tout** (§47) : barres `dailyBreakdown`
+  (Aujourd'hui, Hier, puis `jj/mm`) ou **heatmap des 12 dernières semaines**
+  (style contribution graph, niveaux 0-4, `heatmapCells`) — jamais de
+  bibliothèque graphique (§47-48).
 - **Par jeu** (§31) : temps, nombre de sessions, dernière session, badge
   « ● En cours » pour une session live, bouton vers la page jeu.
 - **Par profil** (§32, §49) : barre de répartition `Default / Photo /
   Performance…` avec durée. L'UI résout les noms actuels ; un profil supprimé
   apparaît sous son nom sauvegardé (snapshot, §99-100).
+- **Recherche et tri** (§98) : filtre par nom + tri plus joué / récent / nom /
+  sessions.
 - **Apps** (§33) : les applications ajoutées à la Bibliothèque (`software`)
   sont suivies comme les jeux, y compris lancées hors ZAILON (§35-36).
+- **Temps Steam séparé** (§96) : si un add-on fournit
+  `game.steamPlaytimeHours`, affiché « Suivi ZAILON : X · Steam : Y » — jamais
+  fusionné.
 - **Exporter** (§50) : CSV (tableur) ou JSON (sauvegarde), local.
 - **Réinitialiser** (§52) : par jeu ou tout, avec confirmation forte.
 
@@ -55,8 +66,8 @@ sessions live de l'exécution.
 - **Temps tiers** (§96) : jamais fusionné silencieusement — un add-on Steam
   afficherait « Suivi ZAILON : 128 h / Steam : 342 h » séparément.
 
-## Limites actuelles (phase 2)
+## Limites actuelles (phase 3)
 
-- Pas encore : heatmap (§48), stats applications par type (vue Jeux / Apps /
-  Tout, §97), recherche/tri avancés (§98), toast « Suivi par ZAILON » en mode
-  background (§120), agent natif sans WebView (§41, phase 3).
+- Pas encore : toast « Suivi par ZAILON » en mode background (§120),
+  l'add-on Steam Advanced fournissant réellement `steamPlaytimeHours`, agent
+  natif sans WebView (§41, phase 4).

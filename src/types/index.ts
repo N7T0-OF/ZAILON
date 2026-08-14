@@ -354,6 +354,10 @@ export interface Game {
   installedMods: Mod[]
   profiles: Profile[]
   totalPlaytime: number
+  /** Temps Steam (heures) fourni par l'add-on Steam Advanced (spec §96) —
+   * JAMAIS fusionné avec le suivi ZAILON : affiché séparément (« Suivi ZAILON :
+   * X · Steam : Y »). */
+  steamPlaytimeHours?: number
   lastPlayed?: number
   platform?: 'steam' | 'epic' | 'gog' | 'standalone'
   detected?: boolean

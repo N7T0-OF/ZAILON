@@ -26,13 +26,14 @@ import { existsSync } from 'node:fs'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const addonsRoot = join(root, 'addons')
 
-const officialIds = ['official.zailon.frosty', 'official.zailon.frosty-editor', 'official.zailon.visual-profiles']
+const officialIds = ['official.zailon.frosty', 'official.zailon.frosty-editor', 'official.zailon.visual-profiles', 'official.zailon.discord']
 
 test('chaque add-on officiel a un manifest valide (validateAddonManifest)', () => {
   const dirs = readdirSync(addonsRoot, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name)
   assert.ok(dirs.includes('official.zailon.frosty'), 'Frosty Support présent')
   assert.ok(dirs.includes('official.zailon.frosty-editor'), 'Frosty Editor présent')
   assert.ok(dirs.includes('official.zailon.visual-profiles'), 'Visual Profiles présent')
+  assert.ok(dirs.includes('official.zailon.discord'), 'Discord Presence présent')
   for (const id of officialIds) {
     const raw = readFileSync(join(addonsRoot, id, 'manifest.json'), 'utf8')
     const result = validateAddonManifest(JSON.parse(raw))
@@ -84,6 +85,23 @@ test('catalogAddonAvailability : les add-ons avec package sont installables (spe
     assert.equal(availability.status, 'available', `${id} : statut Disponible`)
     assert.ok(availability.downloadUrl, `${id} : URL de téléchargement`)
   }
+})
+
+test('Discord Presence : manifest correct (capabilité, permissions, slots)', () => {
+  const entry = OFFICIAL_ADDON_CATALOG.addons.find(item => item.id === 'official.zailon.discord')
+  assert.ok(entry)
+  const raw = JSON.parse(readFileSync(join(addonsRoot, 'official.zailon.discord', 'manifest.json'), 'utf8'))
+  const manifest = validateAddonManifest(raw)
+  assert.equal(manifest.ok, true)
+  // Capabilité et slots : métadonnées déclaratives du manifest (docs
+  // addon-sdk) — vérifiées sur le JSON brut.
+  assert.ok((raw.capabilities as string[]).includes('discord.presence'))
+  assert.ok((raw.slots as string[]).includes('Settings.Discord'))
+  assert.ok((raw.slots as string[]).includes('QuickPanel.Discord'))
+  for (const permission of manifest.manifest?.permissions || []) {
+    assert.ok(['game.read', 'process.read', 'settings'].includes(permission), `permission valide : ${permission}`)
+  }
+  assert.ok(!entry.dependencies || entry.dependencies.length === 0, 'Discord Presence n\'a pas de dépendance')
 })
 
 test('Frosty Editor déclare la dépendance à Frosty Support (spec §31, §34)', () => {

@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.95.0] - 2026-08-14
+
+> **Discord Presence devient un vrai add-on installable** — première migration
+> réelle hors du Core avec gate de fonctionnalité complète (feature removal) :
+> sans l'add-on, plus de section Paramètres, plus de contrôle panneau rapide,
+> plus aucun appel au pont RPC, et la présence est nettoyée si elle tournait.
+
+### Added
+
+- **Add-on `official.zailon.discord`** (Disponible, package + SHA-256 réel,
+  7 Ko) : capacité `discord.presence`, réglages, diagnostic et panneau rapide.
+- **Gate de fonctionnalité réelle** (§57) : `discordPresenceAllowed`
+  (pur) — le Core ne publie JAMAIS sur l'IPC Discord sans l'add-on installé
+  ET activé, même si le réglage utilisateur est resté activé ; désinstallation
+  ou désactivation en pleine session → présence nettoyée immédiatement.
+- Panneau rapide : état Discord non émis sans l'add-on ; actions
+  `set-discord` / `open-discord-settings` ignorées.
+- Test dédié `test-discord-feature-removal.ts` (6 tests) — **482 tests au
+  total ✅**.
+
 ## [1.94.0] - 2026-08-14
 
 > **Add-ons officiels débloqués + profils multi-installation + nettoyage

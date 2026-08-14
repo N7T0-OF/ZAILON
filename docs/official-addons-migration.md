@@ -22,7 +22,24 @@ catalogue → la carte devient installable à la synchronisation suivante.
 | `official.zailon.frosty` | Disponible (package + SHA-256) |
 | `official.zailon.frosty-editor` | Disponible (package + SHA-256) |
 | `official.zailon.visual-profiles` | Disponible (package + SHA-256) |
-| les 15 autres officiels | En développement — aucun package tant que la fonctionnalité n'est pas migrée hors Core |
+| `official.zailon.discord` | Disponible (package + SHA-256) — première migration réelle hors Core |
+| les 14 autres officiels | En développement — aucun package tant que la fonctionnalité n'est pas migrée hors Core |
+
+### Discord Presence — migration réelle (feature removal §57)
+
+Premier add-on migré hors du Core avec gate de fonctionnalité complète :
+
+- **Capacité** `discord.presence` → `official.zailon.discord` (`addonGating.ts`) ;
+- section Paramètres Discord déjà gated (`hasCap('discord.presence')`) ;
+- panneau rapide : état Discord **non émis** sans l'add-on, actions
+  `set-discord` / `open-discord-settings` **ignorées** ;
+- store : `syncDiscordPresence` refuse de publier sans la capacité (même si le
+  réglage est resté activé) et **nettoie** la présence à la désinstallation /
+  désactivation en pleine session (`discordPresenceAllowed`, pur et testé) ;
+- test dédié `test-discord-feature-removal.ts`.
+
+Le pont natif RPC reste dans le Core mais n'est plus jamais appelé sans
+l'add-on (même modèle que Visual Profiles).
 
 **Règle §55** : un package ne devient pas « Disponible » uniquement pour
 supprimer le texte « En développement » — il doit contenir un manifeste, un

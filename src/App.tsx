@@ -9,6 +9,7 @@ import { resolveProfileMods, useStore } from './store/useStore'
 import { buildRuntimeToastContent } from './lib/runtimeToast'
 import type { PerformanceMode } from './lib/performanceProfiles'
 import { activeSessionsForQuickPanel, modsPreparedFor, nextSessionAfterCurrent, quickPanelDiscordState, quickPanelPerformanceState, type QuickPanelSessionEntry } from './lib/quickPanelState'
+import { addonCapabilities, hasCapability } from './lib/addonGating'
 import { native, type BackgroundTaskSnapshot, type GameProcessDetectedEvent, type GameProcessEvent, type LearnedProcessSignature, type NxmRequest, type ShortcutLaunchRequest } from './lib/native'
 import { adapterFor, FALLBACK_ADAPTER } from './lib/launchAdapters'
 import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, STEAM_BACKED_ATTACH_THRESHOLD, windowRequestFor } from './lib/gamePresence'
@@ -66,8 +67,11 @@ function emitQuickPanelStateFor(store: ReturnType<typeof useStore.getState>, gam
     visualActive: session.visualProfileActive,
     runtimeActive: session.runtimeToolsActive,
     // Spec §38 : état Discord honnête — ✓ seulement si la présence est activée
-    // ET réellement publiée (connexion IPC + session publiée).
-    discord: quickPanelDiscordState(store.discordPresence, discordConnected, store.lastDiscordPublished?.gameName),
+    // ET réellement publiée (connexion IPC + session publiée). Sans l'add-on
+    // Discord (feature removal §57), aucun contrôle Discord dans le panneau.
+    discord: hasCapability(addonCapabilities(store.addons), 'discord.presence')
+      ? quickPanelDiscordState(store.discordPresence, discordConnected, store.lastDiscordPublished?.gameName)
+      : undefined,
   }).catch(() => undefined)
 }
 
@@ -543,12 +547,16 @@ export default function App() {
       } else if (event.payload.action === 'set-discord') {
         // Spec §38 : bascule rapide de la Présence Discord depuis le panneau —
         // le store persiste le réglage et re-synchronise la présence (ClearPresence
-        // si désactivée, spec §34).
-        store.toggleDiscord()
-        void emit('quick-panel-refresh')
+        // si désactivée, spec §34). Ignorée sans l'add-on (feature removal §57).
+        if (hasCapability(addonCapabilities(store.addons), 'discord.presence')) {
+          store.toggleDiscord()
+          void emit('quick-panel-refresh')
+        }
       } else if (event.payload.action === 'open-discord-settings') {
         // Spec §38 : « Configurer » ouvre ZAILON > Paramètres > Intégrations >
         // Discord (la fenêtre principale est ramenée au premier plan).
+        // Ignorée sans l'add-on — la section n'existe pas (§57).
+        if (!hasCapability(addonCapabilities(store.addons), 'discord.presence')) return
         store.setView('settings')
         const window = getCurrentWindow()
         void window.unminimize().catch(() => undefined)

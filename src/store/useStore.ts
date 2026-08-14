@@ -22,6 +22,7 @@ import { ZAILON_PERSIST_KEY } from '../lib/designTokens'
 import { buildDiscordActivity, DISCORD_APPLICATION_ID, DISCORD_PRIORITY_DEBOUNCE_MS, shouldDelayPrioritySwitch, type DiscordActivityInput } from '../lib/discordPresence'
 import { modMatchesRemote, remoteIdentityFromCatalog, remoteModKey } from '../lib/remoteInstallState'
 import { resolveDiscordAsset } from '../lib/discordAssets'
+import { addonCapabilities, discordPresenceAllowed } from '../lib/addonGating'
 import { DEFAULT_BACKGROUND_MEDIA_SETTINGS, type BackgroundMediaSettings } from '../lib/backgroundMedia'
 import { applyHomeLayoutPreset, HOME_WIDGET_DEFAULTS, normalizeHomeWidgets, type HomeLayoutPreset, type HomeWidgetConfig } from '../lib/homeWidgets'
 // Source de vérité de la version : package.json est bumpé à CHAQUE release
@@ -962,12 +963,19 @@ export const useStore = create<Store>()(persist((set, get) => ({
       // Supprime le code ; les données utilisateur restent (dossier addon-data
       // non touché par le store — spec §16-17).
       set(current => ({ addons: current.addons.filter(item => item.manifest.id !== id) }))
+      // Feature removal (spec §57) : la capacité tombe → la présence Discord
+      // est nettoyée immédiatement si une session tournait.
+      get().syncDiscordPresence()
     }
     return { dependents }
   },
-  setAddonEnabled: (id, enabled) => set(state => ({
-    addons: state.addons.map(item => item.manifest.id === id ? { ...item, enabled } : item),
-  })),
+  setAddonEnabled: (id, enabled) => {
+    set(state => ({
+      addons: state.addons.map(item => item.manifest.id === id ? { ...item, enabled } : item),
+    }))
+    // Désactivation de l'add-on Discord en pleine session → présence nettoyée.
+    get().syncDiscordPresence()
+  },
   importAddonManifest: manifest => {
     const validation = validateAddonManifest(manifest)
     if (!validation.ok || !validation.manifest) return { ok: false, error: validation.error || 'Manifest invalide.' }
@@ -2559,7 +2567,11 @@ export const useStore = create<Store>()(persist((set, get) => ({
       set({ lastDiscordPublished: undefined })
       void native.clearDiscordActivity().catch(() => undefined)
     }
-    if (!state.discordPresence) { stop(); return }
+    // Spec « Finalisation des add-ons » §57 (feature removal) : sans l'add-on
+    // Discord installé ET activé (capacité `discord.presence`), le Core ne
+    // touche JAMAIS au pont RPC — présence nettoyée si elle tournait encore
+    // (désinstallation en pleine session) et aucun nouvel appel.
+    if (!discordPresenceAllowed(addonCapabilities(state.addons), state.discordPresence)) { stop(); return }
     const priorityGameId = pickPrioritySession(state.gameSessions, state.pinnedPriorityGameId, state.foregroundGameId)
     const session = state.gameSessions.find(item => item.gameId === priorityGameId && item.state === 'GameRunning')
     if (!session || !priorityGameId) { stop(); return }

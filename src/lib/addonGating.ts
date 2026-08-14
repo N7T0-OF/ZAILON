@@ -89,6 +89,16 @@ export function isCapabilityMissing(capabilities: Set<ZailonCapability>, capabil
   return !hasCapability(capabilities, capability)
 }
 
+/**
+ * Gate de présence Discord (spec « Finalisation des add-ons » §57, feature
+ * removal) : le Core ne publie JAMAIS sur l'IPC Discord sans l'add-on
+ * installé ET activé (capacité `discord.presence`), même si le réglage
+ * utilisateur est resté activé. Pur et testé (test-discord-feature-removal.ts).
+ */
+export function discordPresenceAllowed(capabilities: Set<ZailonCapability>, discordEnabled: boolean): boolean {
+  return hasCapability(capabilities, 'discord.presence') && discordEnabled
+}
+
 /** Capacités manquantes parmi une liste demandée. */
 export function missingCapabilities(capabilities: Set<ZailonCapability>, requested: ZailonCapability[]): ZailonCapability[] {
   return requested.filter(capability => isCapabilityMissing(capabilities, capability))

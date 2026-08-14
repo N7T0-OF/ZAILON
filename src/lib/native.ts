@@ -761,6 +761,10 @@ export const native = {
     desktopOnly<boolean>('set_autostart', { enabled, discreet }),
   /** L'instance courante a-t-elle été lancée avec `--background` ? */
   backgroundMode: () => desktopOnly<boolean>('background_mode'),
+  /** Bulle système « ✓ Suivi par ZAILON » (spec §120) — mode discret uniquement
+   * (le toast in-app est invisible dans une fenêtre cachée). */
+  notifySessionStarted: (gameName: string) =>
+    desktopOnly<void>('notify_session_started', { gameName }),
 
   visualProfiles: {
     backendReport: () => desktopOnly<VisualBackendReport>('visual_backend_report'),

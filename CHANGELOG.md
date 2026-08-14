@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.91.0] - 2026-08-14
+
+> **Mode discret : bulle système « ✓ Suivi par ZAILON »** — quand ZAILON
+> démarre avec Windows en arrière-plan (fenêtre cachée), le démarrage d'une
+> session suivie est annoncé par une vraie notification OS, pas un toast
+> invisible dans une WebView cachée.
+
+### Added
+
+- **Notification système de session en mode discret** (spec §120) : en
+  `--background`, les débuts de suivi (`started` / `detected` / `recovered`)
+  déclenchent une bulle native « ✓ Suivi par ZAILON — <jeu> » — PowerShell
+  (Windows, NotifyIcon), `osascript` (macOS) ou `notify-send` (Linux). Même
+  réglage que le toast runtime : aucune notification si « En cours via
+  ZAILON » est désactivé, jamais pour une fin de session, jamais en fenêtre
+  visible.
+
+### Changed
+
+- Décision pure et testée : `lib/backgroundTracking.ts`
+  (`shouldNotifyBackgroundSession`, `backgroundSessionNotification`) + 3 tests
+  (`test-background-tracking.ts`) — 465 tests au total.
+- Docs : `background-tracking-mode.md` — section bulle système, limites à jour
+  (le raccourci Quick Panel est déjà actif en mode discret et respecte
+  `quickPanelEnabled`, §121).
+
 ## [1.90.0] - 2026-08-14
 
 > **Statistiques complètes** — la page Statistiques gagne les onglets Jeux /

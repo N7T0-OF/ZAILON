@@ -54,7 +54,23 @@ natif `set_autostart` immédiatement — sans redémarrage.
 - `background_mode()` : l'UI peut interroger le mode (usage futur : sauter les
   initialisations lourdes en phase 2).
 
-## 4. Page Statistiques (phase 2)
+## 4. Bulle système « ✓ Suivi par ZAILON » (§120, 1.91.0)
+
+En mode discret la fenêtre est cachée → le toast in-app est invisible. Quand
+une session commence à être suivie (`started` / `detected` / `recovered`),
+ZAILON affiche une **notification système native** (même règle que le toast
+runtime : `toastRuntimeConnected` ON) :
+
+- Windows : `powershell` + `System.Windows.Forms.NotifyIcon` (balloon, 4 s) ;
+- macOS : `osascript display notification` ;
+- Linux : `notify-send`.
+
+Décision pure dans `lib/backgroundTracking.ts` (`shouldNotifyBackgroundSession`,
+`backgroundSessionNotification`) — testée (`test-background-tracking.ts`).
+Jamais de bulle en fenêtre visible, jamais pour une fin de session, jamais si
+le toast runtime est désactivé.
+
+## 5. Page Statistiques (phase 2)
 
 - Totaux depuis `summarizeSessions` (total, sessions, dernière, récupérées).
 - **7 derniers jours** : barres `dailyBreakdown` (Aujourd'hui / Hier / dates).
@@ -65,10 +81,11 @@ natif `set_autostart` immédiatement — sans redémarrage.
   local, sans compte.
 - **Réinitialiser** (§52) : par jeu ou tout l'historique, confirmation forte.
 
-## 5. Limites / phase suivante
+## 6. Limites / phase suivante
 
 - Le mode `--background` cache la fenêtre mais garde la WebView (RAM modeste).
-  « Sans WebView » (agent natif pur) reste une optimisation future.
-- Pas encore : heatmap (§48), temps importés Steam dans la page (§96), toast
-  « Suivi par ZAILON » en mode background (§120), hotkey Quick Panel en
-  background (§121).
+  « Sans WebView » (agent natif pur) reste une optimisation future (§41).
+- Pas encore : tooltip de zone de notification avec la session en cours
+  (§119, nécessite un vrai tray), hotkey Quick Panel en background (§121 — le
+  raccourci global est déjà actif en mode discret et respecte
+  `quickPanelEnabled`).

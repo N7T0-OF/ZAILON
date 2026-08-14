@@ -15,6 +15,7 @@ import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, STEA
 import { pickPrioritySession } from './lib/sessionPriority'
 import { applyAccentTokens, applyDangerTokens } from './lib/designTokens'
 import { createStartupProfiler, createUiWatchdog, StartupCoordinator } from './lib/startup'
+import { shouldNotifyBackgroundSession } from './lib/backgroundTracking'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from './lib/keyboardPresets'
 import { isRed4extActive } from './lib/frameworkValidator'
 import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
@@ -166,6 +167,23 @@ export default function App() {
   useEffect(() => {
     recoverInterruptedSession()
   }, [recoverInterruptedSession])
+
+  // Mode discret (spec §37-41) : l'instance a été lancée avec `--background` —
+  // la fenêtre est cachée, le tracking tourne. Interrogé une fois au boot.
+  const [backgroundMode, setBackgroundMode] = useState(false)
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    void native.backgroundMode().then(setBackgroundMode).catch(() => undefined)
+  }, [])
+
+  // Spec §120 : en mode discret, le toast in-app est invisible — une bulle
+  // SYSTÈME annonce qu'une session est suivie (même réglage que le toast
+  // runtime : « ✓ Suivi par ZAILON — <jeu> », puis disparition).
+  useEffect(() => {
+    const kind = sessionToast?.kind
+    if (!shouldNotifyBackgroundSession(kind, backgroundMode, toastRuntimeConnected) || !sessionToast) return
+    void native.notifySessionStarted(sessionToast.gameName)
+  }, [sessionToast?.kind, sessionToast?.gameName, backgroundMode, toastRuntimeConnected])
 
   // Persistance UI (spec §17, §4) : les réglages debouncés (accent, sliders)
   // sont écrits immédiatement à la fermeture — `pagehide` couvre les cas où

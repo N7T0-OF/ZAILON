@@ -16587,6 +16587,56 @@ fn set_autostart(enabled: bool, discreet: bool) -> Result<bool, String> {
     }
 }
 
+/// Notification système « ✓ Suivi par ZAILON » (spec §120) : en mode discret
+/// la fenêtre est cachée donc le toast in-app est invisible — une vraie bulle
+/// OS annonce qu'une session est suivie. Aucune dépendance : PowerShell
+/// (Windows, NotifyIcon), osascript (macOS) ou notify-send (Linux).
+#[tauri::command]
+fn notify_session_started(game_name: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let safe = game_name.replace('\'', "''");
+        let script = format!(
+            "Add-Type -AssemblyName System.Windows.Forms; $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; $n.BalloonTipTitle = 'ZAILON'; $n.BalloonTipText = 'Suivi par ZAILON - {safe}'; $n.Visible = $true; $n.ShowBalloonTip(4000); Start-Sleep -Seconds 5; $n.Dispose()"
+        );
+        let _ = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                &script,
+            ])
+            .spawn();
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let safe = game_name.replace('"', "\\\"");
+        let script =
+            format!("display notification \"Suivi par ZAILON - {safe}\" with title \"ZAILON\"");
+        let _ = Command::new("osascript").args(["-e", &script]).spawn();
+        Ok(())
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let _ = Command::new("notify-send")
+            .args(["ZAILON", &format!("Suivi par ZAILON - {game_name}")])
+            .spawn();
+        Ok(())
+    }
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(unix, not(target_os = "macos"))
+    )))]
+    {
+        let _ = (game_name,);
+        Err("notifications non supportées sur cette plateforme".to_string())
+    }
+}
+
 pub fn run() {
     BACKGROUND_MODE.store(
         std::env::args().any(|argument| argument == "--background"),
@@ -16791,7 +16841,8 @@ pub fn run() {
             #[cfg(desktop)]
             install_update,
             set_autostart,
-            background_mode
+            background_mode,
+            notify_session_started
         ])
         .run(tauri::generate_context!())
         .expect("error while running ZAILON");

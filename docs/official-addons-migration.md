@@ -23,7 +23,25 @@ catalogue → la carte devient installable à la synchronisation suivante.
 | `official.zailon.frosty-editor` | Disponible (package + SHA-256) |
 | `official.zailon.visual-profiles` | Disponible (package + SHA-256) |
 | `official.zailon.discord` | Disponible (package + SHA-256) — première migration réelle hors Core |
-| les 14 autres officiels | En développement — aucun package tant que la fonctionnalité n'est pas migrée hors Core |
+| `official.zailon.provider.gamebanana` | Disponible (package + SHA-256) |
+| les 13 autres officiels | En développement — aucun package tant que la fonctionnalité n'est pas migrée hors Core |
+
+### GameBanana Provider — migration réelle (feature removal §57)
+
+Le gating Explorer existait déjà (spec §21-24 : seuls les providers dont
+l'add-on est installé ET activé existent — liste des sources filtrée, effets
+coupés, zéro requête distante). La migration a donc consisté à :
+
+- créer le package `official.zailon.provider.gamebanana` (capacité
+  `provider.gamebanana`, permissions `network`/`game.read`/`mods.write`, slot
+  `Explorer.Provider`) — **Disponible** avec SHA-256 réel ;
+- vérifier qu'aucun appel au client GameBanana n'existe hors de l'UI gated
+  (recherche/refresh/téléchargement ne sont atteignables que via Explorer) ;
+- test dédié `test-gamebanana-provider.ts` (absence → pas de source, package
+  réel, manifest correct).
+
+Le client GameBanana reste dans le Core mais n'est appelé QUE par l'UI gated —
+même modèle que Visual Profiles et Discord Presence.
 
 ### Discord Presence — migration réelle (feature removal §57)
 

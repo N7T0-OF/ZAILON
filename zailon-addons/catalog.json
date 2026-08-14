@@ -117,13 +117,23 @@
       "name": "GameBanana Provider",
       "version": "1.0.0",
       "category": "sources",
-      "description": "Catalogue GameBanana dans Explorer.",
-      "minZailonVersion": "1.69.0",
+      "description": "Source Explorer GameBanana : recherche de jeux et de mods, galerie avec pagination, images, états d'installation et téléchargement. Sans cet add-on, GameBanana n'existe pas dans Explorer — zéro requête distante.",
+      "minZailonVersion": "1.78.0",
       "permissions": [
         "network",
-        "provider"
+        "game.read",
+        "mods.write"
       ],
-      "package": null
+      "package": "packages/gamebanana/official.zailon.provider.gamebanana-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "6d15e5d4a04e6a72d27b770af8f6b9d49a835da97bfd5bf47441ff94f0ae8ddb",
+      "downloadSize": 6309,
+      "installedSize": 15773,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
     },
     {
       "id": "official.zailon.provider.curseforge",

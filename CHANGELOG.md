@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.96.0] - 2026-08-14
+
+> **GameBanana Provider devient un add-on installable** — le gating Explorer
+> existait déjà ; le package réel le rend Disponible (5 add-ons officiels
+> installables).
+
+### Added
+
+- **Add-on `official.zailon.provider.gamebanana`** (Disponible, package +
+  SHA-256 réel, 6 Ko) : source Explorer GameBanana — recherche jeux/mods,
+  galerie paginée, images, états d'installation, téléchargement.
+- **Feature removal vérifié** (§57) : sans l'add-on installé ET activé,
+  GameBanana n'existe pas dans Explorer (source filtrée, effets coupés, zéro
+  requête distante) — test dédié `test-gamebanana-provider.ts` (5 tests),
+  **487 tests au total ✅**.
+
 ## [1.95.0] - 2026-08-14
 
 > **Discord Presence devient un vrai add-on installable** — première migration

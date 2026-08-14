@@ -26,7 +26,7 @@ import { existsSync } from 'node:fs'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const addonsRoot = join(root, 'addons')
 
-const officialIds = ['official.zailon.frosty', 'official.zailon.frosty-editor', 'official.zailon.visual-profiles', 'official.zailon.discord']
+const officialIds = ['official.zailon.frosty', 'official.zailon.frosty-editor', 'official.zailon.visual-profiles', 'official.zailon.discord', 'official.zailon.provider.gamebanana']
 
 test('chaque add-on officiel a un manifest valide (validateAddonManifest)', () => {
   const dirs = readdirSync(addonsRoot, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name)
@@ -34,6 +34,7 @@ test('chaque add-on officiel a un manifest valide (validateAddonManifest)', () =
   assert.ok(dirs.includes('official.zailon.frosty-editor'), 'Frosty Editor présent')
   assert.ok(dirs.includes('official.zailon.visual-profiles'), 'Visual Profiles présent')
   assert.ok(dirs.includes('official.zailon.discord'), 'Discord Presence présent')
+  assert.ok(dirs.includes('official.zailon.provider.gamebanana'), 'GameBanana Provider présent')
   for (const id of officialIds) {
     const raw = readFileSync(join(addonsRoot, id, 'manifest.json'), 'utf8')
     const result = validateAddonManifest(JSON.parse(raw))

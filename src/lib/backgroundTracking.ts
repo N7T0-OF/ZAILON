@@ -34,3 +34,10 @@ export function backgroundSessionNotification(
   if (!isTrackedSessionStart(kind)) return undefined
   return { title: 'ZAILON', message: `✓ Suivi par ZAILON — ${gameName}` }
 }
+
+/** Libellé du tooltip de la zone de notification (spec §119) : « ZAILON —
+ * <jeu> » pendant une session suivie, « ZAILON » sinon. PURE — testable.
+ * La session prioritaire vient de `pickPrioritySession` (sessionPriority). */
+export function traySessionLabel(gameName: string | undefined): string {
+  return gameName ? `ZAILON — ${gameName}` : 'ZAILON'
+}

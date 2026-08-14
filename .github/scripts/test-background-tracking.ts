@@ -10,6 +10,7 @@ import {
   backgroundSessionNotification,
   isTrackedSessionStart,
   shouldNotifyBackgroundSession,
+  traySessionLabel,
 } from '../../src/lib/backgroundTracking.ts'
 
 test('isTrackedSessionStart : uniquement les débuts de suivi (§120)', () => {
@@ -37,4 +38,10 @@ test('backgroundSessionNotification : contenu de la bulle, puis disparition (§1
   assert.deepEqual(bullet, { title: 'ZAILON', message: '✓ Suivi par ZAILON — Cyberpunk 2077' })
   assert.equal(backgroundSessionNotification('ended', 'Cyberpunk 2077'), undefined)
   assert.equal(backgroundSessionNotification(undefined, 'Cyberpunk 2077'), undefined)
+})
+
+test('traySessionLabel : « ZAILON — <jeu> » pendant une session, « ZAILON » sinon (spec §119)', () => {
+  assert.equal(traySessionLabel('Cyberpunk 2077'), 'ZAILON — Cyberpunk 2077')
+  assert.equal(traySessionLabel(undefined), 'ZAILON')
+  assert.equal(traySessionLabel(''), 'ZAILON')
 })

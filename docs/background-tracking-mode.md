@@ -70,7 +70,22 @@ Décision pure dans `lib/backgroundTracking.ts` (`shouldNotifyBackgroundSession`
 Jamais de bulle en fenêtre visible, jamais pour une fin de session, jamais si
 le toast runtime est désactivé.
 
-## 5. Page Statistiques (phase 2)
+## 5. Zone de notification — tray (§42, §119, 1.92.0)
+
+Une **icône de zone de notification** accompagne l'application (tauri `tray-icon`,
+feature déjà dans le graph de tauri 2.11 — aucune dépendance nouvelle) :
+
+- **Clic gauche** : ramène la fenêtre principale au premier plan (même en mode
+  discret) ;
+- **Menu** : « Ouvrir ZAILON » / « Quitter » ;
+- **Tooltip** : « ZAILON — <jeu> » pendant une session suivie (session
+  prioritaire, `pickPrioritySession`), « ZAILON » sinon — piloté par la
+  WebView via `set_tray_session` (idempotent, appelé uniquement quand le
+  libellé change).
+
+Libellé pur testé (`traySessionLabel`) — 4 tests mode discret au total.
+
+## 6. Page Statistiques (phase 2)
 
 - Totaux depuis `summarizeSessions` (total, sessions, dernière, récupérées).
 - **7 derniers jours** : barres `dailyBreakdown` (Aujourd'hui / Hier / dates).
@@ -81,11 +96,9 @@ le toast runtime est désactivé.
   local, sans compte.
 - **Réinitialiser** (§52) : par jeu ou tout l'historique, confirmation forte.
 
-## 6. Limites / phase suivante
+## 7. Limites / phase suivante
 
 - Le mode `--background` cache la fenêtre mais garde la WebView (RAM modeste).
   « Sans WebView » (agent natif pur) reste une optimisation future (§41).
-- Pas encore : tooltip de zone de notification avec la session en cours
-  (§119, nécessite un vrai tray), hotkey Quick Panel en background (§121 — le
-  raccourci global est déjà actif en mode discret et respecte
-  `quickPanelEnabled`).
+- Pas encore : hotkey Quick Panel en background (§121 — le raccourci global est
+  déjà actif en mode discret et respecte `quickPanelEnabled`).

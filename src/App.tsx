@@ -15,7 +15,7 @@ import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, STEA
 import { pickPrioritySession } from './lib/sessionPriority'
 import { applyAccentTokens, applyDangerTokens } from './lib/designTokens'
 import { createStartupProfiler, createUiWatchdog, StartupCoordinator } from './lib/startup'
-import { shouldNotifyBackgroundSession } from './lib/backgroundTracking'
+import { shouldNotifyBackgroundSession, traySessionLabel } from './lib/backgroundTracking'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from './lib/keyboardPresets'
 import { isRed4extActive } from './lib/frameworkValidator'
 import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
@@ -96,6 +96,9 @@ export default function App() {
   const clearCompletedNotifications = useStore(s => s.clearCompletedNotifications)
   const clearNotificationHistory = useStore(s => s.clearNotificationHistory)
   const games = useStore(s => s.games)
+  const sessions = useStore(s => s.gameSessions)
+  const pinnedPriorityGameId = useStore(s => s.pinnedPriorityGameId)
+  const foregroundGameId = useStore(s => s.foregroundGameId)
   const isLaunching = useStore(s => s.isLaunching)
   const isPlaying = useStore(s => s.isPlaying)
   const setSelectedGame = useStore(s => s.setSelectedGame)
@@ -184,6 +187,20 @@ export default function App() {
     if (!shouldNotifyBackgroundSession(kind, backgroundMode, toastRuntimeConnected) || !sessionToast) return
     void native.notifySessionStarted(sessionToast.gameName)
   }, [sessionToast?.kind, sessionToast?.gameName, backgroundMode, toastRuntimeConnected])
+
+  // Spec §119 : tooltip de la zone de notification — « ZAILON — <jeu> »
+  // pendant une session suivie (session prioritaire), « ZAILON » sinon.
+  // Idempotent : le IPC n'est appelé que lorsque le libellé change.
+  const trayLabelRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!native.isDesktop()) return
+    const priorityId = pickPrioritySession(sessions, pinnedPriorityGameId, foregroundGameId)
+    const game = priorityId ? games.find(item => item.id === priorityId) : undefined
+    const label = traySessionLabel(game?.name)
+    if (trayLabelRef.current === label) return
+    trayLabelRef.current = label
+    void native.setTraySession(label).catch(() => undefined)
+  }, [sessions, games, pinnedPriorityGameId, foregroundGameId])
 
   // Persistance UI (spec §17, §4) : les réglages debouncés (accent, sliders)
   // sont écrits immédiatement à la fermeture — `pagehide` couvre les cas où

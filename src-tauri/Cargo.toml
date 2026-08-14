@@ -23,7 +23,7 @@ serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.10"
 base64 = "0.22"
 ed25519-dalek = "2"
-tauri = { version = "2", features = ["protocol-asset", "macos-private-api"] }
+tauri = { version = "2", features = ["protocol-asset", "macos-private-api", "tray-icon"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"

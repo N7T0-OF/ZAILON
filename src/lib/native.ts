@@ -765,6 +765,9 @@ export const native = {
    * (le toast in-app est invisible dans une fenêtre cachée). */
   notifySessionStarted: (gameName: string) =>
     desktopOnly<void>('notify_session_started', { gameName }),
+  /** Tooltip de la zone de notification (spec §119) : « ZAILON — <jeu> »
+   * pendant une session suivie, « ZAILON » sinon. */
+  setTraySession: (label: string) => desktopOnly<void>('set_tray_session', { label }),
 
   visualProfiles: {
     backendReport: () => desktopOnly<VisualBackendReport>('visual_backend_report'),

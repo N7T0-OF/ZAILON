@@ -17,6 +17,11 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State};
 use walkdir::WalkDir;
 
+#[cfg(desktop)]
+use tauri::menu::{Menu, MenuItem};
+#[cfg(desktop)]
+use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+
 mod input_backends;
 mod process_scanner;
 mod quick_panel;
@@ -16501,6 +16506,26 @@ mod tests {
 /// reste cachée jusqu'à ce que l'utilisateur rouvre l'application.
 static BACKGROUND_MODE: AtomicBool = AtomicBool::new(false);
 
+/// Icône de zone de notification (spec §42, §119) : gardée en état géré pour
+/// que le tooltip puisse afficher la session en cours (`set_tray_session`).
+#[cfg(desktop)]
+struct TraySession(Mutex<Option<TrayIcon>>);
+
+/// Tooltip de la zone de notification (spec §119) : « ZAILON — <jeu> »
+/// pendant une session suivie, « ZAILON » sinon. Appelé par la WebView dès
+/// que la session prioritaire change — idempotent et sans coût.
+#[cfg(desktop)]
+#[tauri::command]
+fn set_tray_session(app: AppHandle, label: String) -> Result<(), String> {
+    let state = app.state::<TraySession>();
+    let guard = state.0.lock().map_err(|_| "verrou du tray indisponible")?;
+    if let Some(tray) = guard.as_ref() {
+        tray.set_tooltip(Some(&label))
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 /// L'instance courante a-t-elle été lancée avec `--background` ?
 #[tauri::command]
 fn background_mode() -> bool {
@@ -16697,6 +16722,49 @@ pub fn run() {
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
                 app.manage(PendingUpdate(Mutex::new(None)));
+                // Zone de notification (spec §42, §119) : icône toujours
+                // présente (même en `--background`), clic gauche = ramène la
+                // fenêtre, menu « Ouvrir ZAILON » / « Quitter », tooltip piloté
+                // par la session en cours (set_tray_session).
+                let show_item =
+                    MenuItem::with_id(app, "zailon-show", "Ouvrir ZAILON", true, None::<&str>)?;
+                let quit_item =
+                    MenuItem::with_id(app, "zailon-quit", "Quitter", true, None::<&str>)?;
+                let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+                let mut tray_builder = TrayIconBuilder::new()
+                    .menu(&tray_menu)
+                    .show_menu_on_left_click(false)
+                    .tooltip("ZAILON")
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "zailon-show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "zailon-quit" => app.exit(0),
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle();
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    });
+                if let Some(icon) = app.default_window_icon() {
+                    tray_builder = tray_builder.icon(icon.clone());
+                }
+                app.manage(TraySession(Mutex::new(Some(tray_builder.build(app)?))));
                 for argument in std::env::args() {
                     if argument.starts_with("nxm://") {
                         enqueue_nxm(app.handle(), &argument);
@@ -16842,7 +16910,9 @@ pub fn run() {
             install_update,
             set_autostart,
             background_mode,
-            notify_session_started
+            notify_session_started,
+            #[cfg(desktop)]
+            set_tray_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running ZAILON");

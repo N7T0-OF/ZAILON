@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.92.0] - 2026-08-14
+
+> **Zone de notification (tray)** — une icône systray accompagne ZAILON : clic
+> gauche = rouvrir la fenêtre (y compris depuis le mode discret), menu Ouvrir /
+> Quitter, et un tooltip « ZAILON — <jeu> » qui affiche la session en cours.
+
+### Added
+
+- **Tray icon** (spec §42, §119) : icône en zone de notification sur les trois
+  plateformes — clic gauche ramène la fenêtre au premier plan, menu « Ouvrir
+  ZAILON » / « Quitter », tooltip piloté par la session prioritaire
+  (`set_tray_session`, idempotent — le IPC n'est appelé que quand le libellé
+  change). Zéro dépendance ajoutée : feature `tray-icon` de tauri 2.11 (déjà
+  résolue dans le lock).
+
+### Changed
+
+- `lib/backgroundTracking.ts` : `traySessionLabel` (« ZAILON — <jeu> » /
+  « ZAILON ») — 4 tests mode discret (`test-background-tracking.ts`),
+  466 tests au total.
+- Docs : `background-tracking-mode.md` — section tray, limites à jour.
+
 ## [1.91.0] - 2026-08-14
 
 > **Mode discret : bulle système « ✓ Suivi par ZAILON »** — quand ZAILON

@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, ChevronRight, Compass, Database, ExternalLink, EyeOff, FileClock, FileText, Gamepad2, HardDrive, Heart, Info, KeyRound, Link2, MonitorUp, Palette, Radio, RefreshCw, Search, Settings2, ShieldAlert, Trash2 } from 'lucide-react'
+import { Activity, AlertCircle, CheckCircle2, ChevronRight, Compass, Database, ExternalLink, EyeOff, FileClock, FileText, Gamepad2, HardDrive, Heart, Info, KeyRound, Link2, MonitorUp, Palette, Radio, RefreshCw, Search, Settings2, ShieldAlert, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import type { GameTab } from '../../types'
@@ -155,6 +155,11 @@ export function SettingsView() {
   const setTaskAutoReduceImports = useStore(state => state.setTaskAutoReduceImports)
   const showSupportButton = useStore(state => state.showSupportButton)
   const accentColor = useStore(state => state.accentColor)
+  const trackPlaytime = useStore(state => state.trackPlaytime)
+  const trackExternalApps = useStore(state => state.trackExternalApps)
+  const startWithSystem = useStore(state => state.startWithSystem)
+  const startDiscreet = useStore(state => state.startDiscreet)
+  const setTrackingSettings = useStore(state => state.setTrackingSettings)
   const setShowSupportButton = useStore(state => state.setShowSupportButton)
   const restartTour = useStore(state => state.restartTour)
   const resetTour = useStore(state => state.resetTour)
@@ -437,6 +442,16 @@ export function SettingsView() {
         {(status === 'upToDate' || status === 'available') && <p className="mt-3 flex items-center gap-1.5 text-[11px] text-green-400"><CheckCircle2 size={12} />{status === 'available' ? `Update v${update?.version} is ready.` : 'ZAILON is up to date.'}</p>}
         {(error || lastUpdateError) && <p className="mt-3 flex items-start gap-1.5 text-[11px] leading-relaxed text-red-300"><AlertCircle size={12} className="mt-0.5 shrink-0" />{error || lastUpdateError}</p>}
         <div className="mt-3 flex flex-wrap gap-2"><button onClick={() => void checkUpdates()} disabled={isChecking} className="flex items-center gap-1.5 rounded bg-gold px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold-light disabled:opacity-40"><RefreshCw size={11} className={isChecking ? 'animate-spin' : ''} />{isChecking ? 'Checking…' : 'Check for updates'}</button><button onClick={() => void openLog()} className="flex items-center gap-1.5 rounded border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-[11px] text-white/70 hover:text-white"><FileText size={11} />Open update log</button></div>
+      </AccordionSection>
+
+      <AccordionSection id="tracking" title="Suivi & démarrage discret" subtitle="Statistiques locales, apps hors ZAILON" icon=<Activity size={13} /> open={openSection === 'tracking'} onToggle={() => toggleSection('tracking')}>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/65"><span>Suivre le temps d’utilisation</span><ZailonSwitch checked={trackPlaytime} onChange={next => setTrackingSettings({ trackPlaytime: next })} /></label>
+          <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/65"><span>Suivre les apps lancées hors ZAILON</span><ZailonSwitch checked={trackExternalApps} onChange={next => setTrackingSettings({ trackExternalApps: next })} /></label>
+          <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/65"><span>Démarrer ZAILON avec le système</span><ZailonSwitch checked={startWithSystem} onChange={next => setTrackingSettings({ startWithSystem: next })} /></label>
+          <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/65"><span>Démarrer discrètement</span><ZailonSwitch checked={startDiscreet} onChange={next => setTrackingSettings({ startDiscreet: next })} disabled={!startWithSystem} /></label>
+        </div>
+        {!reduceExplanations && <p className="mt-2 text-[11px] leading-relaxed text-white/32">Les statistiques restent 100 % locales — aucun compte, aucune télémétrie. « Discrètement » lance ZAILON sans ouvrir la fenêtre principale : seul le suivi des sessions tourne (fenêtre réapparaît au double-clic). {!startDiscreet && trackExternalApps && 'ⓘ Le suivi des apps hors ZAILON commence uniquement lorsque ZAILON est ouvert.'}</p>}
       </AccordionSection>
 
       <AccordionSection id="library-stats" title="Library statistics" subtitle="Jeux, mods, temps de jeu" icon=<Database size={13} /> open={openSection === 'library-stats'} onToggle={() => toggleSection('library-stats')}><div className="grid grid-cols-3 gap-2 text-center"><Stat label="Games" value={String(games.length)} /><Stat label="Mods" value={String(games.reduce((sum, game) => sum + game.installedMods.length, 0))} /><Stat label="Playtime" value={formatTime(totalPlaytime)} /></div></AccordionSection>

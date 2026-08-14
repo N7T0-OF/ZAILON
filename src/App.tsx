@@ -112,6 +112,7 @@ export default function App() {
   const batteryPerformanceBehavior = useStore(s => s.batteryPerformanceBehavior)
   const reconcileRuntimeActivity = useStore(s => s.reconcileRuntimeActivity)
   const refreshStagedCatalogs = useStore(s => s.refreshStagedCatalogs)
+  const recoverInterruptedSession = useStore(s => s.recoverInterruptedSession)
   const flushPendingSettings = useStore(s => s.flushPendingSettings)
   const tourCompleted = useStore(s => s.tourCompleted)
   const tourSkipped = useStore(s => s.tourSkipped)
@@ -158,6 +159,13 @@ export default function App() {
     const interactiveTimer = globalThis.setTimeout(() => startupProfiler.mark('interactiveAt'), 300)
     return () => globalThis.clearTimeout(interactiveTimer)
   }, [refreshStagedCatalogs])
+
+  // Spec §45 : au démarrage, une session suivie interrompue par un crash de
+  // ZAILON est archivée avec son dernier checkpoint (marquée « récupérée »).
+  // Le watcher rétablira une nouvelle session live si le jeu tourne encore.
+  useEffect(() => {
+    recoverInterruptedSession()
+  }, [recoverInterruptedSession])
 
   // Persistance UI (spec §17, §4) : les réglages debouncés (accent, sliders)
   // sont écrits immédiatement à la fermeture — `pagehide` couvre les cas où
@@ -294,7 +302,11 @@ export default function App() {
       if (scanning || now - lastScan < (gameModeActive && !exitCheckRef.current ? 6000 : 3000)) return
       const waiters = state.gameSessions.filter(session => session.state === 'WaitingForGame' || session.state === 'GameLost' || session.state === 'WaitingForElevation')
       const activeIds = state.gameSessions.filter(session => session.state !== 'Ended' && session.state !== 'Failed').map(session => session.gameId)
-      const external = installed.filter(game => shouldScanExternalGame(game, steamAppIdsRef.current, state.autoAttachGames ?? [], activeIds))
+      // Spec §114 : « Suivre les apps lancées hors ZAILON » OFF → aucun scan
+      // externe (les sessions lancées par ZAILON restent suivies).
+      const external = state.trackExternalApps
+        ? installed.filter(game => shouldScanExternalGame(game, steamAppIdsRef.current, state.autoAttachGames ?? [], activeIds))
+        : []
       // Sessions en cours : leur fenêtre est scannée pour la PRIORITÉ par
       // premier plan (Alt+Tab réel) — jamais passées par `attach` (déjà Running).
       const runningSessions = state.gameSessions.filter(session => session.state === 'GameRunning')

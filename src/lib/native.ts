@@ -755,6 +755,13 @@ const desktopOnly = <T>(command: string, args?: Record<string, unknown>) => {
 
 export const native = {
   isDesktop: () => isTauri(),
+  /** Active/désactive le démarrage avec le système (spec §37-42, §116) :
+   * `discreet` = lancer en arrière-plan (`--background`, fenêtre cachée). */
+  setAutostart: (enabled: boolean, discreet: boolean) =>
+    desktopOnly<boolean>('set_autostart', { enabled, discreet }),
+  /** L'instance courante a-t-elle été lancée avec `--background` ? */
+  backgroundMode: () => desktopOnly<boolean>('background_mode'),
+
   visualProfiles: {
     backendReport: () => desktopOnly<VisualBackendReport>('visual_backend_report'),
     list: () => desktopOnly<VisualProfile[]>('list_visual_profiles'),

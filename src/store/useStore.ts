@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { BackgroundMediaType, BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, ExternalModReference, Game, GameBackgroundMedia, GameInputProfile, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, ReShadeProfileState, RestorePoint, SessionSource, TextSize, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
+import { ActiveTrackedSession, BackgroundMediaType, BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, ExternalModReference, Game, GameBackgroundMedia, GameInputProfile, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, ReShadeProfileState, RestorePoint, SessionSource, TextSize, TrackedSession, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
+import { checkpointDue } from '../lib/sessionStats'
 import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
 import { validateAddonManifest } from '../lib/addons'
 import type { AddonSource, InstalledAddon, ZailonAddonManifest } from '../lib/addons'
@@ -396,6 +397,20 @@ export interface Store {
   isPlaying: boolean
   playStartTime?: number
   sessionTime: number
+  /** Sessions terminées persistées — source de vérité des statistiques
+   * (spec « Accueil modulaire » §34-52, §90). Noms jeu/profil en SNAPSHOT. */
+  sessionHistory: TrackedSession[]
+  /** Session en cours suivie (checkpoint ~5 min, §44) — persistée pour la
+   * récupération après crash (§45). */
+  activeTrackedSession?: ActiveTrackedSession
+  /** Suivi du temps d'utilisation (spec §114). */
+  trackPlaytime: boolean
+  /** Suivi des apps lancées hors ZAILON (§35-36, §114). */
+  trackExternalApps: boolean
+  /** Démarrer ZAILON avec le système (§37, §116). */
+  startWithSystem: boolean
+  /** Démarrage discret : ZAILON démarre sans fenêtre principale (§37-41). */
+  startDiscreet: boolean
   explorePlatform: Platform
   exploreGameId: number
   exploreGames: GamebananaGame[]
@@ -594,6 +609,14 @@ export interface Store {
    * elle expire sans preuve, la session se termine réellement. Le launcher
    * seul ne compte JAMAIS comme présence du jeu. */
   sessionPresenceReport: (gameId: string, present: boolean, evidence?: string[]) => void
+  /** Réglages de suivi (spec §114-117) : applique le autostart natif dès que
+   * `startWithSystem`/`startDiscreet` changent. */
+  setTrackingSettings: (patch: Partial<Pick<Store, 'trackPlaytime' | 'trackExternalApps' | 'startWithSystem' | 'startDiscreet'>>) => void
+  /** Récupération d'une session interrompue par un crash de ZAILON (§45) :
+   * archive avec le dernier checkpoint, marquée `recovered`. */
+  recoverInterruptedSession: () => void
+  /** Réinitialise l'historique des sessions (jeu précis ou tout, §52). */
+  resetSessionHistory: (gameId?: string) => void
   /** Empreinte des frameworks au dernier lancement réussi, par jeu (spec
    * « Last Known Good » §41) — `undefined` = aucune référence encore. */
   lastKnownGoodFrameworks?: Record<string, FrameworkSnapshot | undefined>
@@ -779,6 +802,14 @@ export function migratePersistedState(persisted: unknown) {
     isPlaying: false,
     playStartTime: undefined,
     sessionTime: 0,
+    sessionHistory: Array.isArray(state.sessionHistory) ? state.sessionHistory : [],
+    trackPlaytime: state.trackPlaytime ?? true,
+    trackExternalApps: state.trackExternalApps ?? true,
+    startWithSystem: state.startWithSystem ?? false,
+    startDiscreet: state.startDiscreet ?? false,
+    activeTrackedSession: state.activeTrackedSession && typeof state.activeTrackedSession.gameId === 'string'
+      ? state.activeTrackedSession
+      : undefined,
     gameSessions: [],
   }
 }
@@ -830,6 +861,11 @@ export const useStore = create<Store>()(persist((set, get) => ({
   isLaunching: false,
   isPlaying: false,
   sessionTime: 0,
+  sessionHistory: [],
+  trackPlaytime: true,
+  trackExternalApps: true,
+  startWithSystem: false,
+  startDiscreet: false,
   gameSessions: [],
   explorePlatform: 'gamebanana',
   exploreGameId: GAMEBANANA_GAMES[0].id,
@@ -1724,7 +1760,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const state = get()
     const game = state.games.find(item => item.id === gameId) ?? state.games.find(item => item.id === state.selectedGameId)
     const profile = game?.profiles.find(item => item.id === profileId) ?? game?.profiles.find(item => item.id === state.selectedProfileId) ?? game?.profiles[0]
-    if (!game || !profile) { set({ isLaunching: false, launchProgress: undefined, isPlaying: false, playStartTime: undefined, sessionTime: 0 }); return }
+    if (!game || !profile) {
+      set({ isLaunching: false, launchProgress: undefined, isPlaying: false, playStartTime: undefined, sessionTime: 0, activeTrackedSession: undefined })
+      return
+    }
     const minutes = state.playStartTime ? Math.floor((Date.now() - state.playStartTime) / 60_000) : 0
     const now = Date.now()
     const restoredStatus: NonNullable<Mod['deploymentStatus']> = cleanupError ? 'failed' : 'enabled'
@@ -1737,11 +1776,43 @@ export const useStore = create<Store>()(persist((set, get) => ({
           ? { ...mod, deploymentStatus: restoredStatus, diagnostics: cleanupError ? [...(mod.diagnostics || []), cleanupError] : mod.diagnostics }
           : mod),
       } : item)
-    set({ games, isLaunching: false, launchProgress: undefined, isPlaying: false, playStartTime: undefined, sessionTime: 0, notice: cleanupError ? `Restauration du jeu incomplète : ${cleanupError}` : state.notice })
+    // Spec §44-45 : fin de session → commit définitif dans l'historique persisté
+    // (source de vérité des statistiques). La source suit la session native.
+    const tracked = state.activeTrackedSession
+    const sessionSource = state.gameSessions.find(item => item.gameId === game.id && item.state !== 'Ended' && item.state !== 'Failed')?.source ?? 'zailon'
+    const trackedSession = tracked && tracked.gameId === game.id && minutes > 0
+      ? {
+          id: createId(),
+          gameId: game.id,
+          gameName: game.name,
+          profileId: profile.id,
+          profileName: profile.name,
+          startedAt: tracked.startedAt,
+          endedAt: now,
+          durationMin: minutes,
+          source: sessionSource === 'external' ? 'external' : 'zailon',
+        } satisfies TrackedSession
+      : undefined
+    set({
+      games,
+      isLaunching: false,
+      launchProgress: undefined,
+      isPlaying: false,
+      playStartTime: undefined,
+      sessionTime: 0,
+      activeTrackedSession: undefined,
+      sessionHistory: trackedSession ? [...state.sessionHistory, trackedSession] : state.sessionHistory,
+      notice: cleanupError ? `Restauration du jeu incomplète : ${cleanupError}` : state.notice,
+    })
   },
   tick: () => {
-    const { isPlaying, playStartTime } = get()
+    const { isPlaying, playStartTime, activeTrackedSession } = get()
     if (isPlaying && playStartTime) set({ sessionTime: Math.floor((Date.now() - playStartTime) / 1_000) })
+    // Spec §44 : checkpoint ~5 min — persiste la progression pour qu'un crash
+    // de ZAILON ne perde pas une session entière (récupérée au §45).
+    if (activeTrackedSession && checkpointDue(activeTrackedSession.checkpointAt, Date.now())) {
+      set({ activeTrackedSession: { ...activeTrackedSession, checkpointAt: Date.now() } })
+    }
   },
   beginSession: (gameId, profileId, source = 'zailon') => {
     const state = get()
@@ -1770,6 +1841,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       isPlaying: true,
       playStartTime: now,
       sessionTime: 0,
+      ...(get().trackPlaytime ? { activeTrackedSession: { gameId, profileId, startedAt: now, checkpointAt: now } } : {}),
     }))
   },
   onGameProcessStopped: ({ gameId, cleanupError, processName }) => {
@@ -1886,6 +1958,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       isPlaying: true,
       playStartTime: now,
       sessionTime: 0,
+      ...(get().trackPlaytime ? { activeTrackedSession: { gameId, profileId: profile.id, startedAt: now, checkpointAt: now } } : {}),
     }))
     get().recordNotice(`${game.name} détecté — session ZAILON récupérée automatiquement.`)
     // Spec #21-24 : détecté hors ZAILON → « Jeu détecté par ZAILON » ; si ZAILON
@@ -1946,6 +2019,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
         isPlaying: true,
         playStartTime: now,
         sessionTime: 0,
+        ...(get().trackPlaytime ? { activeTrackedSession: { gameId, profileId, startedAt: now, checkpointAt: now } } : {}),
       }))
     }
     get().recordNotice(`${game.name} — session attachée à ZAILON.`)
@@ -1978,6 +2052,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       isPlaying: true,
       playStartTime: now,
       sessionTime: 0,
+      ...(get().trackPlaytime ? { activeTrackedSession: { gameId, profileId, startedAt: now, checkpointAt: now } } : {}),
       notice: `${game.name} : mods préparés, watcher actif. Lancez le jeu normalement (launcher officiel) — ZAILON l'attachera automatiquement.`,
     }))
   },
@@ -2291,6 +2366,50 @@ export const useStore = create<Store>()(persist((set, get) => ({
   upsertBackgroundTask: task => set(state => ({ backgroundTasks: [task, ...state.backgroundTasks.filter(item => item.id !== task.id)].sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 500) })),
   setTaskToastsEnabled: taskToastsEnabled => set({ taskToastsEnabled }),
   setTaskAutoReduceImports: taskAutoReduceImports => set({ taskAutoReduceImports }),
+  setTrackingSettings: patch => {
+    const current = get()
+    // Cohérence (spec §116) : discret implique un démarrage avec le système ;
+    // retirer le démarrage système désactive le discret.
+    const startWithSystem = patch.startWithSystem ?? current.startWithSystem
+    const startDiscreet = patch.startDiscreet !== undefined
+      ? patch.startDiscreet && startWithSystem
+      : (current.startDiscreet && startWithSystem)
+    const next = { ...patch, startWithSystem, startDiscreet }
+    set(state => ({ ...state, ...next }))
+    if (native.isDesktop()) void native.setAutostart(startWithSystem, startDiscreet).catch(() => undefined)
+  },
+  recoverInterruptedSession: () => {
+    const state = get()
+    const tracked = state.activeTrackedSession
+    if (!tracked) return
+    // Session déjà reprise par le watcher (jeu encore en cours) : la session
+    // live continuera et archivra sa propre entrée — rien à récupérer.
+    const live = state.gameSessions.some(item => item.gameId === tracked.gameId && item.state !== 'Ended' && item.state !== 'Failed')
+    set({ activeTrackedSession: undefined })
+    if (live || !state.trackPlaytime) return
+    const game = state.games.find(item => item.id === tracked.gameId)
+    if (!game) return
+    const checkpointMs = tracked.checkpointAt ?? tracked.startedAt
+    const durationMin = Math.floor((checkpointMs - tracked.startedAt) / 60_000)
+    if (durationMin < 1) return
+    const profile = game.profiles.find(item => item.id === tracked.profileId) ?? game.profiles[0]
+    const recovered: TrackedSession = {
+      id: createId(),
+      gameId: game.id,
+      gameName: game.name,
+      profileId: profile?.id ?? tracked.profileId,
+      profileName: profile?.name ?? tracked.profileId,
+      startedAt: tracked.startedAt,
+      endedAt: checkpointMs,
+      durationMin,
+      source: 'recovered',
+      recovered: true,
+    }
+    set(current => ({ sessionHistory: [...current.sessionHistory, recovered] }))
+  },
+  resetSessionHistory: gameId => {
+    set(state => ({ sessionHistory: gameId ? state.sessionHistory.filter(session => session.gameId !== gameId) : [] }))
+  },
   setLibraryViewMode: libraryViewMode => set({ libraryViewMode }),
   setGamesBrowsing: gamesBrowsing => set({ gamesBrowsing }),
   setActivityMaxEvents: activityMaxEvents => set({ activityMaxEvents }),
@@ -2972,6 +3091,12 @@ export const useStore = create<Store>()(persist((set, get) => ({
     homeWidgets: state.homeWidgets,
     homeLayoutPreset: state.homeLayoutPreset,
     notificationCenterEnabled: state.notificationCenterEnabled,
+    sessionHistory: state.sessionHistory,
+    activeTrackedSession: state.activeTrackedSession,
+    trackPlaytime: state.trackPlaytime,
+    trackExternalApps: state.trackExternalApps,
+    startWithSystem: state.startWithSystem,
+    startDiscreet: state.startDiscreet,
     activityMaxEvents: state.activityMaxEvents,
     downloadRetention: state.downloadRetention,
     remapSuspendShortcut: state.remapSuspendShortcut,
@@ -2994,7 +3119,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     restorePoints: state.restorePoints,
     autoRestorePoints: state.autoRestorePoints,
   }),
-  version: 4,
+  version: 5,
   migrate: persisted => migratePersistedState(persisted) as never,
 }))
 

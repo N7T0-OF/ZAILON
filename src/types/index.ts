@@ -1,4 +1,34 @@
 export type ViewType = 'home' | 'games' | 'explore' | 'downloads' | 'visuals' | 'news' | 'settings' | 'addons' | 'frosty' | 'statistics'
+
+/** Session de jeu TERMINÉE, persistée (spec « Accueil modulaire » §34-52,
+ * §99-100) : la source de vérité des statistiques. Les noms de jeu/profil sont
+ * des SNAPSHOTS — l'UI résout le nom actuel, le snapshot sert de secours si le
+ * jeu/profil a été renommé ou supprimé (§99-100). */
+export interface TrackedSession {
+  id: string
+  gameId: string
+  gameName: string
+  profileId: string
+  profileName: string
+  startedAt: number
+  endedAt: number
+  /** Durée RÉELLE comptabilisée en minutes (checkpoints inclus). */
+  durationMin: number
+  /** D'où vient le lancement : zailon / external / recovered (§36). */
+  source: string
+  /** Session récupérée après un crash/fermeture sans fin propre (§45). */
+  recovered?: boolean
+}
+
+/** Session EN COURS suivie pour les statistiques (spec §34-45) : checkpoint
+ * toutes les ~5 min ; persistée pour récupérer raisonnablement une session
+ * interrompue par un crash/redémarrage de ZAILON au prochain démarrage. */
+export interface ActiveTrackedSession {
+  gameId: string
+  profileId: string
+  startedAt: number
+  checkpointAt?: number
+}
 export type Platform = 'gamebanana' | 'nexus' | 'curseforge' | 'ayakamods'
 export type UpdateChannel = 'stable' | 'beta'
 export type DownloadRetention = 'startup' | '1d' | '7d' | 'never'

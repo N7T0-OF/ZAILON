@@ -16496,7 +16496,102 @@ mod tests {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Lancé avec `--background` (spec §37-41) : ZAILON démarre sans ouvrir la
+/// fenêtre principale — le process watcher / session tracker tourne, l'UI
+/// reste cachée jusqu'à ce que l'utilisateur rouvre l'application.
+static BACKGROUND_MODE: AtomicBool = AtomicBool::new(false);
+
+/// L'instance courante a-t-elle été lancée avec `--background` ?
+#[tauri::command]
+fn background_mode() -> bool {
+    BACKGROUND_MODE.load(Ordering::SeqCst)
+}
+
+/// Active/désactive le démarrage avec le système (spec §37-42, §116).
+/// `discreet` = lancer avec `--background` (fenêtre cachée, tracking silencieux).
+#[tauri::command]
+fn set_autostart(enabled: bool, discreet: bool) -> Result<bool, String> {
+    let executable =
+        std::env::current_exe().map_err(|error| format!("exécutable introuvable : {error}"))?;
+    let value = if discreet {
+        format!("\"{}\" --background", executable.display())
+    } else {
+        format!("\"{}\"", executable.display())
+    };
+    #[cfg(target_os = "windows")]
+    {
+        let root = RegKey::predef(HKEY_CURRENT_USER);
+        let (key, _) = root
+            .create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
+            .map_err(|error| error.to_string())?;
+        if enabled {
+            key.set_value("ZAILON", &value)
+                .map_err(|error| error.to_string())?;
+        } else {
+            let _ = key.delete_value("ZAILON");
+        }
+        Ok(true)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let dir = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or("HOME introuvable")?
+            .join("Library/LaunchAgents");
+        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        let plist = dir.join("io.github.n7t0of.zailon.plist");
+        if enabled {
+            let mut args = vec![executable.display().to_string()];
+            if discreet {
+                args.push("--background".to_string());
+            }
+            let content = format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict>\n  <key>Label</key><string>io.github.n7t0of.zailon</string>\n  <key>ProgramArguments</key><array>{}</array>\n  <key>RunAtLoad</key><true/>\n  <key>ProcessType</key><string>Interactive</string>\n</dict></plist>\n",
+                args.iter()
+                    .map(|argument| format!("<string>{argument}</string>"))
+                    .collect::<String>()
+            );
+            fs::write(&plist, content).map_err(|error| error.to_string())?;
+        } else {
+            let _ = fs::remove_file(&plist);
+        }
+        Ok(true)
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let dir = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or("HOME introuvable")?
+            .join(".config/autostart");
+        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+        let file = dir.join("zailon.desktop");
+        if enabled {
+            let content = format!(
+                "[Desktop Entry]\nType=Application\nName=ZAILON\nExec={}\nX-GNOME-Autostart-enabled=true\n",
+                value
+            );
+            fs::write(&file, content).map_err(|error| error.to_string())?;
+        } else {
+            let _ = fs::remove_file(&file);
+        }
+        Ok(true)
+    }
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(unix, not(target_os = "macos"))
+    )))]
+    {
+        let _ = (enabled, discreet, value);
+        Err("démarrage automatique non supporté sur cette plateforme".to_string())
+    }
+}
+
 pub fn run() {
+    BACKGROUND_MODE.store(
+        std::env::args().any(|argument| argument == "--background"),
+        Ordering::SeqCst,
+    );
     let builder = tauri::Builder::default()
         .manage(ProviderConnectionCache(Mutex::new(HashMap::new())))
         .manage(BackgroundTaskRegistry(Arc::new(Mutex::new(HashMap::new()))))
@@ -16509,11 +16604,21 @@ pub fn run() {
         .manage(PendingShortcutLaunches(Mutex::new(Vec::new())))
         .plugin(tauri_plugin_single_instance::init(
             |app, args, _working_directory| {
-                for argument in args {
+                for argument in &args {
                     if argument.starts_with("nxm://") {
-                        enqueue_nxm(app, &argument);
+                        enqueue_nxm(app, argument);
                     } else if argument.starts_with("zailon://") {
-                        enqueue_shortcut_launch(app, &argument);
+                        enqueue_shortcut_launch(app, argument);
+                    }
+                }
+                // Double-clic sur l'icône / lancement normal pendant qu'une
+                // instance `--background` tourne → ramène la fenêtre au premier
+                // plan (spec §42 : « prévoir une façon simple de rouvrir ZAILON »).
+                if !args.iter().any(|argument| argument == "--background") {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
                     }
                 }
             },
@@ -16528,6 +16633,13 @@ pub fn run() {
                 app.handle(),
                 app.state::<visual_profiles::VisualRuntime>().inner(),
             );
+            // `--background` (spec §37-41) : l'UI principale reste cachée — le
+            // watcher/session tracker continue de tourner dans la WebView.
+            if BACKGROUND_MODE.load(Ordering::SeqCst) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
             #[cfg(desktop)]
             {
                 app.handle()
@@ -16677,7 +16789,9 @@ pub fn run() {
             #[cfg(desktop)]
             check_for_update,
             #[cfg(desktop)]
-            install_update
+            install_update,
+            set_autostart,
+            background_mode
         ])
         .run(tauri::generate_context!())
         .expect("error while running ZAILON");

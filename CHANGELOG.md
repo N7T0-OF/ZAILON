@@ -1,5 +1,48 @@
 # Changelog
 
+## [1.89.0] - 2026-08-14
+
+> **Suivi du temps en arrière-plan** — l'historique des sessions devient
+> persistant (checkpoints ~5 min, récupération après crash), le temps de jeu
+> est compté même quand un jeu est lancé hors ZAILON, la page Statistiques
+> gagne les 7 derniers jours, l'export CSV/JSON et la réinitialisation, et
+> ZAILON peut démarrer avec le système en **mode discret** (`--background`,
+> fenêtre cachée, seul le tracking tourne).
+
+### Added
+
+- **Moteur de sessions persisté** (spec §34-45, §90) : `sessionHistory` est
+  la source de vérité des statistiques (noms jeu/profil en snapshot, source
+  zailon/external/recovered). Checkpoints toutes les ~5 min pendant la session ;
+  au démarrage, une session interrompue par un crash de ZAILON est récupérée
+  avec son dernier checkpoint (jamais de double comptage si le jeu tourne
+  encore).
+- **Suivi des apps lancées hors ZAILON** (§35-36) : le compteur de session
+  démarre aussi quand le jeu est lancé depuis Steam/EA/le Bureau — réglable
+  (`trackExternalApps`), désactivable sans couper le suivi des lancements
+  ZAILON.
+- **Démarrage discret** (§37-42, §114-118) : Paramètres → « Suivi & démarrage
+  discret » — suivre le temps, suivre hors ZAILON, démarrer avec le système
+  (`set_autostart` natif : registre Windows / LaunchAgent macOS / autostart
+  Linux) et démarrer discrètement (`--background` : fenêtre cachée, tracking
+  seul ; double-clic = fenêtre ramenée au premier plan). Cohérence imposée
+  (discret ⇒ démarrage système).
+- **Page Statistiques v2** (§29-32, §46-52) : totaux (session en cours
+  incluse), barres des **7 derniers jours**, temps par jeu et par profil depuis
+  l'historique, badge « ● En cours », **export CSV/JSON** local et
+  **réinitialisation** (par jeu ou tout).
+
+### Fixed
+
+- Les statistiques ne dépendent plus de l'exécution courante : « Cette
+  semaine » et les sessions persistent entre les lancements (§46).
+
+### Changed
+
+- Moteur d'agrégats pur et testé : `lib/sessionStats.ts` + 7 tests
+  (`test-session-stats.ts`) — fenêtres, par jeu/profil, checkpoints, recovery.
+- Docs : `background-tracking-mode.md` créé, `statistics-engine.md` mis à jour.
+
 ## [1.88.0] - 2026-08-13
 
 > **Accueil modulaire en widgets configurables** — Favoris / Statistiques /

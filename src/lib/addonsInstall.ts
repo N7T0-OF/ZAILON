@@ -251,6 +251,16 @@ export interface AddonDownloadErrorInfo {
 
 /** Classe une erreur de téléchargement d'add-on (pur, testable). */
 export function describeAddonDownloadError(raw: string): AddonDownloadErrorInfo {
+  // Spec « Pipeline » §1 : un `.zailon-addon` doit être un VRAI ZIP. Un HTML/
+  // JSON d'erreur GitHub ou un fichier corrompu n'est jamais accepté comme
+  // package — erreur explicite, pas un message de décompression brut.
+  if (/zip|archive|html|error page|invalide|corrupt/i.test(raw)) {
+    return {
+      title: 'Archive invalide',
+      detail: 'L’archive de l’add-on est invalide ou le téléchargement GitHub n’a pas renvoyé une archive ZIP. Le fichier reçu n’est pas un ZIP valide (page d’erreur HTML ou package corrompu).',
+      retryable: true,
+    }
+  }
   if (/404|not found/i.test(raw)) {
     return {
       title: 'Package introuvable',
@@ -270,6 +280,18 @@ export function describeAddonDownloadError(raw: string): AddonDownloadErrorInfo 
     detail: raw,
     retryable: true,
   }
+}
+
+/**
+ * URL miroir CDN d'un package officiel (spec §7) : le contenu statique GitHub
+ * est répliqué sur jsDelivr (`@branch` au lieu de la branche) — utilisé en
+ * repli quand l'URL principale échoue ou sert un contenu invalide. Pur, testé.
+ */
+export function mirrorAddonUrl(url: string): string | undefined {
+  const match = /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/i.exec(url)
+  if (!match) return undefined
+  const [, owner, repo, branch, path] = match
+  return `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${branch}/${path}`
 }
 
 // ─────────────────────────────── Rapport de stockage ────────────────────────

@@ -17,9 +17,15 @@ import {
   isOfficialCatalogUrl,
   isSafeDownloadUrl,
   mergeCatalogs,
+  mirrorAddonUrl,
   OFFICIAL_CATALOG_URL,
 } from '../../src/lib/addonsInstall.ts'
-import { OFFICIAL_ADDON_CATALOG } from '../../src/lib/addons.ts'
+import { OFFICIAL_ADDON_CATALOG, ZAILON_CURRENT_VERSION } from '../../src/lib/addons.ts'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 test('addonInstallReducer: avance phase par phase puis termine', () => {
   let state = ADDON_INSTALL_INITIAL_STATE
@@ -131,6 +137,36 @@ test('describeAddonDownloadError: erreur réseau générique retryable', () => {
   const network = describeAddonDownloadError('error sending request for url (connection refused)')
   assert.equal(network.retryable, true)
   assert.equal(network.title, 'Impossible d’installer l’add-on')
+})
+
+test('describeAddonDownloadError: archive non-ZIP → « Archive invalide » explicite (spec pipeline §1)', () => {
+  const html = describeAddonDownloadError('Add-on archive is invalid — the downloaded file is not a ZIP archive (error page or corrupt download).')
+  assert.equal(html.title, 'Archive invalide')
+  assert.match(html.detail || '', /n’a pas renvoyé une archive ZIP/)
+  assert.equal(html.retryable, true)
+  const page = describeAddonDownloadError('Add-on download returned an error page (HTML/JSON) instead of the package — archive invalide.')
+  assert.equal(page.title, 'Archive invalide')
+  // La classification ZIP prime sur la détection 404/not found embarquée dans le message.
+  const corrupt = describeAddonDownloadError('zip::result::ZipError: invalid zip archive')
+  assert.equal(corrupt.title, 'Archive invalide')
+})
+
+test('mirrorAddonUrl: miroir jsDelivr depuis raw.githubusercontent (spec §7)', () => {
+  const url = 'https://raw.githubusercontent.com/N7T0-OF/ZAILON/zailon-addons-stable/zailon-addons/packages/frosty/official.zailon.frosty-v1.0.0.zailon-addon'
+  assert.equal(
+    mirrorAddonUrl(url),
+    'https://cdn.jsdelivr.net/gh/N7T0-OF/ZAILON@zailon-addons-stable/zailon-addons/packages/frosty/official.zailon.frosty-v1.0.0.zailon-addon',
+  )
+  assert.equal(mirrorAddonUrl('https://example.com/x.zailon-addon'), undefined)
+  assert.equal(mirrorAddonUrl(''), undefined)
+})
+
+test('ZAILON_CURRENT_VERSION = version RÉELLE du package (spec §2 — régression « 1.69 vs 1.78 »)', () => {
+  // Le bug historique : une version codée en dur ('1.69.0') faisait dire au
+  // launcher qu'il était plus ancien que ce que les add-ons exigeaient.
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  assert.equal(ZAILON_CURRENT_VERSION, pkg.version, 'version dérivée de package.json, jamais figée')
+  assert.ok(!ZAILON_CURRENT_VERSION.includes('1.69'), 'plus aucun reste de la version figée')
 })
 
 test('fetchAddonCatalog: fetchedAt renseigné sur synchronisation réseau (spec §35)', async () => {

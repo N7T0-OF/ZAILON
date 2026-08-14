@@ -21,13 +21,20 @@ import { versionCompare } from './reshade.ts'
 // importé tel quel (jamais dupliqué). Le même fichier est servi par
 // raw.githubusercontent.com pour la synchronisation distante.
 import officialCatalogJson from '../../zailon-addons/catalog.json' with { type: 'json' }
+import packageMetadata from '../../package.json' with { type: 'json' }
+
+const PACKAGE_VERSION = String((packageMetadata as { version?: unknown }).version ?? '0.0.0')
 
 // ─────────────────────────────── Types de base ──────────────────────────────
 
 /** Version de l'API d'extensions — séparée de la version ZAILON (§24). */
 export const ADDON_API_VERSION = '1'
 
-export const ZAILON_CURRENT_VERSION = '1.69.0'
+// Version ZAILON RÉELLE (spec « Finalisation des add-ons » §2) : dérivée du
+// package.json au build — JAMAIS une valeur codée en dur (le bug historique
+// « l'add-on exige 1.78.0 mais le launcher affiche 1.69.0 » venait d'un
+// '1.69.0' figé). Les add-ons incompatibles sont refusés AVANT téléchargement.
+export const ZAILON_CURRENT_VERSION = PACKAGE_VERSION
 
 export type AddonCategory = 'game-support' | 'modding' | 'visual' | 'appearance' | 'sources' | 'utilities'
 

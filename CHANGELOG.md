@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.98.0] - 2026-08-14
+
+> **Pipeline d'installation des add-ons durci** — deux bugs réels corrigés :
+> « Add-on archive must be a ZIP » (la validation regardait l'extension au lieu
+> du contenu) et la version ZAILON figée à 1.69 qui faisait paraître tous les
+> add-ons incompatibles.
+
+### Fixed
+
+- **`Add-on archive must be a ZIP`** : `addon_install_staged` exigeait une
+  extension `.zip` — or les packages cache sont `*.zailon-addon`. La validation
+  se fait sur le CONTENU (magic bytes ZIP `PK\x03\x04`/`PK\x05\x06`/`PK\x07\x08`),
+  jamais sur l'extension. `addon_download` refuse aussi les pages d'erreur
+  GitHub (content-type HTML/JSON) et tout fichier non-ZIP AVANT écriture.
+- **Version ZAILON figée** (`1.69.0`) : `ZAILON_CURRENT_VERSION` est désormais
+  dérivée de `package.json` au build — fini les « Nécessite 1.78.0 » alors que
+  le launcher affichait 1.69. Test de régression dédié.
+- **Refus avant téléchargement** : un add-on incompatible (version, plateforme,
+  API) ne montre plus jamais « Installer » — la carte et le dialogue bloquent
+  avec la liste des raisons, sans aucun appel réseau.
+
+### Added
+
+- **Installation des dépendances réelle** (§5) : « Installer les dépendances »
+  (coché par défaut) installe d'abord chaque dépendance via le même pipeline
+  complet (Frosty Support avant Frosty Editor), puis l'add-on.
+- **Miroir CDN** (§7) : en cas d'échec de l'URL principale, repli automatique
+  sur jsDelivr (`mirrorAddonUrl`, pur et testé) avant d'afficher l'erreur.
+- **Erreur explicite « Archive invalide »** : « L'archive de l'add-on est
+  invalide ou le téléchargement GitHub n'a pas renvoyé une archive ZIP. »
+- Test Rust `zip_magic_detects_real_zips_and_rejects_error_pages` + tests JS
+  (classification ZIP, miroir, version réelle) — **495 tests ✅**.
+
 ## [1.97.0] - 2026-08-14
 
 > **Nexus Provider devient un add-on installable** — 6 add-ons officiels

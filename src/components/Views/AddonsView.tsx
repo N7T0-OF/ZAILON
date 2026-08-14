@@ -21,7 +21,7 @@ import {
   type InstalledAddon,
   type ZailonAddonManifest,
 } from '../../lib/addons'
-import { ADDON_INSTALL_INITIAL_STATE, addonInstallReducer, addonSignaturePolicy, addonStorageReport, describeAddonDownloadError, fetchAddonCatalog, hasAddonSignature, hasRealSha256, type CatalogFetchResult } from '../../lib/addonsInstall'
+import { ADDON_INSTALL_INITIAL_STATE, addonInstallReducer, addonSignaturePolicy, addonStorageReport, describeAddonDownloadError, fetchAddonCatalog, hasAddonSignature, hasRealSha256, mirrorAddonUrl, type CatalogFetchResult } from '../../lib/addonsInstall'
 import { native } from '../../lib/native'
 import { useStore } from '../../store/useStore'
 import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
@@ -284,9 +284,11 @@ function AddonCard({ row, nameById, offline = false, onInstall, onEnable, onRemo
   const installedSize = installed ? estimateInstalledSize(entry.downloadSize || 1_000_000) : 0
   // Disponibilité réelle (spec §5, §49) : le bouton Installer n'existe que si
   // le catalogue référence un package réel — jamais pour un add-on en
-  // développement. Hors ligne : pas de téléchargement possible (§22).
+  // développement. Hors ligne : pas de téléchargement possible (§22). Un
+  // add-on INCOMPATIBLE (ex. version ZAILON insuffisante, spec §2) ne montre
+  // jamais Installer : refus AVANT tout téléchargement.
   const availability = catalogAddonAvailability(entry)
-  const installableNow = availability.installable && !offline
+  const installableNow = availability.installable && !offline && compatibility.ok
 
   return <article className={`flex flex-col rounded-xl border bg-white/[0.018] p-4 transition-colors ${installed ? 'border-gold/14' : 'border-white/[0.07] hover:border-white/15'} ${installed && !installed.enabled ? 'opacity-75' : ''}`}>
     <div className="flex items-start gap-3">
@@ -376,6 +378,9 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
   const availability = catalogAddonAvailability(entry)
   const [deps, setDeps] = useState(entry.dependencies?.length ? true : false)
   const [run, setRun] = useState<{ state: ReturnType<typeof addonInstallReducer> | undefined; error?: string }>({ state: undefined })
+  // Machine d'état du pipeline partagée entre `installOne` (dépendances puis
+  // add-on) et `startInstall` — réinitialisée à chaque lancement.
+  let state: ReturnType<typeof addonInstallReducer> = ADDON_INSTALL_INITIAL_STATE
   const [lastError, setLastError] = useState<ReturnType<typeof describeAddonDownloadError>>()
 
   const manifestFor = (item: AddonCatalogEntry): ZailonAddonManifest => ({
@@ -405,79 +410,103 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
     return labels[phase] || phase
   }
 
+  // Téléchargement HTTPS avec repli miroir (spec §7) : si l'URL principale
+  // échoue ou sert un contenu invalide (page d'erreur HTML/JSON), on tente
+  // une fois le miroir CDN (jsDelivr) avant de déclarer l'échec.
+  const downloadWithMirror = async (downloadUrl: string, cachePath: string) => {
+    try {
+      await native.addonDownload(downloadUrl, cachePath, () => undefined)
+    } catch (primaryError) {
+      const mirror = mirrorAddonUrl(downloadUrl)
+      if (!mirror) throw primaryError
+      await native.addonDownload(mirror, cachePath, () => undefined)
+    }
+  }
+
+  // Pipeline complet pour UN add-on (spec §3) : téléchargement → HTTP/ZIP validé
+  // (Rust) → SHA-256 → signature → staging → swap atomique → santé. Réutilisé
+  // pour les dépendances puis pour l'add-on lui-même (§5).
+  const installOne = async (target: AddonCatalogEntry): Promise<void> => {
+    const targetAvailability = catalogAddonAvailability(target)
+    if (!targetAvailability.installable || !targetAvailability.downloadUrl) throw new Error('Package indisponible.')
+    const installDir = await native.addonInstallDir()
+    const cacheDir = installDir.replace(/installed[\\/]*$/, 'cache')
+    const cachePath = `${cacheDir}/${target.id.replace(/\./g, '-')}.zailon-addon`
+    const targetDir = `${installDir}/${target.id}`
+
+    state = addonInstallReducer(state, { type: 'phase', phase: 'download', message: phaseLabel('download') })
+    setRun({ state })
+    await downloadWithMirror(targetAvailability.downloadUrl, cachePath)
+    state = addonInstallReducer(state, { type: 'phase', phase: 'verify', message: phaseLabel('verify') })
+    setRun({ state })
+
+    // SHA-256 — sautée uniquement si le catalogue ne fournit pas encore le
+    // hash réel ('catalog').
+    if (target.sha256 && target.sha256 !== 'catalog') {
+      const valid = await native.addonVerifySha256(cachePath, target.sha256)
+      if (!valid) throw new Error('SHA-256 incorrect — installation refusée.')
+    }
+
+    // Signature Ed25519 : vérifiée quand elle est déclarée (jamais exigée
+    // seule — spec §17-20).
+    const targetPolicy = addonSignaturePolicy(target)
+    if (targetPolicy.required && !hasAddonSignature(target)) throw new Error(targetPolicy.reason)
+    if (hasAddonSignature(target)) {
+      state = addonInstallReducer(state, { type: 'phase', phase: 'verify', message: 'Vérification de la signature Ed25519…' })
+      setRun({ state })
+      const signed = await native.addonVerifySignature(cachePath, target.signature!, target.signaturePublicKey!)
+      if (!signed) throw new Error('Signature Ed25519 invalide — installation refusée.')
+    }
+
+    // Extraction en staging + swap atomique avec rollback (Rust).
+    state = addonInstallReducer(state, { type: 'phase', phase: 'staging', message: phaseLabel('staging') })
+    setRun({ state })
+    state = addonInstallReducer(state, { type: 'phase', phase: 'swap', message: phaseLabel('swap') })
+    setRun({ state })
+    await native.addonInstallStaged(cachePath, targetDir)
+
+    // Vérification de santé (spec §66) : manifest + compatibilité.
+    state = addonInstallReducer(state, { type: 'phase', phase: 'health', message: phaseLabel('health') })
+    setRun({ state })
+    const targetManifest = manifestFor(target)
+    const health = checkAddonCompatibility(targetManifest, { zailonVersion: ZAILON_CURRENT_VERSION, addonApiVersion: ADDON_API_VERSION, installedIds: [...installedIds, targetManifest.id] })
+    if (!health.ok) throw new Error(`Vérification de santé : ${health.reasons.join(' ')}`)
+  }
+
   const startInstall = async () => {
     const manifest = manifestFor(entry)
     if (!availability.installable || !availability.downloadUrl) return
-    let state = ADDON_INSTALL_INITIAL_STATE
+    // Refus AVANT téléchargement (spec §2) : version ZAILON insuffisante ou
+    // autre incompatibilité → jamais de réseau, jamais d'extraction.
+    if (!compatibility.ok) {
+      setRun({ state: { status: 'failed', phase: 'download', progress: 0, message: `Installation refusée avant téléchargement : ${compatibility.reasons.join(' ')}` } })
+      return
+    }
+    state = ADDON_INSTALL_INITIAL_STATE
     setRun({ state })
     try {
-      const installDir = await native.addonInstallDir()
-      const cacheDir = installDir.replace(/installed[\\/]*$/, 'cache')
-      const cachePath = `${cacheDir}/${entry.id.replace(/\./g, '-')}.zailon-addon`
-      const targetDir = `${installDir}/${entry.id}`
-
-      // 1. Téléchargement HTTPS (spec §14) — URL résolue depuis le chemin
-      // `package` du catalogue (repository statique, jamais de release §1-2).
-      state = addonInstallReducer(state, { type: 'phase', phase: 'download', message: phaseLabel('download') })
-      setRun({ state })
-      await native.addonDownload(availability.downloadUrl, cachePath, () => undefined)
-      state = addonInstallReducer(state, { type: 'phase', phase: 'verify', message: phaseLabel('verify') })
-      setRun({ state })
-
-      // 2. Vérification SHA-256 — sautée uniquement si le catalogue de
-      // référence ne fournit pas encore le hash réel ('catalog').
-      if (entry.sha256 && entry.sha256 !== 'catalog') {
-        const valid = await native.addonVerifySha256(cachePath, entry.sha256)
-        if (!valid) {
-          state = addonInstallReducer(state, { type: 'failed', message: 'SHA-256 incorrect — installation refusée (§14).' })
+      // 0. Dépendances d'abord (spec §5, §31-33) : Frosty Support AVANT Frosty
+      // Editor — chaque dépendance est installée via le même pipeline complet.
+      if (deps) {
+        for (const dependencyId of dependencyPlan.toInstall) {
+          const dependency = catalogById.get(dependencyId)
+          if (!dependency) continue
+          state = addonInstallReducer(state, { type: 'phase', phase: 'download', message: `Dépendance : ${dependency.name}…` })
           setRun({ state })
-          return
+          await installOne(dependency)
+          useStore.getState().installAddon(manifestFor(dependency), 'official')
         }
       }
-
-      // 2b. Signature Ed25519 (spec §14, §52) : un add-on officiel avec SHA-256
-      // réel DOIT être signé ; sinon la signature déclarée est vérifiée.
-      const signaturePolicy = addonSignaturePolicy(entry)
-      if (signaturePolicy.required && !hasAddonSignature(entry)) {
-        state = addonInstallReducer(state, { type: 'failed', message: signaturePolicy.reason })
-        setRun({ state })
-        return
-      }
-      if (hasAddonSignature(entry)) {
-        state = addonInstallReducer(state, { type: 'phase', phase: 'verify', message: 'Vérification de la signature Ed25519…' })
-        setRun({ state })
-        const signed = await native.addonVerifySignature(cachePath, entry.signature!, entry.signaturePublicKey!)
-        if (!signed) {
-          state = addonInstallReducer(state, { type: 'failed', message: 'Signature Ed25519 invalide — installation refusée (§14).' })
-          setRun({ state })
-          return
-        }
-      }
-
-      // 3. Extraction en staging + swap atomique avec rollback (Rust).
-      state = addonInstallReducer(state, { type: 'phase', phase: 'staging', message: phaseLabel('staging') })
-      setRun({ state })
-      state = addonInstallReducer(state, { type: 'phase', phase: 'swap', message: phaseLabel('swap') })
-      setRun({ state })
-      await native.addonInstallStaged(cachePath, targetDir)
-
-      // 4. Vérification de santé (spec §66) : manifest + compatibilité.
-      state = addonInstallReducer(state, { type: 'phase', phase: 'health', message: phaseLabel('health') })
-      setRun({ state })
-      const health = checkAddonCompatibility(manifest, { zailonVersion: ZAILON_CURRENT_VERSION, addonApiVersion: ADDON_API_VERSION, installedIds: [...installedIds, manifest.id] })
-      if (!health.ok) {
-        state = addonInstallReducer(state, { type: 'rolled_back', message: `Vérification de santé : ${health.reasons.join(' ')}` })
-        setRun({ state })
-        return
-      }
-
+      // 1-4. L'add-on lui-même (même pipeline).
+      await installOne(entry)
       state = addonInstallReducer(state, { type: 'done' })
       setRun({ state })
       onInstalled(manifest)
     } catch (reason) {
       const raw = reason instanceof Error ? reason.message : String(reason)
       // Classement (spec §23, §40-41) : 404 = package absent (jamais de retry) ;
-      // 403/429 = GitHub limité ; sinon erreur réseau. Détails techniques ⓘ.
+      // 403/429 = GitHub limité ; archive invalide = HTML/JSON/ZIP cassé ;
+      // sinon erreur réseau. Détails techniques ⓘ.
       const info = describeAddonDownloadError(raw)
       state = addonInstallReducer(state, { type: 'failed', message: `${info.title}. ${info.detail || ''}` })
       setRun({ state })
@@ -522,9 +551,10 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
 
           {(dependencyPlan.toInstall.length > 0 || dependencyPlan.missing.length > 0) && (
             <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/15 p-3">
-              <p className="text-[11px] font-semibold text-white/68">Dépendances</p>
-              {dependencyPlan.toInstall.length > 0 && <label className="mt-2 flex items-center gap-2 text-[11px] text-white/60"><input type="checkbox" checked={deps} onChange={event => setDeps(event.target.checked)} className="h-3.5 w-3.5 accent-[var(--zailon-accent)]" />Installer aussi : {dependencyPlan.toInstall.map(id => catalogById.get(id)?.name || id).join(', ')}</label>}
-              {dependencyPlan.missing.length > 0 && <p className="mt-1.5 text-[10px] text-amber-100/70">Dépendances introuvables : {dependencyPlan.missing.join(', ')}</p>}
+              {/* Spec §5 : dépendance lisible — « Nécessite Frosty Support ⓘ », pas une phrase d'ids. */}
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-white/68"><Link2 size={12} className="text-gold/70" />Nécessite {dependencyPlan.toInstall.map(id => catalogById.get(id)?.name || id).join(', ')}{dependencyPlan.missing.length > 0 ? ` + ${dependencyPlan.missing.length} introuvable(s)` : ''}</p>
+              {dependencyPlan.toInstall.length > 0 && <label className="mt-2 flex items-center gap-2 text-[11px] text-white/60"><input type="checkbox" checked={deps} onChange={event => setDeps(event.target.checked)} className="h-3.5 w-3.5 accent-[var(--zailon-accent)]" /><strong className="text-white/75">Installer les dépendances</strong> — {dependencyPlan.toInstall.map(id => catalogById.get(id)?.name || id).join(', ')} d'abord, puis cet add-on.</label>}
+              {dependencyPlan.missing.length > 0 && <p className="mt-1.5 text-[10px] text-amber-100/70">Dépendances introuvables dans le catalogue : {dependencyPlan.missing.join(', ')} — installation impossible tant qu'elles ne sont pas publiées.</p>}
             </div>
           )}
 
@@ -540,7 +570,7 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
 
           {entry.downloadSize ? <p className="mt-3 text-[11px] text-white/42">{formatAddonSize(entry.downloadSize)} à télécharger · ~{formatAddonSize(estimateInstalledSize(entry.downloadSize))} installé · vérification SHA-256, signature et installation atomique.</p> : null}
 
-          <footer className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="px-3 py-2 text-[11px] text-white/45">Annuler</button><button type="button" onClick={() => { void startInstall() }} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><Download size={13} />Installer</button></footer>
+          <footer className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="px-3 py-2 text-[11px] text-white/45">Annuler</button><button type="button" onClick={() => { void startInstall() }} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><Download size={13} />{deps && dependencyPlan.toInstall.length > 0 ? 'Installer avec les dépendances' : 'Installer'}</button></footer>
         </>
       )}
 

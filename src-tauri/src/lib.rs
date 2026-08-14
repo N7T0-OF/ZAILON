@@ -14764,9 +14764,23 @@ enum AddonInstallEvent {
     Finished,
 }
 
+/// Vrai si l'octet de tête est une signature ZIP valide (spec « Pipeline » §1) :
+/// `PK\x03\x04` (archive normale), `PK\x05\x06` (archive vide) ou `PK\x07\x08`
+/// (archive spanned). Le format `.zailon-addon` est LOGIQUE : le contenu doit
+/// être un ZIP — l'extension du fichier n'est jamais une preuve.
+fn is_zip_archive(bytes: &[u8]) -> bool {
+    bytes.len() >= 4
+        && ((bytes[0] == b'P' && bytes[1] == b'K' && bytes[2] == 0x03 && bytes[3] == 0x04)
+            || (bytes[0] == b'P' && bytes[1] == b'K' && bytes[2] == 0x05 && bytes[3] == 0x06)
+            || (bytes[0] == b'P' && bytes[1] == b'K' && bytes[2] == 0x07 && bytes[3] == 0x08))
+}
+
 /// Télécharge un add-on depuis une URL HTTPS uniquement (spec §9, §14).
 /// Jamais de mirror : la validation d'URL est renforcée côté UI (source
 /// officielle ou URL choisie par l'utilisateur pour un add-on communautaire).
+///
+/// Le fichier téléchargé est validé AVANT écriture : status HTTP, type de
+/// contenu (jamais une page d'erreur HTML/JSON) et magic bytes ZIP.
 #[tauri::command]
 async fn addon_download(
     url: String,
@@ -14780,10 +14794,32 @@ async fn addon_download(
     if !response.status().is_success() {
         return Err(format!("Add-on download failed: {}", response.status()));
     }
+    // Une page d'erreur GitHub (404 servie en HTML/JSON avec status 200 sur
+    // certains CDN) n'est PAS un package : refus immédiat, jamais d'extraction.
+    if let Some(content_type) = response.headers().get(reqwest::header::CONTENT_TYPE) {
+        if let Ok(value) = content_type.to_str() {
+            if value.to_ascii_lowercase().contains("text/html")
+                || value.to_ascii_lowercase().contains("application/json")
+            {
+                return Err(
+                    "Add-on download returned an error page (HTML/JSON) instead of the package — archive invalide."
+                        .into(),
+                );
+            }
+        }
+    }
     let total = response.content_length().unwrap_or(0);
     let bytes = response.bytes().await.map_err(to_error)?;
     if bytes.len() > 1024 * 1024 * 1024 {
         return Err("Add-on archive exceeds 1 GiB.".into());
+    }
+    // L'extension `.zailon-addon` est un format LOGIQUE : le contenu doit être
+    // un vrai ZIP. Refus propre d'un HTML/JSON d'erreur ou d'un fichier corrompu.
+    if !is_zip_archive(&bytes) {
+        return Err(
+            "Add-on archive is invalid — the downloaded file is not a ZIP archive (error page or corrupt download)."
+                .into(),
+        );
     }
     let destination = std::path::Path::new(&dest_path);
     if let Some(parent) = destination.parent() {
@@ -14816,12 +14852,14 @@ fn addon_verify_sha256(path: String, expected: String) -> Result<bool, String> {
 fn addon_install_staged(archive_path: String, install_dir: String) -> Result<(), String> {
     let archive = std::path::Path::new(&archive_path);
     let install = std::path::Path::new(&install_dir);
-    let extension = archive
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default();
-    if !extension.eq_ignore_ascii_case("zip") {
-        return Err("Add-on archive must be a ZIP.".into());
+    // Le fichier `.zailon-addon` n'a PAS l'extension `.zip` : la validation se
+    // fait sur le CONTENU (magic bytes ZIP), jamais sur l'extension (spec §1).
+    let bytes = std::fs::read(archive).map_err(to_error)?;
+    if !is_zip_archive(&bytes) {
+        return Err(
+            "Add-on archive is invalid — not a ZIP archive (error page or corrupt download)."
+                .into(),
+        );
     }
     let file = std::fs::File::open(archive).map_err(to_error)?;
     let mut zip = zip::ZipArchive::new(file).map_err(to_error)?;
@@ -14926,6 +14964,22 @@ mod tests {
         assert!(safe_game_id("4b2d66ca-5c39-4d35_a").is_ok());
         assert!(safe_game_id("../outside").is_err());
         assert!(safe_game_id("").is_err());
+    }
+
+    #[test]
+    fn zip_magic_detects_real_zips_and_rejects_error_pages() {
+        // ZIP normal (PK\x03\x04), vide (PK\x05\x06), spanned (PK\x07\x08).
+        assert!(is_zip_archive(&[b'P', b'K', 0x03, 0x04, 0x00, 0x00]));
+        assert!(is_zip_archive(&[b'P', b'K', 0x05, 0x06, 0x00, 0x00]));
+        assert!(is_zip_archive(&[b'P', b'K', 0x07, 0x08, 0x00, 0x00]));
+        // Page d'erreur GitHub (HTML), JSON d'erreur, fichier corrompu, court.
+        assert!(!is_zip_archive(
+            b"<!DOCTYPE html><html><body>404</body></html>"
+        ));
+        assert!(!is_zip_archive(b"{\"error\":\"Not Found\"}"));
+        assert!(!is_zip_archive(b"PK"));
+        assert!(!is_zip_archive(&[]));
+        assert!(!is_zip_archive(&[b'P', b'K', 0x03, 0x00]));
     }
 
     #[test]

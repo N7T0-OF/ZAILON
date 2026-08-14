@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { parseAddonCatalog } from '../../src/lib/addons.ts'
-import { addonSignaturePolicy, hasAddonSignature, hasRealSha256 } from '../../src/lib/addonsInstall.ts'
+import { addonSignaturePolicy, addonTrustLevel, hasAddonSignature, hasRealSha256 } from '../../src/lib/addonsInstall.ts'
 import type { AddonCatalogEntry } from '../../src/lib/addons.ts'
 
 const baseEntry: AddonCatalogEntry = {
@@ -31,15 +31,17 @@ test('hasRealSha256 : placeholder catalogue exclu', () => {
   assert.equal(hasRealSha256({ sha256: 'a1b2'.repeat(16) }), true)
 })
 
-test('officiel + SHA-256 réel sans signature → refusé (spec §14)', () => {
+test('officiel + SHA-256 réel sans signature → INSTALLABLE (spec §17-20, v1)', () => {
   const policy = addonSignaturePolicy({ ...baseEntry, sha256: 'a1b2'.repeat(16) })
-  assert.equal(policy.required, true)
-  assert.match(policy.reason, /refusée/)
+  assert.equal(policy.required, false)
+  assert.equal(policy.trust, 'official-verified-hash')
+  assert.doesNotMatch(policy.reason, /refusée/)
 })
 
-test('officiel + SHA-256 réel avec signature → vérifiée', () => {
+test('officiel + SHA-256 réel avec signature → vérifiée, trust officiel signé', () => {
   const policy = addonSignaturePolicy({ ...baseEntry, sha256: 'a1b2'.repeat(16), signature: 'sig', signaturePublicKey: 'key' })
   assert.equal(policy.required, true)
+  assert.equal(policy.trust, 'official-signed')
   assert.match(policy.reason, /vérifiée/)
 })
 
@@ -47,6 +49,13 @@ test('officiel + SHA-256 placeholder → pas encore exigible', () => {
   const policy = addonSignaturePolicy(baseEntry)
   assert.equal(policy.required, false)
   assert.match(policy.reason, /en attente/)
+})
+
+test('addonTrustLevel : les 4 niveaux (spec §19)', () => {
+  assert.equal(addonTrustLevel({ ...baseEntry, sha256: 'a1b2'.repeat(16) }), 'official-verified-hash')
+  assert.equal(addonTrustLevel({ ...baseEntry, signature: 'sig', signaturePublicKey: 'key' }), 'official-signed')
+  assert.equal(addonTrustLevel({ ...baseEntry, official: false, signature: 'sig', signaturePublicKey: 'key' }), 'community-signed')
+  assert.equal(addonTrustLevel({ ...baseEntry, official: false }), 'community-unsigned')
 })
 
 test('communautaire sans signature → facultative', () => {

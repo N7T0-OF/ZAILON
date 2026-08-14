@@ -31,11 +31,21 @@ export type AddonInstallEvent =
   | { type: 'failed'; message: string }
   | { type: 'rolled_back'; message: string }
 
-// ─────────────────────────── Politique de signature ─────────────────────────
-// Spec §14, §52 : le SHA-256 garantit l'intégrité, la signature Ed25519 garantit
-// l'origine. Règle : un add-on OFFICIEL avec un SHA-256 réel (catalogue distant)
-// DOIT être signé — sinon installation refusée. Les add-ons communautaires
-// restent installables sans signature (permissions affichées, §59).
+// ─────────────────────────── Politique de confiance ─────────────────────────
+// Spec « Finalisation des add-ons » §17-24 : le SHA-256 garantit l'intégrité,
+// la signature Ed25519 garantit l'origine. Pour v1 du système : un add-on
+// OFFICIEL (dépôt officiel + manifest valide + SHA-256 réel vérifié) est
+// INSTALLABLE SANS signature — la signature est recommandée mais PAS
+// obligatoire (elle sera vérifiée quand elle est déclarée). Seuls restent des
+// motifs de refus : hash incorrect, manifest invalide, package corrompu,
+// incompatibilité, path traversal, permission interdite, dépendance invalide.
+
+/** Niveau de confiance d'une entrée (spec §19). */
+export type AddonTrustLevel =
+  | 'official-verified-hash'
+  | 'official-signed'
+  | 'community-signed'
+  | 'community-unsigned'
 
 /** Vrai si l'entrée déclare une signature utilisable (signature + clé). */
 export function hasAddonSignature(entry: Pick<AddonCatalogEntry, 'signature' | 'signaturePublicKey'>): boolean {
@@ -47,27 +57,35 @@ export function hasRealSha256(entry: Pick<AddonCatalogEntry, 'sha256'>): boolean
   return Boolean(entry.sha256 && entry.sha256 !== 'catalog')
 }
 
+/** Niveau de confiance (spec §19) — pur, testable. */
+export function addonTrustLevel(entry: Pick<AddonCatalogEntry, 'official' | 'signature' | 'signaturePublicKey'>): AddonTrustLevel {
+  if (entry.official) return hasAddonSignature(entry) ? 'official-signed' : 'official-verified-hash'
+  return hasAddonSignature(entry) ? 'community-signed' : 'community-unsigned'
+}
+
 export interface AddonSignaturePolicy {
   /** Une signature doit être présente pour installer. */
   required: boolean
+  /** Niveau de confiance effectif de l'entrée (spec §19). */
+  trust: AddonTrustLevel
   /** Raison lisible de la politique. */
   reason: string
 }
 
-/** Politique de signature d'une entrée de catalogue (pur, testable). */
+/** Politique de confiance d'une entrée de catalogue (pur, testable). */
 export function addonSignaturePolicy(entry: Pick<AddonCatalogEntry, 'official' | 'sha256' | 'signature' | 'signaturePublicKey'>): AddonSignaturePolicy {
   if (entry.official && hasRealSha256(entry)) {
     return hasAddonSignature(entry)
-      ? { required: true, reason: 'Signature officielle requise et déclarée — vérifiée avant installation.' }
-      : { required: true, reason: 'Add-on officiel avec SHA-256 réel mais SANS signature — installation refusée (spec §14).' }
+      ? { required: true, trust: 'official-signed', reason: 'Signature officielle déclarée — vérifiée avant installation.' }
+      : { required: false, trust: 'official-verified-hash', reason: 'Add-on officiel vérifié par SHA-256 (dépôt officiel + manifest valide) — la signature cryptographique est recommandée mais pas obligatoire (v1, spec §17-20).' }
   }
   if (hasAddonSignature(entry)) {
-    return { required: false, reason: 'Signature déclarée — vérifiée avant installation.' }
+    return { required: false, trust: 'community-signed', reason: 'Signature déclarée — vérifiée avant installation.' }
   }
   if (entry.official) {
-    return { required: false, reason: 'Catalogue de référence (SHA-256 en attente) — signature vérifiée quand le package réel sera publié.' }
+    return { required: false, trust: 'official-verified-hash', reason: 'Catalogue de référence (SHA-256 en attente) — la signature sera vérifiée quand le package réel sera publié.' }
   }
-  return { required: false, reason: 'Add-on communautaire — signature facultative (permissions affichées avant installation, §59).' }
+  return { required: false, trust: 'community-unsigned', reason: 'Add-on communautaire — signature facultative (permissions affichées avant installation).' }
 }
 
 const PHASE_INDEX = new Map(ADDON_INSTALL_PHASES.map((phase, index) => [phase, index]))

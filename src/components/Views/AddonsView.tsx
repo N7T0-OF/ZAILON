@@ -1,4 +1,4 @@
-import { BookOpen, Download, Import, Loader2, Lock, Package, Power, RefreshCw, Search, Trash2, Wand2, X, Zap } from 'lucide-react'
+import { BookOpen, Download, Import, Link2, Loader2, Lock, Package, Power, RefreshCw, Search, ShieldCheck, Trash2, Wand2, X, Zap } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import {
   ADDON_API_VERSION,
@@ -21,7 +21,7 @@ import {
   type InstalledAddon,
   type ZailonAddonManifest,
 } from '../../lib/addons'
-import { ADDON_INSTALL_INITIAL_STATE, addonInstallReducer, addonSignaturePolicy, addonStorageReport, describeAddonDownloadError, fetchAddonCatalog, hasAddonSignature, type CatalogFetchResult } from '../../lib/addonsInstall'
+import { ADDON_INSTALL_INITIAL_STATE, addonInstallReducer, addonSignaturePolicy, addonStorageReport, describeAddonDownloadError, fetchAddonCatalog, hasAddonSignature, hasRealSha256, type CatalogFetchResult } from '../../lib/addonsInstall'
 import { native } from '../../lib/native'
 import { useStore } from '../../store/useStore'
 import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
@@ -37,9 +37,16 @@ const ADDON_DOCS_URL = 'https://github.com/N7T0-OF/ZAILON/tree/main/zailon-addon
 // du schema 2 (chemins `package`) (spec §47).
 const CATALOG_CACHE_KEY = 'zailon:addon-catalog:v4'
 
-const FILTERS: Array<{ id: 'all' | 'installed' | AddonCatalog['addons'][number]['category']; label: string }> = [
+// Filtres de statut (spec §65) : la disponibilité vient du catalogue
+// (package + SHA-256), jamais d'un texte écrit à la main (§47-49).
+type AddonStatusFilter = 'disponibles' | 'dev' | 'updates'
+type AddonFilter = 'all' | 'installed' | AddonStatusFilter | AddonCatalog['addons'][number]['category']
+const FILTERS: Array<{ id: AddonFilter; label: string }> = [
   { id: 'all', label: 'Tous' },
   { id: 'installed', label: 'Installés' },
+  { id: 'disponibles', label: 'Disponibles' },
+  { id: 'updates', label: 'Mises à jour' },
+  { id: 'dev', label: 'En développement' },
   { id: 'game-support', label: 'Jeux' },
   { id: 'modding', label: 'Modding' },
   { id: 'visual', label: 'Visuel' },
@@ -125,11 +132,17 @@ export function AddonsView() {
     return rows
   }, [addons, catalog])
 
+  // Noms humains des dépendances pour les cartes (spec §52-53).
+  const catalogNameById = useMemo(() => new Map(catalog.addons.map(entry => [entry.id, entry.name])), [catalog])
+
   const visible = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase()
     return catalogRows.filter(row => {
       if (filter === 'installed' && !row.installed) return false
-      if (filter !== 'all' && filter !== 'installed' && row.entry.category !== filter) return false
+      if (filter === 'disponibles' && (row.installed || !catalogAddonAvailability(row.entry).installable)) return false
+      if (filter === 'updates' && !(row.installed && row.entry.official && row.entry.version !== row.installed.manifest.version)) return false
+      if (filter === 'dev' && (row.installed || catalogAddonAvailability(row.entry).status !== 'development')) return false
+      if (filter !== 'all' && filter !== 'installed' && filter !== 'disponibles' && filter !== 'updates' && filter !== 'dev' && row.entry.category !== filter) return false
       if (!normalized) return true
       const haystack = `${row.entry.name} ${row.entry.description} ${row.entry.id}`.toLocaleLowerCase()
       return haystack.includes(normalized)
@@ -197,6 +210,7 @@ export function AddonsView() {
       {visible.map(row => <AddonCard
         key={row.entry.id}
         row={row}
+        nameById={catalogNameById}
         offline={catalogState?.source === 'fallback'}
         onInstall={() => confirm(row)}
         onEnable={value => setAddonEnabled(row.entry.id, value)}
@@ -252,8 +266,10 @@ function catalogEntryFromInstalled(item: InstalledAddon): AddonCatalogEntry {
   }
 }
 
-function AddonCard({ row, offline = false, onInstall, onEnable, onRemove }: {
+function AddonCard({ row, nameById, offline = false, onInstall, onEnable, onRemove }: {
   row: CatalogRow
+  /** Nom humain par id d'add-on — dépendances affichées lisiblement (§52-53). */
+  nameById: Map<string, string>
   /** Hors connexion : catalogue de référence servi, aucun téléchargement (§22). */
   offline?: boolean
   onInstall: () => void
@@ -301,6 +317,7 @@ function AddonCard({ row, offline = false, onInstall, onEnable, onRemove }: {
       <span className="rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/38">v{entry.version}</span>
       {entry.downloadSize ? <span className="rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/38">{formatAddonSize(entry.downloadSize)} téléchargement{installed ? ` · ~${formatAddonSize(installedSize)} installé` : ''}</span> : null}
       {entry.permissions.length > 0 && <PermissionsButton permissions={entry.permissions} />}
+      {entry.dependencies?.length ? <span className="flex items-center gap-1 rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/46"><Link2 size={10} className="text-white/30" />Nécessite {entry.dependencies.map(id => nameById.get(id) || id).join(', ')}<ZailonInfoPopover text={entry.dependencies.map(id => `${nameById.get(id) || id} (${id})`).join(' · ')} /></span> : null}
     </div>
     {installed && (
       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-white/34">
@@ -511,9 +528,14 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
             </div>
           )}
 
-          <div className={`mt-3 flex items-start gap-1.5 rounded-lg border px-3 py-2 text-[11px] ${signaturePolicy.required && !hasAddonSignature(entry) ? 'border-red-300/18 bg-red-300/[0.04] text-red-200/80' : hasAddonSignature(entry) ? 'border-emerald-300/16 bg-emerald-300/[0.035] text-emerald-100/75' : 'border-white/[0.06] text-white/40'}`}>
-            <Lock size={12} className="mt-0.5 shrink-0" />
-            <span>{signaturePolicy.reason}</span>
+          {/* Spec §17-24 : la confiance ne bloque plus l'absence de signature —
+              l'add-on officiel avec SHA-256 réel est installable. La signature
+              reste VÉRIFIÉE quand elle est déclarée. Affichage : Intégrité ✓ /
+              Signature. */}
+          <div className="mt-3 grid gap-1.5 rounded-lg border border-white/[0.06] bg-black/15 p-3 text-[11px]">
+            <p className="flex items-center gap-1.5 text-emerald-100/75"><ShieldCheck size={12} />Intégrité {hasRealSha256(entry) ? 'SHA-256 ✓' : 'à la première synchronisation'}</p>
+            <p className={`flex items-center gap-1.5 ${hasAddonSignature(entry) ? 'text-emerald-100/75' : 'text-white/38'}`}><Lock size={12} />Signature {hasAddonSignature(entry) ? 'Ed25519 déclarée — vérifiée à l’installation' : 'non utilisée (recommandée, pas obligatoire — v1)'}</p>
+            <p className="mt-0.5 text-[10px] leading-relaxed text-white/34">{signaturePolicy.reason}</p>
           </div>
 
           {entry.downloadSize ? <p className="mt-3 text-[11px] text-white/42">{formatAddonSize(entry.downloadSize)} à télécharger · ~{formatAddonSize(estimateInstalledSize(entry.downloadSize))} installé · vérification SHA-256, signature et installation atomique.</p> : null}

@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { ActiveTrackedSession, BackgroundMediaType, BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, ExternalModReference, Game, GameBackgroundMedia, GameInputProfile, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, ReShadeProfileState, RestorePoint, SessionSource, TextSize, TrackedSession, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
+import { ActiveTrackedSession, BackgroundMediaType, BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, ExternalModReference, Game, GameBackgroundMedia, GameInputProfile, GameInstallation, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, ReShadeProfileState, RestorePoint, SessionSource, TextSize, TrackedSession, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
 import { checkpointDue } from '../lib/sessionStats'
+import { ensurePrincipalInstallation, installationDisplayName, resolveGameInstallation } from '../lib/installations'
 import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
 import { validateAddonManifest } from '../lib/addons'
 import type { AddonSource, InstalledAddon, ZailonAddonManifest } from '../lib/addons'
@@ -267,7 +268,7 @@ function makeGame({ name, execPath, modsPath, platform = 'standalone', provider,
     // de référence, l'utilisateur active ReShade par profil.
     reshade: { enabled: false, shaderDependencies: [] },
   }
-  return {
+  const game: Game = {
     id: gameId,
     name,
     execPath,
@@ -291,6 +292,8 @@ function makeGame({ name, execPath, modsPath, platform = 'standalone', provider,
     publisher,
     detectionSource,
   }
+  // Spec §6-16 : un jeu avec exécutable reçoit son installation « Principal ».
+  return { ...game, installations: ensurePrincipalInstallation(game) }
 }
 
 async function automaticArtworkForGame(game: Game, artworkKeys: { steamGridDbKey: string; igdbClientId: string; igdbClientSecret: string }): Promise<Partial<GameResources>> {
@@ -496,6 +499,10 @@ export interface Store {
   setActiveGameTab: (tab: GameTab) => void
   setSelectedGame: (gameId: string) => void
   setSelectedProfile: (profileId: string) => Promise<void>
+  addInstallation: (gameId: string, installation: Omit<GameInstallation, 'id' | 'gameId' | 'createdAt'>) => void
+  updateInstallation: (gameId: string, installationId: string, patch: Partial<GameInstallation>) => void
+  removeInstallation: (gameId: string, installationId: string) => void
+  setProfileInstallation: (profileId: string, installationId?: string) => void
   addGameFromExecutable: () => Promise<void>
   addDetectedGames: () => Promise<number>
   importDetectedGames: (detected: DetectedGame[]) => number
@@ -747,8 +754,11 @@ export function migratePersistedState(persisted: unknown) {
         isDefault: rawProfile.isDefault ?? index === 0,
       }, installedMods)
     })
-    return { ...game, installedMods, profiles }
+    // Migration v6 (spec §6-16) : chaque jeu avec un exécutable connu reçoit
+    // son installation « Principal » (idempotent — jamais de doublon).
+    return { ...game, installedMods, profiles, installations: ensurePrincipalInstallation(game) }
   }) : []
+
   return {
     ...state,
     games,
@@ -1007,6 +1017,44 @@ export const useStore = create<Store>()(persist((set, get) => ({
       }
     }
     set({ selectedProfileId })
+  },
+  // ── Installations multiples (spec §6-16, §60-64) ──────────────────────
+  addInstallation: (gameId, installation) => {
+    const game = get().games.find(item => item.id === gameId)
+    if (!game) return
+    const id = createId()
+    const entry: GameInstallation = { ...installation, id, gameId, createdAt: Date.now() }
+    set(state => ({ games: state.games.map(item => item.id !== gameId ? item : {
+      ...item,
+      installations: [...ensurePrincipalInstallation(item), entry],
+    }) }))
+  },
+  updateInstallation: (gameId, installationId, patch) => {
+    set(state => ({ games: state.games.map(item => item.id !== gameId ? item : {
+      ...item,
+      installations: (item.installations || []).map(installation => installation.id !== installationId ? installation : { ...installation, ...patch }),
+    }) }))
+  },
+  removeInstallation: (gameId, installationId) => {
+    set(state => ({
+      games: state.games.map(item => item.id !== gameId ? item : {
+        ...item,
+        installations: (item.installations || []).filter(installation => installation.id !== installationId),
+        // Les profils ciblant l'installation supprimée retombent sur la
+        // résolution par défaut (« Principal » / première restante) — jamais
+        // de référence cassée (§10).
+        profiles: item.profiles.map(profile => profile.installationId === installationId
+          ? { ...profile, installationId: undefined }
+          : profile),
+      }),
+    }))
+  },
+  setProfileInstallation: (profileId, installationId) => {
+    const state = get()
+    const game = state.games.find(item => item.id === state.selectedGameId)
+    const profile = game?.profiles.find(item => item.id === profileId)
+    if (!game || !profile) return
+    set(current => ({ games: updateProfile(current.games, game.id, profileId, currentProfile => ({ ...currentProfile, installationId })) }))
   },
   addGameFromExecutable: async () => {
     const execPath = await pickExecutable()
@@ -1687,8 +1735,12 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const state = get()
     if (state.isPlaying || state.isLaunching) { set({ notice: state.isLaunching ? 'La préparation du jeu est déjà en cours.' : 'Un jeu est déjà en cours. Fermez son processus avant un nouveau lancement afin que ZAILON restaure proprement les fichiers temporaires.' }); return }
     const { game, profile } = selected(state)
-    if (!game?.execPath) { set({ notice: 'Select a game executable before launching.' }); return }
+    if (!game) { set({ notice: 'Select a game before launching.' }); return }
     if (!profile) { set({ notice: 'Select a profile before launching.' }); return }
+    // Spec §6-16, §60-64 : l'installation cible vient du profil — changement de
+    // profil = changement d'exécutable / racine / dossier mods (§10).
+    const resolved = resolveGameInstallation(game, profile)
+    if (!resolved.executablePath) { set({ notice: 'Select a game executable before launching.' }); return }
     try {
       if (get().autoRestorePoints) {
         const now = new Date()
@@ -1726,9 +1778,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
           set({ notice: `Attention — la configuration des frameworks a changé depuis le dernier lancement réussi : ${changes}. Vérifiez dans État & Diagnostic > Frameworks avant de continuer.` })
         }
       }
-      const executableParent = game.execPath.replace(/[\\/][^\\/]+$/, '')
-      const knownRoot = game.name.toLocaleLowerCase().includes('cyberpunk') && /[\\/]bin[\\/]x64(?:[\\/]|$)/i.test(game.execPath)
-        ? game.execPath.split(/[\\/]bin[\\/]x64/i)[0]
+      const executablePath = resolved.executablePath!
+      const executableParent = executablePath.replace(/[\\/][^\\/]+$/, '')
+      const knownRoot = game.name.toLocaleLowerCase().includes('cyberpunk') && /[\\/]bin[\\/]x64(?:[\\/]|$)/i.test(executablePath)
+        ? executablePath.split(/[\\/]bin[\\/]x64/i)[0]
         : executableParent
       const stagedModIds = enabledMods
         .map(mod => mod.stageId || (mod.storage === 'staged' ? mod.id : undefined))
@@ -1741,7 +1794,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       // Présence Discord gérée par `syncDiscordPresence` au vrai `GameRunning`
       // (spec Discord §9) — jamais transmise au lancement, sinon la présence
       // démarrerait au launcher / à l'UAC (cas NTE, critère bloquant §63).
-      const result = await native.launchGame(game.execPath, game.id, game.name, game.installDirectory || knownRoot, profile.id, profile.name, enabledMods.length, stagedModIds, profile.conflictRules || [], isLauncherBased(adapterFor(game)), progress => set({ launchProgress: progress }))
+      const result = await native.launchGame(executablePath, game.id, game.name, resolved.rootPath || knownRoot, profile.id, profile.name, enabledMods.length, stagedModIds, profile.conflictRules || [], isLauncherBased(adapterFor(game)), progress => set({ launchProgress: progress }))
       set(current => ({
         isLaunching: false,
         launchProgress: undefined,
@@ -1787,6 +1840,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
           gameName: game.name,
           profileId: profile.id,
           profileName: profile.name,
+          installationId: tracked.installationId,
+          installationName: tracked.installationName,
           startedAt: tracked.startedAt,
           endedAt: now,
           durationMin: minutes,
@@ -1820,10 +1875,16 @@ export const useStore = create<Store>()(persist((set, get) => ({
     if (!game) return
     const adapter = adapterFor(game)
     const now = Date.now()
+    // Spec §16 : la session identifie l'installation cible (stats par
+    // installation, jamais de fusion entre variantes du même jeu).
+    const profile = game.profiles.find(item => item.id === profileId)
+    const resolved = resolveGameInstallation(game, profile)
     const session: GameSession = {
       id: createId(),
       gameId,
       profileId,
+      installationId: resolved.installation?.id,
+      installationName: resolved.installation?.name,
       launchStrategy: adapter.launchBehavior,
       launcherProcessIds: [],
       gameProcessIds: [],
@@ -1841,7 +1902,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       isPlaying: true,
       playStartTime: now,
       sessionTime: 0,
-      ...(get().trackPlaytime ? { activeTrackedSession: { gameId, profileId, startedAt: now, checkpointAt: now } } : {}),
+      ...(get().trackPlaytime ? { activeTrackedSession: { gameId, profileId, installationId: resolved.installation?.id, installationName: resolved.installation?.name, startedAt: now, checkpointAt: now } } : {}),
     }))
   },
   onGameProcessStopped: ({ gameId, cleanupError, processName }) => {
@@ -1931,10 +1992,16 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const profile = [...game.profiles].sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0))[0] ?? game.profiles[0]
     if (!profile) return
     const now = Date.now()
+    // Détection externe : installation « Principal » par défaut (le processus
+    // observé ne révèle pas la variante — l'utilisateur la précise via le
+    // profil la prochaine fois).
+    const resolved = resolveGameInstallation(game, profile)
     const session: GameSession = {
       id: createId(),
       gameId,
       profileId: profile.id,
+      installationId: resolved.installation?.id,
+      installationName: resolved.installation?.name,
       launchStrategy: adapter.launchBehavior,
       launcherProcessIds: [],
       gameProcessIds: [],
@@ -1958,7 +2025,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       isPlaying: true,
       playStartTime: now,
       sessionTime: 0,
-      ...(get().trackPlaytime ? { activeTrackedSession: { gameId, profileId: profile.id, startedAt: now, checkpointAt: now } } : {}),
+      ...(get().trackPlaytime ? { activeTrackedSession: { gameId, profileId: profile.id, installationId: resolved.installation?.id, installationName: resolved.installation?.name, startedAt: now, checkpointAt: now } } : {}),
     }))
     get().recordNotice(`${game.name} détecté — session ZAILON récupérée automatiquement.`)
     // Spec #21-24 : détecté hors ZAILON → « Jeu détecté par ZAILON » ; si ZAILON
@@ -2399,6 +2466,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
       gameName: game.name,
       profileId: profile?.id ?? tracked.profileId,
       profileName: profile?.name ?? tracked.profileId,
+      installationId: tracked.installationId,
+      installationName: tracked.installationName,
       startedAt: tracked.startedAt,
       endedAt: checkpointMs,
       durationMin,
@@ -3119,7 +3188,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     restorePoints: state.restorePoints,
     autoRestorePoints: state.autoRestorePoints,
   }),
-  version: 5,
+  version: 6,
   migrate: persisted => migratePersistedState(persisted) as never,
 }))
 

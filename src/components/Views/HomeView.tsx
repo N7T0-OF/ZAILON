@@ -242,10 +242,9 @@ export function HomeView() {
         </header>
 
         <div className="mt-[clamp(3.6rem,12vh,9rem)] max-w-[min(690px,72vw)]">
+          {/* Spec « Nettoyage Accueil » §1 : plus de texte « Jeu sélectionné » —
+              le Hero montre déjà le jeu. L'étoile favori reste seule (§13). */}
           <div className="flex items-center gap-2.5">
-            <p className="font-mono text-[11px] uppercase tracking-[0.25em] text-white/32">{selectedGame.itemKind === 'software' ? 'Application locale' : 'Jeu sélectionné'}</p>
-            {/* Spec §13 : « Jeu favori » devient une simple étoile — remplie si
-                favori, outline sinon ; tooltip clair. Jamais de texte. */}
             <button type="button" onClick={() => setGameFavorite(selectedGame.id)} title={selectedGame.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'} aria-label={selectedGame.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'} className={`flex h-5 w-5 items-center justify-center rounded-full transition-colors ${selectedGame.favorite ? 'bg-gold/15 text-gold' : 'text-white/26 hover:bg-white/[0.07] hover:text-gold'}`}><Star size={12} className={selectedGame.favorite ? 'fill-gold text-gold' : ''} /></button>
           </div>
           {logo

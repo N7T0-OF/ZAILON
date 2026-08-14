@@ -1,5 +1,46 @@
 # Changelog
 
+## [1.94.0] - 2026-08-14
+
+> **Add-ons officiels débloqués + profils multi-installation + nettoyage
+> Accueil.** Un officiel avec SHA-256 réel s'installe sans signature (la chaîne
+> de signature n'est pas encore déployée) ; les cartes ne montrent plus
+> « Local » sur un officiel ; « Jeu sélectionné », la barre inférieure globale
+> et « En ligne » ont disparu.
+
+### Added
+
+- **Profils multi-installation** (spec §6-16, §60-64) : un jeu = une carte,
+  plusieurs installations physiques ; chaque profil référence la sienne
+  (`Profile.installationId`), le lancement bascule automatiquement exécutable /
+  racine / dossier mods. Section **Configuration → Installations** (ajout par
+  choix d'exécutable, renommage, chemins, suppression avec repli sur
+  Principal), sélecteur « Installation utilisée » dans l'onglet Profils, badge
+  d'installation sur la page jeu. Migration v6 idempotente : chaque jeu avec
+  exécutable reçoit « Principal ».
+- **Statistiques par installation** (§64) : répartition par installation sous
+  chaque jeu (sessions legacy visibles sous le nom du profil — aucune perte).
+  Sessions `GameSession`/`TrackedSession` portent `installationId` + snapshot.
+- **Filtres de statut Add-ons** (§65) : Disponibles / Mises à jour / En
+  développement — le statut vient du catalogue, jamais d'un texte écrit à la
+  main.
+- Docs : `multi-installation-profile-system.md`, `addon-trust-policy.md`,
+  `official-addons-migration.md`, `core-size-after-modularization.md`.
+
+### Fixed
+
+- **Add-ons officiels refusés malgré SHA-256 valide** (§17-24) : la politique de
+  confiance n'exige plus de signature pour v1 — SHA-256 + repository officiel +
+  manifeste valide = installable. L'absence de signature n'est jamais un motif
+  de refus seul.
+- **Badge « Local » sur add-ons officiels** (§42) : le catalogue embarqué est
+  normalisé (`official: true`) — plus aucun officiel affiché « Local ».
+- **Accueil** : « Jeu sélectionné » supprimé (§1) ; **barre inférieure globale
+  supprimée** (§2-5, remplacée par les toasts de tâches) ; badge « En ligne »
+  retiré (état réseau affiché uniquement là où il perturbe, ex. Explorer).
+- **Dépendances lisibles** (§52-53) : chip « Nécessite X ⓘ » sur les cartes
+  (nom humain, ids en tooltip).
+
 ## [1.93.0] - 2026-08-14
 
 > **Correctif : bouton « Détecter » de la Bibliothèque** — la fenêtre de

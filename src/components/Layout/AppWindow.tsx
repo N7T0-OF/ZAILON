@@ -7,7 +7,7 @@ import { ExploreView } from '../Views/ExploreView'
 import { NewsView } from '../Views/NewsView'
 import { SettingsView } from '../Views/SettingsView'
 import { DownloadsView } from '../Views/DownloadsView'
-import { StatusBar } from './StatusBar'
+import { TaskToasts } from './TaskToasts'
 import { VisualProfilesPage } from '../../visual-profiles/ui/VisualProfilesPage'
 import { AddonsView } from '../Views/AddonsView'
 import { FrostyEditorView } from '../Views/FrostyEditorView'
@@ -48,7 +48,7 @@ export function AppWindow() {
           <View />
         </main>
       </div>
-      <StatusBar />
+      <TaskToasts />
     </div>
   )
 }

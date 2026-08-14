@@ -95,6 +95,27 @@ export function perProfile(history: TrackedSession[], gameId: string): Array<{ p
   return [...map.values()].sort((a, b) => b.minutes - a.minutes)
 }
 
+/** Répartition PAR INSTALLATION pour un jeu (spec §64) : les sessions legacy
+ * sans installationId sont regroupées sous le nom du profil (fallback — les
+ * stats d'avant la migration v6 restent visibles, jamais perdues). */
+export function perInstallation(history: TrackedSession[], gameId: string): Array<{ installationId: string; installationName: string; minutes: number; sessions: number }> {
+  const map = new Map<string, { installationId: string; installationName: string; minutes: number; sessions: number }>()
+  for (const session of history) {
+    if (session.gameId !== gameId) continue
+    const key = session.installationId || `profile:${session.profileId}`
+    const entry = map.get(key) ?? {
+      installationId: session.installationId || '',
+      installationName: session.installationName || (session.installationId ? session.installationId : session.profileName),
+      minutes: 0,
+      sessions: 0,
+    }
+    entry.minutes += session.durationMin || 0
+    entry.sessions += 1
+    map.set(key, entry)
+  }
+  return [...map.values()].sort((a, b) => b.minutes - a.minutes)
+}
+
 /** Cellule de la heatmap (spec §48) : un jour, sa durée en minutes et son
  * niveau 0-4 (teinte de la cellule — jamais de librairie graphique). */
 export interface HeatmapCell {

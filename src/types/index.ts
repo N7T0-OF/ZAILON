@@ -10,6 +10,10 @@ export interface TrackedSession {
   gameName: string
   profileId: string
   profileName: string
+  /** Installation utilisée (snapshot, spec §16, §64) — distingue les stats
+   * « FiveM — Drift » sans fusionner les durées. */
+  installationId?: string
+  installationName?: string
   startedAt: number
   endedAt: number
   /** Durée RÉELLE comptabilisée en minutes (checkpoints inclus). */
@@ -26,6 +30,9 @@ export interface TrackedSession {
 export interface ActiveTrackedSession {
   gameId: string
   profileId: string
+  /** Installation cible de la session en cours (spec §16, §64). */
+  installationId?: string
+  installationName?: string
   startedAt: number
   checkpointAt?: number
 }
@@ -252,6 +259,9 @@ export interface Profile {
   stableSince?: number
   lastSuccessfulLaunch?: number
   isDefault?: boolean
+  /** Installation physique utilisée par ce profil (spec §8-10, §60-64).
+   * Absent → installation « Principal » (ou première disponible). */
+  installationId?: string
   launchArgs?: string
   runtime?: string
   conflictRules?: Array<{ path: string; winnerModId: string }>
@@ -340,6 +350,27 @@ export interface GameResources {
   bannerFit?: 'cover' | 'contain'
 }
 
+/**
+ * Installation physique d'un jeu (spec « Profils multi-installation » §6-16,
+ * §60-64 — générique, pas spécifique FiveM). Un jeu = UNE carte Bibliothèque,
+ * plusieurs installations possibles ; chaque profil référence celle qu'il
+ * utilise (`Profile.installationId`). Le changement de profil bascule
+ * automatiquement exécutable / racine / dossier mods / tracking (§10).
+ */
+export interface GameInstallation {
+  id: string
+  gameId: string
+  /** Nom court lisible : « Principal », « Drift », « Visual », « Beta »… (§61). */
+  name: string
+  executablePath?: string
+  rootPath?: string
+  modsPath?: string
+  bypassPath?: string
+  platform?: 'steam' | 'epic' | 'gog' | 'standalone'
+  launchArgs?: string
+  createdAt?: number
+}
+
 export interface Game {
   id: string
   name: string
@@ -353,6 +384,10 @@ export interface Game {
   presets?: GamePreset[]
   installedMods: Mod[]
   profiles: Profile[]
+  /** Installations physiques (spec §6-16) — au moins « Principal » dès qu'un
+   * exécutable est connu. Les champs legacy `execPath`/`installDirectory`
+   * restent la racine pour les jeux sans installations (fallback). */
+  installations?: GameInstallation[]
   totalPlaytime: number
   /** Temps Steam (heures) fourni par l'add-on Steam Advanced (spec §96) —
    * JAMAIS fusionné avec le suivi ZAILON : affiché séparément (« Suivi ZAILON :
@@ -430,6 +465,9 @@ export interface GameSession {
   id: string
   gameId: string
   profileId: string
+  /** Installation cible (spec §16, §64). */
+  installationId?: string
+  installationName?: string
   launchStrategy: LaunchBehavior
   launcherProcessIds: number[]
   gameProcessIds: number[]

@@ -2,7 +2,7 @@ import { ArrowLeft, BarChart3, Clock3, Download, Gamepad2, History, Search, Time
 import { useMemo, useState } from 'react'
 import { useStore } from '../../store/useStore'
 import { formatElapsedDuration, formatTime, timeAgo } from '../../utils'
-import { dailyBreakdown, heatmapCells, minutesWithin, perGame, perProfile, summarizeSessions } from '../../lib/sessionStats'
+import { dailyBreakdown, heatmapCells, minutesWithin, perGame, perInstallation, perProfile, summarizeSessions } from '../../lib/sessionStats'
 
 type StatsTab = 'tout' | 'jeux' | 'apps'
 type StatsRange = 7 | 30 | 'all'
@@ -209,7 +209,7 @@ export function StatisticsView() {
         <section className="rounded-xl border border-white/[0.06] bg-white/[0.018]">
           <div className="flex items-center gap-2 border-b border-white/[0.05] px-4 py-3">
             <BarChart3 size={13} className="text-white/30" />
-            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-white/40">Par jeu et par profil</p>
+            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-white/40">Par jeu, installation et profil</p>
             {query && <span className="ml-auto text-[10px] text-white/28">{visibleGames.length} résultat(s)</span>}
           </div>
           {visibleGames.length === 0
@@ -219,6 +219,10 @@ export function StatisticsView() {
                   const game = games.find(item => item.id === entry.gameId)
                   const profiles = perProfile(filteredHistory, entry.gameId)
                   const maxProfile = Math.max(1, ...profiles.map(profile => profile.minutes))
+                  // Spec §64 : répartition par INSTALLATION (variantes du même
+                  // jeu — FiveM Default/Drift, copies moddées…).
+                  const installations = perInstallation(filteredHistory, entry.gameId)
+                  const maxInstallation = Math.max(1, ...installations.map(installation => installation.minutes))
                   return <li key={entry.gameId} className="px-4 py-3.5">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <button type="button" onClick={() => { if (game) { setSelectedGame(game.id); setView('games') } }} className="group flex min-w-0 items-center gap-2 text-left">
@@ -233,6 +237,20 @@ export function StatisticsView() {
                     </div>
                     {/* Spec §96 : temps Steam JAMAIS fusionné — affiché séparément. */}
                     {game?.steamPlaytimeHours ? <p className="mt-1 text-[10px] text-white/26">Suivi ZAILON : {formatTime(entry.minutes)} · Steam : {formatTime(game.steamPlaytimeHours * 60)}</p> : null}
+                    {installations.length > 1 && (
+                      <div className="mt-2 space-y-1 rounded-lg bg-white/[0.02] p-2">
+                        <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-white/26">Par installation</p>
+                        {installations.map(installation => (
+                          <div key={installation.installationId || installation.installationName} className="flex items-center gap-2">
+                            <span className="w-24 truncate text-[10px] text-white/38">{installation.installationName}</span>
+                            <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
+                              <div className="h-full rounded-full bg-[var(--zailon-accent)]/50" style={{ width: `${Math.max(installation.minutes > 0 ? 2 : 0, Math.round((installation.minutes / maxInstallation) * 100))}%` }} />
+                            </div>
+                            <span className="w-14 shrink-0 text-right font-mono text-[10px] text-white/45">{installation.minutes > 0 ? formatTime(installation.minutes) : '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {profiles.length > 1 && (
                       <div className="mt-2 space-y-1">
                         {profiles.map(profile => (

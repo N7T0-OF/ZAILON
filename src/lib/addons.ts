@@ -680,6 +680,11 @@ export function catalogAddonAvailability(entry: AddonCatalogEntry): AddonAvailab
  * Installer tant qu'un vrai `.zailon-addon` n'est pas committé (spec §5,
  * §49).
  */
-// Les entrées JSON sont toutes officielles (`official: true` implicite) — le
-// cast passe par `unknown` car le fichier ne répète pas le champ par entrée.
-export const OFFICIAL_ADDON_CATALOG: AddonCatalog = officialCatalogJson as unknown as AddonCatalog
+// Le JSON embarqué ne répète pas `official` par entrée : il est normalisé via
+// `parseAddonCatalog` (official: true, SHA-256/package validés) pour que le
+// fallback hors ligne se comporte EXACTEMENT comme le catalogue distant —
+// jamais de badge « Local » sur un add-on officiel (spec §42).
+const parsedOfficialCatalog = parseAddonCatalog(officialCatalogJson)
+export const OFFICIAL_ADDON_CATALOG: AddonCatalog = parsedOfficialCatalog.ok && parsedOfficialCatalog.catalog
+  ? parsedOfficialCatalog.catalog
+  : { schema: 2, addons: [] }

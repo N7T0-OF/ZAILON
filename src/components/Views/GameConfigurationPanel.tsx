@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, History, Keyboard, Layers3, MonitorDown, Package, Palette, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Snowflake, Trash2, Upload, Wand2, Wrench } from 'lucide-react'
+import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, HardDrive, History, Keyboard, Layers3, MonitorDown, Package, Palette, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Snowflake, Trash2, Upload, Wand2, Wrench } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
@@ -25,7 +25,8 @@ import {
   type ZailonPerformancePolicies,
   type ZailonPriorityPolicy,
 } from '../../lib/performanceProfiles'
-import { native, pickFolder } from '../../lib/native'
+import { native, pickExecutable, pickFolder } from '../../lib/native'
+import { resolveGameInstallation, shortPathName } from '../../lib/installations'
 import { ProfileShareDialog } from '../UI/ProfileShareDialog'
 import { detectModBackend, frostyBackendStatus } from '../../lib/modBackends'
 import { frostyOverhaulConflict, FROSTY_STRATEGY_LABELS } from '../../lib/frosty'
@@ -73,6 +74,10 @@ interface Props {
 export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBrowseModsFolder, onSaveResources, onOpenVisuals }: Props) {
   const setGamePath = useStore(state => state.setGamePath)
   const setModsPath = useStore(state => state.setModsPath)
+  const addInstallation = useStore(state => state.addInstallation)
+  const updateInstallation = useStore(state => state.updateInstallation)
+  const removeInstallation = useStore(state => state.removeInstallation)
+  const setProfileInstallation = useStore(state => state.setProfileInstallation)
   const reduceExplanations = useStore(state => state.reduceExplanations)
   const advancedMode = useStore(state => state.advancedMode)
   const performanceMode = useStore(state => state.performanceModes[game.id] ?? state.globalPerformanceMode)
@@ -230,6 +235,49 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
           </div>
         </div>
         <LaunchChainTest game={game} />
+      </ConfigCard>
+
+      {/* Spec « Profils multi-installation » §6-16, §60-64 : un jeu = une carte,
+       * plusieurs installations physiques ; chaque profil choisit la sienne
+       * (onglet Profils → « Installation utilisée »). */}
+      <ConfigCard id="installations" title="Installations" icon={HardDrive} badge={`${(game.installations || []).length} installation(s)`} open={open.includes('installations')} onToggle={() => toggle('installations')}>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="max-w-lg text-[11px] leading-relaxed text-white/40">Plusieurs copies/variantes du même jeu (FiveM Default/Drift, version Steam vs standalone, édition moddée…). Un seul jeu dans la Bibliothèque — chaque profil référence l’installation à utiliser, le lancement bascule automatiquement (exécutable, racine, dossier mods).<ZailonInfoPopover text="L'installation « Principal » est créée automatiquement depuis l'exécutable configuré. Le changement de profil change l'installation cible — le tracking et les statistiques distinguent chaque variante." /></p>
+          <button type="button" onClick={async () => {
+            const execPath = await pickExecutable()
+            if (!execPath) return
+            const parent = execPath.replace(/[\\/][^\\/]+$/, '')
+            addInstallation(game.id, {
+              name: shortPathName(parent) || `Installation ${(game.installations || []).length + 1}`,
+              executablePath: execPath,
+              rootPath: parent,
+              platform: game.platform,
+            })
+          }} className="flex items-center gap-1.5 rounded-lg border border-gold/25 px-3 py-2 text-[11px] font-semibold text-gold hover:bg-gold/10"><Plus size={13} />Ajouter une installation</button>
+        </div>
+        {(game.installations || []).length === 0
+          ? <p className="rounded-lg border border-white/[0.07] bg-white/[0.02] p-3 text-[11px] text-white/32">Aucune installation — configurez un exécutable dans « Lancement » pour créer « Principal ».</p>
+          : <ul className="space-y-2">{(game.installations || []).map(installation => {
+            const isPrincipal = installation.id === 'principal'
+            const usedByProfiles = game.profiles.filter(profile => profile.installationId === installation.id)
+            return <li key={installation.id} className={`rounded-xl border p-3 ${resolveGameInstallation(game, profile).installation?.id === installation.id ? 'border-gold/20 bg-gold/[0.03]' : 'border-white/[0.07] bg-white/[0.02]'}`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <input value={installation.name} onChange={event => updateInstallation(game.id, installation.id, { name: event.target.value })} className="min-w-36 flex-1 bg-transparent text-xs font-semibold text-white/78 outline-none" />
+                {isPrincipal && <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[9px] font-semibold text-white/38">Principal</span>}
+                <span className="ml-auto font-mono text-[10px] text-white/28">{usedByProfiles.length ? `${usedByProfiles.map(item => item.name).join(', ')}` : 'aucun profil'}</span>
+                {!isPrincipal && <button type="button" onClick={() => removeInstallation(game.id, installation.id)} title="Retirer cette installation (les profils retombent sur Principal)" className="rounded-lg p-1.5 text-white/30 hover:bg-red-400/10 hover:text-red-300"><Trash2 size={12} /></button>}
+              </div>
+              <p className="mt-1 truncate font-mono text-[10px] text-white/34" title={installation.executablePath || installation.rootPath}>{installation.executablePath || installation.rootPath || 'Chemin non défini'}</p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <label className="text-[10px] text-white/36">Exécutable
+                  <input value={installation.executablePath || ''} onChange={event => updateInstallation(game.id, installation.id, { executablePath: event.target.value })} placeholder="C:\Jeux\FiveM\FiveM.exe" className="mt-1 block w-full rounded-lg border border-white/[0.08] bg-black/20 px-2.5 py-1.5 text-[10px] text-white/64 outline-none focus:border-gold/30" />
+                </label>
+                <label className="text-[10px] text-white/36">Racine du jeu
+                  <input value={installation.rootPath || ''} onChange={event => updateInstallation(game.id, installation.id, { rootPath: event.target.value })} placeholder="C:\Jeux\FiveM" className="mt-1 block w-full rounded-lg border border-white/[0.08] bg-black/20 px-2.5 py-1.5 text-[10px] text-white/64 outline-none focus:border-gold/30" />
+                </label>
+              </div>
+            </li>
+          })}</ul>}
       </ConfigCard>
 
       <ConfigCard id="apparence" title="Apparence" icon={Palette} badge={visualName ? `Profil visuel : ${visualName}` : undefined} open={open.includes('apparence')} onToggle={() => toggle('apparence')}>

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.93.0] - 2026-08-14
+
+> **Correctif : bouton « Détecter » de la Bibliothèque** — la fenêtre de
+> détection ne s'ouvrait plus depuis la grille de la Bibliothèque : l'early
+> return de la vue grille court-circuitait le rendu du dialogue (réservé à la
+> page jeu).
+
+### Fixed
+
+- **Bibliothèque → « Détecter »** : la fenêtre « Détecter jeux et logiciels »
+  (Steam / Epic / Registre / FiveM) s'ouvre désormais depuis la grille — le
+  dialogue est rendu dans la branche `gamesBrowsing` aussi (portail React,
+  aucun impact layout).
+
 ## [1.92.0] - 2026-08-14
 
 > **Zone de notification (tray)** — une icône systray accompagne ZAILON : clic

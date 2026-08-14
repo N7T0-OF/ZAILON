@@ -421,6 +421,11 @@ export function GamesView() {
       onAddGame={() => void addGameFromExecutable()}
       onDetect={() => setSteamDialogOpen(true)}
     />
+    {/* Bug #Détecter : la fenêtre de détection doit être rendue AUSSI dans la
+        vue Bibliothèque (grid) — l'early return ci-dessus court-circuitait
+        le rendu de la ligne 504 (réservée à la page jeu). Portail → aucun
+        impact layout. */}
+    {steamDialogOpen && <SteamDetectionDialog onClose={() => setSteamDialogOpen(false)} onImport={importDetectedGames} />}
   }
 
   const heroImage = resourceUrl(selectedGame.resources?.heroPath || selectedGame.resources?.bannerPath || selectedGame.resources?.backgroundPath || selectedGame.resources?.coverPath || selectedGame.backgroundArt)

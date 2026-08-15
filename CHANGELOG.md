@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.99.0] - 2026-08-14
+
+> **CurseForge Provider devient un add-on installable** — le trio des
+> fournisseurs de mods est fermé : GameBanana, Nexus et CurseForge sont tous
+> les trois des packages officiels hors Core.
+
+### Added
+
+- **Add-on `official.zailon.provider.curseforge`** (Disponible, package +
+  SHA-256 réel) : source Explorer CurseForge — recherche, galerie, états de
+  mise à jour ; ligne de clé API individuelle dans les Paramètres.
+- **Feature removal vérifié** : sans l'add-on, CurseForge n'existe ni dans
+  Explorer ni dans les Paramètres (zéro appel réseau au client CurseForge).
+- Test dédié `test-curseforge-provider.ts` (5 tests) — **500 tests au
+  total ✅**.
+
 ## [1.98.0] - 2026-08-14
 
 > **Pipeline d'installation des add-ons durci** — deux bugs réels corrigés :

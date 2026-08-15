@@ -150,14 +150,24 @@
       "name": "CurseForge Provider",
       "version": "1.0.0",
       "category": "sources",
-      "description": "Recherche CurseForge dans Explorer (clé partenaire requise).",
-      "minZailonVersion": "1.69.0",
+      "description": "Source Explorer CurseForge : recherche, détails et téléchargement — clé API partenaire en coffre système (jamais embarquée dans le package). Sans cet add-on, CurseForge n'existe ni dans Explorer ni dans les Paramètres.",
+      "minZailonVersion": "1.78.0",
       "permissions": [
         "network",
-        "provider",
+        "game.read",
+        "mods.write",
         "settings"
       ],
-      "package": null
+      "package": "packages/curseforge/official.zailon.provider.curseforge-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "59244b6fe07fb0d153fed7f151d0feae7cec9fb4871e0f07ea4936e8c298b73a",
+      "downloadSize": 6579,
+      "installedSize": 16448,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
     },
     {
       "id": "official.zailon.game.cyberpunk",

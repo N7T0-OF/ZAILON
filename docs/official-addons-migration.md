@@ -25,7 +25,21 @@ catalogue → la carte devient installable à la synchronisation suivante.
 | `official.zailon.discord` | Disponible (package + SHA-256) — première migration réelle hors Core |
 | `official.zailon.provider.gamebanana` | Disponible (package + SHA-256) |
 | `official.zailon.provider.nexus` | Disponible (package + SHA-256) |
-| les 12 autres officiels | En développement — aucun package tant que la fonctionnalité n'est pas migrée hors Core |
+| `official.zailon.provider.curseforge` | Disponible (package + SHA-256) |
+| les 11 autres officiels | En développement — aucun package tant que la fonctionnalité n'est pas migrée hors Core |
+
+### CurseForge Provider — migration réelle (feature removal §57)
+
+Dernier du trio des providers : le gating Explorer + la ligne de clé
+Paramètres existaient déjà ; la migration a ajouté :
+
+- le package `official.zailon.provider.curseforge` (capacité
+  `provider.curseforge`, permissions `network`/`game.read`/`mods.write`/
+  `settings`, slots `Explorer.Provider` + `Settings.Provider.CurseForge`) —
+  **Disponible** avec SHA-256 réel ;
+- test dédié `test-curseforge-provider.ts` (absence → rien nulle part, package
+  réel, manifest correct) — ferme le trio providers GameBanana / Nexus /
+  CurseForge.
 
 ### Nexus Provider — migration réelle (feature removal §57)
 

@@ -32,6 +32,7 @@ const officialIds = [
   'official.zailon.provider.curseforge', 'official.zailon.game.cyberpunk', 'official.zailon.game.nte',
   'official.zailon.reshade', 'official.zailon.artwork', 'official.zailon.steam-advanced',
   'official.zailon.game.fivem', 'official.zailon.importer.mo2', 'official.zailon.themes',
+  'official.zailon.importer.vortex',
 ]
 
 test('chaque add-on officiel a un manifest valide (validateAddonManifest)', () => {
@@ -51,6 +52,7 @@ test('chaque add-on officiel a un manifest valide (validateAddonManifest)', () =
   assert.ok(dirs.includes('official.zailon.game.fivem'), 'FiveM Profiles présent')
   assert.ok(dirs.includes('official.zailon.importer.mo2'), 'MO2 Importer présent')
   assert.ok(dirs.includes('official.zailon.themes'), 'Theme Packs présent')
+  assert.ok(dirs.includes('official.zailon.importer.vortex'), 'Vortex Importer présent')
   for (const id of officialIds) {
     const raw = readFileSync(join(addonsRoot, id, 'manifest.json'), 'utf8')
     const result = validateAddonManifest(JSON.parse(raw))

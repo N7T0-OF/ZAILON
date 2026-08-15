@@ -136,6 +136,16 @@ export function mo2ImportAllowed(capabilities: Set<ZailonCapability> | readonly 
 }
 
 /**
+ * Gate de l'import Vortex (spec « Finalisation des add-ons » §35, feature
+ * removal §57) : le dialogue d'import Vortex et son action store n'existent
+ * qu'avec l'add-on installé + activé (capacité `importer.vortex`).
+ * Pur et testé.
+ */
+export function vortexImportAllowed(capabilities: Set<ZailonCapability> | readonly ZailonCapability[]): boolean {
+  return hasCapability(capabilities, 'importer.vortex')
+}
+
+/**
  * Gate des packs de thèmes (spec « Finalisation des add-ons » §39, feature
  * removal §57) : la section « Packs de thèmes » des Paramètres (presets
  * accent + densité + taille de texte) n'existe qu'avec l'add-on installé +

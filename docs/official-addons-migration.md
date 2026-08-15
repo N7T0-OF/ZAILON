@@ -54,6 +54,13 @@ catalogue → la carte devient installable à la synchronisation suivante.
 - **MO2 Importer** (`importer.mo2`) : le bouton « Importer depuis Mod
   Organizer 2 », le dialogue et l'action store `completeMo2Import` sont gated
   par `mo2ImportAllowed` — sans l'add-on, le Core refuse l'import.
+- **Vortex Importer** (`importer.vortex`) : **nouvelle vraie feature** — lib
+  `vortexImport.ts` (parse défensif de `vortex.deployment.json`, déduplication
+  des mods par source, digest), commande native `detect_vortex_instance`
+  (manifest + dossier de staging, lecture seule), action store
+  `importVortexDeployment` gated et dialogue « Importer depuis Vortex ».
+  ZAILON crée un profil de RÉFÉRENCES — Vortex a déjà déployé (hardlink /
+  symlink / move), rien n'est re-copié ni re-lié.
 - **Theme Packs** (`themes.packs`) : **nouvelle vraie feature** — lib
   `themePacks.ts` (5 presets accent + densité + texte + animations, pur et
   testé) + section « Packs de thèmes » dans Paramètres → Apparence gated par
@@ -61,8 +68,6 @@ catalogue → la carte devient installable à la synchronisation suivante.
 
 ### Encore « En développement » (honnêteté §55 — pas de package fantôme)
 
-- **Vortex Importer** : aucune feature n'existe dans le Core (ni commande
-  native, ni action store, ni dialogue) — un package serait un fantôme.
 - **Frosty Importer** : l'import .fbmod est déjà couvert par `frosty.backend`
   (Frosty Support) — pas de surface indépendante à migrer.
 - **Performance+** : la politique Performance (pause téléchargements, scans,

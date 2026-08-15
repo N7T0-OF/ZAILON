@@ -245,6 +245,25 @@ struct Mo2ImportPreview {
     warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VortexModSummary {
+    name: String,
+    file_count: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VortexInstance {
+    exists: bool,
+    instance: Option<String>,
+    version: Option<u64>,
+    deployment_path: Option<String>,
+    mods_dir: Option<String>,
+    file_count: u64,
+    mods: Vec<VortexModSummary>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Mo2ProfileMapping {
@@ -9918,6 +9937,114 @@ fn copy_mo2_downloads(source: &Path, destination: &Path) -> Result<u64, String> 
 }
 
 #[tauri::command]
+/// Détection de l'instance Vortex d'un jeu (spec « Finalisation des add-ons »
+/// §35) : lit `vortex.deployment.json` (fallback `vortex.deployment.manifest.json`)
+/// à la racine du jeu — lecture seule, jamais d'écriture — et déduit les mods
+/// actifs + le dossier de staging `Vortex/mods/<instance>`. ZAILON ne re-déploie
+/// RIEN : Vortex a déjà déployé (hardlink/symlink/move).
+#[tauri::command]
+fn detect_vortex_instance(game_root: String) -> Result<VortexInstance, String> {
+    let root = PathBuf::from(&game_root);
+    if !root.is_dir() {
+        return Ok(VortexInstance {
+            exists: false,
+            ..Default::default()
+        });
+    }
+    let deployment_path = ["vortex.deployment.json", "vortex.deployment.manifest.json"]
+        .iter()
+        .map(|name| root.join(name))
+        .find(|path| path.is_file());
+    let Some(manifest_path) = deployment_path else {
+        return Ok(VortexInstance {
+            exists: false,
+            ..Default::default()
+        });
+    };
+    let bytes = fs::read(&manifest_path).map_err(to_error)?;
+    let manifest: serde_json::Value = serde_json::from_slice(&bytes).map_err(to_error)?;
+    let Some(instance) = manifest
+        .get("instance")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_string())
+    else {
+        return Ok(VortexInstance {
+            exists: false,
+            ..Default::default()
+        });
+    };
+    let files = manifest
+        .get("files")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut mods: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+    for entry in &files {
+        let Some(source) = entry.get("source").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if entry
+            .get("relPath")
+            .and_then(|value| value.as_str())
+            .is_none()
+        {
+            continue;
+        }
+        *mods.entry(source.to_string()).or_insert(0) += 1;
+    }
+    let file_count = mods.values().sum::<u64>();
+    let mods_dir = vortex_mods_dir(&instance);
+    Ok(VortexInstance {
+        exists: true,
+        instance: Some(instance),
+        version: manifest.get("version").and_then(|value| value.as_u64()),
+        deployment_path: Some(manifest_path.to_string_lossy().to_string()),
+        mods_dir: mods_dir
+            .as_ref()
+            .filter(|dir| dir.is_dir())
+            .map(|dir| dir.to_string_lossy().to_string()),
+        file_count,
+        mods: mods
+            .into_iter()
+            .map(|(name, count)| VortexModSummary {
+                name,
+                file_count: count,
+            })
+            .collect(),
+    })
+}
+
+/// Dossier de staging Vortex : `%APPDATA%/Vortex/mods/<instance>` (Windows) ou
+/// `~/.config/vortex/mods/<instance>` (Linux/macOS) — jamais codé en dur.
+fn vortex_mods_dir(instance: &str) -> Option<PathBuf> {
+    if cfg!(windows) {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            return Some(
+                PathBuf::from(appdata)
+                    .join("Vortex")
+                    .join("mods")
+                    .join(instance),
+            );
+        }
+    }
+    if let Some(config) = std::env::var_os("XDG_CONFIG_HOME") {
+        return Some(
+            PathBuf::from(config)
+                .join("vortex")
+                .join("mods")
+                .join(instance),
+        );
+    }
+    std::env::var_os("HOME").map(|home| {
+        PathBuf::from(home)
+            .join(".config")
+            .join("vortex")
+            .join("mods")
+            .join(instance)
+    })
+}
+
 fn preview_mo2_import(source_path: String) -> Result<Mo2ImportPreview, String> {
     let root = mo2_root(&source_path)?;
     let ini = read_ini_document(&root.join("ModOrganizer.ini"))?;
@@ -17420,6 +17547,7 @@ pub fn run() {
             rollback_cyberpunk_structure_repair,
             preview_mo2_import,
             import_mo2_instance,
+            detect_vortex_instance,
             audit_profile_deployment,
             repair_mo2_profile_deployment,
             repair_staged_imports,

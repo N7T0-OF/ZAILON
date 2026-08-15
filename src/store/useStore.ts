@@ -7,6 +7,7 @@ import { normalizeGameGroups } from '../lib/gameGroups'
 import { resolveGameIdentity } from '../lib/gameIdentity'
 import { lastUsedProfileId } from '../lib/perGameConfig'
 import { fiveMCopyActive, type FiveMCopyOptions } from '../lib/fivemProfile'
+import { vortexProfileName } from '../lib/vortexImport'
 import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
 import { validateAddonManifest } from '../lib/addons'
 import type { AddonSource, InstalledAddon, ZailonAddonManifest } from '../lib/addons'
@@ -26,7 +27,7 @@ import { ZAILON_PERSIST_KEY } from '../lib/designTokens'
 import { buildDiscordActivity, DISCORD_APPLICATION_ID, DISCORD_PRIORITY_DEBOUNCE_MS, shouldDelayPrioritySwitch, type DiscordActivityInput } from '../lib/discordPresence'
 import { modMatchesRemote, remoteIdentityFromCatalog, remoteModKey } from '../lib/remoteInstallState'
 import { resolveDiscordAsset } from '../lib/discordAssets'
-import { addonCapabilities, discordPresenceAllowed, fiveMProfilesAllowed, mo2ImportAllowed, steamAdvancedAllowed } from '../lib/addonGating'
+import { addonCapabilities, discordPresenceAllowed, fiveMProfilesAllowed, mo2ImportAllowed, steamAdvancedAllowed, vortexImportAllowed } from '../lib/addonGating'
 import { DEFAULT_BACKGROUND_MEDIA_SETTINGS, type BackgroundMediaSettings } from '../lib/backgroundMedia'
 import { applyHomeLayoutPreset, HOME_WIDGET_DEFAULTS, normalizeHomeWidgets, type HomeLayoutPreset, type HomeWidgetConfig } from '../lib/homeWidgets'
 // Source de vérité de la version : package.json est bumpé à CHAQUE release
@@ -554,6 +555,7 @@ export interface Store {
   setAutoRestorePoints: (value: boolean) => void
   addProfile: (name: string) => void
   createFiveMProfile: (gameId: string, name: string, copyOptions: FiveMCopyOptions) => void
+  importVortexDeployment: (gameId: string, gameRoot: string) => Promise<void>
   prepareCollectionProfile: (collection: NexusCollectionDetail, name: string, includeAdult: boolean) => Promise<string | undefined>
   installCollectionDownloads: (gameId: string, installId: string, gameName: string) => Promise<boolean>
   duplicateProfile: (profileId: string) => void
@@ -1382,6 +1384,51 @@ export const useStore = create<Store>()(persist((set, get) => ({
     if (native.isDesktop()) void native.syncProfileState(game.id, next).then(paths => {
       set(state => ({ games: updateProfile(state.games, game.id, next.id, profile => withProfilePaths(profile, paths)) }))
     }).catch(error => set({ notice: `Profil créé localement, mais sa persistance native a échoué : ${asError(error)}` }))
+  },
+  importVortexDeployment: async (gameId, gameRoot) => {
+    // Feature removal §57 : sans l'add-on Vortex Importer (importer.vortex),
+    // le Core n'importe JAMAIS depuis Vortex.
+    if (!vortexImportAllowed(addonCapabilities(get().addons))) {
+      set({ notice: 'Import Vortex indisponible : l’add-on Vortex Importer n’est pas installé.' })
+      return
+    }
+    if (!native.isDesktop() || !gameRoot) {
+      set({ notice: 'Import Vortex indisponible : l’application bureau et une racine de jeu sont requises.' })
+      return
+    }
+    const game = get().games.find(item => item.id === gameId)
+    if (!game) return
+    try {
+      const instance = await native.detectVortexInstance(gameRoot)
+      if (!instance.exists || !instance.instance) {
+        set({ notice: 'Aucun déploiement Vortex détecté dans ce jeu (vortex.deployment.json absent).' })
+        return
+      }
+      const name = vortexProfileName(instance.instance, game.profiles.map(profile => profile.name))
+      const modStates: Record<string, ProfileModState> = {}
+      let priority = 0
+      for (const mod of instance.mods) {
+        modStates[mod.name] = { enabled: true, priority: priority++, sourceProvider: 'vortex' }
+      }
+      const profile: Profile = {
+        id: createId(),
+        gameId: game.id,
+        name,
+        modStates,
+        playtime: 0,
+        createdAt: Date.now(),
+        isDefault: false,
+        installOptions: { vortex_instance: instance.instance },
+      }
+      const synced = native.isDesktop() ? withProfilePaths(profile, await native.syncProfileState(gameId, profile)) : profile
+      set(state => ({
+        games: state.games.map(item => item.id !== gameId ? item : { ...item, profiles: [...item.profiles, synced] }),
+        selectedProfileId: synced.id,
+        notice: `Déploiement Vortex importé : ${instance.mods.length} mod(s), ${instance.fileCount} fichier(s) en références (aucune copie — Vortex a déjà déployé).`,
+      }))
+    } catch (error) {
+      set({ notice: asError(error) })
+    }
   },
   prepareCollectionProfile: async (collection, name, includeAdult) => {
     const { game } = selected(get())

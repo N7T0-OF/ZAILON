@@ -14,11 +14,12 @@ import { animationsReducedDuringGame, effectivePerformance } from '../../lib/per
 import { pickPrioritySession } from '../../lib/sessionPriority'
 import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { formatElapsedDuration, formatTime, timeAgo } from '../../utils'
-import { addonCapabilities, cyberpunkToolsAllowed, fiveMProfilesAllowed, hasCapability, mo2ImportAllowed, steamAdvancedAllowed } from '../../lib/addonGating'
+import { addonCapabilities, cyberpunkToolsAllowed, fiveMProfilesAllowed, hasCapability, mo2ImportAllowed, steamAdvancedAllowed, vortexImportAllowed } from '../../lib/addonGating'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
 import { FiveMReShadeDialog } from '../FiveMReShadeDialog'
 import { FiveMPackDialog } from '../FiveMPackDialog'
 import { FiveMInstallAssistant } from '../FiveMInstallAssistant'
+import { VortexImportDialog } from '../VortexImportDialog'
 import type { Game, GameSession, GameTab, Mod, ModImportCandidate, Profile, SensitiveFileAssessment, SensitiveImportAction } from '../../types'
 import { VisualGamePanel } from '../../visual-profiles/ui/VisualGamePanel'
 import { resolveGameInstallation } from '../../lib/installations'
@@ -87,6 +88,7 @@ export function GamesView() {
   const steamAdvanced = steamAdvancedAllowed(capabilities)
   const fiveMProfiles = fiveMProfilesAllowed(capabilities)
   const mo2Import = mo2ImportAllowed(capabilities)
+  const vortexImport = vortexImportAllowed(capabilities)
   const backgroundTasks = useStore(state => state.backgroundTasks)
   const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
   const runtimeActivity = useStore(state => state.runtimeActivity)
@@ -135,6 +137,7 @@ export function GamesView() {
   const [fivemReShadeOpen, setFivemReShadeOpen] = useState(false)
   const [fivemPackOpen, setFivemPackOpen] = useState(false)
   const [fivemAssistantOpen, setFivemAssistantOpen] = useState(false)
+  const [vortexOpen, setVortexOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const profileButtonRef = useRef<HTMLButtonElement>(null)
@@ -514,6 +517,7 @@ export function GamesView() {
           {fiveMProfiles && selectedGame.provider === 'FiveM Client' && <button onClick={() => setFivemReShadeOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-sky-300/18 bg-sky-300/[0.035] px-3 py-2 text-[11px] text-sky-100/68 hover:bg-sky-300/[0.07]"><ShieldCheck size={13} />ReShade FiveM</button>}
           {fiveMProfiles && selectedGame.provider === 'FiveM Client' && <button onClick={() => setFivemPackOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-sky-300/18 bg-sky-300/[0.035] px-3 py-2 text-[11px] text-sky-100/68 hover:bg-sky-300/[0.07]"><Boxes size={13} />Packs graphiques</button>}
           {fiveMProfiles && selectedGame.provider === 'FiveM Client' && <button onClick={() => setFivemAssistantOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-sky-300/18 bg-sky-300/[0.035] px-3 py-2 text-[11px] text-sky-100/68 hover:bg-sky-300/[0.07]"><Sparkles size={13} />Assistant FiveM</button>}
+          {vortexImport && <button onClick={() => setVortexOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-sky-300/18 bg-sky-300/[0.035] px-3 py-2 text-[11px] text-sky-100/68 hover:bg-sky-300/[0.07]"><Download size={13} />Importer depuis Vortex</button>}
           {cyberpunkTools && <button onClick={() => void repairCyberpunkStructure()} className="flex items-center gap-1.5 rounded-lg border border-amber-300/18 bg-amber-300/[0.035] px-3 py-2 text-[11px] text-amber-100/68 hover:bg-amber-300/[0.07]"><Wrench size={13} />Réparer les racines Cyberpunk</button>}
           {bulkHistory.some(operation => operation.gameId === selectedGame.id && operation.undoable) && <button onClick={() => void undoLastBulkOperation()} title="Annuler la dernière opération groupée" className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]"><RotateCcw size={13} />Annuler</button>}
           <label className="flex items-center gap-2 rounded-lg border border-white/[0.08] px-2.5 text-[11px] text-white/55"><input ref={selectAllRef} type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedModIds(current => { const next = new Set(current); if (allVisibleSelected) filteredMods.forEach(mod => next.delete(mod.id)); else filteredMods.forEach(mod => next.add(mod.id)); return next })} className="accent-gold" />Tout visible <span className="text-white/30">{selectedVisible}/{filteredMods.length}</span></label>
@@ -541,6 +545,7 @@ export function GamesView() {
     {fiveMProfiles && fivemReShadeOpen && selectedGame && <FiveMReShadeDialog installRoot={resolvedInstallation?.rootPath || selectedGame.installDirectory || selectedGame.execPath || ''} onClose={() => setFivemReShadeOpen(false)} />}
     {fiveMProfiles && fivemPackOpen && selectedGame && <FiveMPackDialog gameName={selectedGame.name} installRoot={resolvedInstallation?.rootPath || selectedGame.installDirectory || selectedGame.execPath || ''} onClose={() => setFivemPackOpen(false)} />}
     {fiveMProfiles && fivemAssistantOpen && selectedGame && <FiveMInstallAssistant gameId={selectedGame.id} gameName={selectedGame.name} installRoot={resolvedInstallation?.rootPath || selectedGame.installDirectory || selectedGame.execPath || ''} onClose={() => setFivemAssistantOpen(false)} />}
+    {vortexImport && vortexOpen && selectedGame && <VortexImportDialog gameId={selectedGame.id} gameName={selectedGame.name} gameRoot={resolvedInstallation?.rootPath || selectedGame.installDirectory || selectedGame.execPath || ''} onClose={() => setVortexOpen(false)} />}
     {bulkDialog && <BulkActionDialog mode={bulkDialog} count={selectedModIds.size} source={selectedProfile} profiles={selectedGame.profiles} onClose={() => setBulkDialog(undefined)} onConfirm={async value => {
       const ids = [...selectedModIds]
       if (bulkDialog === 'move' || bulkDialog === 'copy') await bulkTransferMods(ids, value, bulkDialog)

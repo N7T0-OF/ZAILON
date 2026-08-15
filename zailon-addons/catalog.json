@@ -284,8 +284,8 @@
       "name": "Vortex Importer",
       "version": "1.0.0",
       "category": "utilities",
-      "description": "Migration d’une installation Vortex (désinstallable après).",
-      "minZailonVersion": "1.69.0",
+      "description": "Import du déploiement Vortex : lecture de vortex.deployment.json (mods actifs, fichiers déployés, dossier de staging) et création d'un profil ZAILON en références — aucune copie, aucun lien recréé. Sans cet add-on, aucun import Vortex n'existe.",
+      "minZailonVersion": "1.78.0",
       "permissions": [
         "game.read",
         "game.files.read",
@@ -294,7 +294,16 @@
         "profile.write",
         "filesystem.external"
       ],
-      "package": null
+      "package": "packages/vortex/official.zailon.importer.vortex-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "14121c693ba2a87db1cdf254fe6b1c56d62df975c1981e8fb66a368f7d3fa7a9",
+      "downloadSize": 5217,
+      "installedSize": 13043,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
     },
     {
       "id": "official.zailon.importer.frosty",

@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.111.0] - 2026-08-15
+
+> **Vortex Importer devient un add-on installable (16/18)** — nouvelle vraie
+> feature : lecture de `vortex.deployment.json` et création d'un profil ZAILON
+> en références, sans re-copier ni re-lier ce que Vortex a déjà déployé.
+
+### Added
+
+- **`src/lib/vortexImport.ts`** (pur, 5 tests) : `parseVortexDeployment`
+  (défensif — chemins normalisés, entrées incomplètes ignorées, jamais
+  deviné), `vortexModSummaries` (dédup par source + comptage + méthodes),
+  `vortexDeploymentDigest`, `vortexProfileName`.
+- **Commande native `detect_vortex_instance`** (binding `native.ts`) : lit
+  `vortex.deployment.json` (fallback `.manifest.json`) à la racine du jeu —
+  lecture seule — et déduit les mods actifs + le staging
+  `Vortex/mods/<instance>` (jamais codé en dur).
+- **`importVortexDeployment`** (store, gated `importer.vortex`) : crée un
+  profil « Vortex — `<instance>` » dont chaque mod est une RÉFÉRENCE
+  (`sourceProvider: 'vortex'`) — aucune copie, aucun lien recréé.
+- **Bouton « Importer depuis Vortex »** (onglet Mods, gated) →
+  `VortexImportDialog` : détection, liste des mods actifs, import.
+- **Add-on `official.zailon.importer.vortex`** construit (package + SHA-256
+  réel) — **16/18 Disponibles** — **566 tests ✅**, tsc ✅, build ✅, audit ✅.
+
 ## [1.110.0] - 2026-08-15
 
 > **Assistant d'installation FiveM** — dernière étape du support FiveM avancé :

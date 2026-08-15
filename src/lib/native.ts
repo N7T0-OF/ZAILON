@@ -79,6 +79,16 @@ export interface FiveMPackManifestRead {
   installedAt: number | null
 }
 
+export interface VortexInstance {
+  exists: boolean
+  instance: string | null
+  version: number | null
+  deploymentPath: string | null
+  modsDir: string | null
+  fileCount: number
+  mods: Array<{ name: string; fileCount: number }>
+}
+
 export interface UpdateStateCounts {
   games: number
   profiles: number
@@ -914,6 +924,7 @@ export const native = {
     desktopOnly<FiveMPackApplyResult>('fivem_pack_apply', { archivePath, targetDir, manifestJson }),
   fivemPackRemove: (targetDir: string) => desktopOnly<FiveMPackRemoveResult>('fivem_pack_remove', { targetDir }),
   fivemPackManifest: (targetDir: string) => desktopOnly<FiveMPackManifestRead>('fivem_pack_manifest', { targetDir }),
+  detectVortexInstance: (gameRoot: string) => desktopOnly<VortexInstance>('detect_vortex_instance', { gameRoot }),
   scanGamePresence: (requests: GamePresenceRequest[]) => desktopOnly<GamePresence[]>('scan_game_presence', { requests }),
   /** Présence Steam (clé de registre RunningAppID, lecture seule) : preuve
    * supplémentaire du GamePresenceEngine — Steam n'est jamais la seule source. */

@@ -4,6 +4,7 @@ import { ActiveTrackedSession, BackgroundMediaType, BulkOperation, DownloadReten
 import { checkpointDue } from '../lib/sessionStats'
 import { ensurePrincipalInstallation, installationDisplayName, resolveGameInstallation } from '../lib/installations'
 import { normalizeGameGroups } from '../lib/gameGroups'
+import { resolveGameIdentity } from '../lib/gameIdentity'
 import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
 import { validateAddonManifest } from '../lib/addons'
 import type { AddonSource, InstalledAddon, ZailonAddonManifest } from '../lib/addons'
@@ -293,6 +294,8 @@ function makeGame({ name, execPath, modsPath, platform = 'standalone', provider,
     version,
     publisher,
     detectionSource,
+    // Identité stable multi-signaux (spec « Configuration par jeu » §2-4).
+    identityKey: resolveGameIdentity({ name, execPath, installDirectory, provider, providerGameId, publisher }).key,
   }
   // Spec §6-16 : un jeu avec exécutable reçoit son installation « Principal ».
   return { ...game, installations: ensurePrincipalInstallation(game) }
@@ -1142,10 +1145,15 @@ export const useStore = create<Store>()(persist((set, get) => ({
         const appId = game.providerGameId
         const installDirectory = normalizedPath(game.installDirectory)
         const executable = normalizedPath(game.execPath)
+        // Identité multi-signaux (spec « Configuration par jeu » §2-4) :
+        // une clé stable déjà connue (ex. steam:<appid>) ou exécutable+chemin
+        // équivalents → doublon, même si le nom affiché a changé.
+        const incomingIdentity = resolveGameIdentity(game).key
         return !existing.some(current =>
           (appId && current.provider === game.provider && current.providerGameId === appId)
           || (installDirectory && normalizedPath(current.installDirectory) === installDirectory)
           || (executable && normalizedPath(current.execPath) === executable)
+          || (current.identityKey && incomingIdentity !== 'unknown' && current.identityKey === incomingIdentity)
         )
       })
       .map(game => makeGame(game))

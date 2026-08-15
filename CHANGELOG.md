@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.107.0] - 2026-08-15
+
+> **Game Identity Resolver + configuration par jeu** : identité de jeu
+> multi-signaux (provider+AppID, exécutable+chemin, éditeur+nom) — jamais le seul
+> nom de l'exécutable — pour ne plus confondre deux installations ni un
+> `launcher.exe` générique, avec dédoublonnage des jeux détectés.
+
+### Added
+
+- **`src/lib/gameIdentity.ts`** (pur, testé) : `resolveGameIdentity` (clé stable,
+  `kind` jeu/application/launcher/inconnu, `confidence` haute/moyenne/faible,
+  signaux réellement utilisés) et `sameGameIdentity` (même jeu via clé ou
+  exécutable+chemin normalisés — jamais le seul nom, donc jamais de fusion
+  abusive).
+- **`Game.identityKey`** persisté : `makeGame` alimente la clé à la création et
+  `importDetectedGames` dédoublonne par identité — un même exécutable détecté
+  deux fois ne crée plus de doublon, même si le nom affiché a changé.
+- Test dédié `test-game-identity.ts` (5 tests) — **547 tests au total ✅**, tsc ✅,
+  build ✅, audit ✅.
+
 ## [1.106.0] - 2026-08-15
 
 > **Packs graphiques FiveM — analyse + plan** : moteur de correspondance des

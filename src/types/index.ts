@@ -427,6 +427,10 @@ export interface Game {
   /** Groupe de jeux (spec « Groupes de jeux » §1-4, §7) — même « famille de
    * jeu », environnements indépendants. Purement organisationnel. */
   groupId?: string
+  /** Clé d'identité stable (spec « Configuration par jeu » §2-4) — dérivée
+   * de plusieurs signaux (provider+AppId, exécutable+chemin, éditeur+nom),
+   * jamais du seul nom d'exécutable. Sert au dédoublonnage à la détection. */
+  identityKey?: string
 }
 
 /** Groupe de jeux (spec « Groupes de jeux » §1-4, §7, §10) : une même famille

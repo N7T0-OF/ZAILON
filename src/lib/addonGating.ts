@@ -144,6 +144,18 @@ export function vortexImportAllowed(capabilities: Set<ZailonCapability> | readon
 }
 
 /**
+ * Gate de l'import Frosty (spec « Finalisation des add-ons » §36, feature
+ * removal §57) : le dialogue d'import d'une installation Frosty et son action
+ * store n'existent qu'avec l'add-on installé + activé (capacité
+ * `importer.frosty`). Le backend Frosty (`frosty.backend`) couvre déjà l'import
+ * d'un `.fbmod` isolé ; cette capacité couvre l'import EN BULK du dossier de
+ * mods Frosty existant, en références. Pur et testé.
+ */
+export function frostyImportAllowed(capabilities: Set<ZailonCapability> | readonly ZailonCapability[]): boolean {
+  return hasCapability(capabilities, 'importer.frosty')
+}
+
+/**
  * Gate de Performance+ (spec « Finalisation des add-ons » §40, feature
  * removal §57) : l'application RÉELLE de la priorité du processus du jeu au
  * lancement n'existe qu'avec l'add-on installé + activé (capacité

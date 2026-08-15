@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "id": "official.zailon.importer.frosty",
+  "name": "Frosty Importer",
+  "version": "1.0.0",
+  "author": "ZAILON",
+  "description": "Import d'une installation Frosty existante : détection du dossier de mods .fbmod (Frosty Mod Manager) et création d'un profil ZAILON en références — aucune copie, aucun lien recréé. Sans cet add-on, aucun import Frosty n'existe.",
+  "category": "utilities",
+  "entrypoint": "module/index.ts",
+  "minZailonVersion": "1.69.0",
+  "minAddonApiVersion": "1",
+  "permissions": [
+    "game.read",
+    "game.files.read",
+    "mods.read",
+    "profile.write"
+  ],
+  "dependencies": [
+    "official.zailon.frosty"
+  ],
+  "supportedPlatforms": ["windows"],
+  "capabilities": ["importer.frosty"],
+  "slots": [
+    "Game.Profiles",
+    "Game.Mods"
+  ],
+  "events": []
+}

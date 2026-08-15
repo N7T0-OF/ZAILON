@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.114.0] - 2026-08-15
+
+> **Frosty Importer devient un add-on installable (18/18)** — le catalogue
+> officiel est désormais complet : chaque carte correspond à un vrai package
+> + SHA-256 et une capacité réellement gated dans le Core.
+
+### Added
+
+- **Commande native `frosty_detect_installation`** (+ helpers purs
+  `frosty_mods_candidate_dirs` / `list_fbmods_in`, testés) : détection du
+  dossier de mods de Frosty Mod Manager (`%LOCALAPPDATA%\Frosty\Mods`,
+  `%APPDATA%\Frosty\Mods`, `~/.config/Frosty/Mods`, + chemins fournis) et
+  liste des `.fbmod` (nom, chemin, taille) — lecture seule, jamais d'écriture,
+  plafonnée à 1000 entrées.
+- **`src/lib/frostyImport.ts`** (pur, testé) : `frostyProfileName` (profil
+  « Frosty — <dossier> » dédupliqué).
+- **Gate `frostyImportAllowed`** + action store `importFrostyInstallation`
+  (gated `importer.frosty`) : profil de RÉFÉRENCES (`sourceProvider:
+  'frosty'`) — aucune copie, aucun lien recréé, Frosty Mod Manager reste
+  l'unique gestionnaire.
+- **`FrostyImportDialog`** + bouton « Importer depuis Frosty » (onglet Mods,
+  réservé aux jeux Frosty via `frostyAdapterForExecutable`).
+- **Package `official.zailon.importer.frosty`** construit (5,3 Ko, SHA-256
+  réel) — **577 tests JS ✅** + 3 tests Rust natifs, tsc ✅, build ✅.
+
+### Changed
+
+- **`test-addon-catalog-audit.ts`** : l'invariant « En développement »
+  devient « aucun add-on résiduel » — le catalogue est à **18/18**.
+- **`test-official-addons.ts`** : `importer.frosty` rejoint les 17 autres
+  ids vérifiés (package versionné + SHA-256 + URL raw).
+
 ## [1.113.0] - 2026-08-15
 
 > **Audit d'intégrité du catalogue d'add-ons** — une carte ne ment plus :

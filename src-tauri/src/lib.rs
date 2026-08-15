@@ -265,6 +265,26 @@ struct VortexInstance {
     mods: Vec<VortexModSummary>,
 }
 
+/// Fichier `.fbmod` découvert dans une installation Frosty (lecture seule).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FrostyModFileInfo {
+    name: String,
+    path: String,
+    size: u64,
+}
+
+/// Résultat de détection d'une installation Frosty existante (mods `.fbmod`).
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FrostyInstallation {
+    exists: bool,
+    mods_dir: Option<String>,
+    mods: Vec<FrostyModFileInfo>,
+    file_count: u64,
+    total_bytes: u64,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Mo2ProfileMapping {
@@ -10056,6 +10076,105 @@ fn vortex_mods_dir(instance: &str) -> Option<PathBuf> {
     })
 }
 
+/// Dossiers conventionnels des mods Frosty (lecture seule, jamais codés en
+/// dur) : `%LOCALAPPDATA%\Frosty\Mods`, `%APPDATA%\Frosty\Mods` (Windows),
+/// `~/.config/Frosty/Mods`, plus chaque chemin fourni et ses variantes `Mods`.
+fn frosty_mods_candidate_dirs(extra_paths: &[String]) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if cfg!(windows) {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            dirs.push(PathBuf::from(local).join("Frosty").join("Mods"));
+        }
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            dirs.push(PathBuf::from(appdata).join("Frosty").join("Mods"));
+        }
+    }
+    if let Some(config) = std::env::var_os("XDG_CONFIG_HOME") {
+        dirs.push(PathBuf::from(config).join("Frosty").join("Mods"));
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(
+            PathBuf::from(home)
+                .join(".config")
+                .join("Frosty")
+                .join("Mods"),
+        );
+    }
+    for extra in extra_paths {
+        let path = PathBuf::from(extra);
+        dirs.push(path.clone());
+        dirs.push(path.join("Mods"));
+        dirs.push(path.join("Frosty").join("Mods"));
+    }
+    dirs
+}
+
+/// Liste les `.fbmod` d'un dossier (entrées de premier niveau uniquement,
+/// plafonnées) — pur, testable.
+fn list_fbmods_in(dir: &std::path::Path) -> Vec<FrostyModFileInfo> {
+    const MAX_MODS: usize = 1000;
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<FrostyModFileInfo> = Vec::new();
+    for entry in entries.flatten() {
+        if out.len() >= MAX_MODS {
+            break;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.to_ascii_lowercase().ends_with(".fbmod") {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        out.push(FrostyModFileInfo {
+            name,
+            path: path.to_string_lossy().to_string(),
+            size: meta.len(),
+        });
+    }
+    out.sort_by(|a, b| {
+        a.name
+            .to_ascii_lowercase()
+            .cmp(&b.name.to_ascii_lowercase())
+    });
+    out
+}
+
+/// Détecte une installation Frosty existante (dossier de mods `.fbmod`) —
+/// lecture seule, jamais d'écriture. ZAILON ne re-déploie RIEN : Frosty Mod
+/// Manager reste l'unique gestionnaire des mods.
+#[tauri::command]
+fn frosty_detect_installation(extra_paths: Vec<String>) -> Result<FrostyInstallation, String> {
+    for dir in frosty_mods_candidate_dirs(&extra_paths) {
+        if !dir.is_dir() {
+            continue;
+        }
+        let mods = list_fbmods_in(&dir);
+        if mods.is_empty() {
+            continue;
+        }
+        let file_count = mods.len() as u64;
+        let total_bytes = mods.iter().map(|mod_file| mod_file.size).sum();
+        return Ok(FrostyInstallation {
+            exists: true,
+            mods_dir: Some(dir.to_string_lossy().to_string()),
+            mods,
+            file_count,
+            total_bytes,
+        });
+    }
+    Ok(FrostyInstallation {
+        exists: false,
+        ..Default::default()
+    })
+}
+
 #[tauri::command]
 fn preview_mo2_import(source_path: String) -> Result<Mo2ImportPreview, String> {
     let root = mo2_root(&source_path)?;
@@ -16642,6 +16761,49 @@ mod tests {
     }
 
     #[test]
+    fn list_fbmods_in_lists_only_top_level_fbmod() {
+        let dir = std::env::temp_dir().join(format!("zailon-frosty-import-{}", unix_timestamp()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("NightVisuals.fbmod"), vec![0u8; 12]).unwrap();
+        std::fs::write(dir.join("HEAT.FBMOD"), b"heat").unwrap();
+        std::fs::write(dir.join("readme.txt"), b"pas un mod").unwrap();
+        // .fbmod dans un sous-dossier : pas de récursion (entrées de premier niveau).
+        std::fs::write(dir.join("sub").join("nested.fbmod"), b"nested").unwrap();
+        let mods = list_fbmods_in(&dir);
+        assert_eq!(mods.len(), 2);
+        assert!(mods.iter().any(|m| m.name == "HEAT.FBMOD" && m.size == 4));
+        assert!(mods
+            .iter()
+            .any(|m| m.name == "NightVisuals.fbmod" && m.size == 12));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn frosty_detect_installation_finds_fbmods_in_extra_path() {
+        let dir = std::env::temp_dir().join(format!("zailon-frosty-install-{}", unix_timestamp()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("CoolMod.fbmod"), vec![0u8; 32]).unwrap();
+        std::fs::write(dir.join("OtherMod.fbmod"), b"other").unwrap();
+        let installation =
+            frosty_detect_installation(vec![dir.to_string_lossy().to_string()]).unwrap();
+        assert!(installation.exists);
+        assert_eq!(installation.file_count, 2);
+        assert_eq!(installation.total_bytes, 37);
+        assert!(installation.mods_dir.is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn frosty_detect_installation_returns_not_exists_when_no_fbmod() {
+        let dir = std::env::temp_dir().join(format!("zailon-frosty-empty-{}", unix_timestamp()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let installation =
+            frosty_detect_installation(vec![dir.to_string_lossy().to_string()]).unwrap();
+        assert!(!installation.exists);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn process_is_running_for_current_pid() {
         assert!(process_is_running(std::process::id()));
     }
@@ -17560,6 +17722,7 @@ pub fn run() {
             preview_mo2_import,
             import_mo2_instance,
             detect_vortex_instance,
+            frosty_detect_installation,
             set_game_process_priority,
             audit_profile_deployment,
             repair_mo2_profile_deployment,

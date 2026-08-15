@@ -6,7 +6,7 @@
  *  2. catalogue ↔ dossiers `addons/` cohérents (publié = dossier + package) ;
  *  3. chaque `capabilities` d'un manifest repointe vers SON propre add-on ;
  *  4. un add-on publié déclare au moins une capacité (rien de fantôme) ;
- *  5. « En développement » = exactement la liste documentée (importer.frosty) ;
+ *  5. aucun add-on « En développement » résiduel (18/18 publiés) ;
  *  6. chaque capacité publiée est réellement exercée dans le Core (au moins
  *     une référence hors de `addonGating.ts` — feature removal §57).
  */
@@ -108,9 +108,9 @@ test('tout add-on publié déclare au moins une capacité', () => {
   }
 })
 
-test('« En développement » = exactement la liste documentée (importer.frosty)', () => {
+test('aucun add-on « En développement » résiduel (18/18 publiés)', () => {
   const inDevelopment = catalog.filter(addon => !addon.package).map(addon => addon.id)
-  assert.deepEqual(inDevelopment.sort(), ['official.zailon.importer.frosty'])
+  assert.deepEqual(inDevelopment.sort(), [])
 })
 
 test('chaque capacité publiée est réellement exercée dans le Core (feature removal §57)', () => {

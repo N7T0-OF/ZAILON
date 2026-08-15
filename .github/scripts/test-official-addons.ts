@@ -32,7 +32,7 @@ const officialIds = [
   'official.zailon.provider.curseforge', 'official.zailon.game.cyberpunk', 'official.zailon.game.nte',
   'official.zailon.reshade', 'official.zailon.artwork', 'official.zailon.steam-advanced',
   'official.zailon.game.fivem', 'official.zailon.importer.mo2', 'official.zailon.themes',
-  'official.zailon.importer.vortex', 'official.zailon.performance',
+  'official.zailon.importer.vortex', 'official.zailon.performance', 'official.zailon.importer.frosty',
 ]
 
 test('chaque add-on officiel a un manifest valide (validateAddonManifest)', () => {

@@ -36,21 +36,24 @@ catalogue → la carte devient installable à la synchronisation suivante.
 | `official.zailon.importer.vortex` | Disponible (package + SHA-256) — import Vortex gated |
 | `official.zailon.performance` | Disponible (package + SHA-256) — priorité processus appliquée |
 | `official.zailon.themes` | Disponible (package + SHA-256) — feature presets implémentée |
-| `official.zailon.importer.frosty` | En développement — couvert par `frosty.backend` |
+| `official.zailon.importer.frosty` | Disponible (package + SHA-256) — import installation Frosty gated |
 
-**17/18 Disponibles.** Le seul « En développement » restant est
-`official.zailon.importer.frosty`, dont la surface (import .fbmod) est déjà
-couverte par Frosty Support (`frosty.backend`).
+**18/18 Disponibles.** Le dernier add-on, `official.zailon.importer.frosty`,
+couvre l'import EN BULK d'une installation Frosty existante (dossier de mods
+`.fbmod` détecté → profil de références). Il ne fait pas doublon avec Frosty
+Support (`frosty.backend`), qui couvre l'import d'un `.fbmod` isolé, le
+runtime et le lancement : l'importer détecte le dossier de mods de Frosty Mod
+Manager et crée un profil en références, sans jamais copier ni re-déployer.
 
 ### Audit d'intégrité du catalogue (test-addon-catalog-audit.ts)
 
 Invariants vérifiés automatiquement : aucune capacité orpheline, cohérence
 catalogue ↔ dossiers, capabilities du manifest repointent vers leur propre
-add-on, tout add-on publié déclare une capacité, « En développement » =
-`importer.frosty` uniquement, et chaque capacité publiée est réellement
-exercée dans le Core (feature removal §57). L'audit a aussi supprimé la
-capacité morte `ue.modding` (→ `official.zailon.ue` inexistant) et ajouté les
-`capabilities` manquantes des manifests Frosty/Frosty Editor.
+add-on, tout add-on publié déclare une capacité, aucun add-on « En
+développement » résiduel, et chaque capacité publiée est réellement exercée
+dans le Core (feature removal §57). L'audit a aussi supprimé la capacité morte
+`ue.modding` (→ `official.zailon.ue` inexistant) et ajouté les `capabilities`
+manquantes des manifests Frosty/Frosty Editor.
 
 ### Lot final — 6 add-ons (feature removal §57)
 
@@ -89,10 +92,17 @@ capacité morte `ue.modding` (→ `official.zailon.ue` inexistant) et ajouté le
   PID du jeu (`SetPriorityClass` Windows / `setpriority` Unix), gated par
   `performancePlusAllowed`. Jamais « temps réel ».
 
-### Encore « En développement » (honnêteté §55 — pas de package fantôme)
+### Plus aucun add-on « En développement » (18/18 publiés)
 
-- **Frosty Importer** : l'import .fbmod est déjà couvert par `frosty.backend`
-  (Frosty Support) — pas de surface indépendante à migrer.
+Le chantier est clos : les 18 add-ons officiels ont un vrai package + SHA-256,
+et chaque capacité est réellement gated dans le Core. Le dernier à migrer,
+**Frosty Importer** (`importer.frosty`), couvre l'import EN BULK d'une
+installation Frosty existante : commande native `frosty_detect_installation`
+(lecture seule du dossier de mods `.fbmod`), gate `frostyImportAllowed`, action
+store `importFrostyInstallation` (profil « Frosty — <dossier> » en références,
+`sourceProvider: 'frosty'`) et dialogue `FrostyImportDialog`. Il ne fait pas
+doublon avec Frosty Support : l'import d'un `.fbmod` isolé reste couvert par
+`frosty.backend`.
 
 ### NTE Support — migration réelle (feature removal §57)
 
@@ -219,10 +229,12 @@ entrypoint et une vraie implémentation minimale.
    En développement.
 4. **Permissions** (§50) : icône 🔐 + nombre avec popover des libellés.
 
-## Prochaines migrations prioritaires (§56)
+## Migration terminée (§56-57)
 
-Le code de Discord Presence, Nexus/GameBanana providers, Visual Profiles,
-Cyberpunk Advanced, NTE Support et Performance+ existe déjà dans le Core :
-la priorité est de le déplacer dans des packages, puis de vérifier le
-« feature removal test » (§57) — désinstaller l'add-on fait disparaître la
-fonctionnalité réelle (réglages, panneaux, chargements).
+Les 18 add-ons officiels sont publiés : Discord Presence, Nexus/GameBanana/
+CurseForge providers, Visual Profiles, Cyberpunk Advanced, NTE Support,
+Performance+, ReShade, Artwork+, Steam Advanced, FiveM, Theme Packs, MO2,
+Vortex et Frosty Importer ont chacun un package + SHA-256 et une capacité
+réellement exercée dans le Core, avec le « feature removal test » (§57) :
+désinstaller l'add-on fait disparaître la fonctionnalité réelle (réglages,
+panneaux, chargements), vérifié par `test-addon-catalog-audit.ts`.

@@ -8,6 +8,7 @@ import { resolveGameIdentity } from '../lib/gameIdentity'
 import { lastUsedProfileId } from '../lib/perGameConfig'
 import { fiveMCopyActive, type FiveMCopyOptions } from '../lib/fivemProfile'
 import { vortexProfileName } from '../lib/vortexImport'
+import { frostyProfileName } from '../lib/frostyImport'
 import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
 import { validateAddonManifest } from '../lib/addons'
 import type { AddonSource, InstalledAddon, ZailonAddonManifest } from '../lib/addons'
@@ -27,7 +28,7 @@ import { ZAILON_PERSIST_KEY } from '../lib/designTokens'
 import { buildDiscordActivity, DISCORD_APPLICATION_ID, DISCORD_PRIORITY_DEBOUNCE_MS, shouldDelayPrioritySwitch, type DiscordActivityInput } from '../lib/discordPresence'
 import { modMatchesRemote, remoteIdentityFromCatalog, remoteModKey } from '../lib/remoteInstallState'
 import { resolveDiscordAsset } from '../lib/discordAssets'
-import { addonCapabilities, discordPresenceAllowed, fiveMProfilesAllowed, mo2ImportAllowed, performancePlusAllowed, steamAdvancedAllowed, vortexImportAllowed } from '../lib/addonGating'
+import { addonCapabilities, discordPresenceAllowed, fiveMProfilesAllowed, frostyImportAllowed, mo2ImportAllowed, performancePlusAllowed, steamAdvancedAllowed, vortexImportAllowed } from '../lib/addonGating'
 import { launchProcessPriority, shouldApplyProcessPriority } from '../lib/performancePlus'
 import { DEFAULT_BACKGROUND_MEDIA_SETTINGS, type BackgroundMediaSettings } from '../lib/backgroundMedia'
 import { applyHomeLayoutPreset, HOME_WIDGET_DEFAULTS, normalizeHomeWidgets, type HomeLayoutPreset, type HomeWidgetConfig } from '../lib/homeWidgets'
@@ -557,6 +558,7 @@ export interface Store {
   addProfile: (name: string) => void
   createFiveMProfile: (gameId: string, name: string, copyOptions: FiveMCopyOptions) => void
   importVortexDeployment: (gameId: string, gameRoot: string) => Promise<void>
+  importFrostyInstallation: (gameId: string, extraPaths: string[]) => Promise<void>
   prepareCollectionProfile: (collection: NexusCollectionDetail, name: string, includeAdult: boolean) => Promise<string | undefined>
   installCollectionDownloads: (gameId: string, installId: string, gameName: string) => Promise<boolean>
   duplicateProfile: (profileId: string) => void
@@ -1426,6 +1428,51 @@ export const useStore = create<Store>()(persist((set, get) => ({
         games: state.games.map(item => item.id !== gameId ? item : { ...item, profiles: [...item.profiles, synced] }),
         selectedProfileId: synced.id,
         notice: `Déploiement Vortex importé : ${instance.mods.length} mod(s), ${instance.fileCount} fichier(s) en références (aucune copie — Vortex a déjà déployé).`,
+      }))
+    } catch (error) {
+      set({ notice: asError(error) })
+    }
+  },
+  importFrostyInstallation: async (gameId, extraPaths) => {
+    // Feature removal §57 : sans l'add-on Frosty Importer (importer.frosty),
+    // le Core n'importe JAMAIS une installation Frosty existante.
+    if (!frostyImportAllowed(addonCapabilities(get().addons))) {
+      set({ notice: 'Import Frosty indisponible : l’add-on Frosty Importer n’est pas installé.' })
+      return
+    }
+    if (!native.isDesktop()) {
+      set({ notice: 'Import Frosty indisponible : l’application bureau est requise.' })
+      return
+    }
+    const game = get().games.find(item => item.id === gameId)
+    if (!game) return
+    try {
+      const installation = await native.detectFrostyInstallation(extraPaths)
+      if (!installation.exists || !installation.modsDir || installation.mods.length === 0) {
+        set({ notice: 'Aucune installation Frosty détectée (aucun dossier de mods contenant des .fbmod).' })
+        return
+      }
+      const name = frostyProfileName(installation.modsDir, game.profiles.map(profile => profile.name))
+      const modStates: Record<string, ProfileModState> = {}
+      let priority = 0
+      for (const mod of installation.mods) {
+        modStates[mod.name] = { enabled: true, priority: priority++, sourceProvider: 'frosty' }
+      }
+      const profile: Profile = {
+        id: createId(),
+        gameId: game.id,
+        name,
+        modStates,
+        playtime: 0,
+        createdAt: Date.now(),
+        isDefault: false,
+        installOptions: { frosty_mods_dir: installation.modsDir },
+      }
+      const synced = native.isDesktop() ? withProfilePaths(profile, await native.syncProfileState(gameId, profile)) : profile
+      set(state => ({
+        games: state.games.map(item => item.id !== gameId ? item : { ...item, profiles: [...item.profiles, synced] }),
+        selectedProfileId: synced.id,
+        notice: `Installation Frosty importée : ${installation.mods.length} mod(s) en références (aucune copie — Frosty Mod Manager reste le gestionnaire).`,
       }))
     } catch (error) {
       set({ notice: asError(error) })

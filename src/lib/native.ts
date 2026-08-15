@@ -89,6 +89,14 @@ export interface VortexInstance {
   mods: Array<{ name: string; fileCount: number }>
 }
 
+export interface FrostyInstallation {
+  exists: boolean
+  modsDir: string | null
+  mods: Array<{ name: string; path: string; size: number }>
+  fileCount: number
+  totalBytes: number
+}
+
 export interface UpdateStateCounts {
   games: number
   profiles: number
@@ -925,6 +933,7 @@ export const native = {
   fivemPackRemove: (targetDir: string) => desktopOnly<FiveMPackRemoveResult>('fivem_pack_remove', { targetDir }),
   fivemPackManifest: (targetDir: string) => desktopOnly<FiveMPackManifestRead>('fivem_pack_manifest', { targetDir }),
   detectVortexInstance: (gameRoot: string) => desktopOnly<VortexInstance>('detect_vortex_instance', { gameRoot }),
+  detectFrostyInstallation: (extraPaths: string[]) => desktopOnly<FrostyInstallation>('frosty_detect_installation', { extraPaths }),
   setGameProcessPriority: (pid: number, priority: string) => desktopOnly<void>('set_game_process_priority', { pid, priority }),
   scanGamePresence: (requests: GamePresenceRequest[]) => desktopOnly<GamePresence[]>('scan_game_presence', { requests }),
   /** Présence Steam (clé de registre RunningAppID, lecture seule) : preuve

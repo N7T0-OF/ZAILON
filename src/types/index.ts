@@ -424,6 +424,19 @@ export interface Game {
   launchAdapter?: GameLaunchAdapter
   /** Fond multimédia de l'Accueil pour ce jeu (spec Accueil multimédia §11). */
   backgroundMedia?: GameBackgroundMedia
+  /** Groupe de jeux (spec « Groupes de jeux » §1-4, §7) — même « famille de
+   * jeu », environnements indépendants. Purement organisationnel. */
+  groupId?: string
+}
+
+/** Groupe de jeux (spec « Groupes de jeux » §1-4, §7, §10) : une même famille
+ * de jeu (FiveM, Cyberpunk…) avec plusieurs environnements indépendants.
+ * La suppression d'un groupe ne supprime jamais les jeux ni leurs fichiers. */
+export interface GameGroup {
+  id: string
+  name: string
+  memberGameIds: string[]
+  createdAt: number
 }
 
 export type LaunchBehavior = 'DirectProcess' | 'LauncherChild' | 'LauncherDetached' | 'SteamLauncher' | 'ExternalLauncher' | 'MultiStage'

@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.103.0] - 2026-08-15
+
+> **Fondations du support FiveM avancé + groupes de jeux** — libs pures et
+> testées pour CitizenFX.ini, la détection FiveM et les groupes.
+
+### Added
+
+- **`citizenfx.ts`** : éditeur sécurisé de `CitizenFX.ini` — lecture `[Game]
+  IVPath` (jamais modifié), ajout/mise à jour/retrait de la SEULE ligne
+  `ReShade5` dans `[Addons]` (sections, clés et commentaires préservés, aucun
+  doublon, section créée si absente).
+- **`fivemSupport.ts`** : détection de `FiveM.app`/`CitizenFX.ini` (chemin
+  jamais codé en dur), classification de compatibilité ReShade
+  (`recommended`/`compatible`/`risky`/`unknown` — jamais « dernière =
+  bonne »), et classification de packs graphiques (FiveM/ReShade/GTAV/inconnu
+  + fichiers sensibles jamais exécutés).
+- **Groupes de jeux** : `Game.groupId` + `GameGroup`, migration **v7**
+  (normalisation idempotente), actions store (créer/renommer/ajouter/
+  dissocier/supprimer — la suppression ne touche jamais aux jeux), proposition
+  de groupe par exécutable partagé (manuelle, jamais auto), stats de groupe
+  séparées, et sélecteur « Groupe » sur la page du jeu.
+- Test dédié `test-fivem-advanced.ts` (14 tests) — **534 tests au total ✅**.
+
 ## [1.102.0] - 2026-08-15
 
 > **Lot final des add-ons officiels** : 6 nouveaux packages installables —

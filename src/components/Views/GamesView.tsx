@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, Boxes, CheckSquare2, ChevronDown, ChevronLeft, Copy, Download, ExternalLink, FolderInput, FolderOpen, FolderPlus, Gamepad2, HardDrive, Image as ImageIcon, Loader2, Lock, Monitor, Pause, Play, Plus, Radar, RefreshCw, RotateCcw, Search, ShieldAlert, Star, Tag, Trash2, Unlock, Wrench, X } from 'lucide-react'
+import { AlertTriangle, Archive, Boxes, CheckSquare2, ChevronDown, ChevronLeft, Copy, Download, ExternalLink, FolderInput, FolderOpen, FolderPlus, Gamepad2, HardDrive, Image as ImageIcon, Loader2, Lock, Monitor, Pause, Play, Plus, Radar, RefreshCw, RotateCcw, Search, ShieldAlert, Star, Tag, Trash2, Unlock, Users, Wrench, X } from 'lucide-react'
 import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -65,6 +65,11 @@ export function GamesView() {
   const setSelectedGame = useStore(state => state.setSelectedGame)
   const setSelectedProfile = useStore(state => state.setSelectedProfile)
   const setProfileInstallation = useStore(state => state.setProfileInstallation)
+  const gameGroups = useStore(state => state.gameGroups)
+  const createGameGroup = useStore(state => state.createGameGroup)
+  const addGameToGroup = useStore(state => state.addGameToGroup)
+  const removeGameFromGroup = useStore(state => state.removeGameFromGroup)
+  const currentGroup = gameGroups.find(group => selectedGame?.id && group.memberGameIds.includes(selectedGame.id))
 
   const setView = useStore(state => state.setView)
   const gamesBrowsing = useStore(state => state.gamesBrowsing)
@@ -452,7 +457,7 @@ export function GamesView() {
         <div className="relative px-4 pb-3 pt-3">
           <button type="button" onClick={() => { setGamesBrowsing(true); if (libraryScrollRef.current) libraryScrollRef.current.scrollTop = 0 }} className="mb-2 flex items-center gap-1.5 rounded-lg border border-white/[0.1] bg-black/30 px-2.5 py-1.5 text-[11px] font-semibold text-white/60 backdrop-blur hover:bg-white/[0.06] hover:text-white"><ChevronLeft size={13} />Bibliothèque</button>
           <div className="flex items-start justify-between gap-3">
-          <div><h1 className="font-display text-lg font-bold text-white">{selectedGame.name}</h1>{selectedGame.lastPlayed && <p className="text-[11px] text-white/30">Joué {timeAgo(selectedGame.lastPlayed)}</p>}</div>
+          <div><h1 className="font-display text-lg font-bold text-white">{selectedGame.name}</h1>{selectedGame.lastPlayed && <p className="text-[11px] text-white/30">Joué {timeAgo(selectedGame.lastPlayed)}</p>}<div className="mt-1.5 flex items-center gap-1.5"><Users size={11} className="text-white/35" /><span className="text-[10px] text-white/38">Groupe</span><select value={currentGroup?.id ?? ''} onChange={event => { const value = event.target.value; if (value === '__new__') { const name = window.prompt('Nom du nouveau groupe', selectedGame.name); if (name && name.trim()) createGameGroup(name.trim(), [selectedGame.id]) } else if (value === '') { removeGameFromGroup(selectedGame.id) } else { addGameToGroup(value, selectedGame.id) } }} className="max-w-40 rounded-md border border-white/[0.08] bg-black/30 px-1.5 py-1 text-[10px] text-white/70 outline-none"><option value="">Aucun</option>{gameGroups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}<option value="__new__">+ Nouveau groupe…</option></select>{currentGroup && currentGroup.memberGameIds.length > 1 && <span className="text-[10px] text-white/30">{currentGroup.memberGameIds.length} jeux</span>}</div></div>
           <div className="flex gap-1.5"><button onClick={() => void scanMods(selectedGame.id)} title="Analyser le dossier Mods" className="rounded-lg border border-white/[0.07] p-2 text-white/40 hover:bg-white/[0.06] hover:text-gold"><RefreshCw size={13} /></button><button onClick={() => void browseModsFolder()} title="Choisir le dossier Mods" className="rounded-lg border border-white/[0.07] p-2 text-white/40 hover:bg-white/[0.06] hover:text-gold"><FolderOpen size={13} /></button><button onClick={() => { if (window.confirm(`Retirer ${selectedGame.name} de ZAILON ?`)) removeGame(selectedGame.id) }} title="Retirer de la bibliothèque" className="rounded-lg border border-white/[0.07] p-2 text-white/40 hover:bg-red-400/10 hover:text-red-300"><Trash2 size={13} /></button></div>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">

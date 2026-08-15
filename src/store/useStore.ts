@@ -1,8 +1,9 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { ActiveTrackedSession, BackgroundMediaType, BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, ExternalModReference, Game, GameBackgroundMedia, GameInputProfile, GameInstallation, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, ReShadeProfileState, RestorePoint, SessionSource, TextSize, TrackedSession, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
+import { ActiveTrackedSession, BackgroundMediaType, BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, ExternalModReference, Game, GameBackgroundMedia, GameInputProfile, GameInstallation, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, GameGroup, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, ReShadeProfileState, RestorePoint, SessionSource, TextSize, TrackedSession, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
 import { checkpointDue } from '../lib/sessionStats'
 import { ensurePrincipalInstallation, installationDisplayName, resolveGameInstallation } from '../lib/installations'
+import { normalizeGameGroups } from '../lib/gameGroups'
 import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
 import { validateAddonManifest } from '../lib/addons'
 import type { AddonSource, InstalledAddon, ZailonAddonManifest } from '../lib/addons'
@@ -479,6 +480,14 @@ export interface Store {
   autoAttachGames: string[]
   accentColor: string
   bulkHistory: BulkOperation[]
+  // Groupes de jeux (spec « Groupes de jeux » §1-4, §7) : purement
+  // organisationnel — la suppression d'un groupe ne touche jamais aux jeux.
+  gameGroups: GameGroup[]
+  createGameGroup: (name: string, gameIds?: string[]) => string
+  renameGameGroup: (id: string, name: string) => void
+  addGameToGroup: (groupId: string, gameId: string) => void
+  removeGameFromGroup: (gameId: string) => void
+  deleteGameGroup: (id: string) => void
   notificationHistory: UiNotification[]
   notice?: string
   // Add-ons (spec §1-83) : jamais chargés au démarrage — état installé/activé
@@ -807,6 +816,7 @@ export function migratePersistedState(persisted: unknown) {
     autoAttachGames: state.autoAttachGames || [],
     accentColor: /^#[0-9a-f]{6}$/i.test(state.accentColor || '') ? state.accentColor : '#f3faf8',
     bulkHistory: state.bulkHistory || [],
+    gameGroups: normalizeGameGroups((state as { gameGroups?: GameGroup[] }).gameGroups, games),
     notificationHistory: state.notificationHistory || [],
     isLaunching: false,
     launchProgress: undefined,
@@ -927,6 +937,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   addonsNudgePending: false,
   accentColor: '#f3faf8',
   bulkHistory: [],
+  gameGroups: [],
   notificationHistory: [],
   setView: currentView => set(state => ({ currentView, addonsNudgePending: currentView === 'addons' ? false : state.addonsNudgePending })),
   clearAddonsNudge: () => set({ addonsNudgePending: false }),
@@ -982,6 +993,36 @@ export const useStore = create<Store>()(persist((set, get) => ({
     get().installAddon(validation.manifest, 'community')
     return { ok: true }
   },
+  // Groupes de jeux (spec « Groupes de jeux » §1-4, §7) : purement
+  // organisationnel — jamais de fusion de profils, de fichiers ni de stats.
+  createGameGroup: (name, gameIds = []) => {
+    const id = `group-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+    set(state => ({
+      gameGroups: [...state.gameGroups, { id, name: name.trim() || 'Groupe', memberGameIds: gameIds, createdAt: Date.now() }],
+      games: gameIds.length ? state.games.map(game => gameIds.includes(game.id) ? { ...game, groupId: id } : game) : state.games,
+    }))
+    return id
+  },
+  renameGameGroup: (id, name) => set(state => ({
+    gameGroups: state.gameGroups.map(group => group.id === id ? { ...group, name } : group),
+  })),
+  addGameToGroup: (groupId, gameId) => set(state => ({
+    gameGroups: state.gameGroups.map(group => group.id === groupId
+      ? { ...group, memberGameIds: [...new Set([...group.memberGameIds, gameId])] }
+      : group),
+    games: state.games.map(game => game.id === gameId ? { ...game, groupId } : game),
+  })),
+  removeGameFromGroup: gameId => set(state => ({
+    gameGroups: state.gameGroups.map(group => group.memberGameIds.includes(gameId)
+      ? { ...group, memberGameIds: group.memberGameIds.filter(id => id !== gameId) }
+      : group),
+    games: state.games.map(game => game.id === gameId ? { ...game, groupId: undefined } : game),
+  })),
+  deleteGameGroup: id => set(state => ({
+    gameGroups: state.gameGroups.filter(group => group.id !== id),
+    games: state.games.map(game => game.groupId === id ? { ...game, groupId: undefined } : game),
+  })),
+
   // Frosty Editor (spec §10-13) : projets persistés hors du dossier jeu.
   upsertFrostyProject: project => set(state => ({
     frostyProjects: state.frostyProjects.some(p => p.id === project.id)
@@ -3216,7 +3257,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     restorePoints: state.restorePoints,
     autoRestorePoints: state.autoRestorePoints,
   }),
-  version: 6,
+  version: 7,
   migrate: persisted => migratePersistedState(persisted) as never,
 }))
 

@@ -72,8 +72,10 @@ fn set_process_priority_unix(pid: u32, priority: ProcessPriority) -> Result<(), 
         ProcessPriority::AboveNormal => -5,
         ProcessPriority::High => -10,
     };
-    // SAFETY : appel POSIX standard, PID entier simple.
-    let result = unsafe { libc::setpriority(libc::PRIO_PROCESS, pid as i32, nice) };
+    // SAFETY : appel POSIX standard. `id_t` est u32 sur Linux glibc et i32 sur
+    // macOS — le cast `pid as libc::id_t` couvre les deux (les PID tiennent dans
+    // les deux types).
+    let result = unsafe { libc::setpriority(libc::PRIO_PROCESS, pid as libc::id_t, nice) };
     if result != 0 {
         return Err(format!(
             "setpriority failed for the game process (errno {})",

@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "id": "official.zailon.themes",
+  "name": "Theme Packs",
+  "version": "1.0.0",
+  "author": "ZAILON",
+  "description": "Packs de thèmes : presets complets appliqués d'un clic (couleur d'accent, densité, taille de texte, animations). Sans cet add-on, aucun pack de thème n'apparaît dans les Paramètres.",
+  "category": "appearance",
+  "entrypoint": "module/index.ts",
+  "minZailonVersion": "1.78.0",
+  "minAddonApiVersion": "1",
+  "permissions": [
+    "ui.extend",
+    "settings"
+  ],
+  "supportedPlatforms": ["windows", "linux", "macos"],
+  "capabilities": ["themes.packs"],
+  "slots": [
+    "Settings.Appearance"
+  ],
+  "events": []
+}

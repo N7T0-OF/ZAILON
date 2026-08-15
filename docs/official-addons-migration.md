@@ -28,7 +28,47 @@ catalogue → la carte devient installable à la synchronisation suivante.
 | `official.zailon.provider.curseforge` | Disponible (package + SHA-256) |
 | `official.zailon.game.cyberpunk` | Disponible (package + SHA-256) — outils avancés gated |
 | `official.zailon.game.nte` | Disponible (package + SHA-256) — backend PAK gated |
-| les 9 autres officiels | En développement — aucun package tant que la fonctionnalité n'est pas migrée hors Core |
+| `official.zailon.reshade` | Disponible (package + SHA-256) — section gated (déjà) |
+| `official.zailon.artwork` | Disponible (package + SHA-256) — sources gated (déjà) |
+| `official.zailon.steam-advanced` | Disponible (package + SHA-256) — détection Steam gated |
+| `official.zailon.game.fivem` | Disponible (package + SHA-256) — traitement FiveM gated |
+| `official.zailon.importer.mo2` | Disponible (package + SHA-256) — import MO2 gated |
+| `official.zailon.themes` | Disponible (package + SHA-256) — feature presets implémentée |
+| les 3 autres officiels | En développement — voir ci-dessous |
+
+### Lot final — 6 add-ons (feature removal §57)
+
+- **ReShade Manager** (`reshade.manager`) : la section ReShade de la
+  configuration était déjà gated (`hasReShadeCap`) — package + tests.
+- **Artwork+** (`artwork.plus`) : sections Sources/Illustrations déjà gated
+  (`hasCap('artwork.plus')` dans Paramètres et dialogue ressources) — package
+  + tests.
+- **Steam Advanced** (`steam.advanced`) : le bouton de détection, le dialogue
+  de scan et l'action store `addDetectedGames` sont désormais conditionnés par
+  `steamAdvancedAllowed` — sans l'add-on, le Core ne scanne jamais la
+  bibliothèque Steam.
+- **FiveM Profiles** (`fivem.profiles`) : la bannière adaptateur et
+  l'initialisation de la base neutre (`initializeFiveMBase`) sont gated par
+  `fiveMProfilesAllowed` — un jeu FiveM s'importe comme n'importe quel jeu
+  sans l'add-on ; l'adaptateur de lancement reste dans le Core.
+- **MO2 Importer** (`importer.mo2`) : le bouton « Importer depuis Mod
+  Organizer 2 », le dialogue et l'action store `completeMo2Import` sont gated
+  par `mo2ImportAllowed` — sans l'add-on, le Core refuse l'import.
+- **Theme Packs** (`themes.packs`) : **nouvelle vraie feature** — lib
+  `themePacks.ts` (5 presets accent + densité + texte + animations, pur et
+  testé) + section « Packs de thèmes » dans Paramètres → Apparence gated par
+  la capacité.
+
+### Encore « En développement » (honnêteté §55 — pas de package fantôme)
+
+- **Vortex Importer** : aucune feature n'existe dans le Core (ni commande
+  native, ni action store, ni dialogue) — un package serait un fantôme.
+- **Frosty Importer** : l'import .fbmod est déjà couvert par `frosty.backend`
+  (Frosty Support) — pas de surface indépendante à migrer.
+- **Performance+** : la politique Performance (pause téléchargements, scans,
+  priorité lancement) est de l'infrastructure Core — la gater régresserait le
+  comportement de base ; les extensions (contrôle FPS natif) ne sont pas
+  encore construites.
 
 ### NTE Support — migration réelle (feature removal §57)
 

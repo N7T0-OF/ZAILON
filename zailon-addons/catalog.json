@@ -63,8 +63,8 @@
       "name": "ReShade Manager",
       "version": "1.0.0",
       "category": "visual",
-      "description": "Installation et mise à jour de ReShade, presets, shaders et profils par jeu.",
-      "minZailonVersion": "1.69.0",
+      "description": "Gestion ReShade par jeu : détection d'installation, ajout aux jeux compatibles et configuration depuis la page du jeu. Sans cet add-on, aucune section ReShade n'apparaît dans la configuration.",
+      "minZailonVersion": "1.78.0",
       "permissions": [
         "game.read",
         "game.files.write",
@@ -73,7 +73,16 @@
         "settings",
         "ui.extend"
       ],
-      "package": null
+      "package": "packages/reshade/official.zailon.reshade-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "a745ac8f4f6cc6eb6b9e52eafe780ffa609014688ce48ae2e9899ee8da04b2ad",
+      "downloadSize": 4516,
+      "installedSize": 11290,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
     },
     {
       "id": "official.zailon.discord",
@@ -224,8 +233,8 @@
       "name": "FiveM Profiles",
       "version": "1.0.0",
       "category": "game-support",
-      "description": "Profils FiveM : roads, visual mods et dossiers spécifiques.",
-      "minZailonVersion": "1.69.0",
+      "description": "Traitement FiveM client : base neutre initialisée à l'import, bannière adaptateur dans la liste de mods (plugins client uniquement). Sans cet add-on, un jeu FiveM s'importe comme n'importe quel jeu — l'adaptateur de lancement reste dans le Core.",
+      "minZailonVersion": "1.78.0",
       "permissions": [
         "game.read",
         "game.files.write",
@@ -233,15 +242,24 @@
         "mods.write",
         "settings"
       ],
-      "package": null
+      "package": "packages/fivem/official.zailon.game.fivem-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "8c64f29c67b33cee5ddf8a647bd2a048012e373924434b4029b1def77a540232",
+      "downloadSize": 4921,
+      "installedSize": 12303,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
     },
     {
       "id": "official.zailon.importer.mo2",
       "name": "MO2 Importer",
       "version": "1.0.0",
       "category": "utilities",
-      "description": "Migration d’une installation ou de profils MO2 (désinstallable après).",
-      "minZailonVersion": "1.69.0",
+      "description": "Import depuis Mod Organizer 2 : lecture de l'instance (mods, profils, ordre, overwrite), création des profils ZAILON correspondants et staging des paquets. Sans cet add-on, aucun import MO2 n'existe.",
+      "minZailonVersion": "1.78.0",
       "permissions": [
         "game.read",
         "game.files.read",
@@ -250,7 +268,16 @@
         "profile.write",
         "filesystem.external"
       ],
-      "package": null
+      "package": "packages/mo2/official.zailon.importer.mo2-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "136134153064949b937e8a5c3b3ff132ef5b61af7dcebafea515de63d4d864ac",
+      "downloadSize": 4622,
+      "installedSize": 11555,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
     },
     {
       "id": "official.zailon.importer.vortex",
@@ -292,41 +319,68 @@
       "name": "Steam Advanced",
       "version": "1.0.0",
       "category": "utilities",
-      "description": "Scan Steam avancé, playtime, artwork et intégration de raccourcis.",
-      "minZailonVersion": "1.69.0",
+      "description": "Détection et import avancés de la bibliothèque Steam : scan des jeux installés, import en un clic et association. Sans cet add-on, aucun bouton de détection Steam ni dialogue de scan n'existe.",
+      "minZailonVersion": "1.78.0",
       "permissions": [
         "game.read",
         "process.read",
         "network",
         "game.launch"
       ],
-      "package": null
+      "package": "packages/steam-advanced/official.zailon.steam-advanced-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "8c9a4f8369b2ba4842b15c0f9a28ccf237ebc9f5725e7ba2f566fc4914737fac",
+      "downloadSize": 4587,
+      "installedSize": 11468,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
     },
     {
       "id": "official.zailon.artwork",
       "name": "Artwork+",
       "version": "1.0.0",
       "category": "appearance",
-      "description": "Fournisseurs d’illustrations supplémentaires (SteamGridDB, IGDB…).",
-      "minZailonVersion": "1.69.0",
+      "description": "Illustrations automatiques pour les jeux : sources SteamGridDB, IGDB et GameBanana, recherche automatique et personnalisation des images. Sans cet add-on, aucune source d'illustrations ni configuration n'apparaît.",
+      "minZailonVersion": "1.78.0",
       "permissions": [
         "network",
         "settings"
       ],
-      "package": null
+      "package": "packages/artwork/official.zailon.artwork-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "510c5fe40a8da43a8fbd71b13202ba4fea4cb285a9904805535290e1ca959b36",
+      "downloadSize": 4578,
+      "installedSize": 11445,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
     },
     {
       "id": "official.zailon.themes",
       "name": "Theme Packs",
       "version": "1.0.0",
       "category": "appearance",
-      "description": "Apparences supplémentaires (OLED, Minimal, Console…).",
-      "minZailonVersion": "1.69.0",
+      "description": "Packs de thèmes : presets complets appliqués d'un clic (couleur d'accent, densité, taille de texte, animations). Sans cet add-on, aucun pack de thème n'apparaît dans les Paramètres.",
+      "minZailonVersion": "1.78.0",
       "permissions": [
         "ui.extend",
         "settings"
       ],
-      "package": null
+      "package": "packages/themes/official.zailon.themes-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "837cce561dc7ba0dc2b8f1092a833b2d29f4761a847cbaf67940870bb349fe17",
+      "downloadSize": 4655,
+      "installedSize": 11638,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
     },
     {
       "id": "official.zailon.performance",

@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "official.zailon.steam-advanced",
+  "name": "Steam Advanced",
+  "version": "1.0.0",
+  "author": "ZAILON",
+  "description": "Détection et import avancés de la bibliothèque Steam : scan des jeux installés, import en un clic et association. Sans cet add-on, aucun bouton de détection Steam ni dialogue de scan n'existe.",
+  "category": "utilities",
+  "entrypoint": "module/index.ts",
+  "minZailonVersion": "1.78.0",
+  "minAddonApiVersion": "1",
+  "permissions": [
+    "game.read",
+    "process.read",
+    "network",
+    "game.launch"
+  ],
+  "supportedPlatforms": ["windows", "linux", "macos"],
+  "capabilities": ["steam.advanced"],
+  "slots": [
+    "Library.Detect",
+    "Library.Grid"
+  ],
+  "events": []
+}

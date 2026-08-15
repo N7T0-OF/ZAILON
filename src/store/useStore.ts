@@ -22,7 +22,7 @@ import { ZAILON_PERSIST_KEY } from '../lib/designTokens'
 import { buildDiscordActivity, DISCORD_APPLICATION_ID, DISCORD_PRIORITY_DEBOUNCE_MS, shouldDelayPrioritySwitch, type DiscordActivityInput } from '../lib/discordPresence'
 import { modMatchesRemote, remoteIdentityFromCatalog, remoteModKey } from '../lib/remoteInstallState'
 import { resolveDiscordAsset } from '../lib/discordAssets'
-import { addonCapabilities, discordPresenceAllowed } from '../lib/addonGating'
+import { addonCapabilities, discordPresenceAllowed, fiveMProfilesAllowed, mo2ImportAllowed, steamAdvancedAllowed } from '../lib/addonGating'
 import { DEFAULT_BACKGROUND_MEDIA_SETTINGS, type BackgroundMediaSettings } from '../lib/backgroundMedia'
 import { applyHomeLayoutPreset, HOME_WIDGET_DEFAULTS, normalizeHomeWidgets, type HomeLayoutPreset, type HomeWidgetConfig } from '../lib/homeWidgets'
 // Source de vérité de la version : package.json est bumpé à CHAQUE release
@@ -1080,6 +1080,12 @@ export const useStore = create<Store>()(persist((set, get) => ({
     }
   },
   addDetectedGames: async () => {
+    // Feature removal §57 : sans l'add-on Steam Advanced (steam.advanced), le
+    // Core ne scanne jamais la bibliothèque Steam.
+    if (!steamAdvancedAllowed(addonCapabilities(get().addons))) {
+      set({ notice: 'Détection Steam indisponible : l’add-on Steam Advanced n’est pas installé.' })
+      return 0
+    }
     try {
       const scan = await native.scanSteamGames(undefined, () => undefined)
       return get().importDetectedGames(scan.games)
@@ -1115,7 +1121,11 @@ export const useStore = create<Store>()(persist((set, get) => ({
           void native.syncProfileState(game.id, initial).then(paths => {
             set(state => ({ games: updateProfile(state.games, game.id, initial.id, profile => withProfilePaths(profile, paths)) }))
           }).catch(error => set({ notice: asError(error) }))
-          if (game.provider === 'FiveM Client' && game.installDirectory) {
+          // Feature removal §57 : la base FiveM n'est initialisée qu'avec
+          // l'add-on FiveM Profiles (fivem.profiles). Sans lui, un jeu FiveM
+          // s'importe comme n'importe quel jeu — l'adaptateur de lancement
+          // reste dans le Core.
+          if (game.provider === 'FiveM Client' && game.installDirectory && fiveMProfilesAllowed(addonCapabilities(get().addons))) {
             void native.initializeFiveMBase(game.id, game.installDirectory).then(snapshot => {
               set({ notice: `FiveM client détecté. Base neutre indexée (${snapshot.files} fichiers, aucune copie complète).` })
             }).catch(error => set({ notice: asError(error) }))
@@ -1489,6 +1499,12 @@ export const useStore = create<Store>()(persist((set, get) => ({
     if (native.isDesktop()) await native.syncProfileState(gameId, updated)
   },
   completeMo2Import: async (gameId, result) => {
+    // Feature removal §57 : sans l'add-on MO2 Importer (importer.mo2), le
+    // Core n'importe JAMAIS depuis Mod Organizer 2.
+    if (!mo2ImportAllowed(addonCapabilities(get().addons))) {
+      set({ notice: 'Import MO2 indisponible : l’add-on MO2 Importer n’est pas installé.' })
+      return
+    }
     const game = get().games.find(item => item.id === gameId)
     if (!game) return
     const [folderMods, stagedMods] = await Promise.all([

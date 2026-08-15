@@ -105,6 +105,47 @@ export function missingCapabilities(capabilities: Set<ZailonCapability>, request
 }
 
 /**
+ * Gate de la détection Steam avancée (spec « Finalisation des add-ons » §37,
+ * feature removal §57) : la détection/import des jeux Steam (dialogue de
+ * détection, scan) n'existe qu'avec l'add-on installé + activé (capacité
+ * `steam.advanced`). Pur et testé (test-steam-advanced-addon.ts).
+ */
+export function steamAdvancedAllowed(capabilities: Set<ZailonCapability> | readonly ZailonCapability[]): boolean {
+  return hasCapability(capabilities, 'steam.advanced')
+}
+
+/**
+ * Gate des profils FiveM (spec « Finalisation des add-ons » §33, feature
+ * removal §57) : le traitement FiveM client (bannière adaptateur, base
+ * initialisée à l'import) n'existe qu'avec l'add-on installé + activé
+ * (capacité `fivem.profiles`). L'adaptateur de lancement reste dans le Core.
+ * Pur et testé (test-fivem-addon.ts).
+ */
+export function fiveMProfilesAllowed(capabilities: Set<ZailonCapability> | readonly ZailonCapability[]): boolean {
+  return hasCapability(capabilities, 'fivem.profiles')
+}
+
+/**
+ * Gate de l'import Mod Organizer 2 (spec « Finalisation des add-ons » §34,
+ * feature removal §57) : le dialogue d'import MO2 et son action store
+ * n'existent qu'avec l'add-on installé + activé (capacité `importer.mo2`).
+ * Pur et testé (test-mo2-importer-addon.ts).
+ */
+export function mo2ImportAllowed(capabilities: Set<ZailonCapability> | readonly ZailonCapability[]): boolean {
+  return hasCapability(capabilities, 'importer.mo2')
+}
+
+/**
+ * Gate des packs de thèmes (spec « Finalisation des add-ons » §39, feature
+ * removal §57) : la section « Packs de thèmes » des Paramètres (presets
+ * accent + densité + taille de texte) n'existe qu'avec l'add-on installé +
+ * activé (capacité `themes.packs`). Pur et testé (test-themes-addon.ts).
+ */
+export function themePacksAllowed(capabilities: Set<ZailonCapability> | readonly ZailonCapability[]): boolean {
+  return hasCapability(capabilities, 'themes.packs')
+}
+
+/**
  * Gate du backend PAK NTE (spec « Finalisation des add-ons » §32, feature
  * removal §57) : la détection NTE PAK (.pak/.utoc/.ucas) de Neverness to
  * Everness n'existe qu'avec l'add-on installé + activé (capacité

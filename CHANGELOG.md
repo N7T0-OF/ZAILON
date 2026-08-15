@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.102.0] - 2026-08-15
+
+> **Lot final des add-ons officiels** : 6 nouveaux packages installables —
+> ReShade Manager, Artwork+, Steam Advanced, FiveM Profiles, MO2 Importer et
+> Theme Packs (nouvelle feature presets). 15/18 add-ons Disponibles.
+
+### Added
+
+- **`official.zailon.reshade`** et **`official.zailon.artwork`** : sections
+  déjà gated par leurs capacités — packages + tests.
+- **`official.zailon.steam-advanced`** : détection/import Steam gated
+  (bouton, dialogue, `addDetectedGames` refuse sans la capacité).
+- **`official.zailon.game.fivem`** : bannière adaptateur et base neutre gated
+  — un jeu FiveM s'importe comme n'importe quel jeu sans l'add-on.
+- **`official.zailon.importer.mo2`** : bouton, dialogue et `completeMo2Import`
+  gated — le Core refuse l'import MO2 sans la capacité.
+- **`official.zailon.themes`** : nouvelle feature — 5 presets
+  (accent + densité + texte + animations) dans Paramètres → Apparence,
+  lib `themePacks.ts` pure et testée.
+- Test dédié `test-batch-addons.ts` (7 tests) — **520 tests au total ✅**.
+
+### Notes
+
+- Vortex Importer, Frosty Importer et Performance+ restent « En
+  développement » : aucune feature indépendante dans le Core (pas de package
+  fantôme — règle §55). Détails dans `docs/official-addons-migration.md`.
+
 ## [1.101.0] - 2026-08-15
 
 > **NTE Support devient un add-on installable** — deuxième migration « jeu » :

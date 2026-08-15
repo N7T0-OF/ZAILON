@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { groupLastPlayed, groupMembers, groupModCount, groupProfileCount, groupTotalPlaytime, reorderArray } from '../../src/lib/gameGroups.ts'
+import { groupLastPlayed, groupMembers, groupModCount, groupProfileCount, groupProfilePairs, groupTotalPlaytime, nextGroupProfile, reorderArray } from '../../src/lib/gameGroups.ts'
 import type { Game, GameGroup } from '../../src/types/index.ts'
 
 const game = (id: string, overrides: Partial<Game> = {}): Game => ({
@@ -60,4 +60,32 @@ test('reorderArray : décale d\'une case, bornes respectées', () => {
 test('groupTotalPlaytime : somme, séparée des profils', () => {
   const games = [game('a', { totalPlaytime: 42 }), game('b', { totalPlaytime: 61 })]
   assert.equal(groupTotalPlaytime(games, group(['a', 'b'])), 103)
+})
+
+test('groupProfilePairs : tous les profils des membres, chacun avec son jeu', () => {
+  const games = [
+    game('a', { name: 'FiveM — Default', profiles: [{ id: 'p1', name: 'Default' }, { id: 'p2', name: 'Graphics' }] }),
+    game('b', { name: 'FiveM — ReShade', profiles: [{ id: 'p3', name: 'ReShade' }] }),
+  ]
+  const pairs = groupProfilePairs(games, group(['a', 'b']))
+  assert.equal(pairs.length, 3)
+  assert.deepEqual(pairs[0], { gameId: 'a', gameName: 'FiveM — Default', profileId: 'p1', profileName: 'Default' })
+  assert.equal(pairs[1].profileId, 'p2')
+  assert.equal(pairs[2].gameId, 'b')
+  assert.equal(pairs[2].profileName, 'ReShade')
+})
+
+test('nextGroupProfile : boucle dans la séquence du groupe, jamais de croisement', () => {
+  const pairs = groupProfilePairs([
+    game('a', { profiles: [{ id: 'p1', name: 'Default' }, { id: 'p2', name: 'Graphics' }] }),
+    game('b', { profiles: [{ id: 'p3', name: 'ReShade' }] }),
+  ], group(['a', 'b']))
+  assert.equal(nextGroupProfile(pairs, 'a', 'p1')?.profileId, 'p2')
+  assert.deepEqual(nextGroupProfile(pairs, 'a', 'p2'), { gameId: 'b', gameName: 'b', profileId: 'p3', profileName: 'ReShade' })
+  // Boucle : dernier → premier.
+  assert.equal(nextGroupProfile(pairs, 'b', 'p3')?.profileId, 'p1')
+  // Position introuvable → premier pair.
+  assert.equal(nextGroupProfile(pairs, 'ghost', 'ghost')?.profileId, 'p1')
+  // Séquence vide → undefined.
+  assert.equal(nextGroupProfile([], 'a', 'p1'), undefined)
 })

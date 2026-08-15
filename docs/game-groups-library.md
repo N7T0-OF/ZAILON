@@ -38,6 +38,25 @@ leurs fichiers (spec §12).
 - **`GameGroupDialog`** (créer / éditer) : nom + sélection des membres avec
   recherche. Aucun déplacement de fichiers.
 
+## Sélecteur rapide sur l'Accueil (spec §7, §16)
+
+Quand le jeu sélectionné appartient à un groupe de plusieurs membres, la
+flèche de changement de profil de l'Accueil devient un **sélecteur de groupe** :
+
+```text
+FiveM — Default → FiveM — Graphics → FiveM — ReShade → … (boucle)
+```
+
+- La séquence est celle de `groupProfilePairs(games, group)` : membres dans
+  l'ordre du groupe, puis profils de chaque membre (tous les profils de tous
+  les jeux membres, jamais fusionnés).
+- Changer de jeu membre bascule `selectedGame` puis `selectedProfile` — le
+  profil cible est explicite, jamais le « dernier utilisé » du jeu.
+- Le bouton affiche `Jeu · Profil` (ex. « FiveM · Graphics ») quand le groupe
+  a plusieurs membres.
+- Jamais pendant une session active si le backend ne peut pas changer en
+  runtime (message honnête, spec §18).
+
 ## Règle
 
 Un groupe ne **fusionne** rien. Deux profils « FiveM — Default » et

@@ -82,6 +82,37 @@ export function groupLastPlayed(games: Game[], group: GameGroup): number | undef
   return dates.length ? Math.max(...dates) : undefined
 }
 
+/** Un profil membre d'un groupe, avec son jeu d'origine (jamais fusionné). */
+export interface GroupProfilePair {
+  gameId: string
+  gameName: string
+  profileId: string
+  profileName: string
+}
+
+/** Tous les profils de tous les membres d'un groupe, dans l'ordre : membres
+ * (ordre déclaré du groupe) puis profils de chaque membre (spec §7, §16).
+ * Chaque profil garde son jeu d'origine — aucune fusion, aucun croisement. */
+export function groupProfilePairs(games: Game[], group: GameGroup): GroupProfilePair[] {
+  return groupMembers(games, group).flatMap(game =>
+    (game.profiles || []).map(profile => ({
+      gameId: game.id,
+      gameName: game.shortName || game.name,
+      profileId: profile.id,
+      profileName: profile.name,
+    })),
+  )
+}
+
+/** Le profil suivant dans la séquence du groupe (boucle). Si l'actuel n'est
+ * pas trouvé (jeu retiré du groupe), on repart du premier. Séquence vide →
+ * `undefined`. */
+export function nextGroupProfile(pairs: GroupProfilePair[], currentGameId: string, currentProfileId: string): GroupProfilePair | undefined {
+  if (pairs.length === 0) return undefined
+  const index = pairs.findIndex(pair => pair.gameId === currentGameId && pair.profileId === currentProfileId)
+  return pairs[(index + 1) % pairs.length]
+}
+
 /** Réordonnancement pur : décale un élément d'une case (haut/bas). Sans effet
  * si la cible sort des bornes — l'ordre n'est jamais perdu (spec §12). */
 export function reorderArray<T>(items: T[], index: number, direction: -1 | 1): T[] {

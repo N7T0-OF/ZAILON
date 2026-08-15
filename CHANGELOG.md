@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.118.0] - 2026-08-15
+
+> **Sélecteur rapide de groupe sur l'Accueil** — la flèche de changement de
+> profil parcourt désormais les profils de TOUS les membres du groupe.
+
+### Added
+
+- **`groupProfilePairs` / `nextGroupProfile`** (`src/lib/gameGroups.ts`, purs
+  et testés) : séquence ordonnée de tous les profils de tous les membres d'un
+  groupe + profil suivant en boucle — chaque profil garde son jeu d'origine,
+  aucune fusion.
+- **Flèche de profil de l'Accueil group-aware** : `FiveM — Default →
+  FiveM — Graphics → FiveM — ReShade → …` ; un changement de jeu membre
+  bascule `selectedGame` puis le profil cible explicite (jamais « dernier
+  utilisé »).
+- **Label du bouton profil** : affiche `Jeu · Profil` (ex. « FiveM ·
+  Graphics ») quand le groupe a plusieurs membres (tooltip du nom complet).
+
+### Changed
+
+- Repli identique à avant pour un jeu sans groupe (boucle sur ses propres
+  profils) — aucun comportement régressé.
+
 ## [1.117.0] - 2026-08-15
 
 > **Groupes de jeux dans la Bibliothèque** — nouveau filtre « Groupes » avec

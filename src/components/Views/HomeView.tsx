@@ -13,6 +13,7 @@ import { formatElapsedDuration, formatSeconds, formatTime, timeAgo } from '../..
 import { addonCapabilities, hasCapability } from '../../lib/addonGating'
 import { HOME_PRESET_LABELS, HOME_WIDGET_DEFAULTS, HOME_WIDGET_VARIANTS, orderHomeWidgets, widgetGridClass, type HomeLayoutPreset, type HomeWidgetConfig } from '../../lib/homeWidgets'
 import { pickPrioritySession } from '../../lib/sessionPriority'
+import { groupProfilePairs, groupMembers, nextGroupProfile } from '../../lib/gameGroups'
 import { GameContextMenu } from '../GameContextMenu'
 import { GameResourcesDialog } from '../GameResourcesDialog'
 import { FallbackArtwork } from '../UI/FallbackArtwork'
@@ -25,6 +26,7 @@ import { ZailonSwitch } from '../UI/ZailonSwitch'
 export function HomeView() {
   const summaries = useWorkspaceCache()
   const games = useStore(state => state.games)
+  const gameGroups = useStore(state => state.gameGroups)
   const selectedGame = useStore(getSelectedGame)
   const selectedProfile = useStore(getSelectedProfile)
   const setSelectedGame = useStore(state => state.setSelectedGame)
@@ -179,11 +181,30 @@ export function HomeView() {
   const widgets = orderHomeWidgets(homeWidgets).filter(widget => widget.id !== 'session' || activeSessionsNow.length > 0)
 
   const openMenu = (position: { x: number; y: number }) => setMenu({ game: selectedGame, position })
+  // Groupe du jeu sélectionné (spec « Groupes de jeux » §7, §16) : le bouton
+  // flèche passe au profil suivant du GROUPE (tous les jeux membres, dans
+  // l'ordre), pas seulement du jeu courant. Chaque profil reste indépendant.
+  const currentGroup = gameGroups.find(group => group.memberGameIds.includes(selectedGame.id))
+  const groupMembersList = currentGroup ? groupMembers(games, currentGroup) : []
+  const groupContextLabel = currentGroup && groupMembersList.length > 1
+    ? `${selectedGame.shortName || selectedGame.name} · ${selectedProfile.name}`
+    : selectedProfile.name
   // Choix rapide du profil (spec §16-19) : le nom ouvre la liste complète, la
   // flèche passe au profil suivant (boucle). Jamais pendant une session active
   // si le backend ne peut pas changer en runtime — message honnête (§18).
   const cycleToNextProfile = () => {
     if (sessionRunning) { recordNotice('Changement de profil disponible après la fermeture du jeu.'); return }
+    if (currentGroup) {
+      const pairs = groupProfilePairs(games, currentGroup)
+      if (pairs.length >= 2) {
+        const next = nextGroupProfile(pairs, selectedGame.id, selectedProfile.id)
+        if (next) {
+          if (next.gameId !== selectedGame.id) setSelectedGame(next.gameId)
+          void setSelectedProfile(next.profileId)
+        }
+        return
+      }
+    }
     const profiles = selectedGame.profiles
     if (profiles.length < 2) return
     const index = profiles.findIndex(profile => profile.id === selectedProfile.id)
@@ -254,7 +275,7 @@ export function HomeView() {
               flèche = profil suivant en boucle. */}
           <div className="mt-5 flex flex-wrap items-center gap-2 text-[11px] text-white/38">
             <span>Profil</span>
-            <button ref={profileButtonRef} type="button" onClick={() => setProfileMenuOpen(open => !open)} className="flex items-center gap-1 rounded-full border border-white/[0.12] bg-black/25 px-2.5 py-1 font-semibold text-white/75 backdrop-blur hover:border-white/25">{selectedProfile.name}<ChevronDown size={10} className={`transition-transform ${profileMenuOpen ? 'rotate-180' : ''}`} /></button>
+            <button ref={profileButtonRef} type="button" onClick={() => setProfileMenuOpen(open => !open)} title={groupContextLabel !== selectedProfile.name ? groupContextLabel : undefined} className="flex max-w-56 items-center gap-1 rounded-full border border-white/[0.12] bg-black/25 px-2.5 py-1 font-semibold text-white/75 backdrop-blur hover:border-white/25"><span className="truncate">{groupContextLabel}</span><ChevronDown size={10} className={`shrink-0 transition-transform ${profileMenuOpen ? 'rotate-180' : ''}`} /></button>
             <button type="button" onClick={cycleToNextProfile} title="Profil suivant" aria-label="Profil suivant" className="flex h-6 w-6 items-center justify-center rounded-full border border-white/[0.1] bg-black/25 text-white/45 backdrop-blur hover:bg-white/[0.08] hover:text-white"><ChevronRight size={11} /></button>
             <span className="mx-1 text-white/18">•</span>
             <span>{activeMods} mod{activeMods !== 1 ? 's' : ''} actif{activeMods !== 1 ? 's' : ''}</span>

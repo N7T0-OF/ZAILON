@@ -26,7 +26,34 @@ catalogue → la carte devient installable à la synchronisation suivante.
 | `official.zailon.provider.gamebanana` | Disponible (package + SHA-256) |
 | `official.zailon.provider.nexus` | Disponible (package + SHA-256) |
 | `official.zailon.provider.curseforge` | Disponible (package + SHA-256) |
-| les 11 autres officiels | En développement — aucun package tant que la fonctionnalité n'est pas migrée hors Core |
+| `official.zailon.game.cyberpunk` | Disponible (package + SHA-256) — outils avancés gated |
+| les 10 autres officiels | En développement — aucun package tant que la fonctionnalité n'est pas migrée hors Core |
+
+### Cyberpunk Advanced — migration réelle (feature removal §57)
+
+Première migration « jeu » : les outils de réparation Cyberpunk étaient
+branchés sur le SEUL nom du jeu (aucune gate d'add-on). La migration a
+ajouté :
+
+- le package `official.zailon.game.cyberpunk` (capacité
+  `cyberpunk.frameworks`, permissions `game.read`/`game.files.write`/
+  `mods.read`/`mods.write`/`process.read`, slots `Game.Tools` +
+  `Game.Diagnostic` + `Diagnostic.Frameworks`) — **Disponible** avec SHA-256
+  réel ;
+- **gate pur et testé** `cyberpunkToolsAllowed(capabilities, isCyberpunkGame)`
+  : les outils n'existent que pour un jeu Cyberpunk ET avec l'add-on
+  installé + activé ;
+- **gating UI** : bouton « Réparer les racines Cyberpunk » (onglet Mods),
+  `onRepairMo2` (réparation du déploiement MO2) et carte « Réparer RED4ext »
+  (Diagnostic → Frameworks) sont tous conditionnés par la gate — plus jamais
+  par le seul nom du jeu ;
+- la détection de frameworks (RED4ext, redscript, TweakXL, ArchiveXL…) et le
+  backend virtuel de lancement restent dans le Core (adaptateur jeu, spec
+  « Séparation des responsabilités » §113) : un jeu Cyberpunk se lance et se
+  scanne normalement, seuls les OUTILS de réparation disparaissent sans
+  l'add-on ;
+- test dédié `test-cyberpunk-addon.ts` (gate ×4, catalogue/SHA, garde-fou
+  source sur GamesView/GameDiagnosticPanel, manifest) — 507 tests au total.
 
 ### CurseForge Provider — migration réelle (feature removal §57)
 

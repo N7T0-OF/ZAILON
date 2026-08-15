@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "catalogSchemaVersion": 2,
-  "updatedAt": "2026-08-14",
+  "updatedAt": "2026-08-15",
   "addons": [
     {
       "id": "official.zailon.frosty",
@@ -174,8 +174,8 @@
       "name": "Cyberpunk Advanced",
       "version": "1.0.0",
       "category": "game-support",
-      "description": "RED4ext, redscript, TweakXL, ArchiveXL et REDmod pour Cyberpunk 2077.",
-      "minZailonVersion": "1.69.0",
+      "description": "Outils avancés Cyberpunk 2077 : réparation de structure des paquets, réparation du déploiement MO2 et réparation RED4ext. Sans cet add-on, aucun outil de réparation Cyberpunk n'apparaît — le lancement de base reste dans le Core.",
+      "minZailonVersion": "1.78.0",
       "permissions": [
         "game.read",
         "game.files.write",
@@ -183,7 +183,16 @@
         "mods.write",
         "process.read"
       ],
-      "package": null
+      "package": "packages/cyberpunk/official.zailon.game.cyberpunk-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "86b2259634f6957f07bcb88044f3fe8d353b4b69378489ecc904ab45a0fdbd48",
+      "downloadSize": 6460,
+      "installedSize": 16150,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
     },
     {
       "id": "official.zailon.game.nte",

@@ -14,7 +14,7 @@ import { animationsReducedDuringGame, effectivePerformance } from '../../lib/per
 import { pickPrioritySession } from '../../lib/sessionPriority'
 import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { formatElapsedDuration, formatTime, timeAgo } from '../../utils'
-import { addonCapabilities, hasCapability } from '../../lib/addonGating'
+import { addonCapabilities, cyberpunkToolsAllowed, hasCapability } from '../../lib/addonGating'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
 import type { Game, GameSession, GameTab, Mod, ModImportCandidate, Profile, SensitiveFileAssessment, SensitiveImportAction } from '../../types'
 import { VisualGamePanel } from '../../visual-profiles/ui/VisualGamePanel'
@@ -72,6 +72,9 @@ export function GamesView() {
   const addons = useStore(state => state.addons)
   const capabilities = useMemo(() => addonCapabilities(addons), [addons])
   const hasVisualProfiles = hasCapability(capabilities, 'visual.profiles')
+  // Outils avancés Cyberpunk : uniquement pour un jeu Cyberpunk ET avec
+  // l'add-on Cyberpunk Advanced installé + activé (feature removal §57).
+  const cyberpunkTools = cyberpunkToolsAllowed(capabilities, selectedGame?.name.toLocaleLowerCase().includes('cyberpunk') ?? false)
   const backgroundTasks = useStore(state => state.backgroundTasks)
   const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
   const runtimeActivity = useStore(state => state.runtimeActivity)
@@ -493,7 +496,7 @@ export function GamesView() {
           <button onClick={() => void deduplicateStagedMods(selectedGame.id)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05]"><Boxes size={13} /> Nettoyer les doublons</button>
           <button onClick={() => void purgeUnreferencedStagedMods(selectedGame.id)} className="flex items-center gap-1.5 rounded-lg border border-red-300/12 px-3 py-2 text-[11px] text-red-100/58 hover:bg-red-300/[0.05]"><Trash2 size={13} /> Purger les paquets retirés</button>
           <button onClick={() => void repairStagedImports()} title="Re-stager chaque paquet importé depuis sa source enregistrée (racines de jeu corrigées)" className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05]"><RotateCcw size={13} />Réparer les racines des imports</button>
-          {selectedGame.name.toLocaleLowerCase().includes('cyberpunk') && <button onClick={() => void repairCyberpunkStructure()} className="flex items-center gap-1.5 rounded-lg border border-amber-300/18 bg-amber-300/[0.035] px-3 py-2 text-[11px] text-amber-100/68 hover:bg-amber-300/[0.07]"><Wrench size={13} />Réparer les racines Cyberpunk</button>}
+          {cyberpunkTools && <button onClick={() => void repairCyberpunkStructure()} className="flex items-center gap-1.5 rounded-lg border border-amber-300/18 bg-amber-300/[0.035] px-3 py-2 text-[11px] text-amber-100/68 hover:bg-amber-300/[0.07]"><Wrench size={13} />Réparer les racines Cyberpunk</button>}
           {bulkHistory.some(operation => operation.gameId === selectedGame.id && operation.undoable) && <button onClick={() => void undoLastBulkOperation()} title="Annuler la dernière opération groupée" className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]"><RotateCcw size={13} />Annuler</button>}
           <label className="flex items-center gap-2 rounded-lg border border-white/[0.08] px-2.5 text-[11px] text-white/55"><input ref={selectAllRef} type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedModIds(current => { const next = new Set(current); if (allVisibleSelected) filteredMods.forEach(mod => next.delete(mod.id)); else filteredMods.forEach(mod => next.add(mod.id)); return next })} className="accent-gold" />Tout visible <span className="text-white/30">{selectedVisible}/{filteredMods.length}</span></label>
           {availableTags.length > 0 && <select value={tagFilter} onChange={event => setTagFilter(event.target.value)} className="rounded-lg border border-white/[0.08] bg-[#101313] px-2 py-2 text-[11px] text-white/58"><option value="">Toutes les étiquettes</option>{availableTags.map(tag => <option key={tag.id} value={tag.id}>{tag.label}</option>)}</select>}
@@ -511,7 +514,7 @@ export function GamesView() {
         ? <VisualGamePanel game={selectedGame} zailonProfile={selectedProfile} />
         : <div className="flex flex-1 items-center justify-center p-8"><div className="max-w-sm rounded-xl border border-white/[0.07] bg-white/[0.02] p-5 text-center"><p className="text-xs text-white/55">Les profils visuels sont fournis par l’add-on <span className="font-semibold text-white/75">Visual Profiles</span>.</p><button type="button" onClick={() => setView('addons')} className="mt-3 rounded-lg bg-[var(--zailon-accent)] px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]">Voir l’add-on</button></div></div>)}
       {tab === 'configuration' && <GameConfigurationPanel game={selectedGame} profile={selectedProfile} onBrowseExecutable={() => void browseExecutable()} onBrowseModsFolder={() => void browseModsFolder()} onSaveResources={resources => setGameResources(selectedGame.id, resources)} onOpenVisuals={() => setTab('visuals')} />}
-      {tab === 'diagnostic' && <GameDiagnosticPanel game={selectedGame} profile={selectedProfile} profileMods={profileMods} onOpenConfiguration={() => setTab('configuration')} onRepairMo2={selectedGame.name.toLocaleLowerCase().includes('cyberpunk') ? () => void repairMo2Deployment() : undefined} repairBusy={deploymentToolBusy} conflicts={resolvedConflicts} onSetWinner={(path, winnerId) => setConflictWinner(path, winnerId)} initialSection={diagSection} />}
+      {tab === 'diagnostic' && <GameDiagnosticPanel game={selectedGame} profile={selectedProfile} profileMods={profileMods} onOpenConfiguration={() => setTab('configuration')} onRepairMo2={cyberpunkTools ? () => void repairMo2Deployment() : undefined} showRed4extTools={cyberpunkTools} repairBusy={deploymentToolBusy} conflicts={resolvedConflicts} onSetWinner={(path, winnerId) => setConflictWinner(path, winnerId)} initialSection={diagSection} />}
     </section>
 
     {steamDialogOpen && <SteamDetectionDialog onClose={() => setSteamDialogOpen(false)} onImport={importDetectedGames} />}

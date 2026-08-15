@@ -100,13 +100,15 @@ interface Props {
   profileMods: Mod[]
   onOpenConfiguration: () => void
   onRepairMo2?: () => void
+  /** Outils avancés Cyberpunk (add-on Cyberpunk Advanced) : carte « Réparer RED4ext ». */
+  showRed4extTools?: boolean
   repairBusy?: boolean
   conflicts?: ResolvedConflict[]
   onSetWinner?: (path: string, winnerId: string) => void
   initialSection?: SubSection
 }
 
-export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfiguration, onRepairMo2, repairBusy = false, conflicts = [], onSetWinner, initialSection }: Props) {
+export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfiguration, onRepairMo2, showRed4extTools = false, repairBusy = false, conflicts = [], onSetWinner, initialSection }: Props) {
   const [section, setSection] = useState<SubSection>(initialSection || 'resume')
   const [audit, setAudit] = useState<ProfileDeploymentAudit | undefined>()
   const [busy, setBusy] = useState(false)
@@ -262,7 +264,7 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
         </div>}
         <FrameworkHierarchyCard gameId={game.id} profileMods={profileMods} virtualFiles={audit?.virtualFiles.map(file => file.gameRelativePath)} />
         <FrameworkLastKnownGood gameId={game.id} profile={profile} profileMods={profileMods} />
-        <Red4extRepairCard summary={repair} audit={audit} busy={repairing} onRepair={() => void repairRed4ext()} onRepairMo2={onRepairMo2} />
+        {showRed4extTools && <Red4extRepairCard summary={repair} audit={audit} busy={repairing} onRepair={() => void repairRed4ext()} onRepairMo2={onRepairMo2} />}
       </div>}
 
       {section === 'conflicts' && (conflicts.length

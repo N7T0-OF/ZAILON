@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.100.0] - 2026-08-15
+
+> **Cyberpunk Advanced devient un add-on installable** — première migration
+> « jeu » hors du Core : les outils de réparation Cyberpunk (structure, MO2,
+> RED4ext) sont désormais conditionnés par l'add-on, plus jamais par le seul
+> nom du jeu.
+
+### Added
+
+- **Add-on `official.zailon.game.cyberpunk`** (Disponible, package + SHA-256
+  réel) : capacité `cyberpunk.frameworks`, permissions
+  `game.read`/`game.files.write`/`mods.read`/`mods.write`/`process.read`,
+  slots `Game.Tools` + `Game.Diagnostic` + `Diagnostic.Frameworks`.
+- **Gate pur `cyberpunkToolsAllowed`** : le bouton « Réparer les racines
+  Cyberpunk », la réparation du déploiement MO2 et la carte « Réparer
+  RED4ext » n'existent que pour un jeu Cyberpunk ET avec l'add-on installé +
+  activé — feature removal §57, y compris le défaut (outils désactivés).
+- La détection de frameworks et le backend virtuel de lancement restent dans
+  le Core (adaptateur jeu) : un jeu Cyberpunk se lance et se scanne
+  normalement, seuls les outils de réparation disparaissent.
+- Test dédié `test-cyberpunk-addon.ts` (8 tests) — **507 tests au total ✅**.
+
 ## [1.99.0] - 2026-08-14
 
 > **CurseForge Provider devient un add-on installable** — le trio des

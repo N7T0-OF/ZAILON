@@ -104,5 +104,16 @@ export function missingCapabilities(capabilities: Set<ZailonCapability>, request
   return requested.filter(capability => isCapabilityMissing(capabilities, capability))
 }
 
+/**
+ * Gate des outils avancés Cyberpunk (spec « Finalisation des add-ons » §31,
+ * feature removal §57) : les boutons de réparation (structure, MO2, RED4ext)
+ * n'existent que pour un jeu Cyberpunk ET avec l'add-on installé + activé
+ * (capacité `cyberpunk.frameworks`). Pur et testé
+ * (test-cyberpunk-addon.ts).
+ */
+export function cyberpunkToolsAllowed(capabilities: Set<ZailonCapability> | readonly ZailonCapability[], isCyberpunkGame: boolean): boolean {
+  return isCyberpunkGame && hasCapability(capabilities, 'cyberpunk.frameworks')
+}
+
 /** Toutes les capacités connues, pour l'inspection/diagnostic. */
 export const ALL_ZAILON_CAPABILITIES: ZailonCapability[] = Object.keys(CAPABILITY_ADDON) as ZailonCapability[]

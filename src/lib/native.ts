@@ -1081,6 +1081,8 @@ export const native = {
   openUpdateLog: () => desktopOnly<void>('open_update_log'),
   checkForUpdate: (channel: UpdateChannel) =>
     desktopOnly<UpdateMetadata | null>('check_for_update', { channel }),
+  fetchReleaseNotes: (version: string) =>
+    desktopOnly<string | null>('fetch_release_notes', { version }),
   installUpdate: (onEvent: (event: UpdateDownloadEvent) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Updates are only available in the ZAILON desktop app.'))
     const channel = new Channel<UpdateDownloadEvent>()

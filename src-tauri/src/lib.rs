@@ -15455,6 +15455,49 @@ async fn install_update(
         .map_err(to_error)
 }
 
+/// Récupère le corps (notes) d'une release GitHub précise, sans clé API.
+/// Utilisé par la fenêtre « Nouveautés » au démarrage après une mise à jour
+/// installée hors de l'updater interne (installeur téléchargé).
+///
+/// Retourne `None` (jamais une erreur bloquante) si : hors-ligne, release
+/// absente, rate-limit GitHub, corps vide. L'UI affiche alors un repli
+/// « Voir sur GitHub ».
+#[cfg(desktop)]
+#[tauri::command]
+async fn fetch_release_notes(version: String) -> Result<Option<String>, String> {
+    let version = version.trim().trim_start_matches('v');
+    if version.is_empty() {
+        return Ok(None);
+    }
+    let url = format!("https://api.github.com/repos/N7T0-OF/ZAILON/releases/tags/v{version}");
+    let response = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .user_agent(format!("ZAILON/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|_| "Unable to initialize the release notes fetch.".to_string())?
+        .get(&url)
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .send()
+        .await;
+    let response = match response {
+        Ok(response) => response,
+        Err(_) => return Ok(None), // hors-ligne / timeout → repli silencieux
+    };
+    if !response.status().is_success() {
+        return Ok(None); // 404 / 403 rate-limit → repli silencieux
+    }
+    let release: serde_json::Value = match response.json().await {
+        Ok(release) => release,
+        Err(_) => return Ok(None),
+    };
+    let body = release
+        .get("body")
+        .and_then(|body| body.as_str())
+        .map(str::to_string)
+        .filter(|body| !body.trim().is_empty());
+    Ok(body)
+}
+
 // ─────────────────── Add-ons : pipeline d'installation (spec §14-15, §65) ──
 
 #[derive(Clone, Serialize)]
@@ -17839,6 +17882,8 @@ pub fn run() {
             create_desktop_shortcut,
             #[cfg(desktop)]
             check_for_update,
+            #[cfg(desktop)]
+            fetch_release_notes,
             #[cfg(desktop)]
             install_update,
             set_autostart,

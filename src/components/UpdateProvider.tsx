@@ -4,6 +4,7 @@ import { relaunch } from '@tauri-apps/plugin-process'
 import { native, type UpdateMetadata } from '../lib/native'
 import { appVersion, useStore } from '../store/useStore'
 import { countListItems, parseMarkdown, summarizeBlocks } from '../lib/safeMarkdown'
+import { parseSemver, shouldShowReleaseNotes } from '../lib/releaseNotes'
 import { SafeMarkdown } from './UI/SafeMarkdown'
 import { ScrollableModal } from './UI/ScrollableModal'
 import { ZailonSwitch } from './UI/ZailonSwitch'
@@ -48,12 +49,6 @@ function errorMessage(error: unknown) {
   return message
 }
 
-/** SemVer (major, minor, patch). Retourne null si la version n'est pas exploitable. */
-function parseSemver(version: string) {
-  const match = version.trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)/)
-  return match ? { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) } : null
-}
-
 /** Un patch (x.y.z → x.y.z+1) est une mise à jour mineure : toast plutôt que modale. */
 function isPatchUpdate(previous: string | undefined, current: string) {
   const before = parseSemver(previous ?? '')
@@ -89,6 +84,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const [notesOpen, setNotesOpen] = useState(false)
   const [notesFull, setNotesFull] = useState(false)
   const [patchToast, setPatchToast] = useState(false)
+  const [startupNotesUnavailable, setStartupNotesUnavailable] = useState(false)
   const automaticCheckStarted = useRef(false)
   const releaseNotesHandled = useRef(false)
 
@@ -191,6 +187,27 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
     }
   }, [lastInstalledUpdate, lastSeenReleaseNotesVersion, showReleaseNotesOnUpdate, dismissInstalledUpdate])
 
+  // Après une mise à jour installée HORS de l'updater interne (installeur
+  // téléchargé), `lastInstalledUpdate` n'est jamais renseigné. On compare donc
+  // la version installée à la dernière version dont les notes ont été vues
+  // (spec « Fix changelog » §1) : si `appVersion` > `lastSeenReleaseNotesVersion`,
+  // on récupère les notes de la release GitHub et on les affiche une seule fois.
+  // En cas d'échec réseau, la fenêtre s'ouvre quand même avec un repli « Voir
+  // sur GitHub » (jamais de blocage).
+  useEffect(() => {
+    if (releaseNotesHandled.current) return
+    if (!native.isDesktop()) return
+    if (!shouldShowReleaseNotes({ installedVersion: appVersion, lastSeenVersion: lastSeenReleaseNotesVersion, enabled: showReleaseNotesOnUpdate })) return
+    releaseNotesHandled.current = true
+    void (async () => {
+      const fetched = await native.fetchReleaseNotes(appVersion).catch(() => null)
+      setUpdate({ version: appVersion, currentVersion: appVersion, notes: fetched ?? undefined })
+      setStartupNotesUnavailable(fetched === null)
+      setNotesFull(false)
+      setNotesOpen(true)
+    })()
+  }, [appVersion, lastSeenReleaseNotesVersion, showReleaseNotesOnUpdate])
+
   const closeReleaseNotes = () => {
     setNotesOpen(false)
     setLastSeenReleaseNotes(appVersion)
@@ -229,7 +246,7 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       return []
     }
   }, [notes])
-  const notesFailed = notes.trim() !== '' && parsed.length === 0
+  const notesFailed = startupNotesUnavailable || (notes.trim() !== '' && parsed.length === 0)
   const summary = summarizeBlocks(parsed, 8)
 
   return (

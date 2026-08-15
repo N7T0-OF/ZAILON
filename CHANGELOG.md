@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.116.0] - 2026-08-15
+
+> **Fenêtre « Nouveautés » restaurée après chaque mise à jour** — y compris
+> via l'installeur téléchargé, plus seulement via l'updater interne.
+
+### Added
+
+- **`src/lib/releaseNotes.ts`** (pur, testé) : `parseSemver`, `compareSemver`,
+  `shouldShowReleaseNotes` — la décision d'afficher ne dépend plus de
+  `lastInstalledUpdate` (renseigné uniquement par l'updater interne), mais de
+  `appVersion > lastSeenReleaseNotesVersion`.
+- **Commande native `fetch_release_notes(version)`** : lit le corps de la
+  release GitHub précise (sans clé API, timeout 15 s) et retourne `None` —
+  jamais une erreur bloquante — si hors-ligne, rate-limit ou release absente.
+- **Effet démarrage** (`UpdateProvider`) : compare la version installée à la
+  dernière vue, récupère les notes et les affiche une seule fois par version.
+  En cas d'échec réseau, la fenêtre s'ouvre quand même avec le repli
+  « Voir sur GitHub ».
+
+### Changed
+
+- **Déduplication** : `parseSemver` est désormais partagé depuis
+  `releaseNotes.ts` (supprimé de la copie locale d'`UpdateProvider`).
+
 ## [1.115.0] - 2026-08-15
 
 > **Fix bouton « Détecter » dans la Bibliothèque** — le bouton était un

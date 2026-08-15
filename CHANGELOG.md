@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.105.0] - 2026-08-15
+
+> **UI ReShade FiveM** : diagnostic compact + assistant d'ID avec aperçu
+> avant/après et écriture avec backup — le flux complet de la spec §8-9, §12.
+
+### Added
+
+- **Bouton « ReShade FiveM »** (onglet Mods d'un jeu FiveM client, gated par
+  `fivem.profiles`) ouvrant le dialogue `FiveMReShadeDialog` :
+  - **Diagnostic compact** ✓/⚠/✕ : FiveM.app, CitizenFX.ini, dossiers
+    mods/citizen/plugins, chemin GTA V (`[Game] IVPath`) et ID ReShade5 ;
+  - **Assistant ID** : saisie + **aperçu avant/après** du fichier via
+    `setReShade5Id` (lib pure — aucune écriture sans validation) ;
+  - **Enregistrer** → `writeCitizenFx` (backup horodaté) ; **Retirer** →
+    `removeReShade5Id` (désinstallation propre, autres clés `[Addons]`
+    conservées) ;
+  - création de la section `[Addons]` si `CitizenFX.ini` est absent.
+- Garde-fous source (bouton/dialogue gated, écriture uniquement via lib pure)
+  — **536 tests ✅**, tsc ✅, build ✅, audit ✅.
+
 ## [1.104.0] - 2026-08-15
 
 > **Backend natif FiveM** : lecture/écriture sécurisée de `CitizenFX.ini` avec

@@ -66,10 +66,20 @@ Commandes Rust exposées via `native.ts` :
   dossiers `mods`/`citizen`/`plugins` et chemin GTA V (`[Game] IVPath`, lecture
   seule). Le chemin de `FiveM.app` n'est jamais codé en dur.
 
-## 4. Prochaines phases (non livrées ici)
+## 4. UI ReShade FiveM (livrée en 1.105.0)
 
-- **UI ReShade FiveM** : assistant d'ID (micro-fenêtre), lecture/écriture de
-  `CitizenFX.ini` via les commandes natives, aperçu avant/après.
+Bouton « **ReShade FiveM** » dans l'onglet Mods d'un jeu FiveM client (gated
+par `fivem.profiles` — feature removal §57). Le dialogue :
+
+1. **Diagnostic compact** (§12) : FiveM.app, CitizenFX.ini, dossiers
+   mods/citizen/plugins, GTA V (`IVPath`) et ID ReShade5 — ✓/⚠/✕ ;
+2. **Assistant ID** (§7-9) : saisie de l'ID, **aperçu avant/après** du
+   fichier via `setReShade5Id` (lib pure — aucune écriture sans validation) ;
+3. **Enregistrer** → `writeCitizenFx` (backup horodaté automatique) ;
+   **Retirer** → `removeReShade5Id` (désinstallation propre §20).
+
+## 5. Prochaines phases (non livrées ici)
+
 - **Gestionnaire de packs graphiques FiveM** : import `.zip/.rar/.7z`,
   classification interactive, installation par profil avec manifeste
   `zailon-manifest.json` et rollback.

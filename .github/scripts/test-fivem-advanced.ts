@@ -4,6 +4,11 @@ import { extractReShade5Id, hasReShade5Id, parseCitizenFx, removeReShade5Id, set
 import { classifyFiveMPack, detectFiveMStructure, fiveMReShadeCompatibility, isFiveMName } from '../../src/lib/fivemSupport.ts'
 import { groupTotalPlaytime, normalizeGameGroups, proposeGameGroups } from '../../src/lib/gameGroups.ts'
 import type { Game } from '../../src/types/index.ts'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 // ── CitizenFX.ini : éditeur sécurisé (spec §6, §8-9, §20) ───────────────────
 
@@ -149,6 +154,21 @@ test('groupTotalPlaytime : somme des membres, séparée des profils', () => {
   const games = [game('a', undefined, 'g1', 42), game('b', undefined, 'g1', 61), game('c', undefined, undefined, 23)]
   const total = groupTotalPlaytime(games, { id: 'g1', name: 'FiveM', memberGameIds: ['a', 'b'], createdAt: 0 })
   assert.equal(total, 103)
+})
+
+// ── Gating UI : le dialogue ReShade FiveM n'est atteignable que gated ───────
+
+test('GamesView : le bouton et le dialogue ReShade FiveM sont conditionnés par la gate fivem.profiles', () => {
+  const gamesView = readFileSync(join(root, 'src/components/Views/GamesView.tsx'), 'utf8')
+  assert.ok(gamesView.includes("fiveMProfiles && selectedGame.provider === 'FiveM Client' && <button"), 'bouton ReShade FiveM gated')
+  assert.ok(gamesView.includes('fiveMProfiles && fivemReShadeOpen'), 'dialogue ReShade FiveM gated')
+})
+
+test('le dialogue réutilise l’éditeur pur citizenfx (aucune écriture hors validation)', () => {
+  const dialog = readFileSync(join(root, 'src/components/FiveMReShadeDialog.tsx'), 'utf8')
+  assert.ok(dialog.includes('setReShade5Id'), 'aperçu via la lib pure')
+  assert.ok(dialog.includes('removeReShade5Id'), 'retrait via la lib pure')
+  assert.ok(dialog.includes('writeCitizenFx'), 'écriture avec backup')
 })
 
 test('normalizeGameGroups : retire les membres inexistants et les groupes vides', () => {

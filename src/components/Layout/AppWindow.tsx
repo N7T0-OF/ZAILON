@@ -12,9 +12,10 @@ import { VisualProfilesPage } from '../../visual-profiles/ui/VisualProfilesPage'
 import { AddonsView } from '../Views/AddonsView'
 import { FrostyEditorView } from '../Views/FrostyEditorView'
 import { StatisticsView } from '../Views/StatisticsView'
+import { SteamDetectionDialog } from '../SteamDetectionDialog'
 
 export function AppWindow() {
-  const { currentView } = useStore()
+  const { currentView, discoveryDialogOpen, setDiscoveryDialogOpen, importDetectedGames } = useStore()
 
   const View = ({
     home: HomeView,
@@ -49,6 +50,10 @@ export function AppWindow() {
         </main>
       </div>
       <TaskToasts />
+      {/* Fenêtre « Bibliothèque locale » partagée : le « + » de la sidebar et
+          « Détecter » de la Bibliothèque ouvrent EXACTEMENT la même fenêtre
+          (spec « Détection locale » §5-6). Portail → aucun impact layout. */}
+      {discoveryDialogOpen && <SteamDetectionDialog onClose={() => setDiscoveryDialogOpen(false)} onImport={importDetectedGames} />}
     </div>
   )
 }

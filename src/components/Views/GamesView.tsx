@@ -14,8 +14,7 @@ import { animationsReducedDuringGame, effectivePerformance } from '../../lib/per
 import { pickPrioritySession } from '../../lib/sessionPriority'
 import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { formatElapsedDuration, formatTime, timeAgo } from '../../utils'
-import { addonCapabilities, cyberpunkToolsAllowed, fiveMProfilesAllowed, frostyImportAllowed, hasCapability, mo2ImportAllowed, steamAdvancedAllowed, vortexImportAllowed } from '../../lib/addonGating'
-import { SteamDetectionDialog } from '../SteamDetectionDialog'
+import { addonCapabilities, cyberpunkToolsAllowed, fiveMProfilesAllowed, frostyImportAllowed, hasCapability, mo2ImportAllowed, vortexImportAllowed } from '../../lib/addonGating'
 import { GroupLibraryGrid } from '../GroupLibraryGrid'
 import { FiveMReShadeDialog } from '../FiveMReShadeDialog'
 import { FiveMPackDialog } from '../FiveMPackDialog'
@@ -88,7 +87,6 @@ export function GamesView() {
   // l'add-on Cyberpunk Advanced installé + activé (feature removal §57).
   const cyberpunkTools = cyberpunkToolsAllowed(capabilities, selectedGame?.name.toLocaleLowerCase().includes('cyberpunk') ?? false)
   // Feature removal §57 : Steam Advanced / FiveM Profiles / MO2 Importer.
-  const steamAdvanced = steamAdvancedAllowed(capabilities)
   const fiveMProfiles = fiveMProfilesAllowed(capabilities)
   const mo2Import = mo2ImportAllowed(capabilities)
   const vortexImport = vortexImportAllowed(capabilities)
@@ -100,9 +98,6 @@ export function GamesView() {
   const isLaunching = useStore(state => state.isLaunching)
   const launchProgress = useStore(state => state.launchProgress)
   const endSession = useStore(state => state.endSession)
-  const addGameFromExecutable = useStore(state => state.addGameFromExecutable)
-  const addDetectedGames = useStore(state => state.addDetectedGames)
-  const importDetectedGames = useStore(state => state.importDetectedGames)
   const removeGame = useStore(state => state.removeGame)
   const setGamePath = useStore(state => state.setGamePath)
   const setModsPath = useStore(state => state.setModsPath)
@@ -139,7 +134,7 @@ export function GamesView() {
   const setLibraryFilter = useStore(state => state.setLibraryFilter)
   const libraryScrollRef = useRef<HTMLDivElement>(null)
   const [profileName, setProfileName] = useState('')
-  const [steamDialogOpen, setSteamDialogOpen] = useState(false)
+  const setDiscoveryDialogOpen = useStore(state => state.setDiscoveryDialogOpen)
   const [fivemReShadeOpen, setFivemReShadeOpen] = useState(false)
   const [fivemPackOpen, setFivemPackOpen] = useState(false)
   const [fivemAssistantOpen, setFivemAssistantOpen] = useState(false)
@@ -257,7 +252,7 @@ export function GamesView() {
   const clearBulkSelection = () => setSelectedModIds(new Set())
 
   if (!selectedGame || !selectedProfile) {
-    return <div className="flex h-full flex-col items-center justify-center gap-3 text-center"><p className="text-sm text-white/50">Ajoutez un jeu pour gérer ses fichiers de mods.</p><button onClick={() => void addGameFromExecutable()} className="rounded-lg bg-gold px-3 py-2 text-xs font-semibold text-[var(--zailon-accent-text)]">Ajouter un jeu</button></div>
+    return <div className="flex h-full flex-col items-center justify-center gap-3 text-center"><p className="text-sm text-white/50">Ajoutez un jeu pour gérer ses fichiers de mods.</p><button onClick={() => setDiscoveryDialogOpen(true)} className="rounded-lg bg-gold px-3 py-2 text-xs font-semibold text-[var(--zailon-accent-text)]">Ajouter un jeu</button></div>
   }
 
   const browseExecutable = async () => {
@@ -455,14 +450,9 @@ export function GamesView() {
       onViewMode={setLibraryViewMode}
       scrollRef={libraryScrollRef}
       onOpen={gameId => { setSelectedGame(gameId); setGamesBrowsing(false) }}
-      onAddGame={() => void addGameFromExecutable()}
-      onDetect={() => { if (steamAdvanced) setSteamDialogOpen(true); else void addDetectedGames() }}
+      onAddGame={() => setDiscoveryDialogOpen(true)}
+      onDetect={() => setDiscoveryDialogOpen(true)}
     />
-    {/* Bug #Détecter : la fenêtre de détection doit être rendue AUSSI dans la
-        vue Bibliothèque (grid) — l'early return ci-dessus court-circuitait
-        le rendu de la ligne 504 (réservée à la page jeu). Portail → aucun
-        impact layout. */}
-    {steamAdvanced && steamDialogOpen && <SteamDetectionDialog onClose={() => setSteamDialogOpen(false)} onImport={importDetectedGames} />}
   }
 
   const heroImage = resourceUrl(selectedGame.resources?.heroPath || selectedGame.resources?.bannerPath || selectedGame.resources?.backgroundPath || selectedGame.resources?.coverPath || selectedGame.backgroundArt)
@@ -549,7 +539,6 @@ export function GamesView() {
       {tab === 'diagnostic' && <GameDiagnosticPanel game={selectedGame} profile={selectedProfile} profileMods={profileMods} onOpenConfiguration={() => setTab('configuration')} onRepairMo2={cyberpunkTools ? () => void repairMo2Deployment() : undefined} showRed4extTools={cyberpunkTools} repairBusy={deploymentToolBusy} conflicts={resolvedConflicts} onSetWinner={(path, winnerId) => setConflictWinner(path, winnerId)} initialSection={diagSection} />}
     </section>
 
-    {steamAdvanced && steamDialogOpen && <SteamDetectionDialog onClose={() => setSteamDialogOpen(false)} onImport={importDetectedGames} />}
     {importOpen && <ModImportDialog gameId={selectedGame.id} profileId={selectedProfile.id} gameName={selectedGame.name} destination={selectedGame.modsPath} onClose={() => setImportOpen(false)} onImported={() => void scanMods(selectedGame.id)} />}
     {mo2Import && mo2ImportOpen && <Mo2ImportDialog gameId={selectedGame.id} gameName={selectedGame.name} onClose={() => setMo2ImportOpen(false)} onImported={async result => completeMo2Import(selectedGame.id, result)} />}
     {fiveMProfiles && fivemReShadeOpen && selectedGame && <FiveMReShadeDialog installRoot={resolvedInstallation?.rootPath || selectedGame.installDirectory || selectedGame.execPath || ''} onClose={() => setFivemReShadeOpen(false)} />}

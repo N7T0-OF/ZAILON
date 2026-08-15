@@ -341,6 +341,10 @@ async function automaticArtworkForGame(game: Game, artworkKeys: { steamGridDbKey
 
 export interface Store {
   currentView: ViewType
+  /** Fenêtre « Bibliothèque locale » partagée (sidebar « + » et Bibliothèque
+   * → Détecter). Transitoire, jamais persistée. */
+  discoveryDialogOpen: boolean
+  setDiscoveryDialogOpen: (open: boolean) => void
   activeGameTab: GameTab
   games: Game[]
   selectedGameId?: string
@@ -863,6 +867,8 @@ export function migratePersistedState(persisted: unknown) {
 
 export const useStore = create<Store>()(persist((set, get) => ({
   currentView: 'home',
+  discoveryDialogOpen: false,
+  setDiscoveryDialogOpen: open => set({ discoveryDialogOpen: open }),
   activeGameTab: 'mods',
   addons: [],
   frostyProjects: [],

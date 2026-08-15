@@ -21,7 +21,7 @@ export function Sidebar() {
   const currentView = useStore(state => state.currentView)
   const setView = useStore(state => state.setView)
   const setGamesBrowsing = useStore(state => state.setGamesBrowsing)
-  const addGameFromExecutable = useStore(state => state.addGameFromExecutable)
+  const setDiscoveryDialogOpen = useStore(state => state.setDiscoveryDialogOpen)
   const showSupportButton = useStore(state => state.showSupportButton)
   const language = useStore(state => state.language)
   const addons = useStore(state => state.addons)
@@ -49,7 +49,7 @@ export function Sidebar() {
     </nav>
 
     <div className="flex-1" />
-    <button type="button" onClick={() => void addGameFromExecutable()} title="Ajouter un jeu ou logiciel" aria-label="Ajouter un jeu ou logiciel" className="mb-2 flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] text-white/34 transition-colors hover:border-white/18 hover:bg-white/[0.06] hover:text-white"><Plus size={13} /></button>
+    <button type="button" onClick={() => setDiscoveryDialogOpen(true)} title="Ajouter un jeu ou logiciel" aria-label="Ajouter un jeu ou logiciel" className="mb-2 flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.08] text-white/34 transition-colors hover:border-white/18 hover:bg-white/[0.06] hover:text-white"><Plus size={13} /></button>
     {showSupportButton && <button type="button" onClick={() => setSupportOpen(true)} title={language === 'fr' ? 'Me soutenir' : 'Support me'} aria-label={language === 'fr' ? 'Me soutenir' : 'Support me'} className="mb-2 flex h-8 w-8 items-center justify-center rounded-full text-rose-200/48 transition-colors hover:bg-rose-200/[0.07] hover:text-rose-100"><Heart size={13} /></button>}
     <NavButton item={{ id: 'settings', icon: Settings, label: 'Paramètres' }} active={currentView === 'settings'} onClick={() => setView('settings')} />
   </aside>{supportOpen && <SupportModal onClose={() => setSupportOpen(false)} />}</>

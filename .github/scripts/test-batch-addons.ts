@@ -91,9 +91,12 @@ test('store : les actions Steam/FiveM/MO2 sont gardées par les capacités', () 
   assert.ok(store.includes('mo2ImportAllowed(addonCapabilities(get().addons))'), 'completeMo2Import gardé')
 })
 
-test('GamesView : détection Steam, bannière FiveM et bouton MO2 conditionnés par les gates', () => {
+test('GamesView : la détection locale n’est plus gated, les features add-on le restent', () => {
   const gamesView = readFileSync(join(root, 'src/components/Views/GamesView.tsx'), 'utf8')
-  assert.ok(gamesView.includes('steamAdvanced && steamDialogOpen'), 'dialogue Steam gated')
+  // Spec « Détection locale » §5-6 : la fenêtre « Bibliothèque locale » est un
+  // service CORE (Steam/Epic/Registre), plus jamais le privilège d’un add-on.
+  assert.ok(!gamesView.includes('steamAdvanced && steamDialogOpen'), 'dialogue de détection ne doit plus être gated')
+  assert.ok(!gamesView.includes('addDetectedGames'), 'plus de scan silencieux en arrière-plan')
   assert.ok(gamesView.includes('fiveMProfiles && selectedGame.provider'), 'bannière FiveM gated')
   assert.ok(gamesView.includes('mo2Import &&'), 'bouton MO2 gated')
 })

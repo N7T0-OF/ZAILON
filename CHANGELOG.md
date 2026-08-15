@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.124.0] - 2026-08-15
+
+> **Détection locale unifiée** : la fenêtre « Bibliothèque locale » devient un
+> service Core partagé — le « + » de la barre latérale, « Détecter » de la
+> Bibliothèque, l’Accueil et la palette ouvrent exactement la même fenêtre.
+
+### Fixed
+
+- **« Détecter » ne fait plus un scan silencieux en arrière-plan** : sans
+  l’add-on Steam Advanced, le bouton lançait `addDetectedGames` dans le
+  vide (aucune fenêtre affichée, aucun retour). Il ouvre désormais toujours
+  la fenêtre « Bibliothèque locale » (spec §6).
+- **Le « + » de la barre latérale ouvrait un file picker** (système différent
+  de « Détecter »). Il ouvre maintenant la même micro-fenêtre (spec §5) :
+  choix rapide/complète → analyse → résultats → sélection → ajout.
+- **Accueil et palette unifiés** : « Ajouter », « Détecter » (Accueil) et les
+  actions de la palette de commandes ouvrent la même fenêtre partagée — fin
+  des « deux systèmes différents ».
+
+### Changed
+
+- La fenêtre est rendue **une seule fois** dans `AppWindow` (portail) et
+  pilotée par `discoveryDialogOpen` (état transitoire, jamais persisté).
+  HomeView/GamesView n’ont plus d’instance locale.
+- La détection locale (Steam, Epic, Registre, FiveM) est un service Core,
+  **plus le privilège d’un add-on** : `scan_library` reste accessible sans
+  Steam Advanced. Le dialogue est indépendant du gate.
+
 ## [1.123.0] - 2026-08-15
 
 > **Mise à niveau Bibliothèque / Add-ons — phase 1** : sauvegarde définitive

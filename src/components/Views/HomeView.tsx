@@ -18,7 +18,6 @@ import { GameContextMenu } from '../GameContextMenu'
 import { GameResourcesDialog } from '../GameResourcesDialog'
 import { FallbackArtwork } from '../UI/FallbackArtwork'
 import { SessionStopModal } from '../SessionStopModal'
-import { SteamDetectionDialog } from '../SteamDetectionDialog'
 import { BackgroundMediaLayer } from '../UI/BackgroundMediaLayer'
 import { ProfileSwitcherPopover } from '../UI/ProfileSwitcherPopover'
 import { ZailonSwitch } from '../UI/ZailonSwitch'
@@ -31,8 +30,7 @@ export function HomeView() {
   const selectedProfile = useStore(getSelectedProfile)
   const setSelectedGame = useStore(state => state.setSelectedGame)
   const setGamesBrowsing = useStore(state => state.setGamesBrowsing)
-  const addGameFromExecutable = useStore(state => state.addGameFromExecutable)
-  const importDetectedGames = useStore(state => state.importDetectedGames)
+  const setDiscoveryDialogOpen = useStore(state => state.setDiscoveryDialogOpen)
   const setGameResources = useStore(state => state.setGameResources)
   const launchSelectedGame = useStore(state => state.launchSelectedGame)
   const isLaunching = useStore(state => state.isLaunching)
@@ -62,7 +60,6 @@ export function HomeView() {
   // Visual Profiles est installé et activé — jamais dans le Core seul.
   const capabilities = useMemo(() => addonCapabilities(addons), [addons])
   const hasVisualProfiles = hasCapability(capabilities, 'visual.profiles')
-  const [discoveryOpen, setDiscoveryOpen] = useState(false)
   const [customizeOpen, setCustomizeOpen] = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const profileButtonRef = useRef<HTMLButtonElement>(null)
@@ -125,12 +122,11 @@ export function HomeView() {
           <h1 className="mt-2 font-display text-5xl font-black uppercase leading-[0.88] text-white">Créez votre<br />bibliothèque</h1>
           <p className="mx-auto mt-4 max-w-md text-[11px] leading-relaxed text-white/38">Ajoutez un exécutable local ou détectez les bibliothèques installées sur cet appareil.</p>
           <div className="mt-6 flex flex-wrap justify-center gap-2">
-            <button type="button" onClick={() => void addGameFromExecutable()} className="flex items-center gap-2 rounded-full bg-[var(--zailon-accent)] px-5 py-2.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--zailon-accent-text)] hover:bg-[var(--zailon-accent-hover)]"><FolderPlus size={12} /> Ajouter</button>
-            <button type="button" onClick={() => setDiscoveryOpen(true)} className="flex items-center gap-2 rounded-full border border-white/[0.12] bg-black/22 px-5 py-2.5 text-[11px] uppercase tracking-[0.12em] text-white/58 backdrop-blur hover:bg-white/[0.07] hover:text-white"><Radar size={12} /> Détecter</button>
+            <button type="button" onClick={() => setDiscoveryDialogOpen(true)} className="flex items-center gap-2 rounded-full bg-[var(--zailon-accent)] px-5 py-2.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--zailon-accent-text)] hover:bg-[var(--zailon-accent-hover)]"><FolderPlus size={12} /> Ajouter</button>
+            <button type="button" onClick={() => setDiscoveryDialogOpen(true)} className="flex items-center gap-2 rounded-full border border-white/[0.12] bg-black/22 px-5 py-2.5 text-[11px] uppercase tracking-[0.12em] text-white/58 backdrop-blur hover:bg-white/[0.07] hover:text-white"><Radar size={12} /> Détecter</button>
           </div>
         </div>
       </div>
-      {discoveryOpen && <SteamDetectionDialog onClose={() => setDiscoveryOpen(false)} onImport={importDetectedGames} />}
     </>
   }
 
@@ -252,7 +248,7 @@ export function HomeView() {
               <p className="font-mono text-[11px] uppercase tracking-[0.15em] text-white/74">{isLaunching ? 'Préparation' : activeSession ? SESSION_STATE_LABELS[activeSession.state] || 'En jeu' : isPlaying ? 'En jeu' : 'Prêt à jouer'}</p>
               <p className="mt-0.5 max-w-72 truncate text-[11px] text-white/36">{isLaunching ? launchProgress?.message || 'Analyse des mods…' : activeSession?.state === 'WaitingForGame' && activeSession.reattachUntil ? `Rattachement dans ${Math.max(0, Math.ceil((activeSession.reattachUntil - Date.now()) / 1000))} s…` : activeSession?.state === 'GameLost' ? 'Jeu non détecté' : isPlaying ? formatSeconds(sessionTime) : selectedGame.lastPlayed ? timeAgo(selectedGame.lastPlayed) : 'Jamais lancé'}</p>
             </div>
-            <CircleAction label="Détecter" onClick={() => setDiscoveryOpen(true)}><Radar size={11} /></CircleAction>
+            <CircleAction label="Détecter" onClick={() => setDiscoveryDialogOpen(true)}><Radar size={11} /></CircleAction>
             <CircleAction label="Modifier l’apparence" onClick={() => setResourcesGameId(selectedGame.id)}><Palette size={11} /></CircleAction>
             <CircleAction label="Personnaliser l’Accueil" onClick={() => setCustomizeOpen(true)}><SlidersHorizontal size={11} /></CircleAction>
             <CircleAction label="Actions du jeu" onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); openMenu({ x: rect.right - 252, y: rect.bottom + 5 }) }}><MoreHorizontal size={12} /></CircleAction>
@@ -389,7 +385,6 @@ export function HomeView() {
       </div>
     </section>
 
-    {discoveryOpen && <SteamDetectionDialog onClose={() => setDiscoveryOpen(false)} onImport={importDetectedGames} />}
     {resourcesGame && <GameResourcesDialog game={resourcesGame} onClose={() => setResourcesGameId(undefined)} onChange={resources => setGameResources(resourcesGame.id, resources)} />}
     {/* Choix rapide du profil (spec §16-19) : le nom ouvre la liste complète. */}
     <ProfileSwitcherPopover

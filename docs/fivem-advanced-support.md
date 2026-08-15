@@ -113,7 +113,26 @@ les fichiers GTA V restent exclus. Le dialogue affiche le pack installé avec un
 bouton **Désinstaller** (rollback), et l'installation est non destructive
 (backup systématique avant remplacement).
 
-## 7. Prochaines phases (non livrées ici)
+## 7. Assistant d'installation FiveM (livré en 1.110.0)
 
-- Assistant d'installation FiveM (détection → création de profil → première
-  initialisation de l'environnement).
+Bouton « **Assistant FiveM** » (onglet Mods d'un jeu FiveM client, gated
+`fivem.profiles`) → `FiveMInstallAssistant` :
+
+1. **Détection** (spec §1) : FiveM.app, chemin GTA V (`[Game] IVPath`),
+   dossiers mods/citizen/plugins et CitizenFX.ini — lecture seule, jamais
+   codé en dur ;
+2. **Création de profil** (spec §2) : nom (défaut « FiveM — Clean » sans
+   conflit) + options de copie (config/mods/ReShade/plugins/graphiques) —
+   décochez tout pour un profil propre ;
+3. **État d'initialisation** (spec §3) : `fivemProfile.ts` (pur) déduit
+   `ready`/`partial`/`missing` de la structure détectée — FiveM génère
+   lui-même ses dossiers au premier lancement, ZAILON ne crée jamais une
+   structure FiveM de toutes pièces.
+
+`createFiveMProfile` (store) crée le profil et mémorise les options de copie
+et l'état `pending` dans `installOptions` (fivem_copy_*, fivem_init).
+
+## 8. Prochaines phases (non livrées ici)
+
+- Déploiement initial après premier lancement : marquer le profil
+  « initialisé » quand la structure est détectée au lancement suivant.

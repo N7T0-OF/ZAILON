@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.110.0] - 2026-08-15
+
+> **Assistant d'installation FiveM** — dernière étape du support FiveM avancé :
+> détection de l'environnement, création de profil (propre ou avec options de
+> copie) et état d'initialisation déduit de la structure réelle.
+
+### Added
+
+- **`src/lib/fivemProfile.ts`** (pur, 4 tests) : `fiveMProfileInitState`
+  (`ready`/`partial`/`missing`), `fiveMMissingItems`, `fiveMInitLabel`,
+  `fiveMCopyActive` et `nextCleanFiveMProfileName` (nom propre sans conflit) —
+  FiveM génère lui-même sa structure au premier lancement, ZAILON ne la crée
+  jamais de toutes pièces.
+- **`createFiveMProfile`** (store) : création d'un profil FiveM avec options de
+  copie (config/mods/ReShade/plugins/graphiques) et état `pending` mémorisés
+  dans `installOptions` (fivem_copy_*, fivem_init).
+- **Bouton « Assistant FiveM »** (onglet Mods, gated `fivem.profiles`) →
+  `FiveMInstallAssistant` : détection (FiveM.app, GTA V, dossiers, ini),
+  création avec options, état d'initialisation — **560 tests ✅**, tsc ✅,
+  build ✅, audit ✅.
+
 ## [1.109.0] - 2026-08-15
 
 > **Packs graphiques FiveM — application réelle + rollback** : inventaire natif

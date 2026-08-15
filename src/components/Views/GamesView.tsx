@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, Boxes, CheckSquare2, ChevronDown, ChevronLeft, Copy, Download, ExternalLink, FolderInput, FolderOpen, FolderPlus, Gamepad2, HardDrive, Image as ImageIcon, Loader2, Lock, Monitor, Pause, Play, Plus, Radar, RefreshCw, RotateCcw, Search, ShieldAlert, ShieldCheck, Star, Tag, Trash2, Unlock, Users, Wrench, X } from 'lucide-react'
+import { AlertTriangle, Archive, Boxes, CheckSquare2, ChevronDown, ChevronLeft, Copy, Download, ExternalLink, FolderInput, FolderOpen, FolderPlus, Gamepad2, HardDrive, Image as ImageIcon, Loader2, Lock, Monitor, Pause, Play, Plus, Radar, RefreshCw, RotateCcw, Search, ShieldAlert, ShieldCheck, Sparkles, Star, Tag, Trash2, Unlock, Users, Wrench, X } from 'lucide-react'
 import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -18,6 +18,7 @@ import { addonCapabilities, cyberpunkToolsAllowed, fiveMProfilesAllowed, hasCapa
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
 import { FiveMReShadeDialog } from '../FiveMReShadeDialog'
 import { FiveMPackDialog } from '../FiveMPackDialog'
+import { FiveMInstallAssistant } from '../FiveMInstallAssistant'
 import type { Game, GameSession, GameTab, Mod, ModImportCandidate, Profile, SensitiveFileAssessment, SensitiveImportAction } from '../../types'
 import { VisualGamePanel } from '../../visual-profiles/ui/VisualGamePanel'
 import { resolveGameInstallation } from '../../lib/installations'
@@ -133,6 +134,7 @@ export function GamesView() {
   const [steamDialogOpen, setSteamDialogOpen] = useState(false)
   const [fivemReShadeOpen, setFivemReShadeOpen] = useState(false)
   const [fivemPackOpen, setFivemPackOpen] = useState(false)
+  const [fivemAssistantOpen, setFivemAssistantOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const profileButtonRef = useRef<HTMLButtonElement>(null)
@@ -511,6 +513,7 @@ export function GamesView() {
           <button onClick={() => void repairStagedImports()} title="Re-stager chaque paquet importé depuis sa source enregistrée (racines de jeu corrigées)" className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05]"><RotateCcw size={13} />Réparer les racines des imports</button>
           {fiveMProfiles && selectedGame.provider === 'FiveM Client' && <button onClick={() => setFivemReShadeOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-sky-300/18 bg-sky-300/[0.035] px-3 py-2 text-[11px] text-sky-100/68 hover:bg-sky-300/[0.07]"><ShieldCheck size={13} />ReShade FiveM</button>}
           {fiveMProfiles && selectedGame.provider === 'FiveM Client' && <button onClick={() => setFivemPackOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-sky-300/18 bg-sky-300/[0.035] px-3 py-2 text-[11px] text-sky-100/68 hover:bg-sky-300/[0.07]"><Boxes size={13} />Packs graphiques</button>}
+          {fiveMProfiles && selectedGame.provider === 'FiveM Client' && <button onClick={() => setFivemAssistantOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-sky-300/18 bg-sky-300/[0.035] px-3 py-2 text-[11px] text-sky-100/68 hover:bg-sky-300/[0.07]"><Sparkles size={13} />Assistant FiveM</button>}
           {cyberpunkTools && <button onClick={() => void repairCyberpunkStructure()} className="flex items-center gap-1.5 rounded-lg border border-amber-300/18 bg-amber-300/[0.035] px-3 py-2 text-[11px] text-amber-100/68 hover:bg-amber-300/[0.07]"><Wrench size={13} />Réparer les racines Cyberpunk</button>}
           {bulkHistory.some(operation => operation.gameId === selectedGame.id && operation.undoable) && <button onClick={() => void undoLastBulkOperation()} title="Annuler la dernière opération groupée" className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]"><RotateCcw size={13} />Annuler</button>}
           <label className="flex items-center gap-2 rounded-lg border border-white/[0.08] px-2.5 text-[11px] text-white/55"><input ref={selectAllRef} type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedModIds(current => { const next = new Set(current); if (allVisibleSelected) filteredMods.forEach(mod => next.delete(mod.id)); else filteredMods.forEach(mod => next.add(mod.id)); return next })} className="accent-gold" />Tout visible <span className="text-white/30">{selectedVisible}/{filteredMods.length}</span></label>
@@ -537,6 +540,7 @@ export function GamesView() {
     {mo2Import && mo2ImportOpen && <Mo2ImportDialog gameId={selectedGame.id} gameName={selectedGame.name} onClose={() => setMo2ImportOpen(false)} onImported={async result => completeMo2Import(selectedGame.id, result)} />}
     {fiveMProfiles && fivemReShadeOpen && selectedGame && <FiveMReShadeDialog installRoot={resolvedInstallation?.rootPath || selectedGame.installDirectory || selectedGame.execPath || ''} onClose={() => setFivemReShadeOpen(false)} />}
     {fiveMProfiles && fivemPackOpen && selectedGame && <FiveMPackDialog gameName={selectedGame.name} installRoot={resolvedInstallation?.rootPath || selectedGame.installDirectory || selectedGame.execPath || ''} onClose={() => setFivemPackOpen(false)} />}
+    {fiveMProfiles && fivemAssistantOpen && selectedGame && <FiveMInstallAssistant gameId={selectedGame.id} gameName={selectedGame.name} installRoot={resolvedInstallation?.rootPath || selectedGame.installDirectory || selectedGame.execPath || ''} onClose={() => setFivemAssistantOpen(false)} />}
     {bulkDialog && <BulkActionDialog mode={bulkDialog} count={selectedModIds.size} source={selectedProfile} profiles={selectedGame.profiles} onClose={() => setBulkDialog(undefined)} onConfirm={async value => {
       const ids = [...selectedModIds]
       if (bulkDialog === 'move' || bulkDialog === 'copy') await bulkTransferMods(ids, value, bulkDialog)

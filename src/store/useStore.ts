@@ -6,6 +6,7 @@ import { ensurePrincipalInstallation, installationDisplayName, resolveGameInstal
 import { normalizeGameGroups } from '../lib/gameGroups'
 import { resolveGameIdentity } from '../lib/gameIdentity'
 import { lastUsedProfileId } from '../lib/perGameConfig'
+import { fiveMCopyActive, type FiveMCopyOptions } from '../lib/fivemProfile'
 import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
 import { validateAddonManifest } from '../lib/addons'
 import type { AddonSource, InstalledAddon, ZailonAddonManifest } from '../lib/addons'
@@ -552,6 +553,7 @@ export interface Store {
   deleteRestorePoint: (gameId: string, pointId: string) => void
   setAutoRestorePoints: (value: boolean) => void
   addProfile: (name: string) => void
+  createFiveMProfile: (gameId: string, name: string, copyOptions: FiveMCopyOptions) => void
   prepareCollectionProfile: (collection: NexusCollectionDetail, name: string, includeAdult: boolean) => Promise<string | undefined>
   installCollectionDownloads: (gameId: string, installId: string, gameName: string) => Promise<boolean>
   duplicateProfile: (profileId: string) => void
@@ -1343,6 +1345,39 @@ export const useStore = create<Store>()(persist((set, get) => ({
       games: state.games.map(item => item.id === game.id ? { ...item, profiles: [...item.profiles, next] } : item),
       selectedProfileId: next.id,
       notice: `Profil vide « ${next.name} » créé : 0 mod actif, aucun réglage hérité.`,
+    }))
+    if (native.isDesktop()) void native.syncProfileState(game.id, next).then(paths => {
+      set(state => ({ games: updateProfile(state.games, game.id, next.id, profile => withProfilePaths(profile, paths)) }))
+    }).catch(error => set({ notice: `Profil créé localement, mais sa persistance native a échoué : ${asError(error)}` }))
+  },
+  createFiveMProfile: (gameId, name, copyOptions) => {
+    const game = get().games.find(item => item.id === gameId)
+    if (!game || !name.trim()) return
+    const next: Profile = {
+      id: createId(),
+      gameId: game.id,
+      name: name.trim(),
+      modStates: {},
+      playtime: 0,
+      createdAt: Date.now(),
+      isDefault: false,
+      // Assistant FiveM (spec §2-3) : les options de copie et l'état
+      // d'initialisation sont mémorisés — FiveM génère lui-même sa structure
+      // au premier lancement (ZAILON ne la crée jamais de toutes pièces).
+      installOptions: {
+        fivem_copy_config: copyOptions.copyConfig,
+        fivem_copy_mods: copyOptions.copyMods,
+        fivem_copy_reshade: copyOptions.copyReshade,
+        fivem_copy_plugins: copyOptions.copyPlugins,
+        fivem_copy_graphics: copyOptions.copyGraphics,
+        fivem_init: 'pending',
+      },
+    }
+    const neutral = fiveMCopyActive(copyOptions) ? '' : ' (base propre, aucun réglage hérité)'
+    set(state => ({
+      games: state.games.map(item => item.id === game.id ? { ...item, profiles: [...item.profiles, next] } : item),
+      selectedProfileId: next.id,
+      notice: `Profil FiveM « ${next.name} » créé${neutral} — premier lancement requis pour initialiser l'environnement.`,
     }))
     if (native.isDesktop()) void native.syncProfileState(game.id, next).then(paths => {
       set(state => ({ games: updateProfile(state.games, game.id, next.id, profile => withProfilePaths(profile, paths)) }))

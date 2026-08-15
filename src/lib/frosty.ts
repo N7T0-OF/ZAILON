@@ -204,6 +204,42 @@ export function frostyPlatformStrategy(
   return { platform, strategy: 'native', datapathFixRecommended: false, pluginConflict }
 }
 
+/** Configuration persistée des plugins de lancement Frosty (spec « Fix Frosty —
+ * activation persistante » §1). Toujours validée avant écriture : DatapathFix et
+ * Launch Platform Plugin ne sont jamais actifs ensemble. */
+export interface FrostyPluginConfig {
+  datapathFix: boolean
+  launchPlatformPlugin: boolean
+}
+
+export const FROSTY_PLUGIN_CONFLICT_NOTICE =
+  'Conflit Frosty : DatapathFix et Launch Platform Plugin ne peuvent pas être actifs ensemble. L\'activation a été refusée.'
+
+export interface FrostyPluginToggleResult {
+  config: FrostyPluginConfig
+  /** Le changement a été refusé (conflit) — l'état reste inchangé. */
+  rejected: boolean
+  conflict: boolean
+  notice?: string
+}
+
+/** Validation transactionnelle avant écriture (spec §1) : si le patch créerait
+ * un conflit (les deux plugins actifs), le changement est REFUSÉ et l'état
+ * précédent est conservé — jamais d'état « impossible » écrit silencieusement.
+ * Désactiver un plugin (pour corriger un conflit hérité) reste accepté. */
+export function applyFrostyPluginToggle(current: FrostyPluginConfig, patch: Partial<FrostyPluginConfig>): FrostyPluginToggleResult {
+  const next = { ...current, ...patch }
+  if (next.datapathFix && next.launchPlatformPlugin) {
+    return { config: current, rejected: true, conflict: true, notice: FROSTY_PLUGIN_CONFLICT_NOTICE }
+  }
+  return { config: next, rejected: false, conflict: false }
+}
+
+/** Clé de stockage par jeu + profil (spec §1 : la config vit dans le profil). */
+export function frostyPluginConfigKey(gameId: string, profileId: string): string {
+  return `${gameId}:${profileId}`
+}
+
 /** FrostyConflictDetector (§41, §87) : gros overhauls concurrents dans le même profil. */
 export const FROSTY_OVERHAUL_CONFLICTS: Array<{ names: string[]; warning: string }> = [
   {

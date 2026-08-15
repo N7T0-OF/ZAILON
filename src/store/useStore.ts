@@ -9,6 +9,7 @@ import { lastUsedProfileId } from '../lib/perGameConfig'
 import { fiveMCopyActive, type FiveMCopyOptions } from '../lib/fivemProfile'
 import { vortexProfileName } from '../lib/vortexImport'
 import { frostyProfileName } from '../lib/frostyImport'
+import { applyFrostyPluginToggle, frostyPluginConfigKey, type FrostyPluginConfig } from '../lib/frosty'
 import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
 import { validateAddonManifest } from '../lib/addons'
 import type { AddonSource, InstalledAddon, ZailonAddonManifest } from '../lib/addons'
@@ -501,6 +502,11 @@ export interface Store {
   deleteGameGroup: (id: string) => void
   toggleGameGroupPinned: (id: string) => void
   moveGameGroup: (id: string, direction: -1 | 1) => void
+  // Configuration persistée des plugins de lancement Frosty, par jeu + profil
+  // (spec « Fix Frosty — activation persistante » §1). Transactionnelle : une
+  // activation créant un conflit est refusée, jamais écrite silencieusement.
+  frostyPluginConfig: Record<string, FrostyPluginConfig>
+  setFrostyPluginConfig: (gameId: string, profileId: string, patch: Partial<FrostyPluginConfig>) => void
   notificationHistory: UiNotification[]
   notice?: string
   // Add-ons (spec §1-83) : jamais chargés au démarrage — état installé/activé
@@ -810,6 +816,7 @@ export function migratePersistedState(persisted: unknown) {
     taskAutoReduceImports: state.taskAutoReduceImports ?? true,
     libraryViewMode: state.libraryViewMode || 'grid',
     libraryFilter: state.libraryFilter || 'all',
+    frostyPluginConfig: state.frostyPluginConfig || {},
     homeWidgets: normalizeHomeWidgets(state.homeWidgets),
     homeLayoutPreset: state.homeLayoutPreset ?? (state.homeWidgets ? 'custom' : 'standard'),
     notificationCenterEnabled: state.notificationCenterEnabled ?? true,
@@ -957,6 +964,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   accentColor: '#f3faf8',
   bulkHistory: [],
   gameGroups: [],
+  frostyPluginConfig: {},
   notificationHistory: [],
   setView: currentView => set(state => ({ currentView, addonsNudgePending: currentView === 'addons' ? false : state.addonsNudgePending })),
   clearAddonsNudge: () => set({ addonsNudgePending: false }),
@@ -1047,6 +1055,16 @@ export const useStore = create<Store>()(persist((set, get) => ({
   moveGameGroup: (id, direction) => set(state => ({
     gameGroups: reorderArray(state.gameGroups, state.gameGroups.findIndex(group => group.id === id), direction),
   })),
+  setFrostyPluginConfig: (gameId, profileId, patch) => {
+    const key = frostyPluginConfigKey(gameId, profileId)
+    const current = get().frostyPluginConfig[key] ?? { datapathFix: false, launchPlatformPlugin: false }
+    const result = applyFrostyPluginToggle(current, patch)
+    if (result.rejected) {
+      set({ notice: result.notice })
+      return
+    }
+    set(state => ({ frostyPluginConfig: { ...state.frostyPluginConfig, [key]: result.config } }))
+  },
 
   // Frosty Editor (spec §10-13) : projets persistés hors du dossier jeu.
   upsertFrostyProject: project => set(state => ({
@@ -3392,6 +3410,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     taskAutoReduceImports: state.taskAutoReduceImports,
     libraryViewMode: state.libraryViewMode,
     libraryFilter: state.libraryFilter,
+    frostyPluginConfig: state.frostyPluginConfig,
     homeWidgets: state.homeWidgets,
     homeLayoutPreset: state.homeLayoutPreset,
     notificationCenterEnabled: state.notificationCenterEnabled,

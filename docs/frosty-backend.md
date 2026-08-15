@@ -83,6 +83,18 @@ Bibliothèque > Jeu > Configuration > **Frosty** :
 - « Tester le profil » (contrôles purs, sans lancer le jeu) ;
 - rappel : jamais initialisé au démarrage.
 
+## Activation persistante et transactionnelle (spec « Fix Frosty — activation »)
+
+Les switches DatapathFix / Launch Platform Plugin ne sont plus un état local
+(qui retombait à `false` à chaque ouverture) : ils vivent dans le store,
+persistés par **jeu + profil** (`frostyPluginConfig`, clé `gameId:profileId`).
+
+`applyFrostyPluginToggle(current, patch)` (pur, testé) valide AVANT écriture :
+activer un plugin alors que l'autre est déjà actif est **refusé** (rollback sur
+l'état précédent + notification) — jamais d'état « impossible » écrit
+silencieusement. Désactiver un plugin (correction de conflit hérité) reste
+accepté. L'état est rechargé au lancement suivant.
+
 ## Suivi de chaîne de lancement (spec « Fix Frosty — suivi de chaîne »)
 
 Un jeu Frosty est **launcher-based** : la chaîne réelle est

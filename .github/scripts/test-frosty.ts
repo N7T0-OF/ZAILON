@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  applyFrostyPluginToggle,
   buildFrostyStaging,
   classifyFrostyPackage,
   compareFrostyVersions,
@@ -8,6 +9,7 @@ import {
   frostyFingerprintKey,
   frostyFingerprintsEqual,
   frostyOverhaulConflict,
+  frostyPluginConfigKey,
   frostyPlatformStrategy,
   frostyVersionCompatibilityAlert,
   FROSTY_GAME_REGISTRY,
@@ -119,4 +121,33 @@ test('staging : ordre respecté, version résolue', () => {
 test('loadOrderSignature : ordre significatif', () => {
   assert.equal(loadOrderSignature(['a', 'b']), 'a>b')
   assert.equal(loadOrderSignature(['b', 'a']), 'b>a')
+})
+
+test('applyFrostyPluginToggle : active un plugin sans conflit', () => {
+  const result = applyFrostyPluginToggle({ datapathFix: false, launchPlatformPlugin: false }, { datapathFix: true })
+  assert.equal(result.rejected, false)
+  assert.equal(result.config.datapathFix, true)
+  assert.equal(result.config.launchPlatformPlugin, false)
+})
+
+test('applyFrostyPluginToggle : refuse l\'activation qui créerait un conflit (rollback)', () => {
+  const current = { datapathFix: true, launchPlatformPlugin: false }
+  const result = applyFrostyPluginToggle(current, { launchPlatformPlugin: true })
+  assert.equal(result.rejected, true)
+  assert.equal(result.conflict, true)
+  assert.deepEqual(result.config, current) // état inchangé
+  assert.ok(result.notice)
+})
+
+test('applyFrostyPluginToggle : désactiver un plugin pour corriger un conflit est accepté', () => {
+  const result = applyFrostyPluginToggle({ datapathFix: true, launchPlatformPlugin: true }, { launchPlatformPlugin: false })
+  assert.equal(result.rejected, false)
+  assert.equal(result.config.datapathFix, true)
+  assert.equal(result.config.launchPlatformPlugin, false)
+})
+
+test('frostyPluginConfigKey : clé par jeu + profil, jamais partagée', () => {
+  assert.equal(frostyPluginConfigKey('g1', 'p1'), 'g1:p1')
+  assert.notEqual(frostyPluginConfigKey('g1', 'p1'), frostyPluginConfigKey('g1', 'p2'))
+  assert.notEqual(frostyPluginConfigKey('g1', 'p1'), frostyPluginConfigKey('g2', 'p1'))
 })

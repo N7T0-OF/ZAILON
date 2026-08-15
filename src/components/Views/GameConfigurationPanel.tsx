@@ -29,7 +29,7 @@ import { native, pickExecutable, pickFolder } from '../../lib/native'
 import { resolveGameInstallation, shortPathName } from '../../lib/installations'
 import { ProfileShareDialog } from '../UI/ProfileShareDialog'
 import { detectModBackend, frostyBackendStatus } from '../../lib/modBackends'
-import { frostyOverhaulConflict, FROSTY_STRATEGY_LABELS } from '../../lib/frosty'
+import { frostyOverhaulConflict, frostyPluginConfigKey, FROSTY_STRATEGY_LABELS } from '../../lib/frosty'
 import {
   classifyReShadeCompatibility,
   COMPATIBILITY_LABELS,
@@ -715,8 +715,18 @@ function FrostyConfigCard({ game, profile }: { game: Game; profile: Profile }) {
       return next
     })
   }
-  const [datapathFix, setDatapathFix] = useState(false)
-  const [launchPlatformPlugin, setLaunchPlatformPlugin] = useState(false)
+  // Activation persistante et transactionnelle (spec « Fix Frosty — activation
+  // persistante » §1) : l'état vit dans le store (par jeu + profil), jamais dans
+  // un useState local qui retombe à false à chaque montage. Une activation qui
+  // créerait un conflit est refusée (rollback + notification).
+  const frostyPluginConfig = useStore(state => state.frostyPluginConfig)
+  const setFrostyPluginConfig = useStore(state => state.setFrostyPluginConfig)
+  const pluginKey = frostyPluginConfigKey(game.id, profile.id)
+  const pluginConfig = frostyPluginConfig[pluginKey] ?? { datapathFix: false, launchPlatformPlugin: false }
+  const datapathFix = pluginConfig.datapathFix
+  const launchPlatformPlugin = pluginConfig.launchPlatformPlugin
+  const setDatapathFix = (value: boolean) => setFrostyPluginConfig(game.id, profile.id, { datapathFix: value })
+  const setLaunchPlatformPlugin = (value: boolean) => setFrostyPluginConfig(game.id, profile.id, { launchPlatformPlugin: value })
   const [tested, setTested] = useState<string>()
   const profileMods = resolveProfileMods(game, profile)
   const platform = game.platform === 'steam' ? 'steam' as const : game.platform === 'epic' ? 'epic' as const : 'ea-app' as const

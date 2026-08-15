@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.121.0] - 2026-08-15
+
+> **Activation Frosty persistante et transactionnelle** — DatapathFix /
+> Launch Platform Plugin sont désormais sauvegardés par jeu + profil et
+> rechargés au démarrage ; une activation conflictuelle est refusée.
+
+### Added
+
+- **`applyFrostyPluginToggle` / `frostyPluginConfigKey`** (`src/lib/frosty.ts`,
+  purs, testés) : validation AVANT écriture — activer un plugin alors que
+  l'autre est actif est refusé (rollback + notification), jamais d'état
+  « impossible » écrit silencieusement.
+- **`frostyPluginConfig`** (store, persisté) par `gameId:profileId` +
+  `setFrostyPluginConfig` transactionnel (notice en cas de rejet).
+
+### Fixed
+
+- **Bug d'activation non persistante** : les switches DatapathFix /
+  Launch Platform Plugin étaient des `useState` locaux qui retombaient à
+  `false` à chaque ouverture — l'UI montrait « actif » sans jamais sauver.
+  Ils sont maintenant branchés sur le store et survivent au redémarrage.
+
 ## [1.120.0] - 2026-08-15
 
 > **Suivi de chaîne Frosty** — un jeu Frosty est launcher-based : ZAILON passe

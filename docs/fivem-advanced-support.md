@@ -53,11 +53,23 @@ ni statistiques par profil.
 
 ## 3. Prochaines phases (non livrées ici)
 
-- Backend natif : détection réelle de `FiveM.app`/`CitizenFX.ini`, lecture
-  `[Game] IVPath` sur disque, écriture avec **backup** avant modification
-  (`citizenfx.ini.zailon-backup`).
-- **ReShade FiveM Integration** (installation, ID automatique, presets par
-  profil, « dernière configuration fonctionnelle »).
+## 3. Backend natif (livré en 1.104.0)
+
+Commandes Rust exposées via `native.ts` :
+
+- `readCitizenFx(path)` → `{ path, exists, text }` — lecture du fichier, jamais
+  d'écriture.
+- `writeCitizenFx(path, text)` → `{ path, backupPath, bytes }` — écriture
+  **atomique** APRÈS backup (`citizenfx.ini.zailon-backup-<timestamp>`).
+- `detectFiveMEnvironment(installDirectory)` → `{ root, appData, hasCitizenFxIni,
+  folders, gtaVPath }` — détection disque de `FiveM.app` (remonte les ancêtres),
+  dossiers `mods`/`citizen`/`plugins` et chemin GTA V (`[Game] IVPath`, lecture
+  seule). Le chemin de `FiveM.app` n'est jamais codé en dur.
+
+## 4. Prochaines phases (non livrées ici)
+
+- **UI ReShade FiveM** : assistant d'ID (micro-fenêtre), lecture/écriture de
+  `CitizenFX.ini` via les commandes natives, aperçu avant/après.
 - **Gestionnaire de packs graphiques FiveM** : import `.zip/.rar/.7z`,
   classification interactive, installation par profil avec manifeste
   `zailon-manifest.json` et rollback.

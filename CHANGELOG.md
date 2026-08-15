@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.104.0] - 2026-08-15
+
+> **Backend natif FiveM** : lecture/écriture sécurisée de `CitizenFX.ini` avec
+> backup, et détection disque de l'environnement FiveM.
+
+### Added
+
+- **Commandes Rust** `read_citizenfx` / `write_citizenfx` /
+  `detect_fivem_environment` (bindings `native.ts`) :
+  - `readCitizenFx` : lecture seule du fichier (`exists` + `text`).
+  - `writeCitizenFx` : écriture **atomique** APRÈS backup horodaté
+    (`citizenfx.ini.zailon-backup-<ts>`) — jamais de réécriture sans backup.
+  - `detectFiveMEnvironment` : détection disque de `FiveM.app` (remonte les
+    ancêtres — chemin jamais codé en dur), dossiers `mods`/`citizen`/`plugins`
+    et chemin GTA V (`[Game] IVPath`, lecture seule).
+- Test Rust `citizenfx_iv_path` (parse `[Game] IVPath`, insensible à la casse,
+  quotes, jamais de modification) — **534 tests JS ✅**, Verify natif ✅.
+
 ## [1.103.0] - 2026-08-15
 
 > **Fondations du support FiveM avancé + groupes de jeux** — libs pures et

@@ -112,6 +112,40 @@ struct UpdateStateCounts {
     mods: u64,
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CitizenFxRead {
+    path: String,
+    exists: bool,
+    text: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CitizenFxWrite {
+    path: String,
+    backup_path: Option<String>,
+    bytes: usize,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FiveMFolders {
+    mods: bool,
+    citizen: bool,
+    plugins: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FiveMEnvironment {
+    root: String,
+    app_data: Option<String>,
+    has_citizenfx_ini: bool,
+    folders: FiveMFolders,
+    gta_v_path: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateIntegrityReport {
@@ -1886,6 +1920,124 @@ fn initialize_fivem_base(
         files: file_count,
         changed_files,
         created: previous.is_none(),
+    })
+}
+
+/// Extrait le chemin GTA V (`[Game] IVPath=...`) d'un texte CitizenFX.ini.
+/// Lecture seule : la valeur n'est jamais modifiée par ZAILON.
+fn citizenfx_iv_path(text: &str) -> Option<String> {
+    let mut in_game = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_game = trimmed.eq_ignore_ascii_case("[game]");
+            continue;
+        }
+        if in_game {
+            if let Some((key, value)) = trimmed.split_once('=') {
+                if key.trim().eq_ignore_ascii_case("IVPath") {
+                    let value = value.trim().trim_matches('"');
+                    if !value.is_empty() {
+                        return Some(value.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Localise `FiveM.app` (dossier de données applicatives) sous une racine FiveM.
+fn locate_fivem_app(root: &Path) -> Option<PathBuf> {
+    let direct = root.join("FiveM.app");
+    if direct.is_dir() {
+        return Some(direct);
+    }
+    // Cas d'une racine donnée plus profonde : remonte jusqu'à trouver FiveM.app.
+    for ancestor in root.ancestors() {
+        let candidate = ancestor.join("FiveM.app");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+#[tauri::command]
+fn read_citizenfx(citizenfx_path: String) -> Result<CitizenFxRead, String> {
+    let path = PathBuf::from(&citizenfx_path);
+    match fs::read(&path) {
+        Ok(bytes) => Ok(CitizenFxRead {
+            path: citizenfx_path,
+            exists: true,
+            text: String::from_utf8_lossy(&bytes).to_string(),
+        }),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(CitizenFxRead {
+            path: citizenfx_path,
+            exists: false,
+            text: String::new(),
+        }),
+        Err(err) => Err(to_error(err)),
+    }
+}
+
+/// Écrit `CitizenFX.ini` APRÈS avoir sauvegardé l'existant (spéc §8, §19) :
+/// le fichier courant est copié vers `citizenfx.ini.zailon-backup` (avec
+/// horodatage si un backup existe déjà). Aucune autre modification.
+#[tauri::command]
+fn write_citizenfx(citizenfx_path: String, text: String) -> Result<CitizenFxWrite, String> {
+    let path = PathBuf::from(&citizenfx_path);
+    let backup_path = if path.is_file() {
+        let mut backup = path.clone();
+        backup.set_file_name(format!("citizenfx.ini.zailon-backup-{}", unix_timestamp()));
+        fs::copy(&path, &backup).map_err(to_error)?;
+        Some(backup.to_string_lossy().to_string())
+    } else {
+        None
+    };
+    let bytes = text.as_bytes();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(to_error)?;
+    }
+    let temp = path.with_extension(format!("tmp-{}", unix_timestamp()));
+    fs::write(&temp, bytes).map_err(to_error)?;
+    if path.exists() {
+        fs::remove_file(&path).map_err(to_error)?;
+    }
+    fs::rename(&temp, &path).map_err(to_error)?;
+    Ok(CitizenFxWrite {
+        path: citizenfx_path,
+        backup_path,
+        bytes: bytes.len(),
+    })
+}
+
+/// Détection disque de l'environnement FiveM (spéc §1, §12) : FiveM.app,
+/// CitizenFX.ini, dossiers mods/citizen/plugins et chemin GTA V (`[Game]
+/// IVPath`). Le chemin de FiveM.app n'est jamais codé en dur.
+#[tauri::command]
+fn detect_fivem_environment(install_directory: String) -> Result<FiveMEnvironment, String> {
+    let root = fs::canonicalize(&install_directory).map_err(to_error)?;
+    let app_data = locate_fivem_app(&root);
+    let app_path = match &app_data {
+        Some(path) => path.clone(),
+        None => root.join("FiveM.app"),
+    };
+    let citizenfx_path = app_path.join("citizenfx.ini");
+    let has_citizenfx_ini = citizenfx_path.is_file();
+    let citizenfx_text = has_citizenfx_ini
+        .then(|| fs::read_to_string(&citizenfx_path).ok())
+        .flatten();
+    Ok(FiveMEnvironment {
+        root: root.to_string_lossy().to_string(),
+        app_data: app_data.map(|path| path.to_string_lossy().to_string()),
+        has_citizenfx_ini,
+        folders: FiveMFolders {
+            mods: app_path.join("mods").is_dir(),
+            citizen: app_path.join("citizen").is_dir(),
+            plugins: app_path.join("plugins").is_dir(),
+        },
+        gta_v_path: citizenfx_text.as_deref().and_then(citizenfx_iv_path),
     })
 }
 
@@ -14967,6 +15119,17 @@ mod tests {
     }
 
     #[test]
+    fn citizenfx_iv_path_reads_game_path_without_modifying() {
+        let ini = "[Game]\nIVPath=G:\\Games\\GTAV\nUpdateChannel=beta\nSavedBuildNumber=3570\n\n[Addons]\n";
+        assert_eq!(citizenfx_iv_path(ini), Some("G:\\Games\\GTAV".to_string()));
+        assert_eq!(
+            citizenfx_iv_path("[game]\nivpath=\"C:\\GTA V\"\n"),
+            Some("C:\\GTA V".to_string())
+        );
+        assert_eq!(citizenfx_iv_path("[Addons]\nReShade5=ID:abc\n"), None);
+    }
+
+    #[test]
     fn zip_magic_detects_real_zips_and_rejects_error_pages() {
         // ZIP normal (PK\x03\x04), vide (PK\x05\x06), spanned (PK\x07\x08).
         assert!(is_zip_archive(&[b'P', b'K', 0x03, 0x04, 0x00, 0x00]));
@@ -16860,6 +17023,9 @@ pub fn run() {
             profile_integrity,
             trash_profile_state,
             initialize_fivem_base,
+            read_citizenfx,
+            write_citizenfx,
+            detect_fivem_environment,
             ensure_dir,
             scan_game_presence,
             scan_game_windows,

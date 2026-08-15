@@ -34,6 +34,26 @@ export interface BaseSnapshotResult {
   created: boolean
 }
 
+export interface CitizenFxRead {
+  path: string
+  exists: boolean
+  text: string
+}
+
+export interface CitizenFxWrite {
+  path: string
+  backupPath: string | null
+  bytes: number
+}
+
+export interface FiveMEnvironment {
+  root: string
+  appData: string | null
+  hasCitizenFxIni: boolean
+  folders: { mods: boolean; citizen: boolean; plugins: boolean }
+  gtaVPath: string | null
+}
+
 export interface UpdateStateCounts {
   games: number
   profiles: number
@@ -861,6 +881,9 @@ export const native = {
   profileIntegrity: (gameId: string, profileId: string) => desktopOnly<ProfileIntegrity>('profile_integrity', { gameId, profileId }),
   trashProfileState: (gameId: string, profileId: string) => desktopOnly<string>('trash_profile_state', { gameId, profileId }),
   initializeFiveMBase: (gameId: string, installDirectory: string) => desktopOnly<BaseSnapshotResult>('initialize_fivem_base', { gameId, installDirectory }),
+  readCitizenFx: (citizenfxPath: string) => desktopOnly<CitizenFxRead>('read_citizenfx', { citizenfxPath }),
+  writeCitizenFx: (citizenfxPath: string, text: string) => desktopOnly<CitizenFxWrite>('write_citizenfx', { citizenfxPath, text }),
+  detectFiveMEnvironment: (installDirectory: string) => desktopOnly<FiveMEnvironment>('detect_fivem_environment', { installDirectory }),
   scanGamePresence: (requests: GamePresenceRequest[]) => desktopOnly<GamePresence[]>('scan_game_presence', { requests }),
   /** Présence Steam (clé de registre RunningAppID, lecture seule) : preuve
    * supplémentaire du GamePresenceEngine — Steam n'est jamais la seule source. */

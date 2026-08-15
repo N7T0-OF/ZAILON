@@ -121,6 +121,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
   const hasFrostyCap = hasCapability(capabilities, 'frosty.backend')
   const hasReShadeCap = hasCapability(capabilities, 'reshade.manager')
   const hasNteCap = hasCapability(capabilities, 'nte.modloader')
+  const hasPerformancePlus = hasCapability(capabilities, 'performance.plus')
   const frostyEligible = detectModBackend({ execPath: game.execPath, gameName: game.name, nteAllowed: hasNteCap }) === 'frosty'
   const reshadeEligible = resolveReShadeTarget(game).confidence >= 0.6
   const setView = useStore(state => state.setView)
@@ -496,6 +497,7 @@ function PerformanceSettings({ game, mode, custom, sessions, priorityGameId, onM
   onMode: (mode: PerformanceMode) => void
   onCustom: (policies: Partial<ZailonPerformancePolicies>) => void
 }) {
+  const hasPerformancePlus = hasCapability(addonCapabilities(useStore(state => state.addons)), 'performance.plus')
   const preset = mode === 'custom' ? undefined : PERFORMANCE_PRESETS[mode]
   const zailon = policiesForMode(mode, custom)
   const effective = effectivePerformance(
@@ -548,6 +550,7 @@ function PerformanceSettings({ game, mode, custom, sessions, priorityGameId, onM
         <span className="flex items-center gap-2"><span>Priorité du processus</span><ZailonInfoPopover text="Automatique : Windows gère normalement. Jamais « Temps réel » — il peut rendre Windows instable. La priorité revient à l’état précédent à la fermeture du jeu." /></span>
         <select value={mode === 'custom' ? 'auto' : PERFORMANCE_PRESETS[mode].game.processPriority} disabled className="rounded border border-white/[0.08] bg-[#111515] px-2 py-1.5 text-[11px] text-white/70">{GAME_PROCESS_PRIORITIES.map(priority => <option key={priority} value={priority}>{GAME_PROCESS_PRIORITY_LABELS[priority]}</option>)}</select>
       </label>
+      <p className="mt-2 rounded-lg border border-white/[0.06] bg-white/[0.015] px-2.5 py-1.5 text-[10.5px] leading-relaxed text-white/45">{hasPerformancePlus ? 'Priorité réellement appliquée au processus au lancement (add-on Performance+).' : 'Priorité non appliquée à l’OS — installez l’add-on Performance+ pour l’appliquer au lancement.'}{' '}Jamais « Temps réel ».</p>
       <p className="mt-2 flex items-center justify-between gap-3 rounded-lg bg-white/[0.02] px-3 py-2 text-[11px] text-white/45">
         <span>Limite d’images par seconde</span><span className="font-semibold text-white/60">Backends natifs à venir <ZailonInfoPopover text="Le contrôle FPS utilisera uniquement des méthodes officielles (paramètre natif du jeu, API du pilote) — jamais d’injection. Les jeux protégés (anti-cheat) resteront limités aux réglages officiels." /></span>
       </p>

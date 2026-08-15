@@ -23,6 +23,7 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 mod input_backends;
+mod process_priority;
 mod process_scanner;
 mod quick_panel;
 mod steam_presence;
@@ -2349,6 +2350,17 @@ fn fivem_pack_manifest(target_dir: String) -> Result<FiveMPackManifestRead, Stri
             .unwrap_or(0),
         installed_at: manifest.get("installedAt").and_then(|value| value.as_u64()),
     })
+}
+
+/// Applique la priorité OS au processus d'un jeu (add-on Performance+) :
+/// `normal` / `above-normal` / `high`. `auto` ou inconnu → rien (le système
+/// garde la main). Non critique : l'échec est remonté mais ne bloque jamais
+/// le lancement.
+#[tauri::command]
+fn set_game_process_priority(pid: u32, priority: String) -> Result<(), String> {
+    let parsed = process_priority::parse_process_priority(&priority)
+        .ok_or_else(|| "Unsupported process priority.".to_string())?;
+    process_priority::set_process_priority(pid, parsed)
 }
 
 fn game_resource_directory(app: &tauri::AppHandle, game_id: &str) -> Result<PathBuf, String> {
@@ -17548,6 +17560,7 @@ pub fn run() {
             preview_mo2_import,
             import_mo2_instance,
             detect_vortex_instance,
+            set_game_process_priority,
             audit_profile_deployment,
             repair_mo2_profile_deployment,
             repair_staged_imports,

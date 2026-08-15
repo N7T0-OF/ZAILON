@@ -925,6 +925,7 @@ export const native = {
   fivemPackRemove: (targetDir: string) => desktopOnly<FiveMPackRemoveResult>('fivem_pack_remove', { targetDir }),
   fivemPackManifest: (targetDir: string) => desktopOnly<FiveMPackManifestRead>('fivem_pack_manifest', { targetDir }),
   detectVortexInstance: (gameRoot: string) => desktopOnly<VortexInstance>('detect_vortex_instance', { gameRoot }),
+  setGameProcessPriority: (pid: number, priority: string) => desktopOnly<void>('set_game_process_priority', { pid, priority }),
   scanGamePresence: (requests: GamePresenceRequest[]) => desktopOnly<GamePresence[]>('scan_game_presence', { requests }),
   /** Présence Steam (clé de registre RunningAppID, lecture seule) : preuve
    * supplémentaire du GamePresenceEngine — Steam n'est jamais la seule source. */

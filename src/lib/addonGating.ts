@@ -146,6 +146,17 @@ export function vortexImportAllowed(capabilities: Set<ZailonCapability> | readon
 }
 
 /**
+ * Gate de Performance+ (spec « Finalisation des add-ons » §40, feature
+ * removal §57) : l'application RÉELLE de la priorité du processus du jeu au
+ * lancement n'existe qu'avec l'add-on installé + activé (capacité
+ * `performance.plus`). Sans lui, la priorité reste une valeur affichée, jamais
+ * appliquée à l'OS. Pur et testé.
+ */
+export function performancePlusAllowed(capabilities: Set<ZailonCapability> | readonly ZailonCapability[]): boolean {
+  return hasCapability(capabilities, 'performance.plus')
+}
+
+/**
  * Gate des packs de thèmes (spec « Finalisation des add-ons » §39, feature
  * removal §57) : la section « Packs de thèmes » des Paramètres (presets
  * accent + densité + taille de texte) n'existe qu'avec l'add-on installé +

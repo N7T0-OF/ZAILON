@@ -396,15 +396,24 @@
       "name": "Performance+",
       "version": "1.0.0",
       "category": "utilities",
-      "description": "Profils CPU/GPU/FPS avancés par jeu.",
-      "minZailonVersion": "1.69.0",
+      "description": "Applique réellement la priorité du processus du jeu (normale / supérieure / haute) au lancement, selon le mode Performance choisi. Sans cet add-on, la priorité reste une valeur affichée, jamais appliquée à l'OS.",
+      "minZailonVersion": "1.78.0",
       "permissions": [
         "game.read",
         "process.read",
         "process.launch",
         "settings"
       ],
-      "package": null
+      "package": "packages/performance/official.zailon.performance-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "c4f005fe216da419f3dbf39995d6fca28b941edecff69dc26d6ef237309f9886",
+      "downloadSize": 5144,
+      "installedSize": 12860,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
     },
     {
       "id": "official.zailon.visual-profiles",

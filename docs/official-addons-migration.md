@@ -66,14 +66,17 @@ catalogue → la carte devient installable à la synchronisation suivante.
   testé) + section « Packs de thèmes » dans Paramètres → Apparence gated par
   la capacité.
 
+- **Performance+** (`performance.plus`) : **nouvelle vraie feature** — la
+  priorité du processus du jeu (déjà modélisée par le preset de mode) était
+  une valeur purement AFFICHÉE, jamais appliquée à l'OS. L'add-on la rend
+  réelle : au lancement, `set_game_process_priority` applique la priorité au
+  PID du jeu (`SetPriorityClass` Windows / `setpriority` Unix), gated par
+  `performancePlusAllowed`. Jamais « temps réel ».
+
 ### Encore « En développement » (honnêteté §55 — pas de package fantôme)
 
 - **Frosty Importer** : l'import .fbmod est déjà couvert par `frosty.backend`
   (Frosty Support) — pas de surface indépendante à migrer.
-- **Performance+** : la politique Performance (pause téléchargements, scans,
-  priorité lancement) est de l'infrastructure Core — la gater régresserait le
-  comportement de base ; les extensions (contrôle FPS natif) ne sont pas
-  encore construites.
 
 ### NTE Support — migration réelle (feature removal §57)
 

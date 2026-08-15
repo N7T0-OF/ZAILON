@@ -27,7 +27,8 @@ import { ZAILON_PERSIST_KEY } from '../lib/designTokens'
 import { buildDiscordActivity, DISCORD_APPLICATION_ID, DISCORD_PRIORITY_DEBOUNCE_MS, shouldDelayPrioritySwitch, type DiscordActivityInput } from '../lib/discordPresence'
 import { modMatchesRemote, remoteIdentityFromCatalog, remoteModKey } from '../lib/remoteInstallState'
 import { resolveDiscordAsset } from '../lib/discordAssets'
-import { addonCapabilities, discordPresenceAllowed, fiveMProfilesAllowed, mo2ImportAllowed, steamAdvancedAllowed, vortexImportAllowed } from '../lib/addonGating'
+import { addonCapabilities, discordPresenceAllowed, fiveMProfilesAllowed, mo2ImportAllowed, performancePlusAllowed, steamAdvancedAllowed, vortexImportAllowed } from '../lib/addonGating'
+import { launchProcessPriority, shouldApplyProcessPriority } from '../lib/performancePlus'
 import { DEFAULT_BACKGROUND_MEDIA_SETTINGS, type BackgroundMediaSettings } from '../lib/backgroundMedia'
 import { applyHomeLayoutPreset, HOME_WIDGET_DEFAULTS, normalizeHomeWidgets, type HomeLayoutPreset, type HomeWidgetConfig } from '../lib/homeWidgets'
 // Source de vérité de la version : package.json est bumpé à CHAQUE release
@@ -1953,6 +1954,15 @@ export const useStore = create<Store>()(persist((set, get) => ({
       // (spec Discord §9) — jamais transmise au lancement, sinon la présence
       // démarrerait au launcher / à l'UAC (cas NTE, critère bloquant §63).
       const result = await native.launchGame(executablePath, game.id, game.name, resolved.rootPath || knownRoot, profile.id, profile.name, enabledMods.length, stagedModIds, profile.conflictRules || [], isLauncherBased(adapterFor(game)), progress => set({ launchProgress: progress }))
+      // Performance+ §40 (feature removal §57) : avec l'add-on, la priorité du
+      // mode du jeu est RÉELLEMENT appliquée au processus. Sans lui, la
+      // priorité reste une valeur affichée, jamais appliquée à l'OS.
+      if (performancePlusAllowed(addonCapabilities(get().addons))) {
+        const priority = launchProcessPriority(get().performanceModes[game.id] ?? 'auto')
+        if (shouldApplyProcessPriority(priority)) {
+          void native.setGameProcessPriority(result.pid, priority).catch(() => undefined)
+        }
+      }
       set(current => ({
         isLaunching: false,
         launchProgress: undefined,

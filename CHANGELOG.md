@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.112.0] - 2026-08-15
+
+> **Performance+ devient un add-on installable (17/18)** — la priorité du
+> processus du jeu, jusqu'ici purement affichée, est désormais RÉELLEMENT
+> appliquée au lancement (et uniquement avec l'add-on).
+
+### Added
+
+- **Module natif `process_priority.rs`** + commande
+  `set_game_process_priority(pid, priority)` : `SetPriorityClass` (Windows,
+  NORMAL / ABOVE_NORMAL / HIGH) et `setpriority` (Unix, nice 0 / -5 / -10) —
+  jamais « temps réel », échec non critique (test natif du mapping).
+- **`src/lib/performancePlus.ts`** (pur, 2 tests) :
+  `launchProcessPriority` (suit le preset du mode) et
+  `shouldApplyProcessPriority` (auto = ne pas toucher).
+- **Application au lancement** (store, gated `performance.plus`) : après
+  `launchGame`, la priorité du mode du jeu est appliquée au PID réel — sans
+  l'add-on, la priorité reste une valeur affichée, jamais appliquée à l'OS
+  (feature removal §57).
+- **UI honnête** : Configuration → Performance du jeu affiche « priorité
+  appliquée au lancement » avec l'add-on, « non appliquée à l'OS » sans.
+- **Add-on `official.zailon.performance`** construit (package + SHA-256 réel)
+  — **17/18 Disponibles** — **569 tests ✅**, tsc ✅, build ✅, audit ✅.
+
 ## [1.111.0] - 2026-08-15
 
 > **Vortex Importer devient un add-on installable (16/18)** — nouvelle vraie

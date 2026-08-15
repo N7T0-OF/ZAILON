@@ -113,6 +113,12 @@ Résultat : ZAILON passe à « En cours » dès que `NFS16.exe` est détecté, m
 FrostyModManager reste ouvert ; il termine la session quand le jeu ferme — pas
 quand Frosty ferme.
 
+Le moteur est **universel** (`src/lib/launchChain.ts`, pur et testé) :
+`chainAfterLauncherExit(adapter)` décide pour toute chaîne — Frosty
+(`wait-for-game`), NTE (`wait-for-elevation`), FiveM (`wait-for-game`),
+processus direct (`end`). Le store délègue cette décision à la lib pure
+(plus de logique dupliquée).
+
 ## Sécurité (spec §85)
 
 - Aucun téléchargement de binaires Frosty depuis un miroir inconnu ;

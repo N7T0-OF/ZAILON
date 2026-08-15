@@ -10,6 +10,7 @@ import { fiveMCopyActive, type FiveMCopyOptions } from '../lib/fivemProfile'
 import { vortexProfileName } from '../lib/vortexImport'
 import { frostyProfileName } from '../lib/frostyImport'
 import { applyFrostyPluginToggle, frostyPluginConfigKey, type FrostyPluginConfig } from '../lib/frosty'
+import { chainAfterLauncherExit, chainExpectsElevation } from '../lib/launchChain'
 import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
 import { validateAddonManifest } from '../lib/addons'
 import type { AddonSource, InstalledAddon, ZailonAddonManifest } from '../lib/addons'
@@ -2156,7 +2157,11 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const state = get()
     const game = state.games.find(item => item.id === gameId)
     const adapter = game ? adapterFor(game) : FALLBACK_ADAPTER
-    if (isLauncherBased(adapter)) {
+    // Moteur de chaîne universel (spec « Fix Frosty — suivi de chaîne ») :
+    // un launcher qui sort ne termine jamais la session — seul le processus
+    // final compte. Décision pure, testée (`launchChain.ts`).
+    const outcome = chainAfterLauncherExit(adapter)
+    if (outcome === 'wait-for-game' || outcome === 'wait-for-elevation') {
       state.sessionLauncherExited(gameId, processName)
     } else {
       state.endSession(gameId, cleanupError)
@@ -2170,7 +2175,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const adapter = adapterFor(game)
     const now = Date.now()
     const reattachUntil = now + adapter.reattachWindowSeconds * 1000
-    const expectsElevation = adapter.launchChainStages.includes('UAC')
+    const expectsElevation = chainExpectsElevation(adapter)
     const nextState: GameSession['state'] = expectsElevation ? 'WaitingForElevation' : 'WaitingForGame'
     set(current => ({
       gameSessions: current.gameSessions.map(item => item.id === session.id ? {

@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.122.0] - 2026-08-15
+
+> **Moteur de chaîne de lancement universel, pur et testé** — la décision
+> « launcher qui sort → attendre le processus final » est formalisée pour
+> Frosty, NTE, FiveM et les processus directs.
+
+### Added
+
+- **`src/lib/launchChain.ts`** (pur, 6 tests) : `chainAfterLauncherExit`
+  (end / wait-for-game / wait-for-elevation), `chainExpectsElevation`,
+  `chainAcceptsDetectedGame`, `chainIsDirect` — le même moteur couvre
+  Frosty → NFS16.exe, NTE → UAC → NTE.exe, FiveM → GTA5.exe, Steam et les
+  processus directs.
+
+### Changed
+
+- **`onGameProcessStopped`** et `sessionLauncherExited` délèguent la décision
+  à la lib pure (plus de logique dupliquée dans le store) — comportement
+  identique, testé par assertion de source.
+
 ## [1.121.0] - 2026-08-15
 
 > **Activation Frosty persistante et transactionnelle** — DatapathFix /

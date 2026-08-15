@@ -2161,7 +2161,7 @@ fn fivem_pack_apply(
     if !target.is_dir() {
         return Err("The pack target directory does not exist.".into());
     }
-    let mut manifest: PackManifestInput = serde_json::from_str(&manifest_json).map_err(to_error)?;
+    let manifest: PackManifestInput = serde_json::from_str(&manifest_json).map_err(to_error)?;
     if manifest.files.is_empty() {
         return Err("The pack plan contains no files to install.".into());
     }
@@ -2269,10 +2269,10 @@ fn fivem_pack_remove(target_dir: String) -> Result<FiveMPackRemoveResult, String
             let Some(target_rel) = entry.get("target").and_then(|value| value.as_str()) else {
                 continue;
             };
-            let Ok(relative) = Path::new(target_rel).strip_prefix(".") else {
+            let relative = Path::new(target_rel);
+            if validate_archive_relative(relative).is_err() {
                 continue;
-            };
-            let _ = validate_archive_relative(relative);
+            }
             let destination = target.join(target_rel);
             let backup_name = entry.get("backup").and_then(|value| value.as_str());
             if let Some(name) = backup_name {

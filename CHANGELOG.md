@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.125.0] - 2026-08-15
+
+> **Harmonisation Accueil / config jeu** : widget son en haut à droite,
+> bulle « Historique » masquée quand vide, sections de config réduites par
+> défaut.
+
+### Fixed
+
+- **Bulle « Historique » toujours affichée même vide** : elle disparaît
+  maintenant complètement quand aucune tâche active (téléchargement, scan,
+  déploiement) ni notification n'est en cours — elle apparaît discrètement
+  dès qu'une tâche démarre et disparaît à la fin (spec §1).
+
+### Changed
+
+- **Widget son de l'Accueil déplacé en haut à droite**, juste sous les
+  boutons d'action (Paramètres du jeu · Actions du jeu) — compact, lié
+  uniquement à la vidéo de fond (jamais au volume Windows), état (volume /
+  mute) conservé après Alt+Tab (spec §2).
+- **Sections de configuration réduites par défaut** : seul « Lancement »
+  (exécutable + dossier mods, essentiel à la première configuration) est
+  ouvert ; « Apparence » et toutes les sections secondaires démarrent
+  repliées, l'état ouvert/fermé étant mémorisé par jeu (spec §3).
+
 ## [1.124.0] - 2026-08-15
 
 > **Détection locale unifiée** : la fenêtre « Bibliothèque locale » devient un

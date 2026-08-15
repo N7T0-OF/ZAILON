@@ -60,7 +60,12 @@ const RUNTIME_TYPE_LABELS: Array<[ModRuntimePathType, string]> = [
   ['custom', 'Custom'],
 ]
 
-const DEFAULT_OPEN = ['lancement', 'apparence']
+// Spec correctifs §3 : sections réduites par défaut, sauf les essentielles
+// à la première configuration. Seul « Lancement » (exécutable + dossier mods)
+// est ouvert ; « Apparence » et toutes les sections secondaires (Presets,
+// Sauvegardes, Compatibilité, Performances…) démarrent repliées. L'état
+// ouvert/fermé est mémorisé PAR JEU via localStorage (storageKey ci-dessous).
+const DEFAULT_OPEN = ['lancement']
 
 interface Props {
   game: Game

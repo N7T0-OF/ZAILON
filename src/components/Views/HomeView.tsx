@@ -258,6 +258,19 @@ export function HomeView() {
           </div>
         </header>
 
+        {/* Contrôle audio du Hero (spec correctifs §2) : en haut à droite,
+            juste sous les boutons d'action — compact, lié UNIQUEMENT à la
+            vidéo de fond (jamais au volume Windows). */}
+        <div className="mt-3 flex justify-end">
+          <HeroAudioControl
+            muted={heroMuted}
+            volume={Math.round((sessionAudio.available ? sessionAudio.volume : heroAudio.volume) * 100)}
+            sessionCut={sessionCut}
+            onToggle={() => { const next = !heroMuted; setBackgroundSessionMuted(next); setHeroMedia({ mutedOverride: next }) }}
+            onVolume={value => { const next = value / 100; setBackgroundSessionVolume(next); setHeroMedia({ volumeOverride: next, mutedOverride: value === 0 }) }}
+          />
+        </div>
+
         <div className="mt-[clamp(3.6rem,12vh,9rem)] max-w-[min(690px,72vw)]">
           {/* Spec « Nettoyage Accueil » §1 : plus de texte « Jeu sélectionné » —
               le Hero montre déjà le jeu. L'étoile favori reste seule (§13). */}
@@ -352,18 +365,7 @@ export function HomeView() {
           </div>}
         </div>
 
-        {/* Contrôle audio du Hero (spec §8-13, §27) : dans le flux, aligné à
-            droite, TOUJOURS au-dessus des panneaux (Favoris) — jamais en
-            position absolue sur toute la page. Le Hero bouge / la vidéo peut
-            défiler derrière, le contrôle reste stable et cliquable. */}
         <div className="mt-auto">
-          <HeroAudioControl
-            muted={heroMuted}
-            volume={Math.round((sessionAudio.available ? sessionAudio.volume : heroAudio.volume) * 100)}
-            sessionCut={sessionCut}
-            onToggle={() => { const next = !heroMuted; setBackgroundSessionMuted(next); setHeroMedia({ mutedOverride: next }) }}
-            onVolume={value => { const next = value / 100; setBackgroundSessionVolume(next); setHeroMedia({ volumeOverride: next, mutedOverride: value === 0 }) }}
-          />
         {/* Moteur de widgets (spec §1-28, §73-90) : seuls les widgets ACTIVÉS
             sont rendus — un widget désactivé ne coûte ni rendu, ni calcul, ni
             sondage (§7). Disposition automatique (§4) : Wide sur sa propre

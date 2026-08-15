@@ -829,6 +829,11 @@ function NotificationCenter({ history, onDismiss, onClear, onClearAll }: {
   const [paused, setPaused] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const active = [...history].reverse().find(item => !item.dismissed)
+  // Spec correctifs §1 : la bulle « Historique » ne reste jamais affichée
+  // vide — aucun téléchargement/scan/déploiement/tâche active ni notification
+  // → complètement masquée. Elle apparaît dès qu'une tâche démarre et
+  // disparaît à la fin (délai géré par la notification / le toast de tâche).
+  const runningTasks = useStore(state => state.backgroundTasks.filter(task => task.status === 'running').length)
   useEffect(() => {
     if (!active?.durationMs || paused || showHistory) return
     const timeout = window.setTimeout(() => onDismiss(active.id), active.durationMs)
@@ -836,6 +841,7 @@ function NotificationCenter({ history, onDismiss, onClear, onClearAll }: {
   }, [active?.durationMs, active?.id, onDismiss, paused, showHistory])
   const Icon = active?.kind === 'success' ? CheckCircle2 : active?.kind === 'error' || active?.kind === 'warning' ? AlertTriangle : Info
   const tone = active?.kind === 'error' ? 'border-red-300/25 text-red-100' : active?.kind === 'warning' || active?.kind === 'action' ? 'border-amber-200/25 text-amber-50' : active?.kind === 'success' ? 'border-emerald-200/20 text-emerald-50' : 'border-gold/25 text-white'
+  if (!active && !showHistory && runningTasks === 0) return null
   return <div className="fixed bottom-4 right-4 z-[220] flex max-w-[min(420px,calc(100vw-2rem))] flex-col items-end gap-2">
     {showHistory && <section className="max-h-[55vh] w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-white/[0.1] bg-[#101313]/95 shadow-2xl backdrop-blur-xl">
       <header className="flex items-center justify-between gap-2 border-b border-white/[0.07] px-3 py-2"><div><p className="text-xs font-semibold text-white/78">Historique des notifications</p><p className="text-[11px] text-white/35">{history.length} événement(s), doublons regroupés</p></div><div className="flex gap-1"><button type="button" onClick={onClear} className="rounded-lg px-2 py-1 text-[11px] text-white/42 hover:bg-white/[0.05]">Masquer les terminées</button><button type="button" onClick={() => { if (window.confirm('Effacer tout l’historique de notifications ? Aucun mod, profil ou point de restauration n’est supprimé.')) onClearAll() }} className="rounded-lg px-2 py-1 text-[11px] font-semibold text-red-200/60 hover:bg-red-400/10">Tout supprimer</button></div></header>

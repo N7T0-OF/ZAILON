@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.113.0] - 2026-08-15
+
+> **Audit d'intégrité du catalogue d'add-ons** — une carte ne ment plus :
+> 17/18 Disponibles, aucune capacité orpheline, chaque capacité publiée est
+> réellement exercée dans le Core.
+
+### Added
+
+- **`test-addon-catalog-audit.ts`** (6 tests) : aucun add-on orphelin,
+  catalogue ↔ dossiers cohérents, capabilities du manifest repointent vers
+  leur propre add-on, add-on publié = capacité déclarée, « En développement »
+  = exactement `importer.frosty`, et chaque capacité publiée est consommée
+  dans le Core (feature removal §57).
+
+### Fixed
+
+- **Capacité morte `ue.modding`** (→ `official.zailon.ue` inexistant) :
+  supprimée du `ZailonCapability` et du mapping — fini les capacités fantômes.
+- **Manifests Frosty / Frosty Editor** sans `capabilities` : ajout de
+  `frosty.backend` / `frosty.editor` — auto-descriptifs comme les 15 autres.
+- **575 tests ✅**, tsc ✅, build ✅, audit ✅.
+
 ## [1.112.0] - 2026-08-15
 
 > **Performance+ devient un add-on installable (17/18)** — la priorité du

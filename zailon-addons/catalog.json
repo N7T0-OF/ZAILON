@@ -20,9 +20,9 @@
         "game.launch"
       ],
       "package": "packages/frosty/official.zailon.frosty-v1.0.0.zailon-addon",
-      "sha256": "de58be495c1553e20a55ef9a3731b39da10f4a6fca72c0845199073d4a478cb4",
-      "downloadSize": 7656,
-      "installedSize": 19140,
+      "sha256": "2aa93b378e4169178457629167c70dab165209567a9471e846df82bb0dd8fa2c",
+      "downloadSize": 7694,
+      "installedSize": 19235,
       "platforms": [
         "windows"
       ],
@@ -50,9 +50,9 @@
         "official.zailon.frosty"
       ],
       "package": "packages/frosty-editor/official.zailon.frosty-editor-v1.0.0.zailon-addon",
-      "sha256": "d5b38b5626deca81de6b6c88b13fa0f17b102064696774024836530b76f47f36",
-      "downloadSize": 7313,
-      "installedSize": 18283,
+      "sha256": "fc1e96293505f89691d55b33a6da4226730efb246c31d16ab18df20639b8ce42",
+      "downloadSize": 7350,
+      "installedSize": 18375,
       "platforms": [
         "windows"
       ],

@@ -21,6 +21,7 @@
     "filesystem.external"
   ],
   "supportedPlatforms": ["windows"],
+  "capabilities": ["frosty.editor"],
   "dependencies": ["official.zailon.frosty"],
   "events": ["OnGameSelected", "OnGameLaunching", "OnGameStarted", "OnGameStopped"]
 }

@@ -33,8 +33,24 @@ catalogue → la carte devient installable à la synchronisation suivante.
 | `official.zailon.steam-advanced` | Disponible (package + SHA-256) — détection Steam gated |
 | `official.zailon.game.fivem` | Disponible (package + SHA-256) — traitement FiveM gated |
 | `official.zailon.importer.mo2` | Disponible (package + SHA-256) — import MO2 gated |
+| `official.zailon.importer.vortex` | Disponible (package + SHA-256) — import Vortex gated |
+| `official.zailon.performance` | Disponible (package + SHA-256) — priorité processus appliquée |
 | `official.zailon.themes` | Disponible (package + SHA-256) — feature presets implémentée |
-| les 3 autres officiels | En développement — voir ci-dessous |
+| `official.zailon.importer.frosty` | En développement — couvert par `frosty.backend` |
+
+**17/18 Disponibles.** Le seul « En développement » restant est
+`official.zailon.importer.frosty`, dont la surface (import .fbmod) est déjà
+couverte par Frosty Support (`frosty.backend`).
+
+### Audit d'intégrité du catalogue (test-addon-catalog-audit.ts)
+
+Invariants vérifiés automatiquement : aucune capacité orpheline, cohérence
+catalogue ↔ dossiers, capabilities du manifest repointent vers leur propre
+add-on, tout add-on publié déclare une capacité, « En développement » =
+`importer.frosty` uniquement, et chaque capacité publiée est réellement
+exercée dans le Core (feature removal §57). L'audit a aussi supprimé la
+capacité morte `ue.modding` (→ `official.zailon.ue` inexistant) et ajouté les
+`capabilities` manquantes des manifests Frosty/Frosty Editor.
 
 ### Lot final — 6 add-ons (feature removal §57)
 

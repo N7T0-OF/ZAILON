@@ -19,6 +19,7 @@
     "game.launch"
   ],
   "supportedPlatforms": ["windows"],
+  "capabilities": ["frosty.backend"],
   "supportedGames": [
     "Need for Speed",
     "Need for Speed: Rivals",

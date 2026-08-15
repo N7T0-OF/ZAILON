@@ -441,6 +441,8 @@ export interface GameGroup {
   name: string
   memberGameIds: string[]
   createdAt: number
+  /** Épinglé en tête de la bibliothèque (spec « Groupes de jeux » §13). */
+  pinned?: boolean
 }
 
 export type LaunchBehavior = 'DirectProcess' | 'LauncherChild' | 'LauncherDetached' | 'SteamLauncher' | 'ExternalLauncher' | 'MultiStage'

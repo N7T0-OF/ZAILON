@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware'
 import { ActiveTrackedSession, BackgroundMediaType, BulkOperation, DownloadRetention, ExplodMod, ExploreColumns, ExploreSort, ExternalModReference, Game, GameBackgroundMedia, GameInputProfile, GameInstallation, GameKeyboardLayout, GamePreset, GameProcessSignature, GameResources, GameRuntimePath, GameSession, GameTab, GameTestRun, GamebananaGame, GameGroup, LoaderType, Mod, MotionMode, Platform, Profile, ProfileArchiveManifest, ProfileIntegrity, ProfileModState, ReShadeProfileState, RestorePoint, SessionSource, TextSize, TrackedSession, UiDensity, UiNotification, UpdateChannel, ViewType } from '../types'
 import { checkpointDue } from '../lib/sessionStats'
 import { ensurePrincipalInstallation, installationDisplayName, resolveGameInstallation } from '../lib/installations'
-import { normalizeGameGroups } from '../lib/gameGroups'
+import { normalizeGameGroups, reorderArray } from '../lib/gameGroups'
 import { resolveGameIdentity } from '../lib/gameIdentity'
 import { lastUsedProfileId } from '../lib/perGameConfig'
 import { fiveMCopyActive, type FiveMCopyOptions } from '../lib/fivemProfile'
@@ -496,6 +496,8 @@ export interface Store {
   addGameToGroup: (groupId: string, gameId: string) => void
   removeGameFromGroup: (gameId: string) => void
   deleteGameGroup: (id: string) => void
+  toggleGameGroupPinned: (id: string) => void
+  moveGameGroup: (id: string, direction: -1 | 1) => void
   notificationHistory: UiNotification[]
   notice?: string
   // Add-ons (spec §1-83) : jamais chargés au démarrage — état installé/activé
@@ -1032,6 +1034,12 @@ export const useStore = create<Store>()(persist((set, get) => ({
   deleteGameGroup: id => set(state => ({
     gameGroups: state.gameGroups.filter(group => group.id !== id),
     games: state.games.map(game => game.groupId === id ? { ...game, groupId: undefined } : game),
+  })),
+  toggleGameGroupPinned: id => set(state => ({
+    gameGroups: state.gameGroups.map(group => group.id === id ? { ...group, pinned: !group.pinned } : group),
+  })),
+  moveGameGroup: (id, direction) => set(state => ({
+    gameGroups: reorderArray(state.gameGroups, state.gameGroups.findIndex(group => group.id === id), direction),
   })),
 
   // Frosty Editor (spec §10-13) : projets persistés hors du dossier jeu.

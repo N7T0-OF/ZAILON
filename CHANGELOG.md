@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.117.0] - 2026-08-15
+
+> **Groupes de jeux dans la Bibliothèque** — nouveau filtre « Groupes » avec
+> cartes, statistiques agrégées, épinglage et réordonnancement. Les profils,
+> mods et statistiques des membres restent totalement indépendants.
+
+### Added
+
+- **Filtre « Groupes »** dans la Bibliothèque (à côté de Tous / Jeux /
+  Applications / Favoris / Récent), avec compteur.
+- **`GroupLibraryGrid`** : cartes de groupes — nom, `X jeux · Y profils ·
+  Z mods`, temps total, dernière utilisation, membres, épingle, Ouvrir,
+  Modifier, Monter/Descendre, Supprimer (jamais les jeux).
+- **`GameGroupDialog`** (créer / éditer) : nom + sélection des membres avec
+  recherche — aucun déplacement de fichiers.
+- **`GameGroup.pinned`** + actions store `toggleGameGroupPinned` et
+  `moveGameGroup` (réordonnancement par tableau, bornes respectées).
+- **Statistiques agrégées pures** : `groupProfileCount`, `groupModCount`,
+  `groupLastPlayed`, `reorderArray` (`src/lib/gameGroups.ts`, testées).
+
+### Changed
+
+- `reorderArray` partagé entre le store et la grille — l'ordre des groupes
+  n'est jamais perdu (spec §12).
+
 ## [1.116.0] - 2026-08-15
 
 > **Fenêtre « Nouveautés » restaurée après chaque mise à jour** — y compris

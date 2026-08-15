@@ -66,6 +66,33 @@ export function groupMembers(games: Game[], group: GameGroup): Game[] {
   return group.memberGameIds.map(id => byId.get(id)).filter((game): game is Game => Boolean(game))
 }
 
+/** Nombre total de profils d'un groupe (somme des membres, jamais fusionné). */
+export function groupProfileCount(games: Game[], group: GameGroup): number {
+  return groupMembers(games, group).reduce((sum, game) => sum + (game.profiles?.length ?? 0), 0)
+}
+
+/** Nombre total de mods d'un groupe (somme des membres). */
+export function groupModCount(games: Game[], group: GameGroup): number {
+  return groupMembers(games, group).reduce((sum, game) => sum + (game.installedMods?.length ?? 0), 0)
+}
+
+/** Dernier lancement d'un groupe (le plus récent des membres), ou `undefined`. */
+export function groupLastPlayed(games: Game[], group: GameGroup): number | undefined {
+  const dates = groupMembers(games, group).map(game => game.lastPlayed).filter((date): date is number => typeof date === 'number')
+  return dates.length ? Math.max(...dates) : undefined
+}
+
+/** Réordonnancement pur : décale un élément d'une case (haut/bas). Sans effet
+ * si la cible sort des bornes — l'ordre n'est jamais perdu (spec §12). */
+export function reorderArray<T>(items: T[], index: number, direction: -1 | 1): T[] {
+  const target = index + direction
+  if (index < 0 || index >= items.length || target < 0 || target >= items.length) return items
+  const next = [...items]
+  const [item] = next.splice(index, 1)
+  next.splice(target, 0, item)
+  return next
+}
+
 /**
  * Normalisation idempotente de la liste de groupes (migration v7) :
  * - membres filtrés sur les jeux réellement existants ;

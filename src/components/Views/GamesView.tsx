@@ -16,6 +16,7 @@ import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { formatElapsedDuration, formatTime, timeAgo } from '../../utils'
 import { addonCapabilities, cyberpunkToolsAllowed, fiveMProfilesAllowed, frostyImportAllowed, hasCapability, mo2ImportAllowed, steamAdvancedAllowed, vortexImportAllowed } from '../../lib/addonGating'
 import { SteamDetectionDialog } from '../SteamDetectionDialog'
+import { GroupLibraryGrid } from '../GroupLibraryGrid'
 import { FiveMReShadeDialog } from '../FiveMReShadeDialog'
 import { FiveMPackDialog } from '../FiveMPackDialog'
 import { FiveMInstallAssistant } from '../FiveMInstallAssistant'
@@ -134,7 +135,7 @@ export function GamesView() {
   const [modsVisible, setModsVisible] = useState(120)
   const loadMoreRef = useRef<HTMLDivElement>(null)
   const [librarySearch, setLibrarySearch] = useState('')
-  const [libraryFilter, setLibraryFilter] = useState<'all' | 'games' | 'apps' | 'favorites' | 'recent'>('all')
+  const [libraryFilter, setLibraryFilter] = useState<'all' | 'games' | 'apps' | 'favorites' | 'recent' | 'groups'>('all')
   const libraryScrollRef = useRef<HTMLDivElement>(null)
   const [profileName, setProfileName] = useState('')
   const [steamDialogOpen, setSteamDialogOpen] = useState(false)
@@ -193,6 +194,8 @@ export function GamesView() {
         || (libraryFilter === 'apps' && isApp)
         || (libraryFilter === 'favorites' && game.favorite)
         || (libraryFilter === 'recent' && game.lastPlayed !== undefined)
+      // « Groupes » a sa propre vue (grille de cartes), pas la grille de jeux :
+      // `matchesFilter` est déjà false pour 'groups' (aucun cas ne le couvre).
       return matchesQuery && matchesFilter
     })
     .sort((left, right) => {
@@ -573,7 +576,7 @@ function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, fil
   summaries: ReturnType<typeof useWorkspaceCache>
   search: string
   onSearch: (value: string) => void
-  filter: 'all' | 'games' | 'apps' | 'favorites' | 'recent'
+  filter: 'all' | 'games' | 'apps' | 'favorites' | 'recent' | 'groups'
   onFilter: (value: typeof filter) => void
   viewMode: 'grid' | 'illustrated' | 'compact'
   onViewMode: (mode: typeof viewMode) => void
@@ -622,18 +625,21 @@ function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, fil
     { id: 'apps', label: 'Applications' },
     { id: 'favorites', label: 'Favoris' },
     { id: 'recent', label: 'Installés récemment' },
+    { id: 'groups', label: 'Groupes' },
   ]
   const densities: Array<{ id: typeof viewMode; label: string }> = [
     { id: 'compact', label: 'Petit' },
     { id: 'grid', label: 'Normal' },
     { id: 'illustrated', label: 'Grand' },
   ]
+  const gameGroups = useStore(state => state.gameGroups)
   const counts = {
     all: games.length,
     games: games.filter(game => game.itemKind !== 'software').length,
     apps: games.filter(game => game.itemKind === 'software').length,
     favorites: games.filter(game => game.favorite).length,
     recent: games.filter(game => game.lastPlayed !== undefined).length,
+    groups: gameGroups.length,
   }
   const columns = viewMode === 'compact'
     ? 'grid-cols-[repeat(auto-fill,minmax(106px,1fr))]'
@@ -657,7 +663,7 @@ function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, fil
       </div>
     </div>
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-4">
-      {visibleGames.length ? <div className={`grid gap-3 ${columns}`}>{visibleGames.map(game => <LibraryCard key={game.id} game={game} active={Boolean(activeByGame.get(game.id))} priority={priorityGameId === game.id} onOpen={() => onOpen(game.id)} onFavorite={() => setGameFavorite(game.id)} onContextMenu={(x, y) => setContext({ gameId: game.id, x, y })} />)}</div> : <div className="flex h-48 flex-col items-center justify-center gap-2 text-[11px] text-white/35"><Search size={20} /><span>{search.trim() ? 'Aucun résultat pour cette recherche.' : 'Aucun élément dans ce filtre.'}</span><button type="button" onClick={onAddGame} className="mt-1 rounded-lg border border-white/[0.1] px-3 py-1.5 text-white/55 hover:bg-white/[0.05]">Ajouter un jeu</button></div>}
+      {filter === 'groups' ? <GroupLibraryGrid games={games} onOpen={onOpen} /> : visibleGames.length ? <div className={`grid gap-3 ${columns}`}>{visibleGames.map(game => <LibraryCard key={game.id} game={game} active={Boolean(activeByGame.get(game.id))} priority={priorityGameId === game.id} onOpen={() => onOpen(game.id)} onFavorite={() => setGameFavorite(game.id)} onContextMenu={(x, y) => setContext({ gameId: game.id, x, y })} />)}</div> : <div className="flex h-48 flex-col items-center justify-center gap-2 text-[11px] text-white/35"><Search size={20} /><span>{search.trim() ? 'Aucun résultat pour cette recherche.' : 'Aucun élément dans ce filtre.'}</span><button type="button" onClick={onAddGame} className="mt-1 rounded-lg border border-white/[0.1] px-3 py-1.5 text-white/55 hover:bg-white/[0.05]">Ajouter un jeu</button></div>}
     </div>
     {context && <div className="fixed z-[300]" style={{ left: Math.min(context.x, window.innerWidth - 220), top: Math.min(context.y, window.innerHeight - 160) }}>
       <div className="fixed inset-0 z-[-1]" onClick={() => setContext(undefined)} onContextMenu={event => { event.preventDefault(); setContext(undefined) }} />

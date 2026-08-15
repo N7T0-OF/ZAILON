@@ -100,6 +100,7 @@ export function GamesView() {
   const launchProgress = useStore(state => state.launchProgress)
   const endSession = useStore(state => state.endSession)
   const addGameFromExecutable = useStore(state => state.addGameFromExecutable)
+  const addDetectedGames = useStore(state => state.addDetectedGames)
   const importDetectedGames = useStore(state => state.importDetectedGames)
   const removeGame = useStore(state => state.removeGame)
   const setGamePath = useStore(state => state.setGamePath)
@@ -451,7 +452,7 @@ export function GamesView() {
       scrollRef={libraryScrollRef}
       onOpen={gameId => { setSelectedGame(gameId); setGamesBrowsing(false) }}
       onAddGame={() => void addGameFromExecutable()}
-      onDetect={() => { if (steamAdvanced) setSteamDialogOpen(true) }}
+      onDetect={() => { if (steamAdvanced) setSteamDialogOpen(true); else void addDetectedGames() }}
     />
     {/* Bug #Détecter : la fenêtre de détection doit être rendue AUSSI dans la
         vue Bibliothèque (grid) — l'early return ci-dessus court-circuitait

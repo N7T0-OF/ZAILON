@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.115.0] - 2026-08-15
+
+> **Fix bouton « Détecter » dans la Bibliothèque** — le bouton était un
+> no-op silencieux quand l'add-on Steam Advanced n'était pas installé.
+
+### Fixed
+
+- **Bouton « Détecter les jeux installés »** (vue Bibliothèque) : cliquer sans
+  l'add-on Steam Advanced ne faisait rien. Désormais il délègue à
+  `addDetectedGames()`, qui affiche un message honnête —
+  « Détection Steam indisponible : l'add-on Steam Advanced n'est pas
+  installé. » — au lieu d'échouer en silence. Avec l'add-on, le comportement
+  est inchangé (ouverture de `SteamDetectionDialog`).
+
 ## [1.114.0] - 2026-08-15
 
 > **Frosty Importer devient un add-on installable (18/18)** — le catalogue

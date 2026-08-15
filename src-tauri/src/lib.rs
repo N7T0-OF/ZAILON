@@ -2210,10 +2210,11 @@ fn fivem_pack_apply(
                 backup.set_file_name(format!("{name}.zailon-pack-backup-{}", unix_timestamp()));
                 fs::copy(&destination, &backup).map_err(to_error)?;
                 backups += 1;
+                // Chemin RELATIF au target (sous-dossier conservé) pour le rollback.
                 backup
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .map(|value| value.to_string())
+                    .strip_prefix(&target)
+                    .ok()
+                    .map(|value| value.to_string_lossy().to_string())
             } else {
                 None
             };
@@ -2275,8 +2276,8 @@ fn fivem_pack_remove(target_dir: String) -> Result<FiveMPackRemoveResult, String
             }
             let destination = target.join(target_rel);
             let backup_name = entry.get("backup").and_then(|value| value.as_str());
-            if let Some(name) = backup_name {
-                let backup = target.join(name);
+            if let Some(relative) = backup_name {
+                let backup = target.join(relative);
                 if backup.is_file() {
                     if destination.is_file() {
                         let _ = fs::remove_file(&destination);

@@ -9936,7 +9936,6 @@ fn copy_mo2_downloads(source: &Path, destination: &Path) -> Result<u64, String> 
     Ok(copied)
 }
 
-#[tauri::command]
 /// Détection de l'instance Vortex d'un jeu (spec « Finalisation des add-ons »
 /// §35) : lit `vortex.deployment.json` (fallback `vortex.deployment.manifest.json`)
 /// à la racine du jeu — lecture seule, jamais d'écriture — et déduit les mods
@@ -10045,6 +10044,7 @@ fn vortex_mods_dir(instance: &str) -> Option<PathBuf> {
     })
 }
 
+#[tauri::command]
 fn preview_mo2_import(source_path: String) -> Result<Mo2ImportPreview, String> {
     let root = mo2_root(&source_path)?;
     let ini = read_ini_document(&root.join("ModOrganizer.ini"))?;

@@ -1,7 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { groupLastPlayed, groupMembers, groupModCount, groupProfileCount, groupProfilePairs, groupTotalPlaytime, nextGroupProfile, reorderArray } from '../../src/lib/gameGroups.ts'
 import type { Game, GameGroup } from '../../src/types/index.ts'
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 const game = (id: string, overrides: Partial<Game> = {}): Game => ({
   id,
@@ -45,6 +50,11 @@ test('groupLastPlayed : le plus récent des membres, undefined si aucun', () => 
 test('groupMembers : ordre déclaré, membres inexistants ignorés', () => {
   const games = [game('a'), game('b')]
   assert.deepEqual(groupMembers(games, group(['b', 'a', 'ghost'])).map(g => g.id), ['b', 'a'])
+})
+
+test('persistance : gameGroups fait partie de partialize (jamais perdu au redémarrage)', () => {
+  const store = readFileSync(join(root, 'src/store/useStore.ts'), 'utf8')
+  assert.ok(store.includes('gameGroups: state.gameGroups'), 'gameGroups persisté via partialize')
 })
 
 test('reorderArray : décale d\'une case, bornes respectées', () => {

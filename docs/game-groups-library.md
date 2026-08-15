@@ -63,3 +63,10 @@ Un groupe ne **fusionne** rien. Deux profils « FiveM — Default » et
 « FiveM — Graphics » restent deux profils indépendants (mods, ReShade,
 touches, Visual Profiles, historique et statistiques séparés) — ZAILON sait
 simplement qu'ils appartiennent au même groupe.
+
+## Persistance (spec §15)
+
+Les groupes sont des **objets persistants** : `gameGroups` fait partie du
+`partialize` du store (avec les jeux). Au démarrage : charger groupes →
+charger jeux → résoudre les IDs (`normalizeGameGroups`) → afficher. Les
+références utilisent les **IDs internes des jeux**, jamais les noms.

@@ -1,4 +1,4 @@
-import { Compass, Download, Gamepad2, Heart, Home, Monitor, Package, Plus, Settings, Wrench } from 'lucide-react'
+import { BarChart3, Compass, Download, Gamepad2, Heart, Home, Monitor, Package, Plus, Settings, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { useStore } from '../../store/useStore'
@@ -13,6 +13,7 @@ const NAV: Array<{ id: ViewType; icon: LucideIcon; label: string }> = [
   { id: 'downloads', icon: Download, label: 'Téléchargements' },
   { id: 'visuals', icon: Monitor, label: 'Visual Profiles' },
   { id: 'addons', icon: Package, label: 'Add-ons' },
+  { id: 'statistics', icon: BarChart3, label: 'Statistiques' },
   { id: 'frosty', icon: Wrench, label: 'Création Frosty' },
 ]
 
@@ -40,7 +41,7 @@ export function Sidebar() {
     </button>
 
     <nav className="flex w-full flex-col items-center gap-2" aria-label="Navigation principale">
-      {NAV.map(item => ((item.id === 'frosty' && !showFrosty) || (item.id === 'visuals' && !showVisuals) ? null : <NavButton key={item.id} item={item} active={currentView === item.id} badge={item.id === 'addons' && addonsNudgePending ? 'Nouveau' : undefined} onClick={() => {
+      {NAV.map(item => ((item.id === 'frosty' && !showFrosty) || (item.id === 'visuals' && !showVisuals) ? null : <NavButton key={item.id} item={item} active={currentView === item.id} dot={item.id === 'addons' && addonsNudgePending} onClick={() => {
         // Clic « Bibliothèque » → toujours la vitrine (grille plein écran).
         if (item.id === 'games') setGamesBrowsing(true)
         setView(item.id)
@@ -54,7 +55,7 @@ export function Sidebar() {
   </aside>{supportOpen && <SupportModal onClose={() => setSupportOpen(false)} />}</>
 }
 
-function NavButton({ item, active, badge, onClick }: { item: { id: ViewType; icon: LucideIcon; label: string }; active: boolean; badge?: string; onClick: () => void }) {
+function NavButton({ item, active, dot, onClick }: { item: { id: ViewType; icon: LucideIcon; label: string }; active: boolean; dot?: boolean; onClick: () => void }) {
   const Icon = item.icon
   return <button
     type="button"
@@ -65,6 +66,6 @@ function NavButton({ item, active, badge, onClick }: { item: { id: ViewType; ico
     className={`relative flex h-8 w-8 items-center justify-center rounded-full transition-all ${active ? 'bg-[var(--zailon-accent)] text-[var(--zailon-accent-text)] shadow-[0_8px_22px_rgba(0,0,0,0.32)]' : 'text-white/32 hover:bg-white/[0.06] hover:text-white/74'}`}
   >
     <Icon size={13} strokeWidth={active ? 2.35 : 1.7} />
-    {badge && <span className="absolute -right-1.5 -top-1 rounded-full bg-gold px-1 py-px text-[7px] font-bold uppercase tracking-wide text-[var(--zailon-accent-text)]">{badge}</span>}
+    {dot && <span title="Nouveau contenu disponible" className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-gold ring-2 ring-[#0a0c0c]" />}
   </button>
 }

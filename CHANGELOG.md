@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.123.0] - 2026-08-15
+
+> **Mise à niveau Bibliothèque / Add-ons — phase 1** : sauvegarde définitive
+> des groupes, bouton Statistiques dans la barre latérale, pastille discrète
+> au lieu du texte « Nouveau ».
+
+### Fixed
+
+- **Groupes réellement persistants** : `gameGroups` manquait de `partialize` —
+  les groupes étaient perdus au redémarrage (et le `groupId` des jeux purgé
+  par la normalisation). Ajouté au partialize : les IDs sont résolus au
+  rechargement, jamais des noms (spec §7).
+
+### Added
+
+- **Bouton « Statistiques »** dans la barre latérale (icône graphique) —
+  ouvre la vue Temps de jeu & sessions.
+
+### Changed
+
+- **Pastille « Nouveau »** de la barre latérale remplacée par un point discret
+  avec info-bulle (spec §9) — les titres restent propres.
+
 ## [1.122.0] - 2026-08-15
 
 > **Moteur de chaîne de lancement universel, pur et testé** — la décision

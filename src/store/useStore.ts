@@ -3364,6 +3364,11 @@ export const useStore = create<Store>()(persist((set, get) => ({
     addons: state.addons,
     frostyProjects: state.frostyProjects,
     games: state.games,
+    // Groupes de jeux (spec « Groupes de jeux » §15, « Mise à niveau » §7) :
+    // objets PERSISTANTS — les IDs de jeux sont résolus au rechargement, jamais
+    // des noms. Absents de partialize, les groupes disparaissaient au
+    // redémarrage (et le groupId des jeux était purgé par la normalisation).
+    gameGroups: state.gameGroups,
     selectedGameId: state.selectedGameId,
     selectedProfileId: state.selectedProfileId,
     nsfw: state.nsfw,

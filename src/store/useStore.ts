@@ -5,6 +5,7 @@ import { checkpointDue } from '../lib/sessionStats'
 import { ensurePrincipalInstallation, installationDisplayName, resolveGameInstallation } from '../lib/installations'
 import { normalizeGameGroups } from '../lib/gameGroups'
 import { resolveGameIdentity } from '../lib/gameIdentity'
+import { lastUsedProfileId } from '../lib/perGameConfig'
 import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
 import { validateAddonManifest } from '../lib/addons'
 import type { AddonSource, InstalledAddon, ZailonAddonManifest } from '../lib/addons'
@@ -1037,7 +1038,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
 
   setSelectedGame: selectedGameId => {
     const game = get().games.find(item => item.id === selectedGameId)
-    set({ selectedGameId, selectedProfileId: game?.profiles[0]?.id })
+    // Spec « Configuration par jeu » §4, §12 : restaurer le DERNIER profil
+    // utilisé de CE jeu (jamais le profil du jeu précédent ni un Default global).
+    set({ selectedGameId, selectedProfileId: game ? lastUsedProfileId(game.profiles) : undefined })
   },
   setSelectedProfile: async selectedProfileId => {
     const state = get()
@@ -1202,7 +1205,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   removeGame: gameId => set(state => {
     const games = state.games.filter(game => game.id !== gameId)
     const current = games[0]
-    return { games, selectedGameId: current?.id, selectedProfileId: current?.profiles[0]?.id }
+    return { games, selectedGameId: current?.id, selectedProfileId: current ? lastUsedProfileId(current.profiles) : undefined }
   }),
   setGamePath: async (gameId, execPath) => {
     try {

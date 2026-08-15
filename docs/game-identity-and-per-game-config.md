@@ -39,6 +39,25 @@ ReShade, touches et chemins — aucune donnée FiveM n'est réutilisée pour
 Cyberpunk. Le nouveau `identityKey` renforce cette séparation en évitant les
 doublons à la détection.
 
+### Résolveur pur `src/lib/perGameConfig.ts` (spec §4-5)
+
+Consolide la configuration effective d'une session en croisant les 3 niveaux
+sans jamais fuir d'un jeu à l'autre :
+
+- `lastUsedProfileId` : le profil actif d'un jeu = dernier utilisé (`lastUsed`),
+  sinon `isDefault`, sinon le premier — reçoit uniquement les profils de CE jeu.
+- `profileBelongsToGame` : garde anti-fuite — une sélection de profil d'un autre
+  jeu est rejetée.
+- `resolveActiveProfile` : sélection explicite si elle appartient au jeu, sinon
+  retombe sur le dernier profil utilisé du jeu (§4).
+- `resolveGameSessionConfig` : profil + ReShade + args + runtime (👤), touches +
+  media + performance (🎮), fond multimédia résolu surcharge-par-jeu sinon
+  défaut global (🌐).
+
+`setSelectedGame` restaure désormais le **dernier profil utilisé** du jeu
+(spec §4, §12) au lieu de toujours retomber sur `profiles[0]` — l'ouverture
+d'un jeu ramène son environnement réel, jamais un « Default » générique.
+
 ## 3. Démarrage (déjà en place)
 
 Le boot est déjà différé (`startupCoordinator`, `startupProfiler`) : le shell

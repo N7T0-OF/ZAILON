@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.108.0] - 2026-08-15
+
+> **Configuration par jeu en 3 niveaux** : résolveur pur qui consolide
+> profil/ReShade/touches/performance/media sans jamais fuir d'un jeu à
+> l'autre, et restauration du dernier profil utilisé à l'ouverture d'un jeu.
+
+### Added
+
+- **`src/lib/perGameConfig.ts`** (pur, 6 tests) : `lastUsedProfileId` (profil
+  actif = dernier utilisé → défaut → premier, jamais cross-game),
+  `profileBelongsToGame` (garde anti-fuite), `resolveActiveProfile` (sélection
+  explicite validée, sinon dernier profil du jeu) et `resolveGameSessionConfig`
+  (consolidation des 3 niveaux 🌐 global / 🎮 jeu / 👤 profil).
+- **`setSelectedGame`** restaure le **dernier profil utilisé** du jeu
+  (spec §4, §12) au lieu de `profiles[0]` — ouvrir un jeu ramène son
+  environnement réel, jamais un « Default » générique. Idem pour `removeGame`.
+- Test dédié `test-per-game-config.ts` (7 tests dont garde-fou source) —
+  **554 tests au total ✅**, tsc ✅, build ✅, audit ✅.
+
 ## [1.107.0] - 2026-08-15
 
 > **Game Identity Resolver + configuration par jeu** : identité de jeu

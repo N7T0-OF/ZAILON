@@ -146,6 +146,57 @@ struct FiveMEnvironment {
     gta_v_path: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FiveMPackScanResult {
+    path: String,
+    is_archive: bool,
+    files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FiveMPackApplyResult {
+    installed: usize,
+    backups: usize,
+    manifest_path: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FiveMPackRemoveResult {
+    removed: usize,
+    restored: usize,
+    manifest_path: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FiveMPackManifestRead {
+    exists: bool,
+    name: Option<String>,
+    file_count: usize,
+    installed_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PackManifestInput {
+    #[serde(rename = "schemaVersion")]
+    schema_version: i64,
+    kind: String,
+    name: String,
+    installed_at: Option<u64>,
+    files: Vec<PackManifestFileInput>,
+    sensitive: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PackManifestFileInput {
+    target: String,
+    source: String,
+    kind: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateIntegrityReport {
@@ -2038,6 +2089,245 @@ fn detect_fivem_environment(install_directory: String) -> Result<FiveMEnvironmen
             plugins: app_path.join("plugins").is_dir(),
         },
         gta_v_path: citizenfx_text.as_deref().and_then(citizenfx_iv_path),
+    })
+}
+
+/// Normalise un chemin de pack (`\` → `/`, segments vides supprimés) pour
+/// comparer les sources du plan avec les entrées réelles de l'archive.
+fn pack_norm_path(value: &str) -> String {
+    value
+        .replace('\\', "/")
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Inventorie le contenu réel d'une archive de pack graphique FiveM (spéc
+/// « Analyse intelligente du ZIP ») : liste relative normalisée `/`, symlinks et
+/// chemins de traversée rejetés. Retourne aussi `is_archive:false` pour un
+/// dossier (le scan `scan_mod_import` existant sert alors de listing).
+#[tauri::command]
+fn fivem_pack_scan(selected_path: String) -> Result<FiveMPackScanResult, String> {
+    let path = PathBuf::from(&selected_path);
+    if !path.exists() {
+        return Err("The selected pack does not exist.".into());
+    }
+    if path.is_dir() {
+        return Ok(FiveMPackScanResult {
+            path: selected_path,
+            is_archive: false,
+            files: Vec::new(),
+        });
+    }
+    let file = fs::File::open(&path).map_err(to_error)?;
+    let mut archive = zip::ZipArchive::new(file).map_err(to_error)?;
+    if archive.len() > 100_000 {
+        return Err("Pack archive contains too many entries.".into());
+    }
+    let mut files = Vec::new();
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index).map_err(to_error)?;
+        if archive_is_symlink(entry.unix_mode()) {
+            return Err("Pack archive contains a symbolic link.".into());
+        }
+        let relative = entry
+            .enclosed_name()
+            .ok_or_else(|| "Pack archive contains an unsafe traversal path.".to_string())?;
+        validate_archive_relative(&relative)?;
+        if !entry.is_dir() {
+            files.push(pack_norm_path(&relative.to_string_lossy()));
+        }
+    }
+    Ok(FiveMPackScanResult {
+        path: selected_path,
+        is_archive: true,
+        files,
+    })
+}
+
+/// Applique réellement un pack graphique dans `target_dir` (spéc
+/// « Application + rollback ») : chaque entrée du plan est extraite de
+/// l'archive vers sa cible (relative validée), tout fichier existant est
+/// sauvegardé (`<name>.zailon-pack-backup-<ts>`), puis le manifeste
+/// `zailon-manifest.json` est écrit avec `installedAt` et les backups.
+#[tauri::command]
+fn fivem_pack_apply(
+    archive_path: String,
+    target_dir: String,
+    manifest_json: String,
+) -> Result<FiveMPackApplyResult, String> {
+    let target = fs::canonicalize(&target_dir).map_err(to_error)?;
+    if !target.is_dir() {
+        return Err("The pack target directory does not exist.".into());
+    }
+    let mut manifest: PackManifestInput = serde_json::from_str(&manifest_json).map_err(to_error)?;
+    if manifest.files.is_empty() {
+        return Err("The pack plan contains no files to install.".into());
+    }
+    if manifest.files.len() > 100_000 {
+        return Err("Pack contains too many entries.".into());
+    }
+    let archive_file = fs::File::open(&archive_path).map_err(to_error)?;
+    let mut archive = zip::ZipArchive::new(archive_file).map_err(to_error)?;
+    if archive.len() > 100_000 {
+        return Err("Pack archive contains too many entries.".into());
+    }
+    let mut installed = 0usize;
+    let mut backups = 0usize;
+    let mut output_entries: Vec<serde_json::Value> = Vec::new();
+    for file in &manifest.files {
+        let target_rel = Path::new(&file.target);
+        validate_archive_relative(target_rel)?;
+        let source_norm = pack_norm_path(&file.source);
+        let destination = target.join(target_rel);
+        let mut found = false;
+        for index in 0..archive.len() {
+            let mut entry = archive.by_index(index).map_err(to_error)?;
+            if archive_is_symlink(entry.unix_mode()) {
+                return Err("Pack archive contains a symbolic link.".into());
+            }
+            let relative = entry
+                .enclosed_name()
+                .ok_or_else(|| "Pack archive contains an unsafe traversal path.".to_string())?;
+            if pack_norm_path(&relative.to_string_lossy()) != source_norm {
+                continue;
+            }
+            found = true;
+            if entry.is_dir() {
+                fs::create_dir_all(&destination).map_err(to_error)?;
+                break;
+            }
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent).map_err(to_error)?;
+            }
+            let backup = if destination.is_file() {
+                let name = destination
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("file");
+                let mut backup = destination.clone();
+                backup.set_file_name(format!("{name}.zailon-pack-backup-{}", unix_timestamp()));
+                fs::copy(&destination, &backup).map_err(to_error)?;
+                backups += 1;
+                backup
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .map(|value| value.to_string())
+            } else {
+                None
+            };
+            let mut output = fs::File::create(&destination).map_err(to_error)?;
+            std::io::copy(&mut entry, &mut output).map_err(to_error)?;
+            installed += 1;
+            output_entries.push(serde_json::json!({
+                "target": file.target,
+                "source": file.source,
+                "kind": file.kind,
+                "backup": backup,
+            }));
+            break;
+        }
+        if !found {
+            return Err(format!("Pack archive is missing entry: {}", file.source));
+        }
+    }
+    let manifest_path = target.join("zailon-manifest.json");
+    let written = serde_json::json!({
+        "schemaVersion": 1,
+        "kind": manifest.kind,
+        "name": manifest.name,
+        "installedAt": unix_timestamp(),
+        "files": output_entries,
+        "sensitive": manifest.sensitive,
+    });
+    write_json_atomic(&manifest_path, &written)?;
+    Ok(FiveMPackApplyResult {
+        installed,
+        backups,
+        manifest_path: manifest_path.to_string_lossy().to_string(),
+    })
+}
+
+/// Désinstallation propre (spéc « Désinstallation propre ») : lit
+/// `zailon-manifest.json`, restaure les fichiers sauvegardés (backup) et
+/// supprime UNIQUEMENT les fichiers possédés par le manifeste — jamais un
+/// fichier utilisateur. Le manifeste est ensuite retiré.
+#[tauri::command]
+fn fivem_pack_remove(target_dir: String) -> Result<FiveMPackRemoveResult, String> {
+    let target = fs::canonicalize(&target_dir).map_err(to_error)?;
+    let manifest_path = target.join("zailon-manifest.json");
+    if !manifest_path.is_file() {
+        return Err("No installed pack manifest found in this directory.".into());
+    }
+    let bytes = fs::read(&manifest_path).map_err(to_error)?;
+    let manifest: serde_json::Value = serde_json::from_slice(&bytes).map_err(to_error)?;
+    let mut removed = 0usize;
+    let mut restored = 0usize;
+    if let Some(files) = manifest.get("files").and_then(|value| value.as_array()) {
+        for entry in files {
+            let Some(target_rel) = entry.get("target").and_then(|value| value.as_str()) else {
+                continue;
+            };
+            let Ok(relative) = Path::new(target_rel).strip_prefix(".") else {
+                continue;
+            };
+            let _ = validate_archive_relative(relative);
+            let destination = target.join(target_rel);
+            let backup_name = entry.get("backup").and_then(|value| value.as_str());
+            if let Some(name) = backup_name {
+                let backup = target.join(name);
+                if backup.is_file() {
+                    if destination.is_file() {
+                        let _ = fs::remove_file(&destination);
+                    }
+                    if fs::rename(&backup, &destination).is_ok() {
+                        restored += 1;
+                        continue;
+                    }
+                }
+            }
+            if destination.is_file() {
+                let _ = fs::remove_file(&destination);
+                removed += 1;
+            }
+        }
+    }
+    let _ = fs::remove_file(&manifest_path);
+    Ok(FiveMPackRemoveResult {
+        removed,
+        restored,
+        manifest_path: manifest_path.to_string_lossy().to_string(),
+    })
+}
+
+/// Lit le manifeste installé d'un dossier (état « pack installé » pour l'UI).
+#[tauri::command]
+fn fivem_pack_manifest(target_dir: String) -> Result<FiveMPackManifestRead, String> {
+    let target = fs::canonicalize(&target_dir).map_err(to_error)?;
+    let manifest_path = target.join("zailon-manifest.json");
+    if !manifest_path.is_file() {
+        return Ok(FiveMPackManifestRead {
+            exists: false,
+            name: None,
+            file_count: 0,
+            installed_at: None,
+        });
+    }
+    let bytes = fs::read(&manifest_path).map_err(to_error)?;
+    let manifest: serde_json::Value = serde_json::from_slice(&bytes).map_err(to_error)?;
+    Ok(FiveMPackManifestRead {
+        exists: true,
+        name: manifest
+            .get("name")
+            .and_then(|value| value.as_str())
+            .map(String::from),
+        file_count: manifest
+            .get("files")
+            .and_then(|value| value.as_array())
+            .map(|files| files.len())
+            .unwrap_or(0),
+        installed_at: manifest.get("installedAt").and_then(|value| value.as_u64()),
     })
 }
 
@@ -15145,6 +15435,120 @@ mod tests {
         assert!(!is_zip_archive(&[b'P', b'K', 0x03, 0x00]));
     }
 
+    struct TempPackDir(PathBuf);
+
+    impl TempPackDir {
+        fn new(label: &str) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("zailon-pack-test-{label}-{}", unix_timestamp()));
+            fs::create_dir_all(&dir).unwrap();
+            TempPackDir(dir)
+        }
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempPackDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn write_test_pack_zip(path: &Path) {
+        let file = fs::File::create(path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        for (name, content) in [
+            ("mods/vehicles.meta", "META"),
+            ("plugins/dxgi.dll", "NEWDLL"),
+            ("presets/natural.ini", "PRESET"),
+        ] {
+            writer.start_file(name, zip_options()).unwrap();
+            writer.write_all(content.as_bytes()).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    #[test]
+    fn fivem_pack_scan_lists_real_zip_entries() {
+        let dir = TempPackDir::new("scan");
+        let zip_path = dir.path().join("pack.zip");
+        write_test_pack_zip(&zip_path);
+        let scanned = fivem_pack_scan(zip_path.to_string_lossy().to_string()).unwrap();
+        assert!(scanned.is_archive);
+        assert_eq!(scanned.files.len(), 3);
+        assert!(scanned.files.contains(&"plugins/dxgi.dll".to_string()));
+        assert!(scanned.files.contains(&"mods/vehicles.meta".to_string()));
+    }
+
+    #[test]
+    fn fivem_pack_apply_installs_backs_up_and_removes_with_rollback() {
+        let dir = TempPackDir::new("apply");
+        let zip_path = dir.path().join("pack.zip");
+        write_test_pack_zip(&zip_path);
+        let target = dir.path().join("FiveM.app");
+        fs::create_dir_all(target.join("plugins")).unwrap();
+        fs::write(target.join("plugins/dxgi.dll"), "OLD").unwrap();
+        let manifest = serde_json::json!({
+            "schemaVersion": 1,
+            "kind": "FiveMGraphicPack",
+            "name": "Test Pack",
+            "installedAt": null,
+            "sensitive": [],
+            "files": [
+                { "target": "mods/vehicles.meta", "source": "mods/vehicles.meta", "kind": "mods" },
+                { "target": "plugins/dxgi.dll", "source": "plugins/dxgi.dll", "kind": "plugins" },
+                { "target": "presets/natural.ini", "source": "presets/natural.ini", "kind": "reshade-config" },
+            ],
+        })
+        .to_string();
+
+        let applied = fivem_pack_apply(
+            zip_path.to_string_lossy().to_string(),
+            target.to_string_lossy().to_string(),
+            manifest,
+        )
+        .unwrap();
+        assert_eq!(applied.installed, 3);
+        assert_eq!(applied.backups, 1);
+        assert_eq!(
+            fs::read_to_string(target.join("plugins/dxgi.dll")).unwrap(),
+            "NEWDLL"
+        );
+        assert_eq!(
+            fs::read_to_string(target.join("mods/vehicles.meta")).unwrap(),
+            "META"
+        );
+        let backup_exists = fs::read_dir(target.join("plugins"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains("zailon-pack-backup")
+            });
+        assert!(backup_exists, "un backup du fichier existant doit exister");
+
+        let read = fivem_pack_manifest(target.to_string_lossy().to_string()).unwrap();
+        assert!(read.exists);
+        assert_eq!(read.file_count, 3);
+        assert_eq!(read.name.as_deref(), Some("Test Pack"));
+
+        // Rollback : le fichier pré-existant est RESTAURÉ, les nouveaux supprimés.
+        let removed = fivem_pack_remove(target.to_string_lossy().to_string()).unwrap();
+        assert_eq!(removed.restored, 1);
+        assert_eq!(removed.removed, 2);
+        assert_eq!(
+            fs::read_to_string(target.join("plugins/dxgi.dll")).unwrap(),
+            "OLD"
+        );
+        assert!(!target.join("mods/vehicles.meta").exists());
+        assert!(!target.join("presets/natural.ini").exists());
+        assert!(!target.join("zailon-manifest.json").exists());
+        assert!(fivem_pack_remove(target.to_string_lossy().to_string()).is_err());
+    }
+
     #[test]
     fn converts_mo2_reverse_modlist_order_and_preserves_separators() {
         let root = std::env::temp_dir().join(format!(
@@ -17026,6 +17430,10 @@ pub fn run() {
             read_citizenfx,
             write_citizenfx,
             detect_fivem_environment,
+            fivem_pack_scan,
+            fivem_pack_apply,
+            fivem_pack_remove,
+            fivem_pack_manifest,
             ensure_dir,
             scan_game_presence,
             scan_game_windows,

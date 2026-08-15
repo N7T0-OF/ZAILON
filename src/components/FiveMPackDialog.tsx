@@ -1,11 +1,12 @@
-import { useState } from 'react'
-import { AlertTriangle, Boxes, FileArchive, FolderInput, Loader2, ShieldAlert, X } from 'lucide-react'
-import { native, pickPackFile } from '../lib/native'
-import { planFiveMPack, type PackPlan } from '../lib/fivemPack'
+import { useEffect, useState } from 'react'
+import { AlertTriangle, Boxes, CheckCircle2, FileArchive, FolderInput, Loader2, RotateCcw, ShieldAlert, X } from 'lucide-react'
+import { native, pickPackFile, type FiveMPackManifestRead } from '../lib/native'
+import { packManifestJson, planFiveMPack, type PackPlan } from '../lib/fivemPack'
 import { ZailonInfoPopover } from './UI/ZailonInfoPopover'
 
 interface Props {
   gameName: string
+  installRoot: string
   onClose: () => void
 }
 
@@ -19,11 +20,40 @@ const KIND_LABEL: Record<string, string> = {
   unknown: 'Inconnu',
 }
 
-export function FiveMPackDialog({ gameName, onClose }: Props) {
+export function FiveMPackDialog({ gameName, installRoot, onClose }: Props) {
   const [fileName, setFileName] = useState<string | null>(null)
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [plan, setPlan] = useState<PackPlan | null>(null)
   const [busy, setBusy] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [removing, setRemoving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [targetDir, setTargetDir] = useState<string | null>(null)
+  const [installed, setInstalled] = useState<FiveMPackManifestRead | null>(null)
+
+  const refreshInstalled = async (dir: string | null) => {
+    if (!dir) return
+    try {
+      setInstalled(await native.fivemPackManifest(dir))
+    } catch {
+      setInstalled(null)
+    }
+  }
+
+  useEffect(() => {
+    if (!installRoot) return
+    void (async () => {
+      try {
+        const env = await native.detectFiveMEnvironment(installRoot)
+        const dir = env.appData || `${installRoot.replace(/[\\/]+$/, '')}/FiveM.app`
+        setTargetDir(dir)
+        void refreshInstalled(dir)
+      } catch {
+        setTargetDir(null)
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [installRoot])
 
   const choose = async () => {
     setBusy(true)
@@ -31,18 +61,65 @@ export function FiveMPackDialog({ gameName, onClose }: Props) {
     try {
       const path = await pickPackFile()
       if (!path) return
-      const candidates = await native.scanModImport([path], gameName)
-      const files = candidates.flatMap(candidate => candidate.files)
-      if (!files.length) {
-        setError('Aucun fichier détecté dans cette archive.')
+      const lower = path.toLowerCase()
+      let files: string[]
+      if (lower.endsWith('.zip')) {
+        const scanned = await native.fivemPackScan(path)
+        if (!scanned.files.length) {
+          setError('Aucun fichier détecté dans cette archive ZIP.')
+          return
+        }
+        files = scanned.files
+      } else if (lower.endsWith('.rar') || lower.endsWith('.7z')) {
+        setError('Les archives .rar / .7z ne sont pas analysables nativement — décompressez le pack dans un dossier, ou utilisez un .zip.')
         return
+      } else {
+        const candidates = await native.scanModImport([path], gameName)
+        files = candidates.flatMap(candidate => candidate.files)
+        if (!files.length) {
+          setError('Aucun fichier détecté dans ce dossier.')
+          return
+        }
       }
+      setSelectedPath(path)
       setFileName(path.split(/[\\/]/).pop() || path)
       setPlan(planFiveMPack(files))
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setBusy(false)
+    }
+  }
+
+  const install = async () => {
+    if (!plan || !selectedPath || !targetDir) return
+    setApplying(true)
+    setError(null)
+    try {
+      const result = await native.fivemPackApply(selectedPath, targetDir, packManifestJson(fileName || 'pack', plan))
+      await refreshInstalled(targetDir)
+      setPlan(null)
+      setSelectedPath(null)
+      setFileName(null)
+      setInstalled(prev => prev ? { ...prev, fileCount: result.installed } : prev)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const remove = async () => {
+    if (!targetDir) return
+    setRemoving(true)
+    setError(null)
+    try {
+      await native.fivemPackRemove(targetDir)
+      await refreshInstalled(targetDir)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setRemoving(false)
     }
   }
 
@@ -57,10 +134,26 @@ export function FiveMPackDialog({ gameName, onClose }: Props) {
         <div className="max-h-[70vh] space-y-3 overflow-y-auto p-4">
           {error && <p className="rounded-lg border border-red-300/15 bg-red-300/[0.04] px-3 py-2 text-[11px] text-red-200/75">{error}</p>}
 
+          {!targetDir ? (
+            <p className="rounded-lg border border-amber-300/15 bg-amber-300/[0.04] px-3 py-2 text-[11px] text-amber-100/70">Environnement FiveM introuvable — l'installation d'un pack exige un dossier cible <code className="text-amber-200/80">FiveM.app</code>.</p>
+          ) : (
+            <div className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-white/[0.015] px-3 py-2">
+              <p className="min-w-0 flex-1 truncate text-[10.5px] text-white/45">Cible : <span className="font-mono text-white/65">{targetDir}</span></p>
+              <ZailonInfoPopover text="Les packs s'installent dans l'environnement FiveM (FiveM.app) — les fichiers GTA V ne sont jamais touchés. Chaque remplacement est sauvegardé (rollback possible)." />
+            </div>
+          )}
+
+          {installed?.exists && (
+            <div className="flex items-center justify-between rounded-lg border border-emerald-300/15 bg-emerald-300/[0.04] px-3 py-2">
+              <p className="flex items-center gap-1.5 text-[11px] text-emerald-100/80"><CheckCircle2 size={13} />Pack installé : <b>{installed.name}</b> · {installed.fileCount} fichier(s)</p>
+              <button type="button" onClick={() => void remove()} disabled={removing} className="flex items-center gap-1 rounded-lg border border-white/[0.08] px-2.5 py-1 text-[10.5px] text-white/60 hover:bg-white/[0.05] disabled:opacity-40">{removing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />}Désinstaller</button>
+            </div>
+          )}
+
           {!plan ? (
             <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
               <FileArchive size={26} className="text-white/30" />
-              <p className="max-w-sm text-[11px] leading-relaxed text-white/38">Choisissez un pack <code className="text-white/60">.zip</code> / <code className="text-white/60">.rar</code> / <code className="text-white/60">.7z</code>. ZAILON l'analyse <b>sans rien installer</b> et classe son contenu (FiveM / ReShade / GTA V / inconnu).</p>
+              <p className="max-w-sm text-[11px] leading-relaxed text-white/38">Choisissez un pack <code className="text-white/60">.zip</code> ou un dossier décompressé. ZAILON analyse son contenu <b>sans rien installer</b>, classe les fichiers (FiveM / ReShade / GTA V / inconnu) et applique le plan avec manifeste + rollback.</p>
               <button type="button" onClick={() => void choose()} disabled={busy} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-40">{busy ? <Loader2 size={13} className="animate-spin" /> : <FolderInput size={13} />}Choisir un pack</button>
             </div>
           ) : (
@@ -112,7 +205,7 @@ export function FiveMPackDialog({ gameName, onClose }: Props) {
                 </div>
               )}
 
-              <p className="rounded-lg border border-white/[0.06] bg-white/[0.015] px-3 py-2 text-[10px] leading-relaxed text-white/35">Analyse et plan d'installation — l'application réelle (copie par profil + manifeste `zailon-manifest.json` + rollback) arrive avec le backend d'installation dédié.</p>
+              <button type="button" onClick={() => void install()} disabled={applying || plan.entries.length === 0} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-40">{applying ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}Installer dans {targetDir?.split(/[\\/]/).pop()}</button>
             </>
           )}
         </div>

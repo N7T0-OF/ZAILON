@@ -54,6 +54,31 @@ export interface FiveMEnvironment {
   gtaVPath: string | null
 }
 
+export interface FiveMPackScanResult {
+  path: string
+  isArchive: boolean
+  files: string[]
+}
+
+export interface FiveMPackApplyResult {
+  installed: number
+  backups: number
+  manifestPath: string
+}
+
+export interface FiveMPackRemoveResult {
+  removed: number
+  restored: number
+  manifestPath: string
+}
+
+export interface FiveMPackManifestRead {
+  exists: boolean
+  name: string | null
+  fileCount: number
+  installedAt: number | null
+}
+
 export interface UpdateStateCounts {
   games: number
   profiles: number
@@ -884,6 +909,11 @@ export const native = {
   readCitizenFx: (citizenfxPath: string) => desktopOnly<CitizenFxRead>('read_citizenfx', { citizenfxPath }),
   writeCitizenFx: (citizenfxPath: string, text: string) => desktopOnly<CitizenFxWrite>('write_citizenfx', { citizenfxPath, text }),
   detectFiveMEnvironment: (installDirectory: string) => desktopOnly<FiveMEnvironment>('detect_fivem_environment', { installDirectory }),
+  fivemPackScan: (selectedPath: string) => desktopOnly<FiveMPackScanResult>('fivem_pack_scan', { selectedPath }),
+  fivemPackApply: (archivePath: string, targetDir: string, manifestJson: string) =>
+    desktopOnly<FiveMPackApplyResult>('fivem_pack_apply', { archivePath, targetDir, manifestJson }),
+  fivemPackRemove: (targetDir: string) => desktopOnly<FiveMPackRemoveResult>('fivem_pack_remove', { targetDir }),
+  fivemPackManifest: (targetDir: string) => desktopOnly<FiveMPackManifestRead>('fivem_pack_manifest', { targetDir }),
   scanGamePresence: (requests: GamePresenceRequest[]) => desktopOnly<GamePresence[]>('scan_game_presence', { requests }),
   /** Présence Steam (clé de registre RunningAppID, lecture seule) : preuve
    * supplémentaire du GamePresenceEngine — Steam n'est jamais la seule source. */

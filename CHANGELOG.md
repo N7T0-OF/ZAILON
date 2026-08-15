@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.109.0] - 2026-08-15
+
+> **Packs graphiques FiveM — application réelle + rollback** : inventaire natif
+> du contenu des archives, installation non destructive (backup avant
+> remplacement) avec manifeste `zailon-manifest.json`, et désinstallation
+> propre qui ne touche jamais aux fichiers utilisateur.
+
+### Added
+
+- **Commandes Rust** `fivem_pack_scan` / `fivem_pack_apply` /
+  `fivem_pack_remove` / `fivem_pack_manifest` (bindings `native.ts`) :
+  - `fivemPackScan` : inventaire **réel** des entrées d'un `.zip` (normalisées
+    `/`, symlinks et traversée rejetés) — fini l'analyse par nom de fichier ;
+  - `fivemPackApply` : extraction **uniquement** des entrées du plan vers
+    l'environnement FiveM, sauvegarde de tout fichier existant
+    (`<name>.zailon-pack-backup-<ts>`), écriture du manifeste
+    `zailon-manifest.json` (`installedAt` + backups) ;
+  - `fivemPackRemove` : restaure les backups et supprime **uniquement** les
+    fichiers possédés par le manifeste — jamais un fichier utilisateur — puis
+    retire le manifeste ;
+  - `fivemPackManifest` : état « pack installé » pour l'UI.
+- **`FiveMPackDialog`** : cible = environnement FiveM détecté (jamais codé en
+  dur), bouton **Installer** (applique le plan), état « pack installé » avec
+  **Désinstaller** (rollback), `.rar`/`.7z` → message explicite.
+- `packManifestJson` dans `fivemPack.ts` (manifeste sérialisé prêt backend) —
+  **555 tests ✅**, tsc ✅, build ✅, audit ✅.
+
 ## [1.108.0] - 2026-08-15
 
 > **Configuration par jeu en 3 niveaux** : résolveur pur qui consolide

@@ -130,3 +130,9 @@ export function packManifest(packName: string, plan: PackPlan): object {
 export function rollbackPlanFromManifest(manifest: { files?: Array<{ target?: string }> }): string[] {
   return (manifest.files || []).map(entry => entry.target).filter((target): target is string => Boolean(target))
 }
+
+/** Sérialise le manifeste prêt pour `fivemPackApply` (JSON string) — le
+ * backend y ajoute `installedAt` et les backups avant écriture disque. */
+export function packManifestJson(packName: string, plan: PackPlan): string {
+  return JSON.stringify(packManifest(packName, plan))
+}

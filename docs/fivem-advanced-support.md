@@ -51,8 +51,6 @@ ni statistiques par profil.
   groupe) ; la suppression d'un groupe ne supprime **jamais** les jeux ni leurs
   fichiers.
 
-## 3. Prochaines phases (non livrées ici)
-
 ## 3. Backend natif (livré en 1.104.0)
 
 Commandes Rust exposées via `native.ts` :
@@ -83,21 +81,39 @@ par `fivem.profiles` — feature removal §57). Le dialogue :
 Bouton « **Packs graphiques** » (onglet Mods, gated `fivem.profiles`) →
 `FiveMPackDialog` :
 
-- import `.zip/.rar/.7z` (picker + `scanModImport` natif pour lister le
-  contenu) ;
 - **`fivemPack.ts`** : moteur de correspondance des chemins (pure, testé) —
   `stripCommonRoot` (racine commune détectée automatiquement),
   `mapPackEntry` (mods/citizen/plugins/reshade-shaders/presets/citizenfx,
   exclusion GTA V), `planFiveMPack` (résumé + exclusions + fichiers sensibles),
-  `packManifest` / `rollbackPlanFromManifest` ;
+  `packManifest` / `rollbackPlanFromManifest` / `packManifestJson` ;
 - aperçu du plan **sans rien installer** : compteurs par famille, exclusion
   GTA V, fichiers sensibles (`.exe`/`.dll`/`.asi`) signalés.
 
-## 6. Prochaines phases (non livrées ici)
+## 6. Packs graphiques — application réelle + rollback (livrée en 1.109.0)
 
-- **Application réelle des packs** (copie par profil + manifeste
-  `zailon-manifest.json` + rollback) — backend natif dédié.
-  classification interactive, installation par profil avec manifeste
-  `zailon-manifest.json` et rollback.
+**Invention native de l'archive** : `fivemPackScan(path)` liste les entrées
+réelles d'un `.zip` (normalisées `/`, symlinks et traversée rejetés) — les
+packs `.zip` sont désormais analysés **par leur contenu**, pas par leur nom.
+`.rar`/`.7z` → message explicite (décompressez ou utilisez un `.zip`) ; un
+dossier décompressé reste supporté via le scan existant.
+
+**Application + désinstallation propres** (spec « Désinstallation propre ») :
+
+- `fivemPackApply(archivePath, targetDir, manifestJson)` : extrait **uniquement**
+  les entrées du plan vers `targetDir` (chemins relatifs validés), sauvegarde
+  tout fichier existant (`<name>.zailon-pack-backup-<ts>`), puis écrit
+  `zailon-manifest.json` (`installedAt` + backups).
+- `fivemPackRemove(targetDir)` : restaure les fichiers sauvegardés et supprime
+  **uniquement** les fichiers possédés par le manifeste — jamais un fichier
+  utilisateur — puis retire le manifeste.
+- `fivemPackManifest(targetDir)` : état « pack installé » pour l'UI.
+
+La cible est l'environnement FiveM détecté (`FiveM.app`, jamais codé en dur) ;
+les fichiers GTA V restent exclus. Le dialogue affiche le pack installé avec un
+bouton **Désinstaller** (rollback), et l'installation est non destructive
+(backup systématique avant remplacement).
+
+## 7. Prochaines phases (non livrées ici)
+
 - Assistant d'installation FiveM (détection → création de profil → première
-  initialisation).
+  initialisation de l'environnement).

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mapPackEntry, packManifest, planFiveMPack, rollbackPlanFromManifest, stripCommonRoot } from '../../src/lib/fivemPack.ts'
+import { mapPackEntry, packManifest, packManifestJson, planFiveMPack, rollbackPlanFromManifest, stripCommonRoot } from '../../src/lib/fivemPack.ts'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -60,7 +60,10 @@ test('le bouton et le dialogue Packs graphiques sont gated par fivem.profiles', 
   assert.ok(gamesView.includes('fiveMProfiles && fivemPackOpen'), 'dialogue Packs gated')
   const dialog = readFileSync(join(root, 'src/components/FiveMPackDialog.tsx'), 'utf8')
   assert.ok(dialog.includes('planFiveMPack'), 'analyse via la lib pure')
-  assert.ok(dialog.includes('scanModImport'), 'liste du contenu via le scan natif existant')
+  assert.ok(dialog.includes('fivemPackScan'), 'inventaire natif réel de l\'archive')
+  assert.ok(dialog.includes('fivemPackApply'), 'application réelle via le backend natif')
+  assert.ok(dialog.includes('fivemPackRemove'), 'rollback via le backend natif')
+  assert.ok(dialog.includes('installRoot'), 'cible = environnement FiveM détecté, jamais codé en dur')
 })
 
 test('packManifest + rollbackPlanFromManifest : aller-retour des fichiers possédés', () => {
@@ -70,4 +73,20 @@ test('packManifest + rollbackPlanFromManifest : aller-retour des fichiers possé
   assert.equal(manifest.files.length, 2)
   const rollback = rollbackPlanFromManifest(manifest)
   assert.deepEqual(rollback, ['mods/a.ytd', 'plugins/b.dll'])
+})
+
+test('packManifestJson : manifeste sérialisé prêt pour le backend (sources exactes)', () => {
+  const plan = planFiveMPack(['Natural/mods/a.ytd', 'Natural/plugins/b.dll'])
+  const json = JSON.parse(packManifestJson('Natural Vision', plan)) as { schemaVersion: number; kind: string; name: string; files: Array<{ target: string; source: string }> }
+  assert.equal(json.schemaVersion, 1)
+  assert.equal(json.kind, 'FiveMGraphicPack')
+  assert.equal(json.name, 'Natural Vision')
+  assert.deepEqual(
+    json.files.map(file => file.source),
+    ['mods/a.ytd', 'plugins/b.dll'],
+  )
+  assert.deepEqual(
+    json.files.map(file => file.target),
+    ['mods/a.ytd', 'plugins/b.dll'],
+  )
 })

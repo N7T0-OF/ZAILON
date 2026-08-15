@@ -536,7 +536,7 @@ export function GamesView() {
     {importOpen && <ModImportDialog gameId={selectedGame.id} profileId={selectedProfile.id} gameName={selectedGame.name} destination={selectedGame.modsPath} onClose={() => setImportOpen(false)} onImported={() => void scanMods(selectedGame.id)} />}
     {mo2Import && mo2ImportOpen && <Mo2ImportDialog gameId={selectedGame.id} gameName={selectedGame.name} onClose={() => setMo2ImportOpen(false)} onImported={async result => completeMo2Import(selectedGame.id, result)} />}
     {fiveMProfiles && fivemReShadeOpen && selectedGame && <FiveMReShadeDialog installRoot={resolvedInstallation?.rootPath || selectedGame.installDirectory || selectedGame.execPath || ''} onClose={() => setFivemReShadeOpen(false)} />}
-    {fiveMProfiles && fivemPackOpen && selectedGame && <FiveMPackDialog gameName={selectedGame.name} onClose={() => setFivemPackOpen(false)} />}
+    {fiveMProfiles && fivemPackOpen && selectedGame && <FiveMPackDialog gameName={selectedGame.name} installRoot={resolvedInstallation?.rootPath || selectedGame.installDirectory || selectedGame.execPath || ''} onClose={() => setFivemPackOpen(false)} />}
     {bulkDialog && <BulkActionDialog mode={bulkDialog} count={selectedModIds.size} source={selectedProfile} profiles={selectedGame.profiles} onClose={() => setBulkDialog(undefined)} onConfirm={async value => {
       const ids = [...selectedModIds]
       if (bulkDialog === 'move' || bulkDialog === 'copy') await bulkTransferMods(ids, value, bulkDialog)

@@ -445,6 +445,9 @@ export interface Store {
   taskToastsEnabled: boolean
   taskAutoReduceImports: boolean
   libraryViewMode: 'grid' | 'illustrated' | 'compact'
+  /** Filtre actif de la vitrine Bibliothèque (persisté pour la recherche
+   * globale : un résultat « groupe » ouvre directement la vue Groupes). */
+  libraryFilter: 'all' | 'games' | 'apps' | 'favorites' | 'recent' | 'groups'
   /** Mode de la Bibliothèque (refonte « vitrine Steam ») : `true` = grille de
    * couvertures plein écran, `false` = page du jeu (hero + onglets). État de
    * session, non persisté — la grille garde recherche/filtre/scroll au retour. */
@@ -699,6 +702,7 @@ export interface Store {
   setTaskToastsEnabled: (enabled: boolean) => void
   setTaskAutoReduceImports: (enabled: boolean) => void
   setLibraryViewMode: (mode: Store['libraryViewMode']) => void
+  setLibraryFilter: (filter: Store['libraryFilter']) => void
   setGamesBrowsing: (browsing: boolean) => void
   setActivityMaxEvents: (count: number) => void
   setDownloadRetention: (retention: DownloadRetention) => void
@@ -805,6 +809,7 @@ export function migratePersistedState(persisted: unknown) {
     taskToastsEnabled: state.taskToastsEnabled ?? true,
     taskAutoReduceImports: state.taskAutoReduceImports ?? true,
     libraryViewMode: state.libraryViewMode || 'grid',
+    libraryFilter: state.libraryFilter || 'all',
     homeWidgets: normalizeHomeWidgets(state.homeWidgets),
     homeLayoutPreset: state.homeLayoutPreset ?? (state.homeWidgets ? 'custom' : 'standard'),
     notificationCenterEnabled: state.notificationCenterEnabled ?? true,
@@ -920,6 +925,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   taskToastsEnabled: true,
   taskAutoReduceImports: true,
   libraryViewMode: 'grid',
+  libraryFilter: 'all',
   gamesBrowsing: true,
   homeWidgets: [...HOME_WIDGET_DEFAULTS],
   homeLayoutPreset: 'standard',
@@ -2703,6 +2709,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     set(state => ({ sessionHistory: gameId ? state.sessionHistory.filter(session => session.gameId !== gameId) : [] }))
   },
   setLibraryViewMode: libraryViewMode => set({ libraryViewMode }),
+  setLibraryFilter: libraryFilter => set({ libraryFilter }),
   setGamesBrowsing: gamesBrowsing => set({ gamesBrowsing }),
   setActivityMaxEvents: activityMaxEvents => set({ activityMaxEvents }),
   setDownloadRetention: downloadRetention => set({ downloadRetention }),
@@ -3384,6 +3391,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     taskToastsEnabled: state.taskToastsEnabled,
     taskAutoReduceImports: state.taskAutoReduceImports,
     libraryViewMode: state.libraryViewMode,
+    libraryFilter: state.libraryFilter,
     homeWidgets: state.homeWidgets,
     homeLayoutPreset: state.homeLayoutPreset,
     notificationCenterEnabled: state.notificationCenterEnabled,

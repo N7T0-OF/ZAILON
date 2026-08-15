@@ -7,6 +7,7 @@ import { appVersion, useStore } from '../../store/useStore'
 import { activeSessions, isSearchingSession, pickPrioritySession } from '../../lib/sessionPriority'
 import { formatElapsedDuration } from '../../utils'
 import { SessionStopModal } from '../SessionStopModal'
+import { GlobalSearch } from '../GlobalSearch'
 
 type WindowAction = 'Réduire' | 'Agrandir' | 'Déplacer' | 'Fermer'
 
@@ -89,6 +90,8 @@ export function TitleBar() {
         <span className="font-display text-[11px] font-bold uppercase tracking-[0.24em] text-white/62">ZAILON · v{appVersion}</span>
         {windowError && <span title={windowError} className="ml-2 max-w-sm truncate text-[11px] text-red-300/75">Contrôle de fenêtre indisponible</span>}
       </div>
+
+      <div className="flex h-full items-center px-1.5" onDoubleClick={event => event.stopPropagation()}><GlobalSearch /></div>
 
       {running.length > 0 && <div className="relative flex h-full items-stretch" onDoubleClick={event => event.stopPropagation()}>
         <button type="button" onClick={() => setSessionsOpen(value => !value)} aria-expanded={sessionsOpen} title={`${running.length} session(s) en cours — cliquer pour voir la liste`} className="flex items-center gap-1.5 border-r border-white/[0.05] px-3 text-[11px] font-semibold text-emerald-200/90 hover:bg-white/[0.06]"><Gamepad2 size={11} /><span className="hidden lg:inline">{running.length} en cours</span><span className="lg:hidden">{running.length}</span></button>

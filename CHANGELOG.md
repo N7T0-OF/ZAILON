@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.119.0] - 2026-08-15
+
+> **Recherche globale** — une seule requête en haut de ZAILON trouve jeux,
+> applications, profils, mods, groupes et add-ons. Ctrl/Cmd+K, navigation
+> clavier, ouverture directe du résultat.
+
+### Added
+
+- **`src/lib/globalSearch.ts`** (pur, testé) : recherche multi-catégorie avec
+  score simple (préfixe > mot > sous-chaîne), tri stable, total borné.
+- **`GlobalSearch`** : pastille « Rechercher » dans la barre de titre +
+  surcouche portail (`document.body`) — ↑/↓, Entrée, Échap. Navigation :
+  jeu/app → page jeu ; profil → jeu + profil explicite ; mod → jeu + onglet
+  Mods ; add-on → Add-ons ; groupe → Bibliothèque filtrée sur « Groupes ».
+- **`libraryFilter` levé dans le store** (persisté) : un résultat « groupe »
+  ouvre directement la vue Groupes.
+
+### Changed
+
+- Le filtre Bibliothèque était un état local ; il est désormais partagé
+  (store) et survit au changement de vue.
+
 ## [1.118.0] - 2026-08-15
 
 > **Sélecteur rapide de groupe sur l'Accueil** — la flèche de changement de

@@ -199,8 +199,8 @@
       "name": "NTE Support",
       "version": "1.0.0",
       "category": "game-support",
-      "description": "Chaîne launcher → UAC → vrai processus NTE + PAK.",
-      "minZailonVersion": "1.69.0",
+      "description": "Support du mod loader de Neverness to Everness : détection du backend PAK (.pak/.utoc/.ucas) pour les jeux NTE. Sans cet add-on, aucun jeu n'est classé NTE PAK — la détection de processus au lancement reste dans le Core.",
+      "minZailonVersion": "1.78.0",
       "permissions": [
         "game.read",
         "game.launch",
@@ -208,7 +208,16 @@
         "mods.read",
         "mods.write"
       ],
-      "package": null
+      "package": "packages/nte/official.zailon.game.nte-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "292ab6027ab8cc4aaf7b83ff496b9867a3bcad244e7107a6f29f3707c65cfc65",
+      "downloadSize": 5668,
+      "installedSize": 14170,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
     },
     {
       "id": "official.zailon.game.fivem",

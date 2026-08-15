@@ -27,7 +27,29 @@ catalogue → la carte devient installable à la synchronisation suivante.
 | `official.zailon.provider.nexus` | Disponible (package + SHA-256) |
 | `official.zailon.provider.curseforge` | Disponible (package + SHA-256) |
 | `official.zailon.game.cyberpunk` | Disponible (package + SHA-256) — outils avancés gated |
-| les 10 autres officiels | En développement — aucun package tant que la fonctionnalité n'est pas migrée hors Core |
+| `official.zailon.game.nte` | Disponible (package + SHA-256) — backend PAK gated |
+| les 9 autres officiels | En développement — aucun package tant que la fonctionnalité n'est pas migrée hors Core |
+
+### NTE Support — migration réelle (feature removal §57)
+
+Deuxième migration « jeu » (la plus fine du catalogue) : le support NTE était
+purement déclaratif (descripteur `nte-pak` + détection par marqueurs) sans
+capacité exercée. La migration a ajouté :
+
+- le package `official.zailon.game.nte` (capacité `nte.modloader`,
+  permissions `game.read`/`game.launch`/`process.read`/`mods.read`/
+  `mods.write`, slots `Game.Configuration` + `Game.Mods`) — **Disponible**
+  avec SHA-256 réel ;
+- **gate pur `nteModsAllowed(capabilities)`** et paramètre `nteAllowed` sur
+  `detectModBackend` : sans l'add-on (ou désactivé), un jeu Neverness to
+  Everness retombe sur `generic-folder` — plus jamais de classement NTE PAK
+  implicite ; les deux call sites de GameConfigurationPanel passent la gate
+  (le défaut de la lib pure reste `true` pour préserver les tests existants) ;
+- la détection de processus au lancement (`ntegloballauncher.exe` comme stage
+  intermédiaire valide, session tracking) reste dans le Core — mécanique de
+  lancement, spec « Séparation des responsabilités » §113 ;
+- test dédié `test-nte-addon.ts` (gate ×4, catalogue/SHA, manifest) —
+  513 tests au total.
 
 ### Cyberpunk Advanced — migration réelle (feature removal §57)
 

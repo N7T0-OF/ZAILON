@@ -26,7 +26,7 @@ import { existsSync } from 'node:fs'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const addonsRoot = join(root, 'addons')
 
-const officialIds = ['official.zailon.frosty', 'official.zailon.frosty-editor', 'official.zailon.visual-profiles', 'official.zailon.discord', 'official.zailon.provider.gamebanana', 'official.zailon.provider.nexus', 'official.zailon.provider.curseforge', 'official.zailon.game.cyberpunk']
+const officialIds = ['official.zailon.frosty', 'official.zailon.frosty-editor', 'official.zailon.visual-profiles', 'official.zailon.discord', 'official.zailon.provider.gamebanana', 'official.zailon.provider.nexus', 'official.zailon.provider.curseforge', 'official.zailon.game.cyberpunk', 'official.zailon.game.nte']
 
 test('chaque add-on officiel a un manifest valide (validateAddonManifest)', () => {
   const dirs = readdirSync(addonsRoot, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name)
@@ -38,6 +38,7 @@ test('chaque add-on officiel a un manifest valide (validateAddonManifest)', () =
   assert.ok(dirs.includes('official.zailon.provider.nexus'), 'Nexus Provider présent')
   assert.ok(dirs.includes('official.zailon.provider.curseforge'), 'CurseForge Provider présent')
   assert.ok(dirs.includes('official.zailon.game.cyberpunk'), 'Cyberpunk Advanced présent')
+  assert.ok(dirs.includes('official.zailon.game.nte'), 'NTE Support présent')
   for (const id of officialIds) {
     const raw = readFileSync(join(addonsRoot, id, 'manifest.json'), 'utf8')
     const result = validateAddonManifest(JSON.parse(raw))

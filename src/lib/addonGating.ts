@@ -105,6 +105,16 @@ export function missingCapabilities(capabilities: Set<ZailonCapability>, request
 }
 
 /**
+ * Gate du backend PAK NTE (spec « Finalisation des add-ons » §32, feature
+ * removal §57) : la détection NTE PAK (.pak/.utoc/.ucas) de Neverness to
+ * Everness n'existe qu'avec l'add-on installé + activé (capacité
+ * `nte.modloader`). Pur et testé (test-nte-addon.ts).
+ */
+export function nteModsAllowed(capabilities: Set<ZailonCapability> | readonly ZailonCapability[]): boolean {
+  return hasCapability(capabilities, 'nte.modloader')
+}
+
+/**
  * Gate des outils avancés Cyberpunk (spec « Finalisation des add-ons » §31,
  * feature removal §57) : les boutons de réparation (structure, MO2, RED4ext)
  * n'existent que pour un jeu Cyberpunk ET avec l'add-on installé + activé

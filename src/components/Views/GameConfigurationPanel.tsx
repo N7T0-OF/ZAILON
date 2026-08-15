@@ -120,7 +120,8 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
   const capabilities = useMemo(() => addonCapabilities(installedAddons), [installedAddons])
   const hasFrostyCap = hasCapability(capabilities, 'frosty.backend')
   const hasReShadeCap = hasCapability(capabilities, 'reshade.manager')
-  const frostyEligible = detectModBackend({ execPath: game.execPath, gameName: game.name }) === 'frosty'
+  const hasNteCap = hasCapability(capabilities, 'nte.modloader')
+  const frostyEligible = detectModBackend({ execPath: game.execPath, gameName: game.name, nteAllowed: hasNteCap }) === 'frosty'
   const reshadeEligible = resolveReShadeTarget(game).confidence >= 0.6
   const setView = useStore(state => state.setView)
   const openAddons = () => setView('addons')
@@ -690,6 +691,7 @@ function BackgroundPicker({ game }: { game: Game }) {
 function FrostyConfigCard({ game, profile }: { game: Game; profile: Profile }) {
   const capabilities = addonCapabilities(useStore(state => state.addons))
   const hasEditor = hasCapability(capabilities, 'frosty.editor')
+  const hasNteCap = hasCapability(capabilities, 'nte.modloader')
   const setView = useStore(state => state.setView)
   const setFrostyContextGame = useStore(state => state.setFrostyContextGame)
   const [open, setOpen] = useState(() => {
@@ -722,7 +724,7 @@ function FrostyConfigCard({ game, profile }: { game: Game; profile: Profile }) {
     datapathFix,
     launchPlatformPlugin,
   }), [game.id, game.execPath, platform, datapathFix, launchPlatformPlugin])
-  const isFrosty = detectModBackend({ execPath: game.execPath, gameName: game.name }) === 'frosty'
+  const isFrosty = detectModBackend({ execPath: game.execPath, gameName: game.name, nteAllowed: hasNteCap }) === 'frosty'
   const overhaulAlert = useMemo(() => frostyOverhaulConflict(profileMods.map(mod => mod.name)), [profileMods])
   const runTest = () => {
     const checks: string[] = []

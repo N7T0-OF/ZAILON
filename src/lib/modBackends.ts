@@ -65,6 +65,14 @@ export function detectModBackend(input: {
   execPath?: string
   gameName?: string
   steamAppId?: number
+  /**
+   * Vrai si le backend NTE PAK est autorisé — doit être branché sur l'add-on
+   * NTE Support (capacité `nte.modloader`, feature removal §57). Par défaut
+   * `true` pour préserver le comportement de la lib pure ; les appels UI
+   * passent explicitement la gate. Sans autorisation, un jeu NTE retombe sur
+   * `generic-folder`.
+   */
+  nteAllowed?: boolean
 }): ModBackendId {
   const executable = (input.execPath || '').toLocaleLowerCase().split(/[\\/]/).pop() || ''
   if (executable.includes('cyberpunk2077') || (input.gameName || '').toLocaleLowerCase().includes('cyberpunk')) {
@@ -74,7 +82,7 @@ export function detectModBackend(input: {
     return 'frosty'
   }
   const nteMarkers = ['nte', 'neverness', 'neverness-to-everness', 'ntegloballauncher']
-  if (nteMarkers.some(marker => executable.includes(marker) || (input.gameName || '').toLocaleLowerCase().includes(marker))) {
+  if ((input.nteAllowed ?? true) && nteMarkers.some(marker => executable.includes(marker) || (input.gameName || '').toLocaleLowerCase().includes(marker))) {
     return 'nte-pak'
   }
   return 'generic-folder'

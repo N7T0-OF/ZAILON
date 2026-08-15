@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.101.0] - 2026-08-15
+
+> **NTE Support devient un add-on installable** — deuxième migration « jeu » :
+> le backend PAK de Neverness to Everness est désormais conditionné par
+> l'add-on, plus jamais détecté implicitement par marqueurs.
+
+### Added
+
+- **Add-on `official.zailon.game.nte`** (Disponible, package + SHA-256 réel) :
+  capacité `nte.modloader`, permissions `game.read`/`game.launch`/
+  `process.read`/`mods.read`/`mods.write`, slots `Game.Configuration` +
+  `Game.Mods`.
+- **Gate pur `nteModsAllowed`** + paramètre `nteAllowed` sur
+  `detectModBackend` : sans l'add-on, un jeu Neverness to Everness retombe sur
+  `generic-folder` — plus jamais de classement NTE PAK implicite (feature
+  removal §57).
+- La détection de processus au lancement (`ntegloballauncher.exe`, session
+  tracking) reste dans le Core (mécanique de lancement) : un jeu NTE se lance
+  et se tracke normalement, seul le backend PAK disparaît sans l'add-on.
+- Test dédié `test-nte-addon.ts` (7 tests) — **513 tests au total ✅**.
+
 ## [1.100.0] - 2026-08-15
 
 > **Cyberpunk Advanced devient un add-on installable** — première migration

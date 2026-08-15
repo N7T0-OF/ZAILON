@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.120.0] - 2026-08-15
+
+> **Suivi de chaîne Frosty** — un jeu Frosty est launcher-based : ZAILON passe
+> à « En cours » quand le processus final (NFS16.exe…) est détecté, jamais
+> quand FrostyModManager sort ou reste ouvert.
+
+### Added
+
+- **`frostyLaunchAdapter(execPath)`** (`src/lib/launchAdapters.ts`) : adaptateur
+  de lancement dérivé du registre Frosty — `ExternalLauncher`,
+  `gameExecutableCandidates` = candidats du registre (processus FINAL, jamais
+  Frosty), `launchChainStages: ['Frosty', 'Plugin', 'Game']`, rattachement
+  180 s.
+- **`adapterFor(game)`** reconnaît désormais un jeu Frosty par son exécutable
+  (`NFS16.exe`…) avant le repli par nom : `isLauncherBased` devient vrai, la
+  session ne se termine plus à la sortie du launcher.
+
+### Changed
+
+- `launchAdapters.ts` importe le registre Frosty (module pur, aucun cycle).
+
 ## [1.119.0] - 2026-08-15
 
 > **Recherche globale** — une seule requête en haut de ZAILON trouve jeux,

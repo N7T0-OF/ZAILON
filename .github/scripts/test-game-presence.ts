@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { AUTO_ATTACH_THRESHOLD, presenceRequestFor, shouldScanExternalGame, STEAM_BACKED_ATTACH_THRESHOLD, windowRequestFor } from '../../src/lib/gamePresence.ts'
-import { adapterFor } from '../../src/lib/launchAdapters.ts'
+import { adapterFor, frostyLaunchAdapter, isLauncherBased } from '../../src/lib/launchAdapters.ts'
 import type { Game } from '../../src/types.ts'
 
 const game = (name: string, installDirectory?: string): Game => ({
@@ -19,6 +19,39 @@ const game = (name: string, installDirectory?: string): Game => ({
 
 test('adaptateur NTE expose son AppID Steam (4508340)', () => {
   assert.equal(adapterFor(game('Neverness to Everness')).steamAppId, 4508340)
+})
+
+test('adaptateur Frosty : launcher-based, le processus final est NFS16.exe (jamais Frosty)', () => {
+  const adapter = frostyLaunchAdapter('C:\\Games\\Need for Speed\\NFS16.exe')
+  assert.ok(adapter)
+  assert.equal(adapter.launchBehavior, 'ExternalLauncher')
+  assert.equal(adapter.launcherExecutable, 'FrostyModManager.exe')
+  assert.deepEqual(adapter.gameExecutableCandidates, ['NFS16.exe'])
+  assert.deepEqual(adapter.launchChainStages, ['Frosty', 'Plugin', 'Game'])
+  assert.equal(isLauncherBased(adapter), true)
+  assert.ok(adapter.reattachWindowSeconds >= 120)
+})
+
+test('adapterFor : un jeu Frosty (exécutable du registre) est launcher-based', () => {
+  const g = game('Need for Speed', 'C:\\Games\\Need for Speed')
+  g.execPath = 'C:\\Games\\Need for Speed\\NFS16.exe'
+  const adapter = adapterFor(g)
+  assert.equal(adapter.launchBehavior, 'ExternalLauncher')
+  assert.deepEqual(adapter.gameExecutableCandidates, ['NFS16.exe'])
+  assert.equal(isLauncherBased(adapter), true)
+})
+
+test('adapterFor : un exécutable non Frosty retombe sur l\'adaptateur par défaut', () => {
+  const g = game('Random Game', 'C:\\Games\\Random')
+  g.execPath = 'C:\\Games\\Random\\Random.exe'
+  const adapter = adapterFor(g)
+  assert.equal(adapter.launchBehavior, 'DirectProcess')
+  assert.equal(isLauncherBased(adapter), false)
+})
+
+test('frostyLaunchAdapter : exécutable hors registre → undefined', () => {
+  assert.equal(frostyLaunchAdapter('C:\\Games\\Other\\Other.exe'), undefined)
+  assert.equal(frostyLaunchAdapter(undefined), undefined)
 })
 
 test('seuil de rattachement automatique fixé à 80', () => {

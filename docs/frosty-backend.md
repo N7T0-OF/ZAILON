@@ -83,6 +83,24 @@ Bibliothèque > Jeu > Configuration > **Frosty** :
 - « Tester le profil » (contrôles purs, sans lancer le jeu) ;
 - rappel : jamais initialisé au démarrage.
 
+## Suivi de chaîne de lancement (spec « Fix Frosty — suivi de chaîne »)
+
+Un jeu Frosty est **launcher-based** : la chaîne réelle est
+`FrostyModManager → DatapathFix / Launch Platform Plugin → exécutable du jeu`.
+`frostyLaunchAdapter(execPath)` (`src/lib/launchAdapters.ts`) construit
+l'adaptateur à partir du registre Frosty (`NFS16.exe`, etc.) :
+
+- `launchBehavior: ExternalLauncher` — la sortie de Frosty (ou d'un plugin)
+  ne termine **jamais** la session ;
+- `gameExecutableCandidates` = candidats du registre (le processus FINAL,
+  jamais Frosty) ;
+- `launchChainStages: ['Frosty', 'Plugin', 'Game']` ;
+- fenêtre de rattachement 180 s (Frosty + plugins peuvent être lents).
+
+Résultat : ZAILON passe à « En cours » dès que `NFS16.exe` est détecté, même si
+FrostyModManager reste ouvert ; il termine la session quand le jeu ferme — pas
+quand Frosty ferme.
+
 ## Sécurité (spec §85)
 
 - Aucun téléchargement de binaires Frosty depuis un miroir inconnu ;

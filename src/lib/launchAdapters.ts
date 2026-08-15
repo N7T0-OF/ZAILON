@@ -1,4 +1,5 @@
 import type { Game, GameLaunchAdapter } from '../types'
+import { frostyAdapterForExecutable } from './frosty.ts'
 
 /**
  * Adaptateurs de lancement par jeu (système multi-étapes, Phase 6).
@@ -67,8 +68,32 @@ export function defaultAdapterFor(name: string): GameLaunchAdapter {
   return FALLBACK_ADAPTER
 }
 
+/** Adaptateur de lancement Frosty (spec « Fix Frosty — suivi de chaîne ») :
+ * la chaîne réelle est FrostyModManager → DatapathFix / Launch Platform
+ * Plugin → exécutable du jeu. Le processus final n'est JAMAIS Frosty :
+ * `gameExecutableCandidates` vient du registre Frosty (ex. `NFS16.exe`).
+ * Fenêtre de rattachement large : Frosty + plugins peuvent être lents. */
+export function frostyLaunchAdapter(execPath?: string): GameLaunchAdapter | undefined {
+  const frosty = frostyAdapterForExecutable(execPath)
+  if (!frosty) return undefined
+  return {
+    launchBehavior: 'ExternalLauncher',
+    launcherExecutable: 'FrostyModManager.exe',
+    launcherExecutableCandidates: ['FrostyModManager.exe', 'FMM.exe'],
+    gameExecutableCandidates: frosty.executableCandidates,
+    reattachWindowSeconds: 180,
+    endGraceSeconds: 10,
+    launchChainStages: ['Frosty', 'Plugin', 'Game'],
+  }
+}
+
 export function adapterFor(game: Game): GameLaunchAdapter {
-  return game.launchAdapter || defaultAdapterFor(game.name)
+  if (game.launchAdapter) return game.launchAdapter
+  // Un jeu Frosty est « launcher-based » : la sortie de Frosty (ou d'un plugin)
+  // ne doit jamais terminer la session — seul le processus final compte.
+  const frosty = frostyLaunchAdapter(game.execPath)
+  if (frosty) return frosty
+  return defaultAdapterFor(game.name)
 }
 
 /** Un adaptateur « avec launcher » : la sortie du premier PID ne doit pas

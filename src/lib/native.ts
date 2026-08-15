@@ -1098,6 +1098,16 @@ export async function pickProfileArchive() {
   return typeof selected === 'string' ? selected : null
 }
 
+export async function pickPackFile() {
+  if (!isTauri()) return null
+  const selected = await open({
+    title: 'Importer un pack graphique FiveM',
+    multiple: false,
+    filters: [{ name: 'Archives', extensions: ['zip', 'rar', '7z'] }],
+  })
+  return typeof selected === 'string' ? selected : null
+}
+
 export async function saveProfileArchive(defaultName: string) {
   if (!isTauri()) return null
   const selected = await save({

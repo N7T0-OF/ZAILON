@@ -78,9 +78,25 @@ par `fivem.profiles` — feature removal §57). Le dialogue :
 3. **Enregistrer** → `writeCitizenFx` (backup horodaté automatique) ;
    **Retirer** → `removeReShade5Id` (désinstallation propre §20).
 
-## 5. Prochaines phases (non livrées ici)
+## 5. Packs graphiques FiveM — analyse + plan (livrée en 1.106.0)
 
-- **Gestionnaire de packs graphiques FiveM** : import `.zip/.rar/.7z`,
+Bouton « **Packs graphiques** » (onglet Mods, gated `fivem.profiles`) →
+`FiveMPackDialog` :
+
+- import `.zip/.rar/.7z` (picker + `scanModImport` natif pour lister le
+  contenu) ;
+- **`fivemPack.ts`** : moteur de correspondance des chemins (pure, testé) —
+  `stripCommonRoot` (racine commune détectée automatiquement),
+  `mapPackEntry` (mods/citizen/plugins/reshade-shaders/presets/citizenfx,
+  exclusion GTA V), `planFiveMPack` (résumé + exclusions + fichiers sensibles),
+  `packManifest` / `rollbackPlanFromManifest` ;
+- aperçu du plan **sans rien installer** : compteurs par famille, exclusion
+  GTA V, fichiers sensibles (`.exe`/`.dll`/`.asi`) signalés.
+
+## 6. Prochaines phases (non livrées ici)
+
+- **Application réelle des packs** (copie par profil + manifeste
+  `zailon-manifest.json` + rollback) — backend natif dédié.
   classification interactive, installation par profil avec manifeste
   `zailon-manifest.json` et rollback.
 - Assistant d'installation FiveM (détection → création de profil → première

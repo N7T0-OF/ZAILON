@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.106.0] - 2026-08-15
+
+> **Packs graphiques FiveM — analyse + plan** : moteur de correspondance des
+> chemins, classification et aperçu du plan sans rien installer.
+
+### Added
+
+- **`fivemPack.ts`** (pure, testé) : `stripCommonRoot` (racine commune
+  détectée), `mapPackEntry` (mods/citizen/plugins/reshade-shaders/presets/
+  citizenfx — exclusion des fichiers GTA V), `planFiveMPack` (résumé,
+  exclusions, fichiers sensibles), `packManifest` / `rollbackPlanFromManifest`.
+- **Bouton « Packs graphiques »** (onglet Mods FiveM, gated `fivem.profiles`)
+  → `FiveMPackDialog` : import `.zip/.rar/.7z`, analyse **sans rien
+  installer**, aperçu des compteurs par famille, exclusion GTA V et fichiers
+  sensibles (`.exe`/`.dll`/`.asi`) signalés.
+- Test dédié `test-fivem-pack.ts` (6 tests) — **542 tests ✅**, tsc ✅,
+  build ✅, audit ✅.
+
 ## [1.105.0] - 2026-08-15
 
 > **UI ReShade FiveM** : diagnostic compact + assistant d'ID avec aperçu

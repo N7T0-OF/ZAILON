@@ -21,6 +21,16 @@ test('adaptateur NTE expose son AppID Steam (4508340)', () => {
   assert.equal(adapterFor(game('Neverness to Everness')).steamAppId, 4508340)
 })
 
+test('adaptateur FiveM : processus final = GTA V (jamais FiveM.exe seul)', () => {
+  const adapter = adapterFor(game('FiveM'))
+  assert.equal(adapter.launchBehavior, 'ExternalLauncher')
+  assert.equal(adapter.launcherExecutable, 'FiveM.exe')
+  assert.ok(adapter.gameExecutableCandidates.includes('GTA5.exe'))
+  assert.ok(adapter.gameExecutableCandidates.includes('GTA5_Enhanced.exe'))
+  assert.ok(adapter.gameExecutableCandidates.includes('CitizenFX.exe'))
+  assert.deepEqual(adapter.launchChainStages, ['FiveM', 'CitizenFX', 'Game'])
+})
+
 test('adaptateur Frosty : launcher-based, le processus final est NFS16.exe (jamais Frosty)', () => {
   const adapter = frostyLaunchAdapter('C:\\Games\\Need for Speed\\NFS16.exe')
   assert.ok(adapter)

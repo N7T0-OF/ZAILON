@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.126.0] - 2026-08-16
+
+> **Statistiques premium + renommage des jeux + chaîne FiveM** : la page
+> Statistiques devient une vitrine visuelle (totaux, classement avec
+> couvertures, activité récente, détail par jeu/profil), un jeu peut être
+> renommé sans casser son identité technique, et la détection FiveM suit le
+> processus GTA V final (jamais FiveM.exe seul).
+
+### Added
+
+- **Statistiques « premium »** : grandes cartes de totaux, classement
+  « Jeux les plus utilisés » avec couverture + barre, section « Activité
+  récente » avec couvertures, et **détail par jeu** (cette semaine, ce mois,
+  sessions, dernière session, activité 7 jours, répartition par profil).
+  Jeu et profil restent deux niveaux distincts (Cyberpunk 142 h → Default
+  96 h, Modded 31 h…).
+- **Renommage d'un jeu** : champ `displayName` (cosmétique) — l'identité
+  technique (`id`, exécutable, chemins, mods, profils, add-ons, stats)
+  n'est jamais modifiée. Bouton crayon dans l'en-tête du jeu + menu
+  contextuel de la Bibliothèque (« Renommer… », « Réinitialiser le nom »).
+- **Menu contextuel Bibliothèque élargi** : Ouvrir, Changer de profil,
+  Renommer, Favoris, Voir les statistiques, Configuration, Changer
+  l'apparence, Ouvrir le dossier, Retirer de ZAILON.
+- **Chaîne de lancement FiveM** : le processus final surveillé est GTA V
+  (`GTA5.exe` / `GTA5_Enhanced.exe` / `CitizenFX.exe` / `FiveM_GTAProcess.exe`),
+  jamais `FiveM.exe` seul — FiveM peut rester ouvert après la fermeture du
+  jeu, la session se termine quand GTA se ferme.
+
 ## [1.125.0] - 2026-08-15
 
 > **Harmonisation Accueil / config jeu** : widget son en haut à droite,

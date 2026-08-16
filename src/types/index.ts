@@ -374,6 +374,10 @@ export interface GameInstallation {
 export interface Game {
   id: string
   name: string
+  /** Nom d'affichage choisi par l'utilisateur (spec « Renommer un jeu ») :
+   * purement cosmétique — jamais utilisé pour l'identité technique (`id`),
+   * la détection, les mods, profils, add-ons, stats ou raccourcis. */
+  displayName?: string
   shortName?: string
   icon?: string
   backgroundArt?: string

@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, Boxes, CheckSquare2, ChevronDown, ChevronLeft, Copy, Download, ExternalLink, FolderInput, FolderOpen, FolderPlus, Gamepad2, HardDrive, Image as ImageIcon, Loader2, Lock, Monitor, Pause, Play, Plus, Radar, RefreshCw, RotateCcw, Search, ShieldAlert, ShieldCheck, Sparkles, Star, Tag, Trash2, Unlock, Users, Wrench, X } from 'lucide-react'
+import { AlertTriangle, Archive, BarChart3, Boxes, CheckSquare2, ChevronDown, ChevronLeft, Copy, Download, ExternalLink, FolderInput, FolderOpen, FolderPlus, Gamepad2, HardDrive, Image as ImageIcon, Loader2, Lock, Monitor, Pause, PenLine, Play, Plus, Radar, RefreshCw, RotateCcw, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Star, Tag, Trash2, Unlock, Users, Wrench, X } from 'lucide-react'
 import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -24,6 +24,7 @@ import { FrostyImportDialog } from '../FrostyImportDialog'
 import type { Game, GameSession, GameTab, Mod, ModImportCandidate, Profile, SensitiveFileAssessment, SensitiveImportAction } from '../../types'
 import { VisualGamePanel } from '../../visual-profiles/ui/VisualGamePanel'
 import { resolveGameInstallation } from '../../lib/installations'
+import { isRenamed, normalizeDisplayName, resolveGameName, resolveGameTitle } from '../../lib/gameIdentity'
 import { frostyAdapterForExecutable } from '../../lib/frosty'
 import { GameConfigurationPanel } from './GameConfigurationPanel'
 import { GameDiagnosticPanel, GameHealthBar, type SubSection } from './GameDiagnosticPanel'
@@ -99,6 +100,7 @@ export function GamesView() {
   const launchProgress = useStore(state => state.launchProgress)
   const endSession = useStore(state => state.endSession)
   const removeGame = useStore(state => state.removeGame)
+  const renameGame = useStore(state => state.renameGame)
   const setGamePath = useStore(state => state.setGamePath)
   const setModsPath = useStore(state => state.setModsPath)
   const setGameResources = useStore(state => state.setGameResources)
@@ -465,7 +467,7 @@ export function GamesView() {
         <div className="relative px-4 pb-3 pt-3">
           <button type="button" onClick={() => { setGamesBrowsing(true); if (libraryScrollRef.current) libraryScrollRef.current.scrollTop = 0 }} className="mb-2 flex items-center gap-1.5 rounded-lg border border-white/[0.1] bg-black/30 px-2.5 py-1.5 text-[11px] font-semibold text-white/60 backdrop-blur hover:bg-white/[0.06] hover:text-white"><ChevronLeft size={13} />Bibliothèque</button>
           <div className="flex items-start justify-between gap-3">
-          <div><h1 className="font-display text-lg font-bold text-white">{selectedGame.name}</h1>{selectedGame.lastPlayed && <p className="text-[11px] text-white/30">Joué {timeAgo(selectedGame.lastPlayed)}</p>}<div className="mt-1.5 flex items-center gap-1.5"><Users size={11} className="text-white/35" /><span className="text-[10px] text-white/38">Groupe</span><select value={currentGroup?.id ?? ''} onChange={event => { const value = event.target.value; if (value === '__new__') { const name = window.prompt('Nom du nouveau groupe', selectedGame.name); if (name && name.trim()) createGameGroup(name.trim(), [selectedGame.id]) } else if (value === '') { removeGameFromGroup(selectedGame.id) } else { addGameToGroup(value, selectedGame.id) } }} className="max-w-40 rounded-md border border-white/[0.08] bg-black/30 px-1.5 py-1 text-[10px] text-white/70 outline-none"><option value="">Aucun</option>{gameGroups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}<option value="__new__">+ Nouveau groupe…</option></select>{currentGroup && currentGroup.memberGameIds.length > 1 && <span className="text-[10px] text-white/30">{currentGroup.memberGameIds.length} jeux</span>}</div></div>
+          <div><h1 className="flex items-center gap-1.5 font-display text-lg font-bold text-white">{resolveGameName(selectedGame)}{isRenamed(selectedGame) && <span className="truncate text-[10px] font-normal text-white/28" title={`Nom détecté : ${selectedGame.name}`}>({selectedGame.name})</span>}<button type="button" onClick={() => { const next = window.prompt('Nom du jeu', resolveGameName(selectedGame)); if (next !== null) renameGame(selectedGame.id, next) }} title={isRenamed(selectedGame) ? 'Renommer ou réinitialiser le nom' : 'Renommer le jeu'} className="ml-1 rounded-md p-1 text-white/30 hover:bg-white/[0.06] hover:text-gold"><PenLine size={13} /></button></h1>{selectedGame.lastPlayed && <p className="text-[11px] text-white/30">Joué {timeAgo(selectedGame.lastPlayed)}</p>}<div className="mt-1.5 flex items-center gap-1.5"><Users size={11} className="text-white/35" /><span className="text-[10px] text-white/38">Groupe</span><select value={currentGroup?.id ?? ''} onChange={event => { const value = event.target.value; if (value === '__new__') { const name = window.prompt('Nom du nouveau groupe', selectedGame.name); if (name && name.trim()) createGameGroup(name.trim(), [selectedGame.id]) } else if (value === '') { removeGameFromGroup(selectedGame.id) } else { addGameToGroup(value, selectedGame.id) } }} className="max-w-40 rounded-md border border-white/[0.08] bg-black/30 px-1.5 py-1 text-[10px] text-white/70 outline-none"><option value="">Aucun</option>{gameGroups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}<option value="__new__">+ Nouveau groupe…</option></select>{currentGroup && currentGroup.memberGameIds.length > 1 && <span className="text-[10px] text-white/30">{currentGroup.memberGameIds.length} jeux</span>}</div></div>
           <div className="flex gap-1.5"><button onClick={() => void scanMods(selectedGame.id)} title="Analyser le dossier Mods" className="rounded-lg border border-white/[0.07] p-2 text-white/40 hover:bg-white/[0.06] hover:text-gold"><RefreshCw size={13} /></button><button onClick={() => void browseModsFolder()} title="Choisir le dossier Mods" className="rounded-lg border border-white/[0.07] p-2 text-white/40 hover:bg-white/[0.06] hover:text-gold"><FolderOpen size={13} /></button><button onClick={() => { if (window.confirm(`Retirer ${selectedGame.name} de ZAILON ?`)) removeGame(selectedGame.id) }} title="Retirer de la bibliothèque" className="rounded-lg border border-white/[0.07] p-2 text-white/40 hover:bg-red-400/10 hover:text-red-300"><Trash2 size={13} /></button></div>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -582,6 +584,11 @@ function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, fil
   const foregroundGameId = useStore(state => state.foregroundGameId)
   const setGameFavorite = useStore(state => state.setGameFavorite)
   const setGameResources = useStore(state => state.setGameResources)
+  const renameGame = useStore(state => state.renameGame)
+  const removeGame = useStore(state => state.removeGame)
+  const setSelectedGame = useStore(state => state.setSelectedGame)
+  const setActiveGameTab = useStore(state => state.setActiveGameTab)
+  const setView = useStore(state => state.setView)
   const searchRef = useRef<HTMLInputElement>(null)
   const [context, setContext] = useState<{ gameId: string; x: number; y: number }>()
   const [resourcesGameId, setResourcesGameId] = useState<string>()
@@ -659,9 +666,19 @@ function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, fil
       <div className="fixed inset-0 z-[-1]" onClick={() => setContext(undefined)} onContextMenu={event => { event.preventDefault(); setContext(undefined) }} />
       <div className="w-52 rounded-xl border border-white/[0.1] bg-[#111414]/98 p-1.5 shadow-2xl backdrop-blur-xl">
         {(() => { const game = games.find(item => item.id === context.gameId); if (!game) return null; return <>
+          <button type="button" onClick={() => { onOpen(game.id); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/72 hover:bg-white/[0.05]"><Play size={12} className="text-white/35" />Ouvrir</button>
+          <button type="button" onClick={() => { onOpen(game.id); setActiveGameTab('profiles'); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/68 hover:bg-white/[0.05]"><Users size={12} className="text-white/35" />Changer de profil</button>
+          <div className="my-1 h-px bg-white/[0.06]" />
+          <button type="button" onClick={() => { const next = window.prompt('Nom du jeu', resolveGameName(game)); if (next !== null) renameGame(game.id, next); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/68 hover:bg-white/[0.05]"><PenLine size={12} className="text-white/35" />Renommer…</button>
+          {isRenamed(game) && <button type="button" onClick={() => { renameGame(game.id, ''); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/50 hover:bg-white/[0.05]"><RotateCcw size={12} className="text-white/35" />Réinitialiser le nom</button>}
           <button type="button" onClick={() => { setGameFavorite(game.id); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/68 hover:bg-white/[0.05]"><Star size={12} className={game.favorite ? 'fill-gold text-gold' : 'text-white/35'} />{game.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}</button>
-          <button type="button" onClick={() => { onOpen(game.id); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/68 hover:bg-white/[0.05]"><Play size={12} className="text-white/35" />Ouvrir</button>
-          <button type="button" onClick={() => { setResourcesGameId(game.id); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/68 hover:bg-white/[0.05]"><ImageIcon size={12} />Changer l’apparence…</button>
+          <div className="my-1 h-px bg-white/[0.06]" />
+          <button type="button" onClick={() => { setView('statistics'); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/68 hover:bg-white/[0.05]"><BarChart3 size={12} className="text-white/35" />Voir les statistiques</button>
+          <button type="button" onClick={() => { onOpen(game.id); setActiveGameTab('configuration'); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/68 hover:bg-white/[0.05]"><Settings size={12} className="text-white/35" />Configuration</button>
+          <button type="button" onClick={() => { setResourcesGameId(game.id); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/68 hover:bg-white/[0.05]"><ImageIcon size={12} className="text-white/35" />Changer l’apparence…</button>
+          <button type="button" onClick={() => { const install = resolveGameInstallation(game); const folder = install?.rootPath || game.installDirectory || game.execPath?.replace(/[\\/][^\\/]+$/, ''); if (folder) void native.openPath(folder); setContext(undefined) }} disabled={!(resolveGameInstallation(game)?.rootPath || game.installDirectory || game.execPath)} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-white/68 hover:bg-white/[0.05] disabled:opacity-35"><FolderOpen size={12} className="text-white/35" />Ouvrir le dossier</button>
+          <div className="my-1 h-px bg-white/[0.06]" />
+          <button type="button" onClick={() => { if (window.confirm(`Retirer « ${resolveGameName(game)} » de ZAILON ?`)) removeGame(game.id); setContext(undefined) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-red-200/70 hover:bg-red-400/10 hover:text-red-200"><Trash2 size={12} />Retirer de ZAILON</button>
         </> })()}
       </div>
     </div>}
@@ -708,13 +725,13 @@ function LibraryCard({ game, active, priority, onOpen, onFavorite, onContextMenu
             <span className="relative block aspect-[3/4] w-full overflow-hidden bg-black/30">
               {cover
                 ? <img src={cover} alt="" loading="lazy" className="h-full w-full object-cover" />
-                : <FallbackArtwork name={game.name} kind={game.itemKind} />}
+                : <FallbackArtwork name={resolveGameName(game)} kind={game.itemKind} />}
               <span className="pointer-events-none absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100"><span className="mb-3 flex items-center gap-1.5 rounded-full bg-gold px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><Play size={11} />Ouvrir</span></span>
               {active && <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-emerald-400/95 px-2 py-0.5 text-[9px] font-bold text-emerald-950"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-950" />En cours</span>}
               {priority && <span className="absolute left-2 top-8 flex items-center gap-1 rounded-full bg-gold/95 px-2 py-0.5 text-[9px] font-bold text-[var(--zailon-accent-text)]"><Star size={8} className="fill-ink-400" />Prioritaire</span>}
             </span>
             <span className="block p-2.5">
-              <span className="flex items-center gap-1.5 text-[11px] font-semibold text-white/75">{game.itemKind === 'software' ? <Monitor size={11} className="shrink-0 text-white/30" /> : <Gamepad2 size={11} className="shrink-0 text-white/30" />}<span className="truncate">{game.name}</span></span>
+              <span className="flex items-center gap-1.5 text-[11px] font-semibold text-white/75">{game.itemKind === 'software' ? <Monitor size={11} className="shrink-0 text-white/30" /> : <Gamepad2 size={11} className="shrink-0 text-white/30" />}<span className="truncate">{resolveGameName(game)}</span></span>
               <span className="mt-1 block text-[10px] text-white/34">{(() => {
                 // Spec §53-55 : la vitrine Bibliothèque montre le TEMPS DE JEU
                 // (jamais « 0 mods actifs ») ; le détail reste dans la page jeu.

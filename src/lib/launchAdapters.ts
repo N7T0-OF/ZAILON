@@ -51,10 +51,13 @@ const CYBERPUNK_ADAPTER: GameLaunchAdapter = {
   launchChainStages: ['Game'],
 }
 
+// FiveM : le processus final est le client GTA V (FiveM le lance après
+// CitizenFX), jamais FiveM.exe lui-même. FiveM.exe peut rester ouvert après la
+// fermeture du jeu — la session doit se terminer quand GTA se ferme.
 const FIVEM_ADAPTER: GameLaunchAdapter = {
   launchBehavior: 'ExternalLauncher',
   launcherExecutable: 'FiveM.exe',
-  gameExecutableCandidates: ['FiveM_GTAProcess.exe', 'FiveM.exe'],
+  gameExecutableCandidates: ['FiveM_GTAProcess.exe', 'GTA5.exe', 'GTA5_Enhanced.exe', 'CitizenFX.exe', 'FiveM.exe'],
   reattachWindowSeconds: 120,
   endGraceSeconds: 10,
   launchChainStages: ['FiveM', 'CitizenFX', 'Game'],

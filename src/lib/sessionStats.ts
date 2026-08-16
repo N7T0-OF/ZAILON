@@ -82,6 +82,12 @@ export function perGame(history: TrackedSession[], liveSessions: Array<{ gameId:
   return [...map.values()].sort((a, b) => b.minutes - a.minutes || (b.lastEndedAt ?? 0) - (a.lastEndedAt ?? 0))
 }
 
+/** Sessions les plus récentes (spec « Statistiques premium » — Activité
+ * récente) : triées par `endedAt` décroissant, bornées à `limit`. */
+export function recentSessions(history: TrackedSession[], limit = 6): TrackedSession[] {
+  return [...history].sort((a, b) => b.endedAt - a.endedAt).slice(0, limit)
+}
+
 /** Répartition PAR PROFIL pour un jeu (spec §32, §49). */
 export function perProfile(history: TrackedSession[], gameId: string): Array<{ profileId: string; profileName: string; minutes: number; sessions: number }> {
   const map = new Map<string, { profileId: string; profileName: string; minutes: number; sessions: number }>()

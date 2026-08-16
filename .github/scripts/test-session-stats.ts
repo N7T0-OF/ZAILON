@@ -12,6 +12,7 @@ import {
   minutesWithin,
   perGame,
   perProfile,
+  recentSessions,
   summarizeSessions,
   type SessionSummary,
 } from '../../src/lib/sessionStats.ts'
@@ -128,4 +129,15 @@ test('récupération après interruption : durée = dernier checkpoint, source r
   assert.equal(durationMin, 75)
   // Une session de moins d'une minute n'est pas archivée.
   assert.equal(Math.floor((checkpointAt - (checkpointAt - 30_000)) / 60_000), 0)
+})
+
+test('recentSessions : tri décroissant + borne (spec Activité récente)', () => {
+  const older = session({ id: 'a', endedAt: now - 3 * DAY, gameName: 'NTE' })
+  const newer = session({ id: 'b', endedAt: now - DAY, gameName: 'FiveM' })
+  const middle = session({ id: 'c', endedAt: now - 2 * DAY, gameName: 'Cyberpunk 2077' })
+  const list = recentSessions([older, middle, newer], 2)
+  assert.equal(list.length, 2)
+  assert.equal(list[0].id, 'b')
+  assert.equal(list[1].id, 'c')
+  assert.equal(recentSessions([], 6).length, 0)
 })

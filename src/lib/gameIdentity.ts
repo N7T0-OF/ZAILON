@@ -13,6 +13,8 @@
  * Logique pure et testable — aucun accès disque/processus.
  */
 
+import type { Game } from '../types'
+
 export interface GameIdentityInput {
   name?: string
   execPath?: string
@@ -105,4 +107,35 @@ export function sameGameIdentity(a: GameIdentityInput, b: GameIdentityInput): bo
   const rightDir = normalizedInstallDir(b.installDirectory)
   if (leftExec && leftExec === rightExec && leftDir && leftDir === rightDir) return true
   return false
+}
+
+// ---------------------------------------------------------------------------
+// Renommage d'affichage (spec « Renommer un jeu ») — cosmétique uniquement.
+//
+// `displayName` ne remplace JAMAIS l'identité technique (`id`) ni les signaux
+// de détection ci-dessus. Renommer un jeu ne casse donc jamais la détection,
+// les mods, profils, add-ons, statistiques, temps de jeu, raccourcis ou
+// associations Steam/Epic.
+// ---------------------------------------------------------------------------
+
+export type GameNameFields = Pick<Game, 'name' | 'displayName' | 'shortName'>
+
+/** Nom complet d'un jeu : displayName (choix utilisateur) sinon le nom détecté. */
+export function resolveGameName(game: GameNameFields): string {
+  return normalizeDisplayName(game.displayName) || game.name
+}
+
+/** Nom court pour les gros titres (Hero) : displayName > shortName > name. */
+export function resolveGameTitle(game: GameNameFields): string {
+  return normalizeDisplayName(game.displayName) || game.shortName || game.name
+}
+
+/** Nettoie un nom saisi : trim + espaces multiples réduits. Vide → '' (reset). */
+export function normalizeDisplayName(value: string | undefined): string {
+  return (value ?? '').trim().replace(/\s+/g, ' ')
+}
+
+/** Vrai si un nom saisi diffère réellement du nom détecté (dirty state). */
+export function isRenamed(game: GameNameFields): boolean {
+  return Boolean(normalizeDisplayName(game.displayName) && normalizeDisplayName(game.displayName) !== game.name)
 }

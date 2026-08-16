@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveGameIdentity, sameGameIdentity } from '../../src/lib/gameIdentity.ts'
+import { isRenamed, normalizeDisplayName, resolveGameIdentity, resolveGameName, resolveGameTitle, sameGameIdentity } from '../../src/lib/gameIdentity.ts'
 
 test('provider + AppID = haute confiance, clé stable', () => {
   const id = resolveGameIdentity({ name: 'Cyberpunk 2077', provider: 'steam', providerGameId: '1091500' })
@@ -33,6 +33,25 @@ test('nom seul = faible confiance, dernier recours', () => {
   const id = resolveGameIdentity({ name: 'Photoshop' })
   assert.equal(id.confidence, 'low')
   assert.equal(id.key, 'name:photoshop')
+})
+
+test('resolveGameName : displayName gagne, vide → nom détecté (reset)', () => {
+  assert.equal(resolveGameName({ name: 'Cyberpunk 2077' }), 'Cyberpunk 2077')
+  assert.equal(resolveGameName({ name: 'Cyberpunk 2077', displayName: '  Cyberpunk 2077 — Modded  ' }), 'Cyberpunk 2077 — Modded')
+  assert.equal(resolveGameName({ name: 'Cyberpunk 2077', displayName: '   ' }), 'Cyberpunk 2077')
+})
+
+test('resolveGameTitle : displayName > shortName > name (Hero)', () => {
+  assert.equal(resolveGameTitle({ name: 'Need for Speed 2015', shortName: 'NFS' }), 'NFS')
+  assert.equal(resolveGameTitle({ name: 'Need for Speed 2015', shortName: 'NFS', displayName: 'NFS Night Mod' }), 'NFS Night Mod')
+})
+
+test('normalizeDisplayName + isRenamed : cosmétique, jamais l\'identité', () => {
+  assert.equal(normalizeDisplayName('  FiveM   —   Drift '), 'FiveM — Drift')
+  assert.equal(normalizeDisplayName(undefined), '')
+  assert.equal(isRenamed({ name: 'FiveM', displayName: 'FiveM — Drift' }), true)
+  assert.equal(isRenamed({ name: 'FiveM', displayName: 'FiveM' }), false)
+  assert.equal(isRenamed({ name: 'FiveM' }), false)
 })
 
 test('sameGameIdentity : même jeu via des signaux différents (jamais le seul nom)', () => {

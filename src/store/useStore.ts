@@ -541,6 +541,8 @@ export interface Store {
   addDetectedGames: () => Promise<number>
   importDetectedGames: (detected: DetectedGame[]) => number
   removeGame: (gameId: string) => void
+  /** Renomme l'affichage d'un jeu (displayName) — cosmétique uniquement. */
+  renameGame: (gameId: string, name: string) => void
   setGamePath: (gameId: string, execPath: string) => Promise<void>
   setModsPath: (gameId: string, modsPath: string) => void
   setGameBypassPath: (gameId: string, path: string) => void
@@ -1253,6 +1255,11 @@ export const useStore = create<Store>()(persist((set, get) => ({
     const current = games[0]
     return { games, selectedGameId: current?.id, selectedProfileId: current ? lastUsedProfileId(current.profiles) : undefined }
   }),
+  // Spec « Renommer un jeu » : displayName (cosmétique) — un nom vide réinitialise
+  // au nom détecté. `id`, exécutable, chemins, mods, profils, stats restent intacts.
+  renameGame: (gameId, name) => set(state => ({
+    games: state.games.map(game => game.id === gameId ? { ...game, displayName: name.trim().replace(/\s+/g, ' ') || undefined } : game),
+  })),
   setGamePath: async (gameId, execPath) => {
     try {
       const modsPath = execPath && native.isDesktop() ? await native.guessModsPath(execPath) : undefined

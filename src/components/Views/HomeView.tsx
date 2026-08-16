@@ -14,6 +14,7 @@ import { addonCapabilities, hasCapability } from '../../lib/addonGating'
 import { HOME_PRESET_LABELS, HOME_WIDGET_DEFAULTS, HOME_WIDGET_VARIANTS, orderHomeWidgets, widgetGridClass, type HomeLayoutPreset, type HomeWidgetConfig } from '../../lib/homeWidgets'
 import { pickPrioritySession } from '../../lib/sessionPriority'
 import { groupProfilePairs, groupMembers, nextGroupProfile } from '../../lib/gameGroups'
+import { resolveGameName, resolveGameTitle } from '../../lib/gameIdentity'
 import { GameContextMenu } from '../GameContextMenu'
 import { GameResourcesDialog } from '../GameResourcesDialog'
 import { FallbackArtwork } from '../UI/FallbackArtwork'
@@ -183,7 +184,7 @@ export function HomeView() {
   const currentGroup = gameGroups.find(group => group.memberGameIds.includes(selectedGame.id))
   const groupMembersList = currentGroup ? groupMembers(games, currentGroup) : []
   const groupContextLabel = currentGroup && groupMembersList.length > 1
-    ? `${selectedGame.shortName || selectedGame.name} · ${selectedProfile.name}`
+    ? `${resolveGameTitle(selectedGame)} · ${selectedProfile.name}`
     : selectedProfile.name
   // Choix rapide du profil (spec §16-19) : le nom ouvre la liste complète, la
   // flèche passe au profil suivant (boucle). Jamais pendant une session active
@@ -253,7 +254,7 @@ export function HomeView() {
             <CircleAction label="Personnaliser l’Accueil" onClick={() => setCustomizeOpen(true)}><SlidersHorizontal size={11} /></CircleAction>
             <CircleAction label="Actions du jeu" onClick={event => { const rect = event.currentTarget.getBoundingClientRect(); openMenu({ x: rect.right - 252, y: rect.bottom + 5 }) }}><MoreHorizontal size={12} /></CircleAction>
             <button type="button" onClick={() => { setGamesBrowsing(false); setView('games') }} title="Ouvrir les paramètres du jeu" className="ml-1 flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-white/[0.14] bg-[#111515] shadow-[0_8px_24px_rgba(0,0,0,0.35)] hover:border-white/30">
-              {gameIcon ? <img src={gameIcon} alt="" className="h-full w-full object-cover" /> : <span className="font-display text-sm font-black text-[var(--zailon-accent)]">{selectedGame.name.charAt(0).toUpperCase()}</span>}
+              {gameIcon ? <img src={gameIcon} alt="" className="h-full w-full object-cover" /> : <span className="font-display text-sm font-black text-[var(--zailon-accent)]">{resolveGameName(selectedGame).charAt(0).toUpperCase()}</span>}
             </button>
           </div>
         </header>
@@ -279,7 +280,7 @@ export function HomeView() {
           </div>
           {logo
             ? <img src={logo} alt={selectedGame.name} className="mt-4 max-h-28 max-w-[min(430px,72vw)] object-contain object-left" />
-            : <h1 className="mt-3 max-w-3xl font-display text-[clamp(3.2rem,6.7vw,7rem)] font-black uppercase leading-[0.78] tracking-[-0.025em] text-white">{selectedGame.shortName || selectedGame.name}</h1>}
+            : <h1 className="mt-3 max-w-3xl font-display text-[clamp(3.2rem,6.7vw,7rem)] font-black uppercase leading-[0.78] tracking-[-0.025em] text-white">{resolveGameTitle(selectedGame)}</h1>}
           {/* Choix rapide du profil (spec §16-19) : nom = liste complète,
               flèche = profil suivant en boucle. */}
           <div className="mt-5 flex flex-wrap items-center gap-2 text-[11px] text-white/38">
@@ -449,13 +450,13 @@ export function HomeView() {
       </div>
     )}
     {menu && <GameContextMenu game={menu.game} position={menu.position} onClose={() => setMenu(undefined)} onEditResources={() => setResourcesGameId(menu.game.id)} />}
-    {stopSearchingOpen && activeSession && <SessionStopModal gameName={selectedGame.name} searching onCancel={() => setStopSearchingOpen(false)} onConfirm={() => { setStopSearchingOpen(false); cancelSession(selectedGame.id) }} />}
+    {stopSearchingOpen && activeSession && <SessionStopModal gameName={resolveGameName(selectedGame)} searching onCancel={() => setStopSearchingOpen(false)} onConfirm={() => { setStopSearchingOpen(false); cancelSession(selectedGame.id) }} />}
     {quitOpen && (
       <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setQuitOpen(false)}>
         <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-white/[0.09] bg-[#141818] shadow-[0_24px_70px_rgba(0,0,0,0.6)]" onClick={event => event.stopPropagation()}>
           <div className="border-b border-white/[0.06] px-5 py-4">
             <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-white/30">Quitter le jeu</p>
-            <p className="mt-1 font-display text-base font-bold text-white/90">{selectedGame.name}</p>
+            <p className="mt-1 font-display text-base font-bold text-white/90">{resolveGameName(selectedGame)}</p>
           </div>
           <div className="px-5 py-4">
             {!quitConfirm
@@ -509,13 +510,13 @@ function HomeBadge({ label, title }: { label: string; title?: string }) {
 function QuickGame({ game, summary, active, onSelect, favorite }: { game: Game; summary?: GameSummary; active: boolean; onSelect: () => void; favorite?: boolean }) {
   const cover = resourceUrl(game.resources?.coverPath || game.resources?.bannerPath || game.resources?.backgroundPath) || game.backgroundArt
   const healthTone = summary?.health ? (summary.health.verdict === 'ok' ? 'bg-emerald-300/85' : summary.health.verdict === 'vigilance' ? 'bg-amber-300/85' : 'bg-red-300/85') : undefined
-  return <button type="button" onClick={onSelect} title={game.name} className={`group/quick relative min-w-0 overflow-hidden rounded-lg border text-left ${active ? 'border-[#dbe8e5]/28' : 'border-white/[0.06] hover:border-white/20'}`}>
-    {cover ? <img src={cover} alt="" className="absolute inset-0 h-full w-full object-cover opacity-68 transition-transform group-hover/quick:scale-105" /> : <FallbackArtwork name={game.name} kind={game.itemKind} />}
+  return <button type="button" onClick={onSelect} title={resolveGameName(game)} className={`group/quick relative min-w-0 overflow-hidden rounded-lg border text-left ${active ? 'border-[#dbe8e5]/28' : 'border-white/[0.06] hover:border-white/20'}`}>
+    {cover ? <img src={cover} alt="" className="absolute inset-0 h-full w-full object-cover opacity-68 transition-transform group-hover/quick:scale-105" /> : <FallbackArtwork name={resolveGameName(game)} kind={game.itemKind} />}
     <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
     {healthTone && <span className={`absolute right-1 top-1 h-2 w-2 rounded-full ${healthTone}`} title={`Santé : ${summary?.health?.verdict}`} />}
     {favorite && <span className="absolute left-1 top-1 text-[10px] text-amber-300/90" title="Favori">★</span>}
     {/* Spec §10-11 : couverture, nom, temps de jeu — jamais « 0 actif(s) ». */}
-    <span className="absolute inset-x-1.5 bottom-1.5 flex items-center gap-1 truncate text-[11px] font-semibold text-white/78"><span className="min-w-0 flex-1 truncate">{game.name}</span>{game.totalPlaytime ? <span className="shrink-0 font-mono text-[9px] text-white/40">{formatTime(game.totalPlaytime)}</span> : null}</span>
+    <span className="absolute inset-x-1.5 bottom-1.5 flex items-center gap-1 truncate text-[11px] font-semibold text-white/78"><span className="min-w-0 flex-1 truncate">{resolveGameName(game)}</span>{game.totalPlaytime ? <span className="shrink-0 font-mono text-[9px] text-white/40">{formatTime(game.totalPlaytime)}</span> : null}</span>
   </button>
 }
 
@@ -557,8 +558,8 @@ function FavoritesWidget({ variant, favoriteGames, summaries, visibleGames, sele
 function FavoriteRow({ game, active, onSelect }: { game: Game; active: boolean; onSelect: () => void }) {
   const cover = resourceUrl(game.resources?.coverPath || game.resources?.bannerPath || game.resources?.backgroundPath) || game.backgroundArt
   return <button type="button" onClick={onSelect} className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors ${active ? 'border-[#dbe8e5]/25 bg-white/[0.04]' : 'border-white/[0.055] bg-white/[0.02] hover:border-white/15 hover:bg-white/[0.04]'}`}>
-    {cover ? <img src={cover} alt="" className="h-8 w-8 flex-none rounded object-cover" /> : <span className="flex h-8 w-8 flex-none items-center justify-center rounded bg-white/[0.05] font-display text-xs font-black text-[var(--zailon-accent)]">{game.name.charAt(0).toUpperCase()}</span>}
-    <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-white/72">{game.name}</span>
+    {cover ? <img src={cover} alt="" className="h-8 w-8 flex-none rounded object-cover" /> : <span className="flex h-8 w-8 flex-none items-center justify-center rounded bg-white/[0.05] font-display text-xs font-black text-[var(--zailon-accent)]">{resolveGameName(game).charAt(0).toUpperCase()}</span>}
+    <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-white/72">{resolveGameName(game)}</span>
     {game.totalPlaytime ? <span className="shrink-0 font-mono text-[10px] text-white/38">{formatTime(game.totalPlaytime)}</span> : null}
   </button>
 }

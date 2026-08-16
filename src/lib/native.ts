@@ -787,6 +787,8 @@ export interface GamePresence {
  * jamais une fausse activation : chaque champ est interrogé côté natif. */
 export interface QuickPanelStatus {
   created: boolean
+  /** Le WebView du panneau est initialisé (plus jamais de fenêtre blanche). */
+  ready: boolean
   visible: boolean
   focused: boolean
   alwaysOnTop: boolean
@@ -1011,6 +1013,8 @@ export const native = {
   quickPanel: {
     open: () => desktopOnly<void>('open_quick_panel', {}),
     close: () => desktopOnly<void>('close_quick_panel', {}),
+    /** Masque sans détruire la fenêtre (spec §5) — bouton × du panneau. */
+    hide: () => desktopOnly<void>('hide_quick_panel', {}),
     toggle: () => desktopOnly<boolean>('toggle_quick_panel', {}),
     /** État réel de la fenêtre (spec §22, §50) : créée, visible, focus,
      * always-on-top, taille, position — jamais une fausse activation. */

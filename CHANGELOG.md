@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.151.0] - 2026-08-16
+
+> **Quick Panel — cycle de vie reconstruit** : plus jamais de fenêtre blanche,
+> fermeture instantanée (masquage, pas de destruction).
+
+### Changed
+
+- **Créé caché, montré quand prêt (spec §3)** : la fenêtre `quick-panel` est
+  créée avec `.visible(false)` et n'apparaît qu'à la fin du chargement du
+  WebView (`on_page_load`) ou au signal frontend `quick-panel-ready` (React
+  monté, listeners enregistrés). La demande du raccourci arrivée trop tôt est
+  mémorisée (`show_requested`) et l'affichage a lieu dès l'initialisation —
+  fini le rectangle blanc affiché avant que HTML/CSS/JS ne soient chargés.
+- **Masqué, jamais détruit (spec §5)** : le bouton ×, la perte de focus et la
+  fin de session **masquent** la fenêtre (hide) — elle n'est plus recréée à
+  chaque ouverture (recréation WebView lente + courses de focus). Réaffichage
+  instantané, zéro clignotement. Nouvelle commande `hide_quick_panel`.
+- **Position : coin supérieur droit (spec §9)** : zone de travail de l'écran
+  actif (hors barre des tâches), marge 20 px, recalculée à chaque ouverture,
+  jamais de position négative (helper pur `top_right_position` + 3 tests).
+- **Sondage plein écran conditionné** : le contrôle « plein écran exclusif » ne
+  tourne que quand la fenêtre est visible — zéro appel IPC inutile une fois le
+  panneau masqué.
+- **`QuickPanelStatus.ready`** : le diagnostic affiche l'état réel
+  d'initialisation du WebView.
+
+### Validation
+
+- **684 tests ✅** (+4), tsc ✅, build ✅, `cargo fmt` ✅ (3 tests natifs
+  `top_right_position` + câblage frontend/natif verrouillant le cycle de vie).
+
 ## [1.150.0] - 2026-08-16
 
 > **Une seule source de vérité pour les compteurs de mods** : plus aucune

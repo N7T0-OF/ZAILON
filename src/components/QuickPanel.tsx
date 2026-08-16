@@ -123,21 +123,26 @@ export function QuickPanel() {
     void emit('quick-panel-action', { action: 'focus-main' })
   }
 
+  // Spec §5 : la fermeture (×, plein écran exclusif) MASQUE la fenêtre — elle
+  // n'est jamais détruite. La recréer à chaque fois causerait une WebView
+  // lente et des courses de focus (fenêtre blanche, fermeture impossible).
   const close = () => {
-    void getCurrentWindow().close()
+    void native.quickPanel.hide()
   }
 
   // Spec #41 : si le jeu passe en plein écran exclusif pendant que le panneau
-  // est ouvert, la fenêtre externe n'est plus affichée au-dessus — on la ferme
-  // proprement (sondage léger toutes les 2 s, pas de rendu à 144 FPS).
+  // est ouvert, la fenêtre externe n'est plus affichée au-dessus — on la
+  // masque proprement. Sondage toutes les 2 s, uniquement quand la fenêtre est
+  // visible (fenêtre cachée → aucun appel IPC inutile).
   useEffect(() => {
     let disposed = false
     const id = window.setInterval(() => {
-      void native.exclusiveFullscreenActive()
-        .then(exclusive => {
+      void getCurrentWindow().isVisible().then(visible => {
+        if (!visible || disposed) return
+        return native.exclusiveFullscreenActive().then(exclusive => {
           if (exclusive && !disposed) close()
         })
-        .catch(() => undefined)
+      }).catch(() => undefined)
     }, 2000)
     return () => {
       disposed = true

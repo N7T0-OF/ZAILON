@@ -18879,6 +18879,7 @@ pub fn run() {
             steam_running_state,
             quick_panel::open_quick_panel,
             quick_panel::close_quick_panel,
+            quick_panel::hide_quick_panel,
             quick_panel::toggle_quick_panel,
             quick_panel::quick_panel_status,
             launch_game,

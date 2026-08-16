@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.134.0] - 2026-08-16
+
+> **Étiquette add-on sur les jeux de la Bibliothèque** : un jeu lié à un
+> add-on affiche « ● Cyberpunk Advanced · installé » ou « ● Frosty Support ·
+> disponible » — jamais d'étiquette si aucun add-on n'est associé.
+
+### Added
+
+- **`gameAddonAssociation.ts` (pur, testé)** : association jeu ↔ add-on par
+  signaux stables (Cyberpunk → Cyberpunk Advanced, FiveM → FiveM Profiles,
+  NTE → NTE Support, exécutable du registre Frosty → Frosty Support) et
+  `gameAddonLabels` avec statut réel : installé (activé) > disponible
+  (package catalogue) > développement.
+- **Étiquette dans la vitrine Bibliothèque** : pastille sous le titre de la
+  carte (pastille émeraude « · installé », or « · disponible », grise sans
+  mot d'état), clic → page Add-ons. Même règle que le bouton Installer : un
+  add-on sans package n'est jamais « disponible ».
+
 ## [1.133.0] - 2026-08-16
 
 > **Import du temps de jeu Steam** : le compteur ne repart plus de zéro —

@@ -27,6 +27,8 @@ import { VisualGamePanel } from '../../visual-profiles/ui/VisualGamePanel'
 import { resolveGameInstallation } from '../../lib/installations'
 import { isRenamed, normalizeDisplayName, resolveGameName, resolveGameTitle } from '../../lib/gameIdentity'
 import { frostyAdapterForExecutable } from '../../lib/frosty'
+import { gameAddonLabels } from '../../lib/gameAddonAssociation'
+import { OFFICIAL_ADDON_CATALOG } from '../../lib/addons'
 import { GameConfigurationPanel } from './GameConfigurationPanel'
 import { GameDiagnosticPanel, GameHealthBar, type SubSection } from './GameDiagnosticPanel'
 import { GameResourcesDialog } from '../GameResourcesDialog'
@@ -731,6 +733,11 @@ function LibraryCard({ game, active, priority, onOpen, onFavorite, onContextMenu
   const performanceCustom = useStore(state => state.performanceCustom)
   const pinnedPriorityGameId = useStore(state => state.pinnedPriorityGameId)
   const foregroundGameId = useStore(state => state.foregroundGameId)
+  const addons = useStore(state => state.addons)
+  const setView = useStore(state => state.setView)
+  // Étiquette add-on (spec « Mise à niveau » §4) : « ● Cyberpunk Advanced ·
+  // installé » — jamais d'étiquette si aucun add-on n'est associé. Clic → Add-ons.
+  const addonLabels = useMemo(() => gameAddonLabels(game, addons, OFFICIAL_ADDON_CATALOG.addons), [game, addons])
   // Parallaxe coupé pendant le jeu quand un profil Performance/Équilibré réduit
   // les animations (spec §14, §36) — les bibliothèques restent statiques.
   const parallax = useMemo(() => {
@@ -757,7 +764,7 @@ function LibraryCard({ game, active, priority, onOpen, onFavorite, onContextMenu
               {active && <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-emerald-400/95 px-2 py-0.5 text-[9px] font-bold text-emerald-950"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-950" />En cours</span>}
               {priority && <span className="absolute left-2 top-8 flex items-center gap-1 rounded-full bg-gold/95 px-2 py-0.5 text-[9px] font-bold text-[var(--zailon-accent-text)]"><Star size={8} className="fill-ink-400" />Prioritaire</span>}
             </span>
-            <span className="block p-2.5">
+            <span className="block px-2.5 pb-1 pt-2.5">
               <span className="flex items-center gap-1.5 text-[11px] font-semibold text-white/75">{game.itemKind === 'software' ? <Monitor size={11} className="shrink-0 text-white/30" /> : <Gamepad2 size={11} className="shrink-0 text-white/30" />}<span className="truncate">{resolveGameName(game)}</span></span>
               <span className="mt-1 block text-[10px] text-white/34">{(() => {
                 // Spec §53-55 : la vitrine Bibliothèque montre le TEMPS DE JEU
@@ -770,6 +777,31 @@ function LibraryCard({ game, active, priority, onOpen, onFavorite, onContextMenu
               })()}</span>
             </span>
           </button>
+          {/* Étiquette add-on (spec « Mise à niveau » §4) : « ● Cyberpunk
+              Advanced · installé » — jamais d'étiquette si aucun add-on n'est
+              associé. Clic → page Add-ons. */}
+          {addonLabels.length > 0 && (
+            <span className="flex flex-wrap gap-1 px-2.5 pb-2.5 pt-1">
+              {addonLabels.map(label => (
+                <button
+                  key={label.addonId}
+                  type="button"
+                  onClick={event => { event.stopPropagation(); setView('addons') }}
+                  title={`${label.statusLabel} — ouvrir la page Add-ons`}
+                  aria-label={`${label.addonName} · ${label.statusLabel}`}
+                  className={`flex min-w-0 max-w-full items-center gap-1 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold transition-colors ${label.status === 'installed'
+                    ? 'border-emerald-300/25 bg-emerald-300/10 text-emerald-200/90 hover:border-emerald-300/45'
+                    : label.status === 'available'
+                      ? 'border-gold/25 bg-gold/10 text-gold/90 hover:border-gold/45'
+                      : 'border-white/[0.1] bg-white/[0.03] text-white/45 hover:border-white/25'}`}
+                >
+                  <span className={`h-1 w-1 shrink-0 rounded-full ${label.status === 'installed' ? 'bg-emerald-300' : label.status === 'available' ? 'bg-gold' : 'bg-white/40'}`} />
+                  <span className="truncate">{label.addonName}</span>
+                  {label.status !== 'development' && <span className="shrink-0 opacity-75">{label.status === 'installed' ? '· installé' : '· disponible'}</span>}
+                </button>
+              ))}
+            </span>
+          )}
           <button type="button" onClick={event => { event.stopPropagation(); onFavorite() }} title={game.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'} className={`absolute right-2 top-2 rounded-full border p-1.5 backdrop-blur transition-colors ${game.favorite ? 'border-gold/40 bg-gold/15 text-gold' : 'border-white/[0.14] bg-black/35 text-white/40 opacity-0 hover:text-gold group-hover:opacity-100'}`}><Star size={11} className={game.favorite ? 'fill-gold text-gold' : ''} /></button>
         </div>
       </ParallaxCover>

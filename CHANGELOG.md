@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.146.0] - 2026-08-16
+
+> **FiveM Profiles — refonte (1/2)** : ZAILON lit le contenu RÉEL de
+> `FiveM.app/mods` au lieu de lui appliquer le modèle classique de mod
+> manager. Pas d'activation virtuelle — organisation, ouverture et
+> suppression sécurisée uniquement.
+
+### Added
+
+- **`list_fivem_mods` (natif)** : liste chaque entrée de premier niveau de
+  `FiveM.app/mods` (dossier/fichier, taille, nombre de fichiers, date de
+  modification) + **empreinte SHA-256 stable et triée** (spec §1-2, §12).
+  Quand l'empreinte est identique, le listing (et le calcul des tailles
+  récursives) est sauté — l'UI réutilise son index.
+- **`remove_fivem_mod` (natif)** : suppression **sécurisée** limitée aux
+  entrées de premier niveau (un seul segment de chemin, enfant direct du
+  dossier `mods`, symlinks résolus) — impossible de supprimer par erreur
+  `FiveM.exe`, `citizen/` ou `plugins/` (spec §3-4).
+- **`fivemMods.ts` (pur, 6 tests)** : `diffFiveMMods` (ajout/retrait/
+  modification), `formatFiveMSize` (unités françaises), `fiveMModLabel`.
+- **Panneau « Contenu de FiveM.app/mods »** dans l'onglet Mods FiveM : liste
+  réelle avec taille, nombre de fichiers, **Ouvrir le dossier** et
+  **Supprimer** (confirmation), plus bouton Actualiser (spec §2-4).
+- **Index persisté `fiveMModsIndex`** : le re-listing est évité tant que le
+  dossier n'a pas changé — **aucun scan permanent** (spec §11-12).
+
+### Validation
+
+- **666 tests ✅** (+6), tsc ✅, build ✅, `cargo fmt` ✅ (3 tests natifs
+  ajoutés, exécutés en CI Linux/Windows).
+
 ## [1.145.0] - 2026-08-16
 
 > **ZAILON Lite / Core** : nettoyage automatique des ressources orphelines —

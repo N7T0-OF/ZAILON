@@ -147,6 +147,31 @@ struct FiveMEnvironment {
     gta_v_path: Option<String>,
 }
 
+/// Entrée réelle du dossier `FiveM.app/mods` (spec « FiveM Profiles » §2) :
+/// FiveM n'a pas de mods « activables » — ZAILON liste le contenu tel quel,
+/// sans jamais le réinventer en système virtuel.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FiveMModEntry {
+    name: String,
+    kind: String,
+    size_bytes: u64,
+    file_count: u64,
+    modified_at: Option<u64>,
+    relative_path: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FiveMModsListing {
+    mods_path: Option<String>,
+    fingerprint: String,
+    entries: Vec<FiveMModEntry>,
+    /// `false` = l'empreinte fournie par l'appelant était identique : le
+    /// listing complet (tailles récursives) a été sauté — réutiliser le cache.
+    changed: bool,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FiveMPackScanResult {
@@ -2112,6 +2137,228 @@ fn detect_fivem_environment(install_directory: String) -> Result<FiveMEnvironmen
             plugins: app_path.join("plugins").is_dir(),
         },
         gta_v_path: citizenfx_text.as_deref().and_then(citizenfx_iv_path),
+    })
+}
+
+/// Empreinte STABLE du dossier `FiveM.app/mods` (spec §12) : SHA-256 sur les
+/// noms (triés), types, tailles et mtimes des entrées de premier niveau.
+/// Contrairement à `mods_folder_fingerprint` (DefaultHasher, ordre-dépendant),
+/// celle-ci est stable d'un processus/version à l'autre et insensible à
+/// l'ordre de lecture — elle peut donc être persistée dans `fivem.index`.
+fn fivem_mods_fingerprint(mods_dir: &Path) -> String {
+    if !mods_dir.is_dir() {
+        return String::new();
+    }
+    let mut records: Vec<String> = Vec::new();
+    if let Ok(entries) = fs::read_dir(mods_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if name.starts_with('.') {
+                continue;
+            }
+            let meta = match fs::metadata(&path) {
+                Ok(meta) => meta,
+                Err(_) => continue,
+            };
+            let kind = if meta.is_dir() { "d" } else { "f" };
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs())
+                .unwrap_or(0);
+            records.push(format!(
+                "{}|{}|{}|{}",
+                name.to_ascii_lowercase(),
+                kind,
+                meta.len(),
+                modified
+            ));
+        }
+    }
+    records.sort();
+    sha256_hex(records.join("\n").as_bytes())
+}
+
+/// Taille et nombre de fichiers (récursif, borné) d'un dossier de mods.
+fn fivem_dir_stats(dir: &Path) -> (u64, u64) {
+    const MAX_FILES: u64 = 100_000;
+    fn walk(dir: &Path, bytes: &mut u64, files: &mut u64) {
+        if *files >= MAX_FILES {
+            return;
+        }
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if *files >= MAX_FILES {
+                return;
+            }
+            let path = entry.path();
+            if let Ok(meta) = fs::metadata(&path) {
+                if meta.is_dir() {
+                    walk(&path, bytes, files);
+                } else {
+                    *bytes += meta.len();
+                    *files += 1;
+                }
+            }
+        }
+    }
+    let mut total_bytes = 0u64;
+    let mut total_files = 0u64;
+    walk(dir, &mut total_bytes, &mut total_files);
+    (total_bytes, total_files)
+}
+
+/// Liste le contenu RÉEL de `FiveM.app/mods` (spec « FiveM Profiles » §1-2,
+/// §11) : chaque entrée de premier niveau (dossier ou fichier) avec taille,
+/// nombre de fichiers, date de modification et chemin relatif. Jamais de
+/// transformation virtuelle — ZAILON respecte le fonctionnement de FiveM.
+/// Le `fingerprint` (SHA-256 stable) permet à l'UI de sauter le re-listing
+/// tant que le dossier n'a pas changé.
+#[tauri::command]
+fn list_fivem_mods(
+    install_directory: String,
+    known_fingerprint: Option<String>,
+) -> Result<FiveMModsListing, String> {
+    let root = fs::canonicalize(&install_directory).map_err(to_error)?;
+    let app_data = locate_fivem_app(&root);
+    let app_path = match &app_data {
+        Some(path) => path.clone(),
+        None => root.join("FiveM.app"),
+    };
+    let mods_dir = app_path.join("mods");
+    if !mods_dir.is_dir() {
+        return Ok(FiveMModsListing {
+            mods_path: Some(mods_dir.to_string_lossy().to_string()),
+            fingerprint: String::new(),
+            entries: Vec::new(),
+            changed: true,
+        });
+    }
+    let fingerprint = fivem_mods_fingerprint(&mods_dir);
+    // Empreinte inchangée → pas de re-listing ni de calcul des tailles
+    // récursives (spec §11-12) : l'appelant réutilise ses entrées en cache.
+    if known_fingerprint.as_deref() == Some(fingerprint.as_str()) {
+        return Ok(FiveMModsListing {
+            mods_path: Some(mods_dir.to_string_lossy().to_string()),
+            fingerprint,
+            entries: Vec::new(),
+            changed: false,
+        });
+    }
+    const MAX_ENTRIES: usize = 2000;
+    let mut entries: Vec<FiveMModEntry> = Vec::new();
+    for entry in fs::read_dir(&mods_dir).map_err(to_error)?.flatten() {
+        if entries.len() >= MAX_ENTRIES {
+            break;
+        }
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        let meta = match fs::metadata(&path) {
+            Ok(meta) => meta,
+            Err(_) => continue,
+        };
+        let modified = meta
+            .modified()
+            .ok()
+            .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs());
+        let (size_bytes, file_count) = if meta.is_dir() {
+            let (bytes, files) = fivem_dir_stats(&path);
+            (bytes, files)
+        } else {
+            (meta.len(), 1)
+        };
+        entries.push(FiveMModEntry {
+            name: name.to_string(),
+            kind: if meta.is_dir() {
+                "folder".to_string()
+            } else {
+                "file".to_string()
+            },
+            size_bytes,
+            file_count,
+            modified_at: modified,
+            relative_path: name.to_string(),
+        });
+    }
+    entries.sort_by(|a, b| {
+        a.name
+            .to_ascii_lowercase()
+            .cmp(&b.name.to_ascii_lowercase())
+    });
+    Ok(FiveMModsListing {
+        mods_path: Some(mods_dir.to_string_lossy().to_string()),
+        fingerprint,
+        entries,
+        changed: true,
+    })
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FiveMModRemoveResult {
+    removed_files: u64,
+    freed_bytes: u64,
+}
+
+/// Suppression SÉCURISÉE d'un élément de `FiveM.app/mods` (spec « FiveM
+/// Profiles » §4) : uniquement une entrée de PREMIER niveau (un seul segment
+/// de chemin), enfant direct du dossier `mods` — il est donc impossible de
+/// supprimer par erreur `FiveM.exe`, `citizen/`, `plugins/` ou quoi que ce
+/// soit hors du contenu de mods.
+#[tauri::command]
+fn remove_fivem_mod(
+    install_directory: String,
+    relative_path: String,
+) -> Result<FiveMModRemoveResult, String> {
+    if relative_path.is_empty()
+        || relative_path == "."
+        || relative_path == ".."
+        || relative_path.contains('/')
+        || relative_path.contains('\\')
+    {
+        return Err(
+            "Seuls les éléments de premier niveau de FiveM.app/mods peuvent être supprimés.".into(),
+        );
+    }
+    let root = fs::canonicalize(&install_directory).map_err(to_error)?;
+    let app_path = locate_fivem_app(&root).unwrap_or_else(|| root.join("FiveM.app"));
+    let mods_dir = fs::canonicalize(app_path.join("mods")).map_err(to_error)?;
+    let target = mods_dir.join(&relative_path);
+    if !target.exists() {
+        return Err("L'élément demandé n'existe plus.".into());
+    }
+    // canonicalize résout aussi les liens symboliques : une cible pointant
+    // hors de mods/ est rejetée par la vérification du parent direct.
+    let canonical_target = fs::canonicalize(&target).map_err(to_error)?;
+    if canonical_target.parent() != Some(mods_dir.as_path()) {
+        return Err("Suppression refusée : élément hors du dossier mods.".into());
+    }
+    let meta = fs::metadata(&canonical_target).map_err(to_error)?;
+    let (removed_files, freed_bytes) = if meta.is_dir() {
+        fivem_dir_stats(&canonical_target)
+    } else {
+        (1, meta.len())
+    };
+    if meta.is_dir() {
+        fs::remove_dir_all(&canonical_target).map_err(to_error)?;
+    } else {
+        fs::remove_file(&canonical_target).map_err(to_error)?;
+    }
+    Ok(FiveMModRemoveResult {
+        removed_files,
+        freed_bytes,
     })
 }
 
@@ -16083,6 +16330,85 @@ mod tests {
     }
 
     #[test]
+    fn fivem_mods_fingerprint_is_stable_and_changes_on_add() {
+        let root = std::env::temp_dir().join(format!("zailon-fivem-{}", unix_timestamp()));
+        let mods = root.join("FiveM.app").join("mods");
+        fs::create_dir_all(mods.join("VisualPack")).unwrap();
+        fs::write(mods.join("VisualPack").join("a.txt"), b"hello").unwrap();
+        fs::write(mods.join("loose.txt"), b"hi").unwrap();
+        let first = fivem_mods_fingerprint(&mods);
+        let second = fivem_mods_fingerprint(&mods);
+        assert!(!first.is_empty());
+        assert_eq!(first, second);
+        // Nouvelle entrée de premier niveau → empreinte différente.
+        fs::write(mods.join("extra.txt"), b"more").unwrap();
+        assert_ne!(first, fivem_mods_fingerprint(&mods));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn list_fivem_mods_reads_real_mods_content() {
+        let root = std::env::temp_dir().join(format!("zailon-fivem-list-{}", unix_timestamp()));
+        let mods = root.join("FiveM.app").join("mods");
+        fs::create_dir_all(mods.join("VisualPack")).unwrap();
+        fs::write(mods.join("VisualPack").join("a.txt"), b"hello").unwrap();
+        fs::write(mods.join("VisualPack").join("b.txt"), b"world").unwrap();
+        fs::write(mods.join("loose.txt"), b"hi").unwrap();
+        let listing = list_fivem_mods(root.to_string_lossy().to_string(), None).unwrap();
+        assert_eq!(listing.entries.len(), 2);
+        assert!(listing.changed);
+        assert!(!listing.fingerprint.is_empty());
+        // Empreinte identique → listing sauté (changed=false), aucun re-calcul.
+        let cached = list_fivem_mods(
+            root.to_string_lossy().to_string(),
+            Some(listing.fingerprint.clone()),
+        )
+        .unwrap();
+        assert!(!cached.changed);
+        assert!(cached.entries.is_empty());
+        let visual = listing
+            .entries
+            .iter()
+            .find(|entry| entry.name == "VisualPack")
+            .unwrap();
+        assert_eq!(visual.kind, "folder");
+        assert_eq!(visual.file_count, 2);
+        assert_eq!(visual.size_bytes, 10); // "hello" + "world"
+        let loose = listing
+            .entries
+            .iter()
+            .find(|entry| entry.name == "loose.txt")
+            .unwrap();
+        assert_eq!(loose.kind, "file");
+        assert_eq!(loose.file_count, 1);
+        assert_eq!(loose.size_bytes, 2);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn remove_fivem_mod_deletes_top_level_only_and_blocks_traversal() {
+        let root = std::env::temp_dir().join(format!("zailon-fivem-rm-{}", unix_timestamp()));
+        let mods = root.join("FiveM.app").join("mods");
+        fs::create_dir_all(mods.join("VisualPack")).unwrap();
+        fs::write(mods.join("VisualPack").join("a.txt"), b"hello").unwrap();
+        fs::write(root.join("FiveM.exe"), b"exe").unwrap();
+
+        // Suppression d'une entrée de premier niveau : OK.
+        let removed =
+            remove_fivem_mod(root.to_string_lossy().to_string(), "VisualPack".into()).unwrap();
+        assert_eq!(removed.removed_files, 1);
+        assert!(!mods.join("VisualPack").exists());
+
+        // Traversée / séparateur : refusé (jamais FiveM.exe, citizen/, …).
+        assert!(
+            remove_fivem_mod(root.to_string_lossy().to_string(), "..\\FiveM.exe".into()).is_err()
+        );
+        assert!(remove_fivem_mod(root.to_string_lossy().to_string(), "a/../b".into()).is_err());
+        assert!(root.join("FiveM.exe").exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn citizenfx_iv_path_reads_game_path_without_modifying() {
         let ini = "[Game]\nIVPath=G:\\Games\\GTAV\nUpdateChannel=beta\nSavedBuildNumber=3570\n\n[Addons]\n";
         assert_eq!(citizenfx_iv_path(ini), Some("G:\\Games\\GTAV".to_string()));
@@ -18221,6 +18547,8 @@ pub fn run() {
             read_citizenfx,
             write_citizenfx,
             detect_fivem_environment,
+            list_fivem_mods,
+            remove_fivem_mod,
             fivem_pack_scan,
             fivem_pack_apply,
             fivem_pack_remove,

@@ -54,6 +54,29 @@ export interface FiveMEnvironment {
   gtaVPath: string | null
 }
 
+export interface FiveMModEntry {
+  name: string
+  kind: 'folder' | 'file'
+  sizeBytes: number
+  fileCount: number
+  modifiedAt: number | null
+  relativePath: string
+}
+
+export interface FiveMModsListing {
+  modsPath: string | null
+  fingerprint: string
+  entries: FiveMModEntry[]
+  /** `false` = l'empreinte était identique : le listing complet a été sauté
+   * (réutiliser les entrées en cache). */
+  changed: boolean
+}
+
+export interface FiveMModRemoveResult {
+  removedFiles: number
+  freedBytes: number
+}
+
 export interface FiveMPackScanResult {
   path: string
   isArchive: boolean
@@ -934,6 +957,11 @@ export const native = {
   readCitizenFx: (citizenfxPath: string) => desktopOnly<CitizenFxRead>('read_citizenfx', { citizenfxPath }),
   writeCitizenFx: (citizenfxPath: string, text: string) => desktopOnly<CitizenFxWrite>('write_citizenfx', { citizenfxPath, text }),
   detectFiveMEnvironment: (installDirectory: string) => desktopOnly<FiveMEnvironment>('detect_fivem_environment', { installDirectory }),
+  /** Contenu RÉEL de `FiveM.app/mods` + empreinte stable (spec « FiveM
+   * Profiles » §1-2, §11-12) — jamais de système virtuel d'activation. */
+  listFiveMMods: (installDirectory: string, knownFingerprint?: string) => desktopOnly<FiveMModsListing>('list_fivem_mods', { installDirectory, knownFingerprint }),
+  /** Suppression SÉCURISÉE d'un élément de premier niveau de FiveM.app/mods. */
+  removeFiveMMod: (installDirectory: string, relativePath: string) => desktopOnly<FiveMModRemoveResult>('remove_fivem_mod', { installDirectory, relativePath }),
   fivemPackScan: (selectedPath: string) => desktopOnly<FiveMPackScanResult>('fivem_pack_scan', { selectedPath }),
   fivemPackApply: (archivePath: string, targetDir: string, manifestJson: string) =>
     desktopOnly<FiveMPackApplyResult>('fivem_pack_apply', { archivePath, targetDir, manifestJson }),

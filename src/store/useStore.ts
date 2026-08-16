@@ -16,7 +16,7 @@ import { nextProfileName, sanitizeProfileForImport } from '../lib/profileShare'
 import { validateAddonManifest } from '../lib/addons'
 import type { AddonSource, InstalledAddon, ZailonAddonManifest } from '../lib/addons'
 import type { FrostyProject } from '../lib/frostyEditor'
-import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable } from '../lib/native'
+import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2ImportResult, native, NativeMod, NexusCollectionDetail, pickExecutable, type FiveMModsListing } from '../lib/native'
 import { adapterFor, FALLBACK_ADAPTER, isLauncherBased } from '../lib/launchAdapters'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
@@ -357,6 +357,10 @@ export interface Store {
    * intelligent, spec §37-38) — persistée pour ne re-scanner que si le
    * dossier a changé entre deux sessions. */
   modsFingerprints: Record<string, string>
+  /** Index du contenu réel de `FiveM.app/mods` par jeu FiveM (spec « FiveM
+   * Profiles » §12) — persisté : le re-listing est sauté tant que
+   * l'empreinte n'a pas changé. Jamais le contenu entier des fichiers. */
+  fiveMModsIndex: Record<string, FiveMModsListing>
   selectedGameId?: string
   selectedProfileId?: string
   nsfw: boolean
@@ -577,6 +581,9 @@ export interface Store {
    * (non référencés par le store) dans `games/<id>/resources/`. Retourne le
    * résultat pour l'UI ; `undefined` si non desktop. `silent` → aucun toast. */
   runResourceCleanup: (options?: { silent?: boolean }) => Promise<ResourceCleanupOutcome | undefined>
+  /** Liste le contenu RÉEL de `FiveM.app/mods` (spec « FiveM Profiles » §1-2,
+   * §11-12). Réutilise l'index persisté si l'empreinte est inchangée. */
+  loadFiveMMods: (gameId: string) => Promise<FiveMModsListing | undefined>
   setGameFavorite: (gameId: string, favorite?: boolean) => void
   setGameHidden: (gameId: string, hidden?: boolean) => void
   setGameCategories: (gameId: string, categories: string[]) => void
@@ -894,6 +901,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   remoteRemovingKeys: [],
   games: [],
   modsFingerprints: {},
+  fiveMModsIndex: {},
   selectedGameId: undefined,
   selectedProfileId: undefined,
   nsfw: false,
@@ -1361,6 +1369,23 @@ export const useStore = create<Store>()(persist((set, get) => ({
       return outcome
     } catch (error) {
       if (!options?.silent) set({ notice: asError(error) })
+      return undefined
+    }
+  },
+  loadFiveMMods: async gameId => {
+    if (!native.isDesktop()) return undefined
+    const game = get().games.find(item => item.id === gameId)
+    if (!game || game.provider !== 'FiveM Client' || !game.installDirectory) return undefined
+    try {
+      const cached = get().fiveMModsIndex[gameId]
+      const listing = await native.listFiveMMods(game.installDirectory, cached?.fingerprint)
+      // Empreinte inchangée → on réutilise les entrées en cache sans re-listing
+      // ni calcul des tailles récursives (spec §11-12).
+      if (!listing.changed && cached) return cached
+      set(state => ({ fiveMModsIndex: { ...state.fiveMModsIndex, [gameId]: listing } }))
+      return listing
+    } catch (error) {
+      set({ notice: asError(error) })
       return undefined
     }
   },
@@ -3389,6 +3414,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
     // par jeu — permet de sauter le re-scan quand rien n'a changé (même entre
     // deux sessions). Volumétrie : ~40 octets par jeu, jamais les mods.
     modsFingerprints: state.modsFingerprints,
+    // Index du contenu réel de FiveM.app/mods (spec « FiveM Profiles » §12) —
+    // liste d'entrées de premier niveau + empreinte, jamais le contenu complet.
+    fiveMModsIndex: state.fiveMModsIndex,
     // Groupes de jeux (spec « Groupes de jeux » §15, « Mise à niveau » §7) :
     // objets PERSISTANTS — les IDs de jeux sont résolus au rechargement, jamais
     // des noms. Absents de partialize, les groupes disparaissaient au

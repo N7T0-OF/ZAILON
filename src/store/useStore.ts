@@ -27,7 +27,16 @@ import { compareFrameworkSets, fingerprintFrameworkSet, hasFrameworkChanges, typ
 import { effectivePerformance, type DownloadPolicy, type PerformanceMode, type ScanPolicy, type ZailonPerformancePolicies } from '../lib/performanceProfiles'
 import { enabledCountFromState, isSilentClear, repairReport } from '../lib/profileConsistency'
 import { createDebouncer } from '../lib/persistDebounce'
+import { modsScanDecision } from '../lib/modsCache'
 import { ZAILON_PERSIST_KEY } from '../lib/designTokens'
+
+// Cache mods intelligent (spec §37-38) : résultat du scan du dossier Mods par
+// jeu, associé à son empreinte LÉGÈRE (métadonnées). En mémoire uniquement —
+// le catalogue installé est déjà persisté dans `games[].installedMods` ; cette
+// carte évite de RE-parcourir chaque mod quand le dossier n'a pas changé
+// (même session). `modsFingerprints` (persisté) évite le re-scan entre deux
+// sessions via `refreshModsIfChanged`.
+const folderModsCache = new Map<string, { fingerprint: string; folderMods: NativeMod[]; at: number }>()
 import { modMatchesRemote, remoteIdentityFromCatalog, remoteModKey } from '../lib/remoteInstallState'
 import { addonCapabilities, fiveMProfilesAllowed, frostyImportAllowed, mo2ImportAllowed, performancePlusAllowed, steamAdvancedAllowed, vortexImportAllowed } from '../lib/addonGating'
 import { launchProcessPriority, shouldApplyProcessPriority } from '../lib/performancePlus'
@@ -341,6 +350,10 @@ export interface Store {
   setDiscoveryDialogOpen: (open: boolean) => void
   activeGameTab: GameTab
   games: Game[]
+  /** Dernière empreinte LÉGÈRE du dossier Mods par jeu (cache mods
+   * intelligent, spec §37-38) — persistée pour ne re-scanner que si le
+   * dossier a changé entre deux sessions. */
+  modsFingerprints: Record<string, string>
   selectedGameId?: string
   selectedProfileId?: string
   nsfw: boolean
@@ -570,7 +583,11 @@ export interface Store {
   removeProfile: (profileId: string) => void
   registerImportedStages: (gameId: string, profileId: string, installedPaths: string[], enabled: boolean) => Promise<void>
   completeMo2Import: (gameId: string, result: Mo2ImportResult) => Promise<void>
-  scanMods: (gameId?: string) => Promise<void>
+  scanMods: (gameId?: string, opts?: { force?: boolean }) => Promise<void>
+  /** Cache mods intelligent (spec §37-38) : vérifie l'empreinte LÉGÈRE du
+   * dossier Mods et ne re-scanne que si elle a changé. Appelé à l'ouverture
+   * d'un jeu — instantané quand rien n'a changé, frais sinon. */
+  refreshModsIfChanged: (gameId: string) => Promise<void>
   /** Re-scan staged au démarrage (spec Fiabilité profils §9-10) : le catalogue
    * installé est réconcilié avec le store staged réel pour qu'un cache vide
    * persisté ne fasse jamais afficher « 0 mods » à un profil qui possède des
@@ -850,6 +867,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   remoteInstallingKeys: [],
   remoteRemovingKeys: [],
   games: [],
+  modsFingerprints: {},
   selectedGameId: undefined,
   selectedProfileId: undefined,
   nsfw: false,
@@ -1047,6 +1065,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
     // Spec « Configuration par jeu » §4, §12 : restaurer le DERNIER profil
     // utilisé de CE jeu (jamais le profil du jeu précédent ni un Default global).
     set({ selectedGameId, selectedProfileId: game ? lastUsedProfileId(game.profiles) : undefined })
+    // Cache mods intelligent (spec §37-38) : ouverture INSTANTANÉE — on ne
+    // re-scanne que si le dossier Mods a changé depuis le dernier scan. Le
+    // reste du temps, l'affichage venu du store persisté est déjà exact.
+    if (game?.modsPath) void get().refreshModsIfChanged(selectedGameId)
   },
   setSelectedProfile: async selectedProfileId => {
     const state = get()
@@ -1721,7 +1743,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       notice: `Import MO2 terminé : ${result.importedMods} mod(s), ${importedProfiles.length} profil(s), ${result.skippedMods} élément(s) ignoré(s). Source ${result.sourceUnchanged ? 'inchangée' : 'à vérifier'}.`,
     }))
   },
-  scanMods: async gameId => {
+  scanMods: async (gameId, opts) => {
     const state = get()
     const game = state.games.find(item => item.id === (gameId ?? state.selectedGameId))
     const profile = game?.profiles.find(item => item.id === state.selectedProfileId) ?? game?.profiles[0]
@@ -1732,10 +1754,26 @@ export const useStore = create<Store>()(persist((set, get) => ({
           await native.syncProfileState(game.id, currentProfile)
         }
       }
-      const [folderMods, stagedMods] = await Promise.all([
-        game.modsPath ? native.scanMods(game.modsPath) : Promise.resolve([]),
-        native.listStagedMods(game.id),
-      ])
+      // Cache mods intelligent (spec §37-38) : empreinte LÉGÈRE du dossier
+      // (métadonnées uniquement). Si rien n'a changé depuis le dernier scan,
+      // on réutilise le résultat en mémoire — jamais de re-parcours complet.
+      // Les paquets staged sont TOUJOURS relus (ZAILON les modifie lui-même).
+      const folderPath = game.modsPath || ''
+      let folderMods: NativeMod[] = []
+      let fromCache = false
+      if (folderPath && native.isDesktop()) {
+        const fingerprint = await native.modsFolderFingerprint(folderPath)
+        const cached = folderModsCache.get(game.id)
+        if (opts?.force || !cached || cached.fingerprint !== fingerprint) {
+          folderMods = await native.scanMods(folderPath)
+          folderModsCache.set(game.id, { fingerprint, folderMods, at: Date.now() })
+          set(state => ({ modsFingerprints: { ...state.modsFingerprints, [game.id]: fingerprint } }))
+        } else {
+          folderMods = cached.folderMods
+          fromCache = true
+        }
+      }
+      const stagedMods = await native.listStagedMods(game.id)
       const mods = [...stagedMods, ...folderMods.filter(folderMod => !stagedMods.some(staged => staged.fingerprint === folderMod.fingerprint))]
       const previous = resolveProfileMods(game, profile)
       const catalog = scannedMods(mods, game.installedMods || previous)
@@ -1755,13 +1793,26 @@ export const useStore = create<Store>()(persist((set, get) => ({
           installedMods: catalog,
           profiles: item.profiles.map(current => current.id === profile.id ? { ...current, mods: undefined, modStates: nextStates } : current),
         }),
-        notice: `${mods.length} mod${mods.length !== 1 ? 's' : ''} analysé${mods.length !== 1 ? 's' : ''}, dont ${stagedMods.length} stocké${stagedMods.length !== 1 ? 's' : ''} par ZAILON.`,
+        notice: `${mods.length} mod${mods.length !== 1 ? 's' : ''} analysé${mods.length !== 1 ? 's' : ''}, dont ${stagedMods.length} stocké${stagedMods.length !== 1 ? 's' : ''} par ZAILON${fromCache ? ' — dossier Mods inchangé, scan réutilisé (cache).' : '.'}`,
       }))
       const updated = get().games.find(item => item.id === game.id)?.profiles.find(item => item.id === profile.id)
       if (updated && native.isDesktop()) await native.syncProfileState(game.id, updated)
     } catch (error) {
       set({ notice: asError(error) })
     }
+  },
+  refreshModsIfChanged: async gameId => {
+    const game = get().games.find(item => item.id === gameId)
+    if (!game || !game.modsPath || !native.isDesktop()) return
+    const fingerprint = await native.modsFolderFingerprint(game.modsPath)
+    const decision = modsScanDecision({
+      fingerprint,
+      memoryFingerprint: folderModsCache.get(game.id)?.fingerprint,
+      persistedFingerprint: get().modsFingerprints[game.id],
+      modsPathConfigured: Boolean(game.modsPath),
+    })
+    if (decision === 'reuse') return
+    await get().scanMods(game.id)
   },
   refreshStagedCatalogs: async () => {
     // Spec Fiabilité profils §9-10 : au démarrage, le catalogue installé de
@@ -3256,6 +3307,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
     addons: state.addons,
     frostyProjects: state.frostyProjects,
     games: state.games,
+    // Cache mods intelligent (spec §37-38) : empreinte LÉGÈRE du dossier Mods
+    // par jeu — permet de sauter le re-scan quand rien n'a changé (même entre
+    // deux sessions). Volumétrie : ~40 octets par jeu, jamais les mods.
+    modsFingerprints: state.modsFingerprints,
     // Groupes de jeux (spec « Groupes de jeux » §15, « Mise à niveau » §7) :
     // objets PERSISTANTS — les IDs de jeux sont résolus au rechargement, jamais
     // des noms. Absents de partialize, les groupes disparaissaient au

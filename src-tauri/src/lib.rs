@@ -5145,6 +5145,46 @@ fn scan_mods(mods_path: String) -> Result<Vec<NativeMod>, String> {
         .collect::<Vec<_>>())
 }
 
+/// Empreinte LÉGÈRE d'un dossier Mods (spec §37-38 « cache mods intelligent »)
+/// : uniquement des métadonnées (nom + taille + mtime de chaque entrée, nombre
+/// d'entrées) — JAMAIS de lecture de contenu. Comparée à l'empreinte précédente,
+/// elle permet de réutiliser un scan déjà fait quand rien n'a changé, au lieu de
+/// re-parcourir chaque mod à chaque ouverture. Un renommage (toggle
+/// `DISABLED_*`), un ajout ou une suppression change le résultat.
+#[tauri::command]
+fn mods_folder_fingerprint(mods_path: String) -> Result<String, String> {
+    let folder = PathBuf::from(mods_path);
+    if !folder.exists() {
+        return Ok(String::new());
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut count: u64 = 0;
+    for entry in fs::read_dir(&folder)
+        .map_err(to_error)?
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        count += 1;
+        name.hash(&mut hasher);
+        if let Ok(meta) = fs::metadata(&path) {
+            meta.len().hash(&mut hasher);
+            if let Ok(modified) = meta.modified() {
+                if let Ok(since_epoch) = modified.duration_since(UNIX_EPOCH) {
+                    since_epoch.as_nanos().hash(&mut hasher);
+                }
+            }
+        }
+    }
+    count.hash(&mut hasher);
+    Ok(format!("{:016x}", hasher.finish()))
+}
+
 #[tauri::command]
 fn scan_mod_import(
     paths: Vec<String>,
@@ -15740,6 +15780,32 @@ mod tests {
         assert!(!is_zip_archive(&[b'P', b'K', 0x03, 0x00]));
     }
 
+    #[test]
+    fn mods_folder_fingerprint_changes_on_rename_add_and_missing() {
+        let dir = TempPackDir::new("fingerprint");
+        let root = dir.path();
+        fs::create_dir_all(root.join("Mod A")).unwrap();
+        fs::create_dir_all(root.join("Mod B")).unwrap();
+        let before = mods_folder_fingerprint(root.to_string_lossy().to_string()).unwrap();
+        assert!(!before.is_empty());
+
+        // Renommage (toggle DISABLED_*) → empreinte différente.
+        fs::rename(root.join("Mod A"), root.join("DISABLED_Mod A")).unwrap();
+        let after_rename = mods_folder_fingerprint(root.to_string_lossy().to_string()).unwrap();
+        assert_ne!(before, after_rename);
+
+        // Ajout d'un mod → empreinte différente.
+        fs::create_dir_all(root.join("Mod C")).unwrap();
+        let after_add = mods_folder_fingerprint(root.to_string_lossy().to_string()).unwrap();
+        assert_ne!(after_rename, after_add);
+
+        // Dossier inexistant → vide (jamais de scan).
+        assert_eq!(
+            mods_folder_fingerprint(root.join("missing").to_string_lossy().to_string()).unwrap(),
+            ""
+        );
+    }
+
     struct TempPackDir(PathBuf);
 
     impl TempPackDir {
@@ -17798,6 +17864,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             scan_mods,
+            mods_folder_fingerprint,
             list_staged_mods,
             scan_mod_import,
             scan_mod_import_background,

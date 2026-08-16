@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.137.0] - 2026-08-16
+
+> **Cache mods intelligent — ouverture de jeu instantanée** : ZAILON ne
+> re-scanne plus le dossier Mods à chaque ouverture — une empreinte LÉGÈRE
+> (métadonnées, jamais le contenu) décide si un re-scan est nécessaire.
+
+### Added
+
+- **`mods_folder_fingerprint` (natif Rust)** : empreinte métadonnées du
+  dossier Mods (noms, tailles, mtimes, nombre d'entrées — DefaultHasher,
+  aucune lecture de contenu). Un renommage (toggle `DISABLED_*`), un ajout
+  ou une suppression change l'empreinte. Test Rust dédié.
+- **`src/lib/modsCache.ts` (pur, 5 tests)** : `modsScanDecision` —
+  `reuse` / `rescan` selon l'empreinte mémoire (session) ou persistée
+  (session précédente).
+- **`scanMods` fast path** : dossier inchangé → le résultat en mémoire est
+  réutilisé (notification « dossier Mods inchangé, scan réutilisé (cache) »).
+  Les paquets staged sont **toujours relus** (ZAILON les modifie lui-même).
+- **`refreshModsIfChanged`** déclenché à l'ouverture d'un jeu : instantané
+  quand rien n'a changé, frais sinon — `modsFingerprints` persisté (~40 octets
+  par jeu, jamais les mods) couvre le redémarrage.
+
+### Changed
+
+- `setSelectedGame` déclenche le rafraîchissement intelligent en arrière-plan
+  au lieu d'aucun scan — l'affichage venu du store persisté reste immédiat.
+
+### Docs
+
+- `docs/mods-smart-cache.md` — architecture, décision pure, fiabilité
+  (invalidations, staged toujours relus, volumes persistés).
+
 ## [1.136.0] - 2026-08-16
 
 > **Refonte des cartes Add-ons** : synthèse « N disponibles · N installés ·

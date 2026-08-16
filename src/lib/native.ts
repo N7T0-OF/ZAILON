@@ -864,6 +864,8 @@ export const native = {
       desktopOnly<void>('open_visual_windows_settings', { kind }),
   },
   scanMods: (modsPath: string) => desktopOnly<NativeMod[]>('scan_mods', { modsPath }),
+  /** Empreinte LÉGÈRE du dossier Mods (métadonnées uniquement) — cache mods intelligent (spec §37-38). */
+  modsFolderFingerprint: (modsPath: string) => desktopOnly<string>('mods_folder_fingerprint', { modsPath }),
   // Add-ons (spec §14-15, §65) : téléchargement HTTPS + SHA-256 + installation
   // atomique avec rollback — jamais d'écrasement direct.
   addonDownload: (url: string, destPath: string, onProgress: (received: number, total: number) => void) => {

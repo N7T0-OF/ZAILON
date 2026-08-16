@@ -3297,7 +3297,11 @@ fn truncate_message(value: &str, max: usize) -> String {
 }
 
 #[tauri::command]
-fn resolve_youtube_video(app: AppHandle, url: String, video_id: String) -> Result<ResolvedBackgroundVideo, String> {
+fn resolve_youtube_video(
+    app: AppHandle,
+    url: String,
+    video_id: String,
+) -> Result<ResolvedBackgroundVideo, String> {
     // Identifiant sanitisé : jamais utilisé tel quel dans un chemin disque.
     if video_id.is_empty()
         || video_id.len() > 24
@@ -3348,7 +3352,10 @@ fn resolve_youtube_video(app: AppHandle, url: String, video_id: String) -> Resul
             video_path: None,
             thumbnail_path: None,
             size_bytes: None,
-            message: Some(truncate_message(&String::from_utf8_lossy(&output.stderr), 400)),
+            message: Some(truncate_message(
+                &String::from_utf8_lossy(&output.stderr),
+                400,
+            )),
         });
     }
     let video_path = cache_dir.join(format!("video_{video_id}.mp4"));

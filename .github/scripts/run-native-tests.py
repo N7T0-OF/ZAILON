@@ -5,14 +5,20 @@ import sys
 from collections import deque
 
 
+import os
+
 command = [
     "cargo",
     "test",
     "--manifest-path",
     "src-tauri/Cargo.toml",
     "--lib",
-]
-tail: deque[str] = deque(maxlen=80)
+] + sys.argv[1:]
+tail: deque[str] = deque(maxlen=40)
+
+# Diagnostic CI : garder la sortie en clair pour repérer un crash harnais.
+if os.environ.get("CI_DIAG_FULL_LOG"):
+    tail = deque(maxlen=200)
 
 process = subprocess.Popen(
     command,

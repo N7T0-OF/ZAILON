@@ -30,6 +30,24 @@ import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-prof
 const startupCoordinator = new StartupCoordinator()
 const startupProfiler = createStartupProfiler()
 
+// Nettoyage différé des tâches d'arrière-plan (spec « Téléchargements ») :
+// quand la dernière tâche en cours/en attente se termine, on laisse un court
+// délai de grâce (l'utilisateur peut encore consulter l'activité) puis on
+// applique la rétention configurée. Avec la rétention par défaut (démarrage),
+// les entrées terminées sont retirées → la section Téléchargements se masque
+// automatiquement de la barre latérale. Rien n'est jamais supprimé tant qu'une
+// tâche tourne ou attend une décision.
+let taskCleanupTimer: number | undefined
+const scheduleTaskCleanup = () => {
+  window.clearTimeout(taskCleanupTimer)
+  taskCleanupTimer = window.setTimeout(() => {
+    const state = useStore.getState()
+    if (!state.backgroundTasks.some(task => task.status === 'running' || task.status === 'awaiting_user_decision')) {
+      state.cleanupBackgroundTasks()
+    }
+  }, 45_000)
+}
+
 // Émission du résumé compact d'une session vers le panneau (WebView séparée,
 // sans accès au store) — source de vérité : l'état RÉEL de la session.
 function emitQuickPanelStateFor(store: ReturnType<typeof useStore.getState>, gameId: string) {
@@ -704,7 +722,12 @@ export default function App() {
         useStore.getState().replaceBackgroundTasks(tasks)
         useStore.getState().cleanupBackgroundTasks()
       }).catch(() => undefined)
-      void listen<BackgroundTaskSnapshot>('background-task-changed', event => useStore.getState().upsertBackgroundTask(event.payload)).then(dispose => { unlisten = dispose })
+      void listen<BackgroundTaskSnapshot>('background-task-changed', event => {
+        useStore.getState().upsertBackgroundTask(event.payload)
+        // Toute fin de tâche relance la minuterie de nettoyage : la section
+        // Téléchargements se masque d'elle-même après la période de grâce.
+        scheduleTaskCleanup()
+      }).then(dispose => { unlisten = dispose })
     })
     return () => unlisten?.()
   }, [])

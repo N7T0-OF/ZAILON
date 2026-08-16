@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.149.0] - 2026-08-16
+
+> **Interface épurée — Téléchargements, Explorer et Add-ons** : tout ce qui ne
+> sert pas à une décision disparaît de l'interface (ou passe derrière ⓘ).
+
+### Changed
+
+- **Téléchargements** : la section n'existe plus en permanence dans la barre
+  latérale. Aucune tâche (en cours, en attente ou récente) → entrée totalement
+  masquée. Dès qu'une analyse, un import, un téléchargement ou un déploiement
+  démarre → elle réapparaît automatiquement. Quand la dernière tâche se
+  termine, un délai de grâce de 45 s permet encore de consulter l'activité,
+  puis le nettoyage automatique (rétention configurée) retire les entrées
+  terminées → la section se masque d'elle-même. Rien n'est jamais supprimé
+  tant qu'une tâche tourne ou attend une décision.
+- **Explorer** : suppression des statuts techniques permanents sur les cartes
+  de sources (« Catalogue public connecté », « Connecté · compte », « Clé
+  requise »…). Principe : **source présente = source fonctionnelle** — seule
+  l'icône ✓/🔑 indique si la source est utilisable immédiatement ou
+  configurable.
+- **Add-ons — Catégories** : les chips permanentes (Jeux · Modding · Visuel ·
+  Apparence · Sources · Utilitaires) sont remplacées par un seul bouton
+  **« ☰ Catégories »** qui ouvre le menu de choix ; la sélection est mémorisée
+  au prochain lancement.
+- **Add-ons — cartes épurées** : identifiant, taille, permissions,
+  dépendances, méthode d'installation, rollback et détails d'API passent dans
+  une **bulle ⓘ**. La carte ne garde que nom, badge de statut, description,
+  catégorie · version et l'action Installer/Désinstaller.
+- **Add-ons** : suppression de la ligne « Catalogue en cache · il y a 1 h » et
+  de sa bulle — la donnée reste utilisée en interne pour rafraîchir le
+  catalogue, sans être affichée à l'utilisateur.
+
+### Validation
+
+- **675 tests ✅**, tsc ✅, build ✅.
+
 ## [1.148.0] - 2026-08-16
 
 > **FiveM Profiles — refonte (2/2)** : export intelligent du profil — on

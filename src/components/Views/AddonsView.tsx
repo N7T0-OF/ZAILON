@@ -1,4 +1,4 @@
-import { BookOpen, Download, Import, Link2, Loader2, Lock, Package, Power, RefreshCw, Search, ShieldCheck, Trash2, Wand2, X, Zap } from 'lucide-react'
+import { BookOpen, Check, Download, Import, Link2, Loader2, Lock, Menu, Package, Power, RefreshCw, Search, ShieldCheck, Trash2, Wand2, X, Zap } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import {
   ADDON_API_VERSION,
@@ -40,34 +40,37 @@ const CATALOG_CACHE_KEY = 'zailon:addon-catalog:v4'
 
 // Filtres de statut (spec §65) : la disponibilité vient du catalogue
 // (package + SHA-256), jamais d'un texte écrit à la main (§47-49).
+// Les CATÉGORIES ne sont plus affichées en permanence : un seul bouton
+// « ☰ Catégories » ouvre le choix, mémorisé au prochain lancement.
 type AddonStatusFilter = 'disponibles' | 'dev' | 'updates'
-type AddonFilter = 'all' | 'installed' | AddonStatusFilter | AddonCatalog['addons'][number]['category']
+type AddonFilter = 'all' | 'installed' | AddonStatusFilter
+type AddonCategoryFilter = 'all' | AddonCatalog['addons'][number]['category']
 const FILTERS: Array<{ id: AddonFilter; label: string }> = [
   { id: 'all', label: 'Tous' },
   { id: 'installed', label: 'Installés' },
   { id: 'disponibles', label: 'Disponibles' },
   { id: 'updates', label: 'Mises à jour' },
   { id: 'dev', label: 'En développement' },
-  { id: 'game-support', label: 'Jeux' },
-  { id: 'modding', label: 'Modding' },
-  { id: 'visual', label: 'Visuel' },
-  { id: 'appearance', label: 'Apparence' },
-  { id: 'sources', label: 'Sources' },
-  { id: 'utilities', label: 'Utilitaires' },
 ]
+
+const CATEGORY_FILTER_KEY = 'zailon:addons-category-filter:v1'
+const CATEGORY_OPTIONS: Array<{ id: AddonCategoryFilter; label: string }> = [
+  { id: 'all', label: 'Tous' },
+  ...(['game-support', 'modding', 'visual', 'appearance', 'sources', 'utilities'] as Array<AddonCatalog['addons'][number]['category']>).map(category => ({ id: category, label: ADDON_CATEGORY_LABELS[category] })),
+]
+
+const readCategoryFilter = (): AddonCategoryFilter => {
+  try {
+    const stored = window.localStorage.getItem(CATEGORY_FILTER_KEY)
+    return CATEGORY_OPTIONS.some(option => option.id === stored) ? stored as AddonCategoryFilter : 'all'
+  } catch { return 'all' }
+}
 
 const CATEGORY_ICON = (category: AddonCatalog['addons'][number]['category']) => category === 'game-support' ? Wand2 : category === 'modding' ? Package : category === 'visual' ? Zap : category === 'appearance' ? Power : category === 'sources' ? Import : BookOpen
 
 interface CatalogRow {
   entry: AddonCatalogEntry
   installed?: InstalledAddon
-}
-
-const timeAgoShort = (at: number) => {
-  const seconds = Math.max(0, Math.floor((Date.now() - at) / 1000))
-  if (seconds < 60) return `il y a ${seconds} s`
-  if (seconds < 3600) return `il y a ${Math.floor(seconds / 60)} min`
-  return `il y a ${Math.floor(seconds / 3600)} h`
 }
 
 /** Carte de synthèse cliquable — « N disponibles · N installés · N mises à
@@ -115,6 +118,9 @@ export function AddonsView() {
 
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<(typeof FILTERS)[number]['id']>('all')
+  // Filtre de catégorie mémorisé au prochain lancement (spec Add-ons §catégories).
+  const [category, setCategory] = useState<AddonCategoryFilter>(readCategoryFilter)
+  const [catOpen, setCatOpen] = useState(false)
   const [catalog, setCatalog] = useState<AddonCatalog>(OFFICIAL_ADDON_CATALOG)
   const [catalogState, setCatalogState] = useState<CatalogFetchResult>()
   const [syncing, setSyncing] = useState(false)
@@ -140,6 +146,10 @@ export function AddonsView() {
 
   useEffect(() => { void syncCatalog() }, [])
 
+  useEffect(() => {
+    try { window.localStorage.setItem(CATEGORY_FILTER_KEY, category) } catch { /* best-effort */ }
+  }, [category])
+
   const catalogRows: CatalogRow[] = useMemo(() => {
     const byId = new Map(addons.map(item => [item.manifest.id, item]))
     const rows: CatalogRow[] = catalog.addons.map(entry => ({ entry, installed: byId.get(entry.id) }))
@@ -161,12 +171,12 @@ export function AddonsView() {
       if (filter === 'disponibles' && (row.installed || !catalogAddonAvailability(row.entry).installable)) return false
       if (filter === 'updates' && !(row.installed && row.entry.official && row.entry.version !== row.installed.manifest.version)) return false
       if (filter === 'dev' && (row.installed || catalogAddonAvailability(row.entry).status !== 'development')) return false
-      if (filter !== 'all' && filter !== 'installed' && filter !== 'disponibles' && filter !== 'updates' && filter !== 'dev' && row.entry.category !== filter) return false
+      if (category !== 'all' && row.entry.category !== category) return false
       if (!normalized) return true
       const haystack = `${row.entry.name} ${row.entry.description} ${row.entry.id}`.toLocaleLowerCase()
       return haystack.includes(normalized)
     })
-  }, [catalogRows, filter, query])
+  }, [catalogRows, filter, category, query])
 
   const storage = useMemo(() => {
     const knownSizes: Record<string, number> = {}
@@ -217,6 +227,16 @@ export function AddonsView() {
       <div className="flex flex-wrap gap-1">
         {FILTERS.map(item => <button key={item.id} type="button" onClick={() => setFilter(item.id)} className={`rounded-lg px-3 py-1.5 text-[11px] ${filter === item.id ? 'bg-gold/15 font-semibold text-gold' : 'text-white/42 hover:bg-white/[0.05] hover:text-white/70'}`}>{item.label}</button>)}
       </div>
+      {/* Catégories : un seul bouton au lieu de chips permanentes — le choix est mémorisé. */}
+      <div className="relative">
+        <button type="button" onClick={() => setCatOpen(value => !value)} aria-haspopup="menu" aria-expanded={catOpen} className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] ${category !== 'all' ? 'bg-gold/15 font-semibold text-gold' : 'text-white/42 hover:bg-white/[0.05] hover:text-white/70'}`}><Menu size={13} />Catégories{category !== 'all' && <span className="ml-0.5 text-gold/70">· {ADDON_CATEGORY_LABELS[category]}</span>}</button>
+        {catOpen && <>
+          <div className="fixed inset-0 z-10" onClick={() => setCatOpen(false)} />
+          <div role="menu" className="absolute right-0 z-20 mt-1.5 w-52 rounded-xl border border-white/[0.1] bg-[#121617] p-1.5 shadow-2xl">
+            {CATEGORY_OPTIONS.map(option => <button key={option.id} role="menuitemradio" aria-checked={category === option.id} type="button" onClick={() => { setCategory(option.id); setCatOpen(false) }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[11px] text-white/70 hover:bg-white/[0.06] hover:text-white"><Check size={12} className={category === option.id ? 'text-gold' : 'text-transparent'} />{option.label}</button>)}
+          </div>
+        </>}
+      </div>
     </section>
 
     <section className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -226,15 +246,7 @@ export function AddonsView() {
       <StatCard label="En développement" value={stats.dev} active={filter === 'dev'} accent="text-white/60" onClick={() => setFilter('dev')} />
     </section>
 
-    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/34">
-      <span>{visible.length} affiché(s) · {formatAddonSize(storage.totalBytes)} installés</span>
-      <span className="flex items-center gap-1.5">
-        {catalogState?.source === 'remote' && <span className="text-emerald-200/70">Catalogue officiel à jour{catalogState.fetchedAt ? ` · ${timeAgoShort(catalogState.fetchedAt)}` : ''}</span>}
-        {catalogState?.source === 'cache' && <span>Catalogue en cache{catalogState.fetchedAt ? ` · ${timeAgoShort(catalogState.fetchedAt)}` : ''}</span>}
-        {catalogState?.source === 'fallback' && <span>Hors ligne — catalogue de référence</span>}
-        <ZailonInfoPopover text="Le catalogue officiel est mis en cache — ZAILON fonctionne sans connexion. Les add-ons installés continuent de fonctionner hors ligne (spec §6). Un add-on n'a de bouton Installer que si le catalogue référence un package réel (chemin `package` + SHA-256 officiel, spec §5) — téléchargé directement depuis le repository statique, jamais via GitHub Releases. Installation : HTTPS → vérification SHA-256 → extraction → échange atomique → vérification de santé, avec rollback (§14-15, §35, §65)." />
-      </span>
-    </div>
+    <p className="mt-2 text-[11px] text-white/34">{visible.length} affiché(s) · {formatAddonSize(storage.totalBytes)} installés</p>
 
     {visible.length ? <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {visible.map(row => <AddonCard
@@ -340,24 +352,16 @@ function AddonCard({ row, nameById, offline = false, onInstall, onEnable, onRemo
               : <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] font-semibold text-white/42">En développement</span>}
           {installed && !installed.enabled && <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] text-white/42">Désactivé</span>}
         </div>
-        <p className="mt-1 text-[10px] font-mono text-white/28" title={entry.id}>{entry.id}</p>
       </div>
     </div>
     <p className="mt-2.5 line-clamp-2 text-[11px] leading-relaxed text-white/42">{entry.description}</p>
-    <div className="mt-2 flex flex-wrap gap-1">
+    <div className="mt-2 flex flex-wrap items-center gap-1">
       <span className="rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/38">{ADDON_CATEGORY_LABELS[entry.category]}</span>
       <span className="rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/38">v{entry.version}</span>
-      {entry.downloadSize ? <span className="rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/38">{formatAddonSize(entry.downloadSize)} téléchargement{installed ? ` · ~${formatAddonSize(installedSize)} installé` : ''}</span> : null}
-      {entry.permissions.length > 0 && <PermissionsButton permissions={entry.permissions} />}
-      {entry.dependencies?.length ? <span className="flex items-center gap-1 rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/46"><Link2 size={10} className="text-white/30" />Nécessite {entry.dependencies.map(id => nameById.get(id) || id).join(', ')}<ZailonInfoPopover text={entry.dependencies.map(id => `${nameById.get(id) || id} (${id})`).join(' · ')} /></span> : null}
+      {/* Le technique (identifiant, taille, permissions, dépendances, méthode
+          d'installation, rollback) passe dans la bulle ⓘ — jamais sur la carte. */}
+      <span className="ml-auto"><AddonTechPopover entry={entry} installed={installed} nameById={nameById} installedSize={installedSize} /></span>
     </div>
-    {installed && (
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-white/34">
-        <span className="rounded bg-white/[0.03] px-1.5 py-0.5 font-mono">API v{installed.manifest.minAddonApiVersion || '1'}</span>
-        {(installed.manifest.events?.length || 0) > 0 && <span className="rounded bg-white/[0.03] px-1.5 py-0.5">{installed.manifest.events!.length} événement(s)</span>}
-        <span className="rounded bg-white/[0.03] px-1.5 py-0.5">lazy ✓</span>
-      </div>
-    )}
     {incompatible && <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-300/[0.05] px-2.5 py-1.5 text-[10px] text-amber-100/75">{compatibility.reasons[0]}</p>}
     <div className="mt-auto flex items-center justify-between gap-2 pt-3">
       {installed ? (
@@ -659,18 +663,28 @@ function AddonRemoveDialog({ row, dependents, onClose, onConfirm }: {
   </div>
 }
 
-/** Badge 🔐 compact avec popover de permissions (spec §39) — les permissions ne
- * s'affichent qu'au clic, jamais sur la carte. */
-function PermissionsButton({ permissions }: { permissions: AddonPermission[] }) {
-  const [open, setOpen] = useState(false)
-  return <span className="relative">
-    <button type="button" onClick={() => setOpen(value => !value)} title="Voir les permissions" className="flex items-center gap-1 rounded-full bg-white/[0.035] px-2 py-0.5 text-[10px] text-white/50 hover:bg-white/[0.07] hover:text-white"><Lock size={10} />{permissions.length}</button>
-    {open && <>
-      <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-      <span className="absolute bottom-full left-0 z-20 mb-1.5 w-64 rounded-xl border border-white/[0.1] bg-[#121617] p-3 shadow-2xl">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-white/40">Permissions</p>
-        <ul className="mt-2 space-y-1">{permissions.map(permission => <li key={permission} className="flex items-start gap-1.5 text-[10px] leading-relaxed text-white/58"><span className="mt-0.5 text-emerald-300/80">✓</span>{ADDON_PERMISSION_LABELS[permission as AddonPermission] || permission}</li>)}</ul>
-      </span>
-    </>}
-  </span>
+/** Bulle ⓘ technique d'une carte (spec « Add-ons — carte épurée ») :
+ * identifiant, taille, permissions, dépendances, méthode d'installation,
+ * rollback et détails d'API sont TOUS dans la bulle — la carte ne garde que
+ * nom, catégorie, version, description et l'action. */
+function AddonTechPopover({ entry, installed, nameById, installedSize }: {
+  entry: AddonCatalogEntry
+  installed?: InstalledAddon
+  nameById: Map<string, string>
+  installedSize: number
+}) {
+  const dependencies = entry.dependencies?.length
+    ? entry.dependencies.map(id => nameById.get(id) || id).join(', ')
+    : 'aucune'
+  return <ZailonInfoPopover wide text="Informations techniques : identifiant, taille, permissions, dépendances, méthode d'installation et rollback.">
+    <ul className="mt-1.5 space-y-1 border-t border-white/[0.06] pt-1.5 text-[10px] leading-relaxed text-white/42">
+      <li>Identifiant : <code className="text-white/55">{entry.id}</code></li>
+      <li>Taille : {formatAddonSize(entry.downloadSize || 0)}{installed ? ` · ~${formatAddonSize(installedSize)} installé` : ''}</li>
+      <li>Permissions : {entry.permissions.length ? entry.permissions.map(permission => ADDON_PERMISSION_LABELS[permission as AddonPermission] || permission).join(', ') : 'aucune'}</li>
+      <li>Dépendances : {dependencies}</li>
+      <li>Installation : HTTPS → SHA-256 → extraction → échange atomique → vérification de santé.</li>
+      <li>Rollback : restauration automatique en cas d'échec à n'importe quelle étape.</li>
+      {installed && <li>API v{installed.manifest.minAddonApiVersion || '1'} · {(installed.manifest.events?.length || 0)} événement(s) · lazy ✓</li>}
+    </ul>
+  </ZailonInfoPopover>
 }

@@ -41,11 +41,15 @@ import { inspectReShadePreset, RESHADE_SHADER_PACKS } from '../../lib/reshade'
 import type { ReShadePresetInspection } from '../../lib/reshade'
 import { GridColumnCycleButton, ProviderExplorerToolbar, ProviderFilters, ProviderPagination, ProviderSearchResults, ProviderSortControl, ProviderViewModeToggle } from '../Explorer/ProviderExplorer'
 
-const providers: Array<{ id: Platform; name: string; detail: string; ready: boolean }> = [
-  { id: 'gamebanana', name: 'GameBanana', detail: 'Catalogue public connecté', ready: true },
-  { id: 'nexus', name: 'Nexus Mods', detail: 'Clé API personnelle requise', ready: false },
-  { id: 'curseforge', name: 'CurseForge', detail: 'Clé API partenaire requise', ready: false },
-  { id: 'ayakamods', name: 'Ayaka Mods', detail: 'Connecteur en préparation', ready: false },
+// « Source présente = source fonctionnelle » (spec Explorer) : les cartes de
+// sources n'affichent plus de statut technique permanent (« Connecté »,
+// « Catalogue connecté », « Clé requise »…). La seule indication est l'icône :
+// ✓ source utilisable immédiatement, 🔑 source configurable si besoin.
+const providers: Array<{ id: Platform; name: string; ready: boolean }> = [
+  { id: 'gamebanana', name: 'GameBanana', ready: true },
+  { id: 'nexus', name: 'Nexus Mods', ready: false },
+  { id: 'curseforge', name: 'CurseForge', ready: false },
+  { id: 'ayakamods', name: 'Ayaka Mods', ready: false },
 ]
 
 const formatCount = (value: number) => new Intl.NumberFormat('fr-FR', {
@@ -260,20 +264,17 @@ export function ExploreView() {
     <section className="mt-5 grid gap-2 md:grid-cols-2 xl:grid-cols-4" aria-label="Sources de mods">
       {availableProviders.map(provider => {
         const connected = provider.ready || (provider.id === 'nexus' && providerStatuses.nexus?.configured)
-        const detail = provider.id === 'nexus' && providerStatuses.nexus?.configured
-          ? providerStatuses.nexus.connected ? `Connecté${providerStatuses.nexus.accountName ? ` · ${providerStatuses.nexus.accountName}` : ''}` : 'Clé sécurisée · test conseillé'
-          : provider.detail
         return <button
           key={provider.id}
           type="button"
           onClick={() => setPlatform(provider.id)}
+          title={provider.name}
           className={`rounded-xl border p-3 text-left transition-colors ${platform === provider.id ? 'border-gold/28 bg-gold/[0.07]' : 'border-white/[0.07] bg-white/[0.018] hover:border-white/15 hover:bg-white/[0.04]'}`}
         >
           <span className="flex items-center justify-between gap-2">
             <span className="text-xs font-semibold text-white/82">{provider.name}</span>
             {connected ? <CheckCircle2 size={14} className="text-emerald-300/72" /> : <KeyRound size={14} className="text-white/28" />}
           </span>
-          <span className="mt-1 block text-[11px] text-white/38">{detail}</span>
         </button>
       })}
     </section>
@@ -781,8 +782,8 @@ function Metric({ label, value }: { label: string; value: string }) {
 function ProviderUnavailable({ provider, onConfigure }: { provider: string; onConfigure: () => void }) {
   return <section className="mt-4 flex min-h-56 flex-col items-center justify-center rounded-2xl border border-white/[0.07] bg-white/[0.018] px-5 text-center">
     <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.025] text-white/34"><KeyRound size={19} /></div>
-    <h2 className="mt-3 text-sm font-semibold text-white/72">{provider} n’est pas encore connecté</h2>
-    <p className="mt-1 max-w-md text-[11px] leading-relaxed text-white/38">Cette source exige une authentification ou une clé API. ZAILON ne présente aucun résultat fictif : GameBanana reste disponible immédiatement sans compte.</p>
+    <h2 className="mt-3 text-sm font-semibold text-white/72">{provider} n’est pas encore configuré</h2>
+    <p className="mt-1 max-w-md text-[11px] leading-relaxed text-white/38">Cette source demande une clé ou une authentification avant de pouvoir afficher des mods. ZAILON ne présente aucun résultat fictif.</p>
     <button type="button" onClick={onConfigure} className="mt-4 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]">Ouvrir les paramètres</button>
   </section>
 }

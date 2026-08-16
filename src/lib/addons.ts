@@ -676,6 +676,41 @@ export function catalogAddonAvailability(entry: AddonCatalogEntry): AddonAvailab
   return { installable: true, status: 'available', downloadUrl }
 }
 
+/**
+ * Synthèse du catalogue pour l'en-tête de la page Add-ons (spec §45) :
+ * « N disponibles · N installés · N mises à jour · N en développement » —
+ * chaque statut vient du catalogue (package réel), jamais d'un texte écrit.
+ */
+export interface AddonCatalogStatRow {
+  entry: AddonCatalogEntry
+  installed?: InstalledAddon
+}
+
+export interface AddonCatalogStats {
+  disponibles: number
+  installes: number
+  updates: number
+  dev: number
+}
+
+export function addonCatalogStats(rows: AddonCatalogStatRow[]): AddonCatalogStats {
+  let disponibles = 0
+  let updates = 0
+  let dev = 0
+  let installes = 0
+  for (const row of rows) {
+    if (row.installed) {
+      installes++
+      if (row.entry.official && row.entry.version !== row.installed.manifest.version) updates++
+    } else {
+      const availability = catalogAddonAvailability(row.entry)
+      if (availability.installable) disponibles++
+      else if (availability.status === 'development') dev++
+    }
+  }
+  return { disponibles, installes, updates, dev }
+}
+
 // ─────────────────────────────── Catalogue officiel ─────────────────────────
 
 /**

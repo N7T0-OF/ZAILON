@@ -5,6 +5,7 @@ import {
   ADDON_CATEGORY_LABELS,
   ADDON_PERMISSION_LABELS,
   ADDON_INSTALL_PHASES,
+  addonCatalogStats,
   catalogAddonAvailability,
   checkAddonCompatibility,
   estimateInstalledSize,
@@ -67,6 +68,24 @@ const timeAgoShort = (at: number) => {
   if (seconds < 60) return `il y a ${seconds} s`
   if (seconds < 3600) return `il y a ${Math.floor(seconds / 60)} min`
   return `il y a ${Math.floor(seconds / 3600)} h`
+}
+
+/** Carte de synthèse cliquable — « N disponibles · N installés · N mises à
+ * jour » (spec §45) : le clic active le filtre correspondant. */
+function StatCard({ label, value, active, accent, onClick }: {
+  label: string
+  value: number
+  active?: boolean
+  accent: string
+  onClick: () => void
+}) {
+  return <button type="button" onClick={onClick} className={`group flex items-center justify-between gap-2 rounded-xl border px-4 py-3 text-left transition-colors ${active ? 'border-gold/30 bg-gold/[0.07]' : 'border-white/[0.07] bg-white/[0.018] hover:border-white/15'}`}>
+    <span className="min-w-0">
+      <span className={`block font-display text-xl font-bold leading-none ${accent}`}>{value}</span>
+      <span className="mt-1 block truncate text-[11px] text-white/42">{label}</span>
+    </span>
+    {active && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />}
+  </button>
 }
 
 const readCatalogCache = (): AddonCatalog | undefined => {
@@ -155,6 +174,10 @@ export function AddonsView() {
     return addonStorageReport(addons, { knownSizes })
   }, [addons, catalog])
 
+  // Synthèse « N disponibles · N installés · N mises à jour » (spec §45) —
+  // chaque statut vient du catalogue (package réel), jamais d'un texte écrit.
+  const stats = useMemo(() => addonCatalogStats(catalogRows), [catalogRows])
+
   const confirm = (row: CatalogRow) => setConfirming(row)
   const remove = (row: CatalogRow) => setRemoving(row)
 
@@ -196,8 +219,15 @@ export function AddonsView() {
       </div>
     </section>
 
-    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/34">
-      <span>{visible.length} add-on(s) · {addons.length} installé(s) · {formatAddonSize(storage.totalBytes)} installés</span>
+    <section className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <StatCard label="Disponibles" value={stats.disponibles} active={filter === 'disponibles'} accent="text-emerald-200/90" onClick={() => setFilter('disponibles')} />
+      <StatCard label="Installés" value={stats.installes} active={filter === 'installed'} accent="text-gold" onClick={() => setFilter('installed')} />
+      <StatCard label="Mises à jour" value={stats.updates} active={filter === 'updates'} accent="text-sky-200/90" onClick={() => setFilter('updates')} />
+      <StatCard label="En développement" value={stats.dev} active={filter === 'dev'} accent="text-white/60" onClick={() => setFilter('dev')} />
+    </section>
+
+    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-white/34">
+      <span>{visible.length} affiché(s) · {formatAddonSize(storage.totalBytes)} installés</span>
       <span className="flex items-center gap-1.5">
         {catalogState?.source === 'remote' && <span className="text-emerald-200/70">Catalogue officiel à jour{catalogState.fetchedAt ? ` · ${timeAgoShort(catalogState.fetchedAt)}` : ''}</span>}
         {catalogState?.source === 'cache' && <span>Catalogue en cache{catalogState.fetchedAt ? ` · ${timeAgoShort(catalogState.fetchedAt)}` : ''}</span>}
@@ -295,7 +325,7 @@ function AddonCard({ row, nameById, offline = false, onInstall, onEnable, onRemo
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-gold/80"><Icon size={17} /></span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <h2 className="truncate text-sm font-semibold text-white/84">{entry.name}</h2>
+          <h2 className="truncate font-display text-base font-bold text-white">{entry.name}</h2>
           {entry.official ? <span className="rounded-full bg-gold/12 px-2 py-0.5 text-[10px] font-semibold text-gold">Officiel ✓</span> : <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-[10px] font-semibold text-white/42">Local</span>}
           {installed ? (
             updateAvailable

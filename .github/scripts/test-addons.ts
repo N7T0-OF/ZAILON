@@ -20,6 +20,7 @@ import {
   ADDON_INSTALL_PHASES,
   ADDON_LAZY_EVENTS,
   OFFICIAL_ADDON_CATALOG,
+  addonCatalogStats,
   catalogAddonAvailability,
   checkAddonCompatibility,
   detectDependencyCycle,
@@ -292,4 +293,23 @@ test('parseAddonCatalog : schema 2, package chemin relatif ou null (spec §2, §
     addons: [{ id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok', package: 'packages/x.zailon-addon', sha256: 'catalog', downloadSize: 100 }],
   })
   assert.equal(badPackage.ok, false, 'package déclaré sans SHA-256 réel → entrée rejetée (jamais 404)')
+})
+
+test('addonCatalogStats : synthèse « disponibles · installés · mises à jour · dev » (spec §45)', () => {
+  const base = { id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok' } as const
+  const published = (id: string): AddonCatalogEntry => ({ ...base, id, official: true, package: `packages/x/${id}-1.0.0.zailon-addon`, sha256: 'a'.repeat(64) })
+  const development = (id: string): AddonCatalogEntry => ({ ...base, id, official: true, package: null, sha256: '' })
+  const installed = { manifest: { ...manifest({ id: 'official.zailon.frosty', version: '1.0.0' }), minAddonApiVersion: '1', events: [], permissions: ['game.read'], category: 'modding', dependencies: [] }, enabled: true, installedAt: 0, directory: '' } as const
+
+  const rows = [
+    { entry: published('official.zailon.reshade') },
+    { entry: published('official.zailon.frosty'), installed: installed },
+    { entry: { ...published('official.zailon.discord'), version: '2.0.0' }, installed: { ...installed, manifest: { ...installed.manifest, id: 'official.zailon.discord', version: '1.0.0' } } },
+    { entry: development('official.zailon.visual-profiles') },
+  ]
+  const stats = addonCatalogStats(rows)
+  assert.equal(stats.disponibles, 1, '1 package disponible non installé')
+  assert.equal(stats.installes, 2, '2 installés')
+  assert.equal(stats.updates, 1, '1 mise à jour (version catalogue > installée)')
+  assert.equal(stats.dev, 1, '1 en développement (package null)')
 })

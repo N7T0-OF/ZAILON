@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.136.0] - 2026-08-16
+
+> **Refonte des cartes Add-ons** : synthèse « N disponibles · N installés ·
+> N mises à jour · N en développement » en haut de page (cliquable = filtre),
+> titres de cartes plus visibles.
+
+### Added
+
+- **Bandeau de synthèse cliquable** (spec §45) : 4 cartes de compteurs —
+  Disponibles / Installés / Mises à jour / En développement — chaque clic
+  active le filtre correspondant. Les compteurs viennent du catalogue
+  (package réel), jamais d'un texte écrit à la main.
+- **`addonCatalogStats` (pur, testé)** dans `addons.ts` : agrège les lignes du
+  catalogue en `{ disponibles, installes, updates, dev }` — une seule source
+  de vérité partagée par l'UI et les tests.
+
+### Changed
+
+- **Titres des cartes Add-ons** passés en `font-display text-base` — le nom de
+  l'add-on est beaucoup plus visible, la description reste légèrement grisée
+  (spec §45).
+
 ## [1.135.0] - 2026-08-16
 
 > **Retrait complet de Discord / Vesktop** : aucune intégration Discord, Rich

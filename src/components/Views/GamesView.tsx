@@ -39,7 +39,6 @@ const TABS: Array<{ id: GameTab; label: string }> = [
   { id: 'mods', label: 'Mods' },
   { id: 'profiles', label: 'Profils' },
   { id: 'configuration', label: 'Configuration' },
-  { id: 'diagnostic', label: 'État & Diagnostic' },
   { id: 'downloads', label: 'Téléchargements' },
   { id: 'visuals', label: 'Visuels' },
 ]
@@ -540,7 +539,7 @@ export function GamesView() {
       {tab === 'visuals' && (hasVisualProfiles
         ? <VisualGamePanel game={selectedGame} zailonProfile={selectedProfile} />
         : <div className="flex flex-1 items-center justify-center p-8"><div className="max-w-sm rounded-xl border border-white/[0.07] bg-white/[0.02] p-5 text-center"><p className="text-xs text-white/55">Les profils visuels sont fournis par l’add-on <span className="font-semibold text-white/75">Visual Profiles</span>.</p><button type="button" onClick={() => setView('addons')} className="mt-3 rounded-lg bg-[var(--zailon-accent)] px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]">Voir l’add-on</button></div></div>)}
-      {tab === 'configuration' && <GameConfigurationPanel game={selectedGame} profile={selectedProfile} onBrowseExecutable={() => void browseExecutable()} onBrowseModsFolder={() => void browseModsFolder()} onSaveResources={resources => setGameResources(selectedGame.id, resources)} onOpenVisuals={() => setTab('visuals')} />}
+      {tab === 'configuration' && <GameConfigurationPanel game={selectedGame} profile={selectedProfile} onBrowseExecutable={() => void browseExecutable()} onBrowseModsFolder={() => void browseModsFolder()} />}
       {tab === 'diagnostic' && <GameDiagnosticPanel game={selectedGame} profile={selectedProfile} profileMods={profileMods} onOpenConfiguration={() => setTab('configuration')} onRepairMo2={cyberpunkTools ? () => void repairMo2Deployment() : undefined} showRed4extTools={cyberpunkTools} repairBusy={deploymentToolBusy} conflicts={resolvedConflicts} onSetWinner={(path, winnerId) => setConflictWinner(path, winnerId)} initialSection={diagSection} />}
     </section>
 

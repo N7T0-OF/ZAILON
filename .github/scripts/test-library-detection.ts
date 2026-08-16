@@ -60,8 +60,10 @@ test('détection : Accueil unifié sur la même fenêtre (Ajouter + Détecter)',
   assert.ok(!homeView.includes('addGameFromExecutable'), 'Accueil ne doit plus appeler le file picker direct')
 })
 
-test('détection : la palette de commandes ouvre la même fenêtre', () => {
-  const palette = read('src/components/CommandPalette.tsx')
-  assert.ok(palette.includes('setDiscoveryDialogOpen(true)'), 'la palette doit ouvrir la fenêtre partagée')
-  assert.ok(!palette.includes('addGameFromExecutable'), 'la palette ne doit plus appeler le file picker direct')
+test('détection : la recherche globale ouvre la même fenêtre (actions unifiées)', () => {
+  // Spec « Passe de correction » §6 : UNE seule interface de recherche — la
+  // palette de commandes a été fusionnée dans GlobalSearch.
+  const search = read('src/components/GlobalSearch.tsx')
+  assert.ok(search.includes('setDiscoveryDialogOpen(true)'), 'la recherche doit ouvrir la fenêtre partagée')
+  assert.ok(!search.includes('addGameFromExecutable'), 'la recherche ne doit plus appeler le file picker direct')
 })

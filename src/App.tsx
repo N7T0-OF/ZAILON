@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Bell, CheckCircle2, Download, ExternalLink, Info, MonitorX, X } from 'lucide-react'
 import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { AppWindow } from './components/Layout/AppWindow'
-import { CommandPalette } from './components/CommandPalette'
 import { GuidedTour } from './components/GuidedTour'
 import { UpdateProvider } from './components/UpdateProvider'
 import { resolveProfileMods, useStore } from './store/useStore'
@@ -719,7 +718,6 @@ export default function App() {
         <AppWindow />
         {showTour && <GuidedTour />}
       </UpdateProvider>
-      <CommandPalette />
       <SessionToast toast={sessionToast} games={games} shortcutLabel={quickPanelShortcut} shortcutHintCount={shortcutHintCount} toastRuntimeConnected={toastRuntimeConnected} toastSessionEnded={toastSessionEnded} onShortcutHintShown={markShortcutHintShown} onDismiss={() => setSessionToast(undefined)} />
       {/* Spec §22-24, §103 : Centre de notifications désactivable partout —
           OFF = aucun bouton, aucun badge, aucun rendu. Les erreurs critiques

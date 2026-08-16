@@ -52,7 +52,7 @@ sections contextuelles de chaque jeu (Configuration, État & Diagnostic, Mods, P
   props diagnostic réparées.
 - `src/components/Views/GameDiagnosticPanel.tsx` — `onRepairMo2` remplace `onOpenTools`.
 - `src/components/Views/GameConfigurationPanel.tsx` — icônes dossier sur les chemins.
-- `src/components/CommandPalette.tsx` — entrées Actions ajustées.
+- `src/components/GlobalSearch.tsx` — actions rapides fusionnées dans la recherche unique (spec « Passe de correction » §6).
 - `src/types/index.ts` — `'tools'` retiré de `ViewType` et `GameTab`.
 
 ## Validation

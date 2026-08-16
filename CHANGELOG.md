@@ -1,5 +1,46 @@
 # Changelog
 
+## [1.141.0] - 2026-08-16
+
+> **Passe de simplification (2/3)** : configuration de jeu allégée,
+> raccourcis bureau en un clic, menu Accueil épuré et recherche unifiée.
+
+### Removed
+
+- **Configuration jeu > « Apparence »** : section entière supprimée —
+  l'apparence (visuels, fond) est accessible uniquement depuis l'Accueil et
+  l'onglet Visuels (spec §3). `GameAppearanceEditor` et `BackgroundPicker` ne
+  sont plus embarqués dans la configuration.
+- **Onglet permanent « État & Diagnostic »** : retiré de la navigation — la
+  barre de santé n'apparaît plus QUE lorsqu'un problème est réellement
+  détecté (erreurs/avertissements), avec « Voir le diagnostic » (spec §3).
+- **Menu Accueil ⋯ > « Modifier l’apparence »** : supprimé — le bouton dédié
+  existe déjà sur l'Accueil (spec §5).
+- **Micro-fenêtre « Créer un raccourci bureau »** : supprimée
+  (`CreateShortcutDialog`) — la création passe par un clic unique (spec §4).
+- **`CommandPalette.tsx`** : supprimé — fusionné dans `GlobalSearch` pour
+  n'avoir qu'UNE interface de recherche (spec §6).
+
+### Changed
+
+- **Raccourcis bureau en un clic** : jeu sélectionné + profil actif → vrai
+  `.lnk`/`.desktop` via ZAILON (chaîne Frosty/FiveM/NTE conservée), icône
+  résolue automatiquement. Résultat vérifié affiché en ligne dans la
+  configuration et via notification depuis le menu Accueil (spec §4).
+- **Menu Accueil ⋯** : « Ouvrir le dossier des mods » n'apparaît QUE si un
+  dossier mods est réellement configuré — plus aucun bouton grisé (spec §5).
+- **Ctrl+K / recherche cliquée** : un seul `GlobalSearch` partagé — même
+  composant, même état, même animation. Les actions rapides (Paramètres,
+  Explorer, Téléchargements, Visual Profiles, Détecter, Ajouter, Jouer) y
+  vivent désormais (spec §6).
+- **Index de recherche des Paramètres** : « Profil visuel » pointe vers
+  l'onglet Visuels au lieu de la configuration retirée.
+
+### Added
+
+- **Tests de conformité** : apparence retirée de la config, raccourci en un
+  clic sans dialogue, menu conditionnel, recherche unique (spec §3-6).
+
 ## [1.140.0] - 2026-08-16
 
 > **Passe de simplification (1/3)** : Paramètres allégés (sections redondantes

@@ -47,4 +47,6 @@ En cas de problème → « Impossible de créer le raccourci » avec la raison e
   (format binaire MS-OSH, sans COM) + `verify_shortcut_file` ;
 - `src/lib/shortcuts.ts` (pur, testé) : `shortcutModeFor` / `directShortcutViable`
   / `shortcutProfileId` — décision pure, jamais devinée ;
-- `src/components/CreateShortcutDialog.tsx` : micro-fenêtre d'options + résultat vérifié.
+- `src/components/Views/GameConfigurationPanel.tsx` / `src/components/Views/HomeView.tsx` :
+  création en **UN clic** (profil actif), sans micro-fenêtre — résultat vérifié affiché
+  en ligne / via notification (spec « Passe de correction » §4).

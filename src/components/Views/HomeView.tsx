@@ -17,8 +17,8 @@ import { groupProfilePairs, groupMembers, nextGroupProfile } from '../../lib/gam
 import { minimalBackgroundAllowed } from '../../lib/minimalMode'
 import { resolveGameName, resolveGameTitle } from '../../lib/gameIdentity'
 import { GameContextMenu } from '../GameContextMenu'
-import { CreateShortcutDialog } from '../CreateShortcutDialog'
 import { GameResourcesDialog } from '../GameResourcesDialog'
+import { shortcutPlanFor } from '../../lib/shortcuts'
 import { FallbackArtwork } from '../UI/FallbackArtwork'
 import { SessionStopModal } from '../SessionStopModal'
 import { BackgroundMediaLayer } from '../UI/BackgroundMediaLayer'
@@ -69,7 +69,6 @@ export function HomeView() {
   const profileButtonRef = useRef<HTMLButtonElement>(null)
   const [visualName, setVisualName] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ game: Game; position: { x: number; y: number } }>()
-  const [shortcutGame, setShortcutGame] = useState<{ game: Game; profileId: string }>()
   const [quitOpen, setQuitOpen] = useState(false)
   const [quitConfirm, setQuitConfirm] = useState(false)
   const [stopSearchingOpen, setStopSearchingOpen] = useState(false)
@@ -459,8 +458,30 @@ export function HomeView() {
         </div>
       </div>
     )}
-    {menu && <GameContextMenu game={menu.game} position={menu.position} onClose={() => setMenu(undefined)} onEditResources={() => setResourcesGameId(menu.game.id)} onCreateShortcut={profileId => { setShortcutGame({ game: menu.game, profileId }); setMenu(undefined) }} />}
-    {shortcutGame && <CreateShortcutDialog game={shortcutGame.game} profileId={shortcutGame.profileId} onClose={() => setShortcutGame(undefined)} />}
+    {menu && <GameContextMenu
+      game={menu.game}
+      position={menu.position}
+      onClose={() => setMenu(undefined)}
+      onCreateShortcut={async profileId => {
+        // Spec « Passe de correction » §4 : création en UN clic, sans
+        // micro-fenêtre — jeu + profil actif → .lnk via ZAILON, icône résolue.
+        setMenu(undefined)
+        try {
+          const entry = shortcutPlanFor(menu.game, 'current', profileId)[0]
+          if (!entry) return
+          const result = await native.createDesktopShortcut(menu.game.id, entry.profileId, entry.displayName, {
+            iconPath: menu.game.resources?.iconPath,
+            execPath: menu.game.execPath,
+            mode: 'zailon',
+          })
+          recordNotice(result.verified
+            ? `Raccourci bureau créé : ${result.path}`
+            : `Raccourci impossible — ${result.message || result.path}`)
+        } catch (reason) {
+          recordNotice(`Raccourci impossible — ${String(reason)}`)
+        }
+      }}
+    />}
     {stopSearchingOpen && activeSession && <SessionStopModal gameName={resolveGameName(selectedGame)} searching onCancel={() => setStopSearchingOpen(false)} onConfirm={() => { setStopSearchingOpen(false); cancelSession(selectedGame.id) }} />}
     {quitOpen && (
       <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setQuitOpen(false)}>

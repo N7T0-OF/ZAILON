@@ -40,7 +40,7 @@ const SETTINGS_INDEX: Array<{ id: string; label: string; path: string; keywords:
   { id: 'keyboard', label: 'Clavier / Commandes (AZERTY, QWERTY)', path: 'Bibliothèque > Jeu > Configuration > Commandes', keywords: 'clavier commandes azerty qwerty qwertz remapping touches disposition', tab: 'configuration' },
   { id: 'bypass', label: 'Dossier Bypass / Loader', path: 'Bibliothèque > Jeu > Configuration > Lancement (Avancé)', keywords: 'bypass loader asi paks chemins', tab: 'configuration' },
   { id: 'executable', label: 'Exécutable du jeu', path: 'Bibliothèque > Jeu > Configuration > Lancement', keywords: 'executable lancement chemin', tab: 'configuration' },
-  { id: 'visual-profile', label: 'Profil visuel', path: 'Bibliothèque > Jeu > Configuration > Apparence', keywords: 'visuel visual profile apparence', tab: 'configuration' },
+  { id: 'visual-profile', label: 'Profil visuel', path: 'Bibliothèque > Jeu > Visuels', keywords: 'visuel visual profile apparence', tab: 'visuals' },
   { id: 'restore-points', label: 'Points de restauration', path: 'Bibliothèque > Jeu > Configuration > Sauvegardes', keywords: 'sauvegardes snapshots restauration points', tab: 'configuration' },
   { id: 'diagnostic', label: 'Santé / Diagnostic du jeu', path: 'Bibliothèque > Jeu > État & Diagnostic', keywords: 'sante diagnostic erreurs frameworks deploiement', tab: 'diagnostic' },
 ]

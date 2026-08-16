@@ -39,16 +39,17 @@ const VERDICT_TONE: Record<GameHealth['verdict'], string> = {
 
 export function GameHealthBar({ game, profile, profileMods, onVerify }: { game: Game; profile: Profile; profileMods: Mod[]; onVerify: () => void }) {
   const health = computeGameHealth(game, profile, profileMods)
+  // Spec « Passe de correction » §3 : le diagnostic n'est visible QUE lorsqu'un
+  // problème est réellement détecté (erreurs ou avertissements). Aucun
+  // problème → aucune barre de santé permanente.
+  if (health.verdict === 'ok') return null
   return <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.05] px-4 py-2 text-[11px]">
     <span className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-semibold ${VERDICT_TONE[health.verdict]}`}>
-      <span className="h-1.5 w-1.5 rounded-full bg-current" />Santé : {VERDICT_LABEL[health.verdict]}
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />{health.verdict === 'attention' ? 'Problème détecté' : 'À surveiller'} : {VERDICT_LABEL[health.verdict]}
     </span>
-    <Pill>{health.frameworks.length} framework(s)</Pill>
-    <Pill>{health.activeMods} mods actifs</Pill>
     {health.errors > 0 && <Pill tone="red">{health.errors} erreur(s)</Pill>}
     {health.warnings > 0 && <Pill tone="amber">{health.warnings} avertissement(s)</Pill>}
-    <Pill>Dernier lancement : {profile.lastSuccessfulLaunch ? timeAgo(profile.lastSuccessfulLaunch) : '—'}</Pill>
-    <button type="button" onClick={onVerify} className="ml-auto flex items-center gap-1.5 rounded-lg border border-gold/25 px-3 py-1.5 font-semibold text-gold hover:bg-gold/10"><Gauge size={12} />Vérifier</button>
+    <button type="button" onClick={onVerify} className="ml-auto flex items-center gap-1.5 rounded-lg border border-gold/25 px-3 py-1.5 font-semibold text-gold hover:bg-gold/10"><Gauge size={12} />Voir le diagnostic</button>
   </div>
 }
 

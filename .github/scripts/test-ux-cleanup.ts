@@ -40,8 +40,29 @@ test('config jeu : seules les sections essentielles ouvertes par défaut (spec �
   assert.ok(panel.includes('zailon:config-open:${game.id}'), 'l’état des sections doit être persisté par jeu')
 })
 
-test('config jeu : « Apparence » reste un ConfigCard repliable avec son toggle', () => {
+test('config jeu : « Apparence » supprimée (spec Passe de correction §3)', () => {
   const panel = read('src/components/Views/GameConfigurationPanel.tsx')
-  assert.ok(panel.includes('ConfigCard id="apparence"'), 'la section Apparence existe toujours')
-  assert.ok(panel.includes('open={open.includes(\'apparence\')}'), 'Apparence est pilotée par l’état open')
+  assert.ok(!panel.includes('ConfigCard id="apparence"'), 'la section Apparence doit avoir été retirée de la configuration')
+  assert.ok(!panel.includes('GameAppearanceEditor'), 'GameAppearanceEditor ne doit plus être embarqué dans la config')
+})
+
+test('raccourcis : création en un clic sans micro-fenêtre (spec Passe de correction §4)', () => {
+  const panel = read('src/components/Views/GameConfigurationPanel.tsx')
+  assert.ok(!panel.includes('CreateShortcutDialog'), 'la micro-fenêtre de raccourci doit avoir disparu de la config')
+  assert.ok(panel.includes('createShortcut()'), 'la création doit être directe, sans dialogue')
+  assert.ok(panel.includes('shortcutPlanFor(game, \'current\', profile.id)'), 'le raccourci utilise le profil actif')
+})
+
+test('menu Accueil : « Modifier l’apparence » retiré + dossier mods conditionnel (spec §5)', () => {
+  const menu = read('src/components/GameContextMenu.tsx')
+  assert.ok(!menu.includes("label: 'Modifier l’apparence'"), 'le menu ⋯ ne doit plus proposer « Modifier l’apparence »')
+  assert.ok(!menu.includes('onEditResources'), 'le menu ⋯ ne doit plus dépendre du callback apparence')
+  assert.ok(menu.includes('...(game.modsPath ?'), '« Ouvrir le dossier des mods » doit être conditionnel au dossier configuré')
+})
+
+test('Ctrl+K : une seule interface de recherche (spec Passe de correction §6)', () => {
+  assert.throws(() => read('src/components/CommandPalette.tsx'), 'CommandPalette doit avoir été supprimée (fusion dans GlobalSearch)')
+  const search = read('src/components/GlobalSearch.tsx')
+  assert.ok(search.includes("(event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === 'k'"), 'GlobalSearch gère Ctrl+K')
+  assert.ok(search.includes('action:settings'), 'les actions rapides vivent dans la recherche unique')
 })

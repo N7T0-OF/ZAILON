@@ -26,7 +26,7 @@ ou si son contenu est **court et fixe** (pas de risque de débordement).
 | Détection Steam | `SteamDetectionDialog.tsx` | ✅ Conforme | Idem `max-h-[92vh]` + body scrollable |
 | Révision Nexus | `ExploreView.tsx` (l.722) | ✅ Conforme | `max-h-[94vh]` + body `overflow-y-auto` |
 | Confirmation Quitter le jeu | `HomeView.tsx` (quit modal) | ✅ Conforme | Petit contenu fixe, centré, `p-4` |
-| Palette de commandes | `CommandPalette.tsx` | ✅ Conforme | `max-h-[52vh] overflow-y-auto` |
+| Recherche globale (palette unique) | `GlobalSearch.tsx` | ✅ Conforme | `max-h-[54vh] overflow-y-auto` |
 | Historique des tâches | `StatusBar.tsx` | ✅ Conforme | `max-h-[60vh] overflow-y-auto` |
 | Panneau rapide en jeu | `QuickPanel.tsx` | ✅ Conforme | Hauteur fixe 460px, body scrollable |
 | **Support / Me soutenir** | `SupportModal.tsx` | ⚠️ À surveiller | `max-w-md` **sans max-height ni scroll**, mais contenu court et fixe (3 liens) — pas de risque aujourd'hui. Migrer vers `ScrollableModal` si le contenu grandit. |

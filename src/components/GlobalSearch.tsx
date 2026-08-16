@@ -1,15 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Boxes, Gamepad2, Layers, Monitor, Package, Search, User, X } from 'lucide-react'
+import { Boxes, Compass, Download, Gamepad2, Layers, Monitor, Package, Play, Plus, Radar, Search, Settings, User, X } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { globalSearch, type GlobalSearchResult } from '../lib/globalSearch'
 
-const KIND_META: Record<GlobalSearchResult['kind'], { icon: typeof Search; label: string }> = {
+const KIND_META: Record<GlobalSearchResult['kind'] | 'action', { icon: typeof Search; label: string }> = {
   game: { icon: Gamepad2, label: 'Jeu' },
   profile: { icon: User, label: 'Profil' },
   mod: { icon: Boxes, label: 'Mod' },
   addon: { icon: Package, label: 'Add-on' },
   group: { icon: Layers, label: 'Groupe' },
+  action: { icon: Settings, label: 'Action' },
+}
+
+interface SearchAction {
+  key: string
+  title: string
+  subtitle: string
+  icon: typeof Settings
+  run: () => void
 }
 
 /** Recherche globale (spec « Recherche globale ») : une seule requête trouve
@@ -31,6 +40,28 @@ export function GlobalSearch() {
   const setGamesBrowsing = useStore(state => state.setGamesBrowsing)
   const setActiveGameTab = useStore(state => state.setActiveGameTab)
   const setLibraryFilter = useStore(state => state.setLibraryFilter)
+  const setDiscoveryDialogOpen = useStore(state => state.setDiscoveryDialogOpen)
+
+  const actionResults = useMemo<SearchAction[]>(() => {
+    // Spec « Passe de correction » §6 : une SEULE interface de recherche.
+    // Les actions rapides (Paramètres, Explorer, Détecter, Ajouter…) vivent
+    // dans la même palette que la recherche — plus de second overlay Ctrl+K.
+    const actions: SearchAction[] = [
+      { key: 'action:settings', title: 'Ouvrir les Paramètres', subtitle: 'Réglages globaux de ZAILON', icon: Settings, run: () => setView('settings') },
+      { key: 'action:explore', title: 'Ouvrir Explorer', subtitle: 'Nexus, GameBanana, Collections', icon: Compass, run: () => setView('explore') },
+      { key: 'action:downloads', title: 'Ouvrir Téléchargements', subtitle: 'Centre des tâches et de l’activité', icon: Download, run: () => setView('downloads') },
+      { key: 'action:visuals', title: 'Ouvrir Visual Profiles', subtitle: 'Profils visuels système', icon: Monitor, run: () => setView('visuals') },
+      { key: 'action:detect', title: 'Détecter des jeux', subtitle: 'Steam, Epic, applications Windows — Bibliothèque locale', icon: Radar, run: () => { setGamesBrowsing(true); setDiscoveryDialogOpen(true) } },
+      { key: 'action:add-game', title: 'Ajouter un jeu', subtitle: 'Détecter ou choisir un exécutable', icon: Plus, run: () => { setGamesBrowsing(true); setDiscoveryDialogOpen(true) } },
+    ]
+    const launchGame = games.find(game => game.id === useStore.getState().selectedGameId)
+    if (launchGame?.execPath) {
+      actions.unshift({ key: 'action:launch', title: `Jouer à ${launchGame.name}`, subtitle: 'Lancer avec le profil actif', icon: Play, run: () => { void useStore.getState().launchSelectedGame() } })
+    }
+    const needle = query.trim().toLocaleLowerCase()
+    if (!needle) return actions.slice(0, 3)
+    return actions.filter(action => `${action.title} ${action.subtitle}`.toLocaleLowerCase().includes(needle))
+  }, [query, games])
 
   const results = useMemo(
     () => globalSearch({ query, games, gameGroups, addons }, 60),
@@ -64,8 +95,16 @@ export function GlobalSearch() {
     setQuery('')
   }
 
-  const go = (result: GlobalSearchResult) => {
+  // Une seule liste (actions + recherche) pour la navigation clavier unifiée.
+  const entries = useMemo(() => [...actionResults, ...results], [actionResults, results])
+
+  const go = (entry: GlobalSearchResult | SearchAction) => {
     close()
+    if ('run' in entry) {
+      entry.run()
+      return
+    }
+    const result = entry as GlobalSearchResult
     if (result.kind === 'game') {
       if (result.gameId) setSelectedGame(result.gameId)
       setGamesBrowsing(false)
@@ -89,9 +128,9 @@ export function GlobalSearch() {
   }
 
   const onKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === 'ArrowDown') { event.preventDefault(); setIndex(i => Math.min(i + 1, results.length - 1)) }
+    if (event.key === 'ArrowDown') { event.preventDefault(); setIndex(i => Math.min(i + 1, entries.length - 1)) }
     else if (event.key === 'ArrowUp') { event.preventDefault(); setIndex(i => Math.max(i - 1, 0)) }
-    else if (event.key === 'Enter') { const result = results[index]; if (result) go(result) }
+    else if (event.key === 'Enter') { const entry = entries[index]; if (entry) go(entry) }
     else if (event.key === 'Escape') close()
   }
 
@@ -127,25 +166,26 @@ export function GlobalSearch() {
             <div className="max-h-[54vh] overflow-y-auto p-1.5 thin-scroll">
               {query.trim() === '' ? (
                 <p className="px-3 py-8 text-center text-[11px] text-white/32">Tapez pour rechercher dans toute la bibliothèque.</p>
-              ) : results.length === 0 ? (
+              ) : entries.length === 0 ? (
                 <p className="px-3 py-8 text-center text-[11px] text-white/32">Aucun résultat pour « {query.trim()} ».</p>
               ) : (
                 <ul>
-                  {results.map((result, i) => {
-                    const meta = KIND_META[result.kind]
-                    const Icon = meta.icon
+                  {entries.map((entry, i) => {
+                    const isAction = 'run' in entry
+                    const meta = KIND_META[isAction ? 'action' : (entry as GlobalSearchResult).kind]
+                    const Icon = isAction ? (entry as SearchAction).icon : meta.icon
                     return (
-                      <li key={result.key}>
+                      <li key={entry.key}>
                         <button
                           type="button"
-                          onClick={() => go(result)}
+                          onClick={() => go(entry)}
                           onMouseEnter={() => setIndex(i)}
                           className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left ${i === index ? 'bg-gold/[0.09]' : 'hover:bg-white/[0.03]'}`}
                         >
                           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/[0.08] bg-white/[0.03] text-white/45"><Icon size={13} /></span>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[12px] font-medium text-white/80">{result.title}</span>
-                            <span className="block truncate text-[10px] text-white/36">{result.subtitle}</span>
+                            <span className="block truncate text-[12px] font-medium text-white/80">{entry.title}</span>
+                            <span className="block truncate text-[10px] text-white/36">{entry.subtitle}</span>
                           </span>
                           <span className="shrink-0 rounded-full bg-white/[0.05] px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider text-white/30">{meta.label}</span>
                         </button>
@@ -160,7 +200,7 @@ export function GlobalSearch() {
               <span>↑↓ naviguer</span>
               <span>Entrée ouvrir</span>
               <span>Échap fermer</span>
-              <span className="ml-auto">{results.length} résultat(s)</span>
+              <span className="ml-auto">{entries.length} résultat(s)</span>
             </div>
           </div>
         </div>,

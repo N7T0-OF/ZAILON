@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, HardDrive, History, Keyboard, Layers3, MonitorDown, Package, Palette, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Snowflake, Trash2, Upload, Wand2, Wrench } from 'lucide-react'
+import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, HardDrive, History, Keyboard, Layers3, Loader2, MonitorDown, Package, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Snowflake, Trash2, Upload, Wand2, Wrench } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
@@ -25,10 +25,10 @@ import {
   type ZailonPerformancePolicies,
   type ZailonPriorityPolicy,
 } from '../../lib/performanceProfiles'
-import { native, pickExecutable, pickFolder } from '../../lib/native'
+import { native, pickExecutable, pickFolder, type ShortcutCreationResult } from '../../lib/native'
+import { shortcutPlanFor } from '../../lib/shortcuts'
 import { resolveGameInstallation, shortPathName } from '../../lib/installations'
 import { ProfileShareDialog } from '../UI/ProfileShareDialog'
-import { CreateShortcutDialog } from '../CreateShortcutDialog'
 import { detectModBackend, frostyBackendStatus } from '../../lib/modBackends'
 import { frostyOverhaulConflict, frostyPluginConfigKey, FROSTY_STRATEGY_LABELS } from '../../lib/frosty'
 import {
@@ -38,21 +38,15 @@ import {
   resolveReShadeSessionStrategy,
   resolveReShadeTarget,
 } from '../../lib/reshade'
-import { describeBackgroundMedia, resolveMediaType } from '../../lib/backgroundMedia'
-import { PIPELINE_STAGES, type YoutubeResolveStatus } from '../../lib/backgroundMediaCache'
-import { parseYouTubeUrl, youtubeThumbnailUrl } from '../../lib/youtubeUrl'
 import { addonCapabilities, hasCapability } from '../../lib/addonGating'
-import { resourceUrl } from '../../lib/native'
 import { resolveProfileMods, useStore } from '../../store/useStore'
-import type { Game, GamePreset, GameResources, ModRuntimePathType, Profile } from '../../types'
+import type { Game, GamePreset, ModRuntimePathType, Profile } from '../../types'
 
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
 import { formatClock, formatTime } from '../../utils'
-import { GameAppearanceEditor } from '../GameResourcesDialog'
 import { GameKeyboardPanel } from './GameKeyboardPanel'
 import { ZailonSwitch } from '../UI/ZailonSwitch'
 import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
-import { BackgroundMediaLayer } from '../UI/BackgroundMediaLayer'
 
 const RUNTIME_TYPE_LABELS: Array<[ModRuntimePathType, string]> = [
   ['loader', 'Loader'],
@@ -74,11 +68,9 @@ interface Props {
   profile: Profile
   onBrowseExecutable: () => void
   onBrowseModsFolder: () => void
-  onSaveResources: (resources: Partial<GameResources>) => void
-  onOpenVisuals: () => void
 }
 
-export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBrowseModsFolder, onSaveResources, onOpenVisuals }: Props) {
+export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBrowseModsFolder }: Props) {
   const setGamePath = useStore(state => state.setGamePath)
   const setModsPath = useStore(state => state.setModsPath)
   const addInstallation = useStore(state => state.addInstallation)
@@ -110,7 +102,8 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
   const storageKey = `zailon:config-open:${game.id}`
   const [shareOpen, setShareOpen] = useState(false)
   const [shareTab, setShareTab] = useState<'export' | 'import'>('export')
-  const [shortcutOpen, setShortcutOpen] = useState(false)
+  const [shortcutBusy, setShortcutBusy] = useState(false)
+  const [shortcutResult, setShortcutResult] = useState<ShortcutCreationResult | null>(null)
   const [open, setOpen] = useState<string[]>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey) || 'null') as string[] | null
@@ -157,6 +150,28 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
   }, [game.id, profile.id])
 
   const toggle = (id: string) => setOpen(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id])
+
+  // Spec « Passe de correction » §4 : création en UN clic, sans micro-fenêtre.
+  // Jeu sélectionné + profil actif → .lnk via ZAILON (chaîne conservée), icône
+  // résolue côté natif. Vérification post-création affichée en ligne.
+  const createShortcut = async () => {
+    setShortcutBusy(true)
+    setShortcutResult(null)
+    try {
+      const entry = shortcutPlanFor(game, 'current', profile.id)[0]
+      if (!entry) throw new Error('Aucun profil disponible')
+      const result = await native.createDesktopShortcut(game.id, entry.profileId, entry.displayName, {
+        iconPath: game.resources?.iconPath,
+        execPath: game.execPath,
+        mode: 'zailon',
+      })
+      setShortcutResult(result)
+    } catch (reason) {
+      setShortcutResult({ path: String(reason), mode: 'zailon', verified: false, message: String(reason) })
+    } finally {
+      setShortcutBusy(false)
+    }
+  }
   const profileMods = resolveProfileMods(game, profile)
   const frameworks = [...new Set(game.installedMods.map(mod => mod.framework).filter((value): value is string => Boolean(value)))]
   const points = restorePoints.filter(item => item.gameId === game.id).sort((left, right) => right.createdAt - left.createdAt)
@@ -239,10 +254,11 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-[11px] font-semibold text-white/68">Raccourci de lancement sécurisé</p>
-              <p className="mt-1 text-[11px] leading-relaxed text-white/34">Crée un raccourci bureau ZAILON lié à ce jeu et au profil « {profile.name} ». Le lien contient uniquement leurs identifiants internes.</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-white/34">Crée en un clic un raccourci bureau ZAILON lié à ce jeu et au profil actif « {profile.name} ». Le .lnk lance la chaîne ZAILON (profil, mods, clavier, visuel) — icône résolue automatiquement.</p>
             </div>
-            <button type="button" onClick={() => setShortcutOpen(true)} className="flex items-center gap-2 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><MonitorDown size={14} />Créer sur le bureau</button>
+            <button type="button" onClick={() => void createShortcut()} disabled={shortcutBusy} className="flex items-center gap-2 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90 disabled:cursor-wait disabled:opacity-55">{shortcutBusy ? <Loader2 size={14} className="animate-spin" /> : <MonitorDown size={14} />}Créer sur le bureau</button>
           </div>
+          {shortcutResult && <p className={`mt-2 rounded-lg border px-3 py-2 text-[11px] ${shortcutResult.verified ? 'border-emerald-300/15 bg-emerald-300/[0.04] text-emerald-100/75' : 'border-red-300/15 bg-red-300/[0.04] text-red-200/80'}`}>{shortcutResult.verified ? `✓ Raccourci créé et vérifié : ${shortcutResult.path}` : `Échec de la création — ${shortcutResult.message || shortcutResult.path}`}{shortcutResult.mode === 'direct' ? ' (cible directe : l’exécutable du jeu)' : ''}</p>}
         </div>
         <LaunchChainTest game={game} />
       </ConfigCard>
@@ -288,18 +304,6 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
               </div>
             </li>
           })}</ul>}
-      </ConfigCard>
-
-      <ConfigCard id="apparence" title="Apparence" icon={Palette} badge={visualName ? `Profil visuel : ${visualName}` : undefined} open={open.includes('apparence')} onToggle={() => toggle('apparence')}>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
-          <div>
-            <p className="text-[11px] font-semibold text-white/68">Profil visuel</p>
-            <p className="mt-1 text-[11px] text-white/34">Le moteur Visual Profiles reste indépendant ; son réglage est accessible ici.</p>
-          </div>
-          <button type="button" onClick={onOpenVisuals} className="rounded-lg border border-gold/25 px-3 py-2 text-[11px] font-semibold text-gold">{visualName ? `Modifier « ${visualName} »` : 'Modifier le profil visuel'}</button>
-        </div>
-        <GameAppearanceEditor game={game} embedded onSave={onSaveResources} />
-        <BackgroundPicker game={game} />
       </ConfigCard>
 
       <ConfigCard id="commandes" title="Commandes" icon={Keyboard} badge={`${LAYOUT_LABELS[effectiveLayout(game, profile.id)]}`} open={open.includes('commandes')} onToggle={() => toggle('commandes')}>
@@ -419,7 +423,6 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
       </ConfigCard>
     </div>
     {shareOpen && <ProfileShareDialog game={game} profile={profile} initialTab={shareTab} onClose={() => setShareOpen(false)} />}
-    {shortcutOpen && <CreateShortcutDialog game={game} profileId={profile.id} onClose={() => setShortcutOpen(false)} />}
   </div>
 }
 
@@ -599,142 +602,6 @@ function Field({ label, value, placeholder, onChange, onBrowse, onOpen }: { labe
       <button type="button" onClick={onBrowse} className="rounded-lg border border-white/[0.09] bg-white/[0.025] px-3 py-2 text-[11px] text-white/55 hover:border-gold/25 hover:text-gold">Parcourir</button>
     </div>
   </label>
-}
-
-function BackgroundPicker({ game }: { game: Game }) {
-  const setGameBackgroundMedia = useStore(state => state.setGameBackgroundMedia)
-  const backgroundMediaSettings = useStore(state => state.backgroundMediaSettings)
-  const [urlDraft, setUrlDraft] = useState('')
-  const [urlFeedback, setUrlFeedback] = useState<'idle' | 'valid' | 'invalid'>('idle')
-  const [previewOpen, setPreviewOpen] = useState(false)
-  const [resolving, setResolving] = useState(false)
-  const [resolveStatus, setResolveStatus] = useState<YoutubeResolveStatus>('idle')
-
-  const media = game.backgroundMedia
-  // Spec « Fix vidéo YouTube » : le fichier LOCAL mis en cache (localPath) prime
-  // sur la vidéo de ressources — le lien YouTube ne devient jamais le lecteur.
-  const localVideoUrl = resourceUrl(media?.localPath) || resourceUrl(game.resources?.videoPath)
-  const heroUrl = resourceUrl(game.resources?.backgroundPath || game.resources?.bannerPath || game.resources?.coverPath) || game.backgroundArt
-  const effectiveType = resolveMediaType(media, backgroundMediaSettings, Boolean(localVideoUrl))
-  const description = describeBackgroundMedia(media, Boolean(localVideoUrl))
-  const thumb = media?.youtubeVideoId ? youtubeThumbnailUrl(media.youtubeVideoId) : heroUrl
-
-  const applyType = (type: 'auto' | 'image' | 'video' | 'youtube') => {
-    setGameBackgroundMedia(game.id, { type })
-    setUrlFeedback('idle')
-    setResolveStatus('idle')
-  }
-
-  // Pipeline : Lien → Validation → Identification → Téléchargement → Cache
-  // local → Vérification → Lecture LOCALE (hors-ligne). Repli honnête sur le
-  // lecteur embarqué si yt-dlp est absent.
-  const applyYouTube = async () => {
-    const parsed = parseYouTubeUrl(urlDraft)
-    if (!parsed) { setUrlFeedback('invalid'); return }
-    setUrlFeedback('idle')
-    setResolving(true)
-    setResolveStatus('validating')
-    try {
-      if (!native.isDesktop()) {
-        setGameBackgroundMedia(game.id, { type: 'youtube', youtubeUrl: urlDraft.trim(), youtubeVideoId: parsed.videoId, startSeconds: parsed.startSeconds })
-        setUrlFeedback('valid')
-        return
-      }
-      const result = await native.resolveYoutubeVideo(urlDraft.trim(), parsed.videoId)
-      if (result.status === 'cached' && result.videoPath) {
-        setResolveStatus('cached')
-        setGameBackgroundMedia(game.id, { type: 'video', localPath: result.videoPath, youtubeUrl: urlDraft.trim(), youtubeVideoId: parsed.videoId, startSeconds: parsed.startSeconds })
-        setUrlFeedback('valid')
-      } else if (result.status === 'ytdlp_missing') {
-        setResolveStatus('ytdlp_missing')
-        setGameBackgroundMedia(game.id, { type: 'youtube', youtubeUrl: urlDraft.trim(), youtubeVideoId: parsed.videoId, startSeconds: parsed.startSeconds })
-        setUrlFeedback('valid')
-      } else {
-        setResolveStatus('failed')
-        setUrlFeedback('invalid')
-      }
-    } catch (error) {
-      setResolveStatus('failed')
-      setUrlFeedback('invalid')
-    } finally {
-      setResolving(false)
-    }
-  }
-
-  const previewMedia = media?.type === 'youtube' && media.youtubeVideoId
-    ? media
-    : media?.type === 'video' || (media?.type === 'auto' && (media.youtubeVideoId || localVideoUrl))
-      ? media
-      : undefined
-
-  return <div className="mt-4 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-3">
-        <div className="relative h-16 w-28 flex-none overflow-hidden rounded-lg border border-white/[0.08] bg-black/30">
-          {thumb ? <img src={thumb} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center font-mono text-[10px] text-white/25">Aucun fond</div>}
-          {effectiveType === 'youtube' && <span className="absolute right-1 top-1 rounded bg-red-600/90 px-1 py-0.5 font-mono text-[8px] font-bold uppercase text-white">YouTube</span>}
-        </div>
-        <div>
-          <p className="text-[11px] font-semibold text-white/72">Fond de l’Accueil</p>
-          <p className="mt-0.5 text-[11px] text-white/38">{description}</p>
-        </div>
-      </div>
-      {effectiveType !== 'none' && (
-        <button type="button" onClick={() => setPreviewOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-gold/25 px-3 py-2 text-[11px] font-semibold text-gold hover:bg-gold/10"><Rocket size={12} />Aperçu</button>
-      )}
-    </div>
-
-    <div className="mt-3 flex flex-wrap gap-1.5">
-      {(['auto', 'image', 'video', 'youtube'] as const).map(type => (
-        <button
-          key={type}
-          type="button"
-          onClick={() => applyType(type)}
-          className={`rounded-full border px-3 py-1.5 text-[11px] font-medium transition-colors ${media?.type === type ? 'border-gold/40 bg-gold/10 text-gold' : 'border-white/[0.09] text-white/48 hover:bg-white/[0.05] hover:text-white/75'}`}
-        >
-          {type === 'auto' ? 'Automatique' : type === 'image' ? 'Image' : type === 'video' ? 'Vidéo locale' : 'YouTube'}
-        </button>
-      ))}
-    </div>
-
-    {(media?.type === 'youtube' || media?.type === 'auto') && (
-      <div className="mt-3">
-        <label className="text-[11px] font-medium text-white/55">Lien YouTube</label>
-        <div className="mt-1 flex flex-wrap items-center gap-2">
-          <input
-            type="url"
-            value={urlDraft}
-            onChange={event => { setUrlDraft(event.target.value); setUrlFeedback('idle') }}
-            placeholder="https://youtube.com/watch?v=…"
-            className="min-w-0 flex-1 rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2 text-[11px] text-white/80 placeholder-white/25 outline-none focus:border-gold/40"
-          />
-          <button type="button" onClick={() => void applyYouTube()} disabled={resolving} className="rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90 disabled:cursor-wait disabled:opacity-55">{resolving ? 'Téléchargement…' : 'Utiliser comme fond'}</button>
-        </div>
-        {resolving && <div className="mt-2 space-y-1 rounded-lg border border-white/[0.06] bg-black/15 p-2">{PIPELINE_STAGES.map(stage => <p key={stage.id} className="flex items-center gap-2 text-[10px] text-white/45"><span className={`h-1.5 w-1.5 rounded-full ${resolveStatus === 'cached' || resolveStatus === 'ytdlp_missing' ? 'bg-emerald-300/70' : 'bg-gold/70 animate-pulse'}`} />{stage.label}</p>)}</div>}
-        {urlFeedback === 'valid' && resolveStatus === 'cached' && <p className="mt-1.5 text-[11px] text-emerald-300/85">✓ Téléchargée et mise en cache — lecture <b>locale hors-ligne</b>, jamais re-téléchargée à chaque lancement.</p>}
-        {urlFeedback === 'valid' && resolveStatus === 'ytdlp_missing' && <p className="mt-1.5 text-[11px] text-amber-200/80">yt-dlp introuvable — repli sur le lecteur YouTube embarqué (lien direct). <button type="button" onClick={() => void native.openExternalUrl('https://github.com/yt-dlp/yt-dlp')} className="underline hover:text-white">Installer yt-dlp</button> pour la lecture locale hors-ligne.</p>}
-        {urlFeedback === 'valid' && resolveStatus !== 'cached' && resolveStatus !== 'ytdlp_missing' && <p className="mt-1.5 text-[11px] text-emerald-300/85">Vidéo enregistrée.</p>}
-        {urlFeedback === 'invalid' && <p className="mt-1.5 text-[11px] text-red-300/85">{resolveStatus === 'failed' ? 'Téléchargement échoué — vérifiez le lien ou la disponibilité de la vidéo.' : 'Lien non pris en charge. Actuellement : YouTube (watch, youtu.be, shorts).'}</p>}
-        <ZailonInfoPopover text="Le lien YouTube est résolu en fichier LOCAL (yt-dlp) puis lu hors-ligne, sans re-téléchargement à chaque lancement. Sans yt-dlp, repli sur le lecteur embarqué. Aucune clé API : la lecture démarre toujours muette et se suspend quand ZAILON est en arrière-plan ou qu’un jeu démarre." />
-      </div>
-    )}
-
-    {previewOpen && (
-      <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setPreviewOpen(false)}>
-        <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/[0.09] bg-[#141818] shadow-[0_24px_70px_rgba(0,0,0,0.6)]" onClick={event => event.stopPropagation()}>
-          <div className="relative aspect-video overflow-hidden bg-black">
-            {previewMedia
-              ? <BackgroundMediaLayer playerKey={`preview-${game.id}`} priority="preview" media={previewMedia} localVideoUrl={localVideoUrl} fallbackImageUrl={heroUrl} paused={false} settings={backgroundMediaSettings} />
-              : <div className="flex h-full items-center justify-center text-[11px] text-white/35">Sélectionnez une vidéo locale ou un lien YouTube pour prévisualiser.</div>}
-          </div>
-          <div className="flex items-center justify-between gap-3 border-t border-white/[0.06] px-4 py-3">
-            <p className="text-[11px] text-white/45">Aperçu muet — le Hero se met en pause pendant l’aperçu.</p>
-            <button type="button" onClick={() => setPreviewOpen(false)} className="rounded-lg border border-white/[0.12] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:bg-white/[0.06]">Fermer</button>
-          </div>
-        </div>
-      </div>
-    )}
-  </div>
 }
 
 function FrostyConfigCard({ game, profile }: { game: Game; profile: Profile }) {

@@ -28,6 +28,7 @@ import {
 import { native, pickExecutable, pickFolder } from '../../lib/native'
 import { resolveGameInstallation, shortPathName } from '../../lib/installations'
 import { ProfileShareDialog } from '../UI/ProfileShareDialog'
+import { CreateShortcutDialog } from '../CreateShortcutDialog'
 import { detectModBackend, frostyBackendStatus } from '../../lib/modBackends'
 import { frostyOverhaulConflict, frostyPluginConfigKey, FROSTY_STRATEGY_LABELS } from '../../lib/frosty'
 import {
@@ -109,6 +110,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
   const storageKey = `zailon:config-open:${game.id}`
   const [shareOpen, setShareOpen] = useState(false)
   const [shareTab, setShareTab] = useState<'export' | 'import'>('export')
+  const [shortcutOpen, setShortcutOpen] = useState(false)
   const [open, setOpen] = useState<string[]>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey) || 'null') as string[] | null
@@ -239,7 +241,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
               <p className="text-[11px] font-semibold text-white/68">Raccourci de lancement sécurisé</p>
               <p className="mt-1 text-[11px] leading-relaxed text-white/34">Crée un raccourci bureau ZAILON lié à ce jeu et au profil « {profile.name} ». Le lien contient uniquement leurs identifiants internes.</p>
             </div>
-            <button type="button" onClick={() => void native.createDesktopShortcut(game.id, profile.id, game.name, game.resources?.iconPath, game.execPath).then(path => window.alert(`Raccourci créé :\n${path}`)).catch(error => window.alert(String(error)))} className="flex items-center gap-2 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><MonitorDown size={14} />Créer sur le bureau</button>
+            <button type="button" onClick={() => setShortcutOpen(true)} className="flex items-center gap-2 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><MonitorDown size={14} />Créer sur le bureau</button>
           </div>
         </div>
         <LaunchChainTest game={game} />
@@ -417,6 +419,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
       </ConfigCard>
     </div>
     {shareOpen && <ProfileShareDialog game={game} profile={profile} initialTab={shareTab} onClose={() => setShareOpen(false)} />}
+    {shortcutOpen && <CreateShortcutDialog game={game} profileId={profile.id} onClose={() => setShortcutOpen(false)} />}
   </div>
 }
 

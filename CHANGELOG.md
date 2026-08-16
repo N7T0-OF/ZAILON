@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.128.0] - 2026-08-16
+
+> **Fix raccourci bureau** : un vrai raccourci système vérifié (`.lnk` Windows
+> avec cible, arguments, répertoire de démarrage et icône — jamais un simple
+> `.url`), avec choix de la méthode : via ZAILON (chaîne Frosty/FiveM/NTE
+> conservée, profil inclus) ou lancement direct pour les processus directs.
+
+### Added
+
+- **Micro-fenêtre « Créer un raccourci bureau »** (config jeu + menu contextuel) :
+  « Lancer avec le profil actuel » (sinon profil par défaut), méthode
+  (via ZAILON recommandé / lancement direct quand compatible), « Utiliser
+  l’icône du jeu ».
+- **Vérification post-création** : fichier écrit non vide, cible résolvable,
+  icône présente — en cas de problème, « Impossible de créer le raccourci »
+  avec la raison exacte.
+- **Résultat structuré** (`ShortcutCreationResult`) : chemin réel, mode effectif
+  et message — affiché dans la micro-fenêtre avec « Ouvrir le dossier ».
+
+### Changed
+
+- **Mode `direct`** : le `.lnk` cible l’exécutable RÉEL du jeu (double-clic
+  direct). Un jeu à chaîne de lancement (Frosty/FiveM/NTE/Steam) ou sans
+  exécutable vérifiable retombe automatiquement sur **via ZAILON** — la chaîne
+  est conservée, jamais de raccourci cassé.
+- **Icône** (ordre) : icône de l’exécutable → icône enregistrée (PNG enveloppé
+  en .ico) → icône ZAILON. Plus de raccourci blanc générique.
+- Les boutons « Créer sur le bureau » et « Créer un raccourci bureau » ouvrent
+  la même micro-fenêtre au lieu d’une alerte.
+
 ## [1.127.0] - 2026-08-16
 
 > **Pipeline YouTube → cache local** : un lien YouTube de l'Accueil n'est plus

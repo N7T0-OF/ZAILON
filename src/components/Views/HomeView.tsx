@@ -16,6 +16,7 @@ import { pickPrioritySession } from '../../lib/sessionPriority'
 import { groupProfilePairs, groupMembers, nextGroupProfile } from '../../lib/gameGroups'
 import { resolveGameName, resolveGameTitle } from '../../lib/gameIdentity'
 import { GameContextMenu } from '../GameContextMenu'
+import { CreateShortcutDialog } from '../CreateShortcutDialog'
 import { GameResourcesDialog } from '../GameResourcesDialog'
 import { FallbackArtwork } from '../UI/FallbackArtwork'
 import { SessionStopModal } from '../SessionStopModal'
@@ -66,6 +67,7 @@ export function HomeView() {
   const profileButtonRef = useRef<HTMLButtonElement>(null)
   const [visualName, setVisualName] = useState<string | null>(null)
   const [menu, setMenu] = useState<{ game: Game; position: { x: number; y: number } }>()
+  const [shortcutGame, setShortcutGame] = useState<{ game: Game; profileId: string }>()
   const [quitOpen, setQuitOpen] = useState(false)
   const [quitConfirm, setQuitConfirm] = useState(false)
   const [stopSearchingOpen, setStopSearchingOpen] = useState(false)
@@ -451,7 +453,8 @@ export function HomeView() {
         </div>
       </div>
     )}
-    {menu && <GameContextMenu game={menu.game} position={menu.position} onClose={() => setMenu(undefined)} onEditResources={() => setResourcesGameId(menu.game.id)} />}
+    {menu && <GameContextMenu game={menu.game} position={menu.position} onClose={() => setMenu(undefined)} onEditResources={() => setResourcesGameId(menu.game.id)} onCreateShortcut={profileId => { setShortcutGame({ game: menu.game, profileId }); setMenu(undefined) }} />}
+    {shortcutGame && <CreateShortcutDialog game={shortcutGame.game} profileId={shortcutGame.profileId} onClose={() => setShortcutGame(undefined)} />}
     {stopSearchingOpen && activeSession && <SessionStopModal gameName={resolveGameName(selectedGame)} searching onCancel={() => setStopSearchingOpen(false)} onConfirm={() => { setStopSearchingOpen(false); cancelSession(selectedGame.id) }} />}
     {quitOpen && (
       <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={() => setQuitOpen(false)}>

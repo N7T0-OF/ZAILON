@@ -14112,6 +14112,28 @@ fn ensure_zailon_association() -> Result<(), String> {
     Ok(())
 }
 
+/// Résultat de création d'un raccourci : chemin réel + mode effectif
+/// (`zailon` = via ZAILON, chaîne de lancement conservée ; `direct` = cible
+/// l'exécutable du jeu) + vérification post-création.
+#[derive(serde::Serialize)]
+struct ShortcutCreationResult {
+    path: String,
+    mode: String,
+    verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+/// Vérifie qu'un raccourci a réellement été écrit (fichier non vide).
+fn verify_shortcut_file(path: &Path) -> Result<(), String> {
+    let meta =
+        fs::metadata(path).map_err(|_| "Le raccourci n'a pas pu être vérifié.".to_string())?;
+    if !meta.is_file() || meta.len() == 0 {
+        return Err("Le raccourci créé est vide ou invalide.".into());
+    }
+    Ok(())
+}
+
 #[cfg(desktop)]
 #[tauri::command]
 fn create_desktop_shortcut(
@@ -14119,9 +14141,11 @@ fn create_desktop_shortcut(
     game_id: String,
     profile_id: String,
     game_name: String,
+    mode: String,
     icon_path: Option<String>,
     exec_path: Option<String>,
-) -> Result<String, String> {
+    launch_args: Option<String>,
+) -> Result<ShortcutCreationResult, String> {
     safe_game_id(&game_id)?;
     safe_game_id(&profile_id)?;
     let desktop =
@@ -14132,29 +14156,85 @@ fn create_desktop_shortcut(
     {
         ensure_zailon_association()?;
         let executable = std::env::current_exe().map_err(to_error)?;
+        // Cible directe : l'exécutable RÉEL du jeu, existant sur disque. Un
+        // jeu à chaîne de lancement (Frosty/FiveM/NTE/Steam) ou sans exécutable
+        // vérifiable retombe automatiquement sur ZAILON — la chaîne est conservée.
+        let requested_direct = mode == "direct";
+        let direct_target = exec_path
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(|path| path.is_file())
+            .filter(|path| path.extension().is_some());
+        let effective_mode = if requested_direct && direct_target.is_some() {
+            "direct"
+        } else {
+            "zailon"
+        };
+        let mut message = None;
+        if requested_direct && effective_mode == "zailon" {
+            message = Some(
+                "Lancement direct indisponible (exécutable introuvable ou chaîne de lancement requise) — raccourci via ZAILON créé, la chaîne Frosty/FiveM/NTE est conservée."
+                    .to_string(),
+            );
+        }
         let icon =
             resolve_shortcut_icon(&app, &game_id, icon_path.as_deref(), exec_path.as_deref())?;
+        let (target, arguments, working_dir) = if effective_mode == "direct" {
+            let target = direct_target.unwrap();
+            let working = target
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| desktop.clone());
+            (target, launch_args.unwrap_or_default(), working)
+        } else {
+            let working = executable
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| desktop.clone());
+            (executable.clone(), uri.clone(), working)
+        };
         let mut shortcut = desktop.join(format!("ZAILON - {safe_name}.lnk"));
         let mut suffix = 2;
         while shortcut.exists() {
             shortcut = desktop.join(format!("ZAILON - {safe_name} ({suffix}).lnk"));
             suffix += 1;
         }
-        let working_dir = executable
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| desktop.clone());
+        let description = if effective_mode == "direct" {
+            format!("{safe_name} — lance le jeu directement (profil ZAILON : {profile_id})")
+        } else {
+            format!(
+                "ZAILON - {safe_name} — lance le jeu via ZAILON (profil, mods, clavier, visuel)"
+            )
+        };
         write_windows_shortcut_lnk(
             &shortcut,
-            &executable,
-            &uri,
+            &target,
+            &arguments,
             &working_dir,
             &icon,
-            &format!(
-                "ZAILON - {safe_name} — lance le jeu via ZAILON (profil, mods, clavier, visuel)"
-            ),
+            &description,
         )?;
-        return Ok(shortcut.to_string_lossy().to_string());
+        // Vérification post-création (spec raccourci §26-31) : fichier réel,
+        // cible résolvable, icône présente.
+        verify_shortcut_file(&shortcut)?;
+        if !target.exists() {
+            return Err(format!(
+                "La cible du raccourci est introuvable : {}",
+                target.display()
+            ));
+        }
+        if !icon.exists() {
+            return Err(format!(
+                "L'icône du raccourci est introuvable : {}",
+                icon.display()
+            ));
+        }
+        return Ok(ShortcutCreationResult {
+            path: shortcut.to_string_lossy().to_string(),
+            mode: effective_mode.to_string(),
+            verified: true,
+            message,
+        });
     }
     #[cfg(target_os = "linux")]
     {
@@ -14177,7 +14257,19 @@ fn create_desktop_shortcut(
         );
         fs::write(&shortcut, content).map_err(to_error)?;
         fs::set_permissions(&shortcut, fs::Permissions::from_mode(0o755)).map_err(to_error)?;
-        return Ok(shortcut.to_string_lossy().to_string());
+        verify_shortcut_file(&shortcut)?;
+        if !icon.exists() {
+            return Err(format!(
+                "L'icône du raccourci est introuvable : {}",
+                icon.display()
+            ));
+        }
+        return Ok(ShortcutCreationResult {
+            path: shortcut.to_string_lossy().to_string(),
+            mode: "zailon".to_string(),
+            verified: true,
+            message: None,
+        });
     }
     #[cfg(target_os = "macos")]
     {
@@ -14190,7 +14282,13 @@ fn create_desktop_shortcut(
         let escaped_uri = uri.replace('&', "&amp;");
         let content = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>URL</key><string>{escaped_uri}</string></dict></plist>\n");
         fs::write(&shortcut, content).map_err(to_error)?;
-        return Ok(shortcut.to_string_lossy().to_string());
+        verify_shortcut_file(&shortcut)?;
+        return Ok(ShortcutCreationResult {
+            path: shortcut.to_string_lossy().to_string(),
+            mode: "zailon".to_string(),
+            verified: true,
+            message: None,
+        });
     }
     #[allow(unreachable_code)]
     Err("Desktop shortcuts are not supported on this platform.".into())

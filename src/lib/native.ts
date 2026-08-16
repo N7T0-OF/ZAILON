@@ -819,6 +819,16 @@ const desktopOnly = <T>(command: string, args?: Record<string, unknown>) => {
 /** Résultat de la résolution YouTube → fichier local (spec « Fix vidéo YouTube »).
  * `cached` : fichier MP4 local produit ; `ytdlp_missing` : yt-dlp absent (repli
  * lecteur embarqué) ; `failed` : échec de téléchargement. */
+/** Résultat de création d'un raccourci bureau (spec « Fix raccourci ») :
+ * chemin réel, mode effectif (`zailon` = via ZAILON — chaîne conservée ;
+ * `direct` = cible l'exécutable du jeu) et vérification post-création. */
+export interface ShortcutCreationResult {
+  path: string
+  mode: 'zailon' | 'direct'
+  verified: boolean
+  message?: string
+}
+
 export interface ResolvedBackgroundVideo {
   status: 'cached' | 'ytdlp_missing' | 'failed'
   videoPath?: string
@@ -1063,8 +1073,14 @@ export const native = {
    * zailon:// (profil, mods, session, clavier, visuel conservés). L'icône est
    * résolue côté natif : personnalisée (ico/exe/dll/png) → exécutable du jeu
    * (icône native) → icône ZAILON en dernier recours. */
-  createDesktopShortcut: (gameId: string, profileId: string, gameName: string, iconPath?: string, execPath?: string) =>
-    desktopOnly<string>('create_desktop_shortcut', { gameId, profileId, gameName, iconPath, execPath }),
+  createDesktopShortcut: (gameId: string, profileId: string, gameName: string, options?: { iconPath?: string; execPath?: string; mode?: 'zailon' | 'direct'; launchArgs?: string }) =>
+    desktopOnly<ShortcutCreationResult>('create_desktop_shortcut', {
+      gameId, profileId, gameName,
+      mode: options?.mode ?? 'zailon',
+      iconPath: options?.iconPath,
+      execPath: options?.execPath,
+      launchArgs: options?.launchArgs,
+    }),
   storeGameResource: (gameId: string, kind: GameResourceKind, sourcePath: string) =>
     desktopOnly<string>('store_game_resource', { gameId, kind, sourcePath }),
   cacheRemoteGameResource: (gameId: string, kind: Exclude<GameResourceKind, 'video'>, sourceUrl: string) =>

@@ -11,12 +11,13 @@ interface GameContextMenuProps {
   position: { x: number; y: number }
   onClose: () => void
   onEditResources: () => void
+  onCreateShortcut: (profileId: string) => void
 }
 
 type MenuItem = { label: string; icon: LucideIcon; action?: () => void; disabled?: boolean; hint?: string; danger?: boolean }
 type MenuEntry = MenuItem | { separator: true }
 
-export function GameContextMenu({ game, position, onClose, onEditResources }: GameContextMenuProps) {
+export function GameContextMenu({ game, position, onClose, onEditResources, onCreateShortcut }: GameContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
   const [activeIndex, setActiveIndex] = useState(0)
@@ -41,7 +42,7 @@ export function GameContextMenu({ game, position, onClose, onEditResources }: Ga
     { label: 'Modifier les catégories', icon: Tag, action: () => { const next = window.prompt('Catégories, séparées par des virgules', (game.categories || []).join(', ')); if (next !== null) setGameCategories(game.id, next.split(',').map(category => category.trim()).filter(Boolean)); onClose() } },
     { label: game.hidden ? 'Afficher dans la bibliothèque' : 'Masquer dans la bibliothèque', icon: Tag, action: () => { setGameHidden(game.id); onClose() } },
     { separator: true },
-    { label: 'Créer un raccourci bureau', icon: MonitorDown, disabled: !shortcutProfile, action: () => { if (!shortcutProfile) return; void native.createDesktopShortcut(game.id, shortcutProfile.id, game.name, game.resources?.iconPath, game.execPath).then(path => window.alert(`Raccourci créé :\n${path}`)).catch(error => window.alert(String(error))); onClose() } },
+    { label: 'Créer un raccourci bureau', icon: MonitorDown, disabled: !shortcutProfile, action: () => { if (!shortcutProfile) return; onCreateShortcut(shortcutProfile.id); onClose() } },
     { label: 'Ouvrir le dossier du jeu', icon: FolderOpen, disabled: !gameFolder, action: () => { if (gameFolder) void native.openPath(gameFolder); onClose() } },
     { label: 'Ouvrir le dossier des mods', icon: FolderCog, disabled: !game.modsPath, action: () => { if (game.modsPath) void native.openPath(game.modsPath); onClose() } },
     { separator: true },

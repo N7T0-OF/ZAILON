@@ -2346,10 +2346,11 @@ fn remove_fivem_mod(
         return Err("Suppression refusée : élément hors du dossier mods.".into());
     }
     let meta = fs::metadata(&canonical_target).map_err(to_error)?;
-    let (removed_files, freed_bytes) = if meta.is_dir() {
+    // `fivem_dir_stats` renvoie (octets, fichiers) — ne pas inverser.
+    let (freed_bytes, removed_files) = if meta.is_dir() {
         fivem_dir_stats(&canonical_target)
     } else {
-        (1, meta.len())
+        (meta.len(), 1)
     };
     if meta.is_dir() {
         fs::remove_dir_all(&canonical_target).map_err(to_error)?;
@@ -16397,6 +16398,7 @@ mod tests {
         let removed =
             remove_fivem_mod(root.to_string_lossy().to_string(), "VisualPack".into()).unwrap();
         assert_eq!(removed.removed_files, 1);
+        assert_eq!(removed.freed_bytes, 5); // "hello"
         assert!(!mods.join("VisualPack").exists());
 
         // Traversée / séparateur : refusé (jamais FiveM.exe, citizen/, …).

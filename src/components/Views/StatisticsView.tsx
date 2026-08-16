@@ -1,10 +1,11 @@
-import { ArrowLeft, Boxes, ChevronDown, ChevronRight, Clock3, Download, Gamepad2, History, Search, Timer, Trash2, Trophy, Users } from 'lucide-react'
+import { ArrowLeft, Boxes, ChevronDown, ChevronRight, Clock3, Download, Gamepad2, History, Import, Search, Timer, Trash2, Trophy, Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useStore } from '../../store/useStore'
 import { resourceUrl } from '../../lib/native'
 import { formatElapsedDuration, formatTime, timeAgo } from '../../utils'
 import { dailyBreakdown, minutesWithin, perGame, perGroup, perProfile, recentSessions, summarizeSessions } from '../../lib/sessionStats'
 import { groupMembers } from '../../lib/gameGroups'
+import { importedTotals } from '../../lib/playtimeImport'
 import type { TrackedSession } from '../../types'
 
 type StatsTab = 'tout' | 'jeux' | 'apps'
@@ -42,6 +43,9 @@ export function StatisticsView() {
   const setView = useStore(state => state.setView)
   const setSelectedGame = useStore(state => state.setSelectedGame)
   const resetSessionHistory = useStore(state => state.resetSessionHistory)
+  const importSteamPlaytime = useStore(state => state.importSteamPlaytime)
+  const [importing, setImporting] = useState(false)
+  const [importedNotice, setImportedNotice] = useState<string>()
   const [tab, setTab] = useState<StatsTab>('tout')
   const [range, setRange] = useState<StatsRange>(7)
   const [query, setQuery] = useState('')
@@ -70,6 +74,20 @@ export function StatisticsView() {
   const byGame = useMemo(() => perGame(filteredHistory, liveSessions), [filteredHistory, liveSessions])
   const byGroup = useMemo(() => perGroup(filteredHistory, games, gameGroups, liveSessions), [filteredHistory, games, gameGroups, liveSessions])
   const recent = useMemo(() => recentSessions(filteredHistory, 6), [filteredHistory])
+  const imported = useMemo(() => importedTotals(games), [games])
+  const importedByGame = useMemo(() => new Map(games.map(game => [game.id, game.importedPlaytimeMin || 0])), [games])
+
+  const onImportSteam = async () => {
+    if (importing) return
+    setImporting(true)
+    setImportedNotice(undefined)
+    try {
+      const count = await importSteamPlaytime()
+      setImportedNotice(count ? `Temps Steam importé pour ${count} jeu${count > 1 ? 'x' : ''}.` : 'Aucun AppID Steam correspondant trouvé.')
+    } finally {
+      setImporting(false)
+    }
+  }
 
   const liveMinutes = useMemo(() => {
     if (!activeTrackedSession) return 0
@@ -135,6 +153,7 @@ export function StatisticsView() {
             </div>
           )}
         </div>
+        <button type="button" onClick={onImportSteam} disabled={importing} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-1.5 text-[11px] font-semibold text-white/60 hover:border-gold/25 hover:text-gold disabled:opacity-50" title="Importer le temps de jeu Steam (localconfig.vdf) — affiché séparément du suivi ZAILON"><Import size={12} />{importing ? 'Import…' : 'Importer Steam'}</button>
         <button type="button" onClick={() => { if (window.confirm('Réinitialiser TOUTES les statistiques ? Cette action est définitive (l’historique des sessions est supprimé localement).')) resetSessionHistory() }} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-1.5 text-[11px] font-semibold text-white/50 hover:border-red-300/25 hover:text-red-200" title="Réinitialiser toutes les statistiques"><Trash2 size={12} /></button>
       </div>
     </header>
@@ -173,6 +192,17 @@ export function StatisticsView() {
           <HeroStat icon={<Clock3 size={15} />} label="Cette semaine" value={weekMinutes > 0 ? formatTime(weekMinutes) : '0h'} sub={weekSessionCount ? `${weekSessionCount} session(s)` : 'aucune session'} />
         </div>
 
+        {/* Temps Steam importé (spec « Temps Steam/Epic » §3) : JAMAIS fusionné
+         * avec le suivi ZAILON — affiché séparément. */}
+        {(imported.minutes > 0 || importedNotice) && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.018] px-4 py-2.5">
+            <Import size={13} className="text-white/30" />
+            <span className="text-[11px] text-white/55">Temps Steam importé : <strong className="font-mono text-white/80">{imported.minutes > 0 ? formatTime(imported.minutes) : '—'}</strong> sur {imported.count} jeu{imported.count > 1 ? 'x' : ''}</span>
+            <span className="text-[10px] text-white/28">· en plus du suivi ZAILON, jamais fusionné</span>
+            {importedNotice && <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">{importedNotice}</span>}
+          </div>
+        )}
+
         <div className="grid gap-4 lg:grid-cols-5">
           {/* Jeux les plus utilisés — classement visuel */}
           <section className="rounded-xl border border-white/[0.06] bg-white/[0.018] lg:col-span-3">
@@ -199,10 +229,13 @@ export function StatisticsView() {
                             <div className="h-full rounded-full bg-[var(--zailon-accent)]/70" style={{ width: `${Math.max(entry.minutes > 0 ? 3 : 0, Math.round((entry.minutes / maxMinutes) * 100))}%` }} />
                           </div>
                         </div>
-                        <span className="shrink-0 font-mono text-xs text-white/60">{entry.minutes > 0 ? formatTime(entry.minutes) : '—'}</span>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          {(importedByGame.get(entry.gameId) || 0) > 0 && <span className="rounded-full bg-white/[0.05] px-1.5 py-0.5 text-[9px] font-semibold text-white/40" title={`Steam : ${formatTime(importedByGame.get(entry.gameId) || 0)}`}>Steam +{formatTime(importedByGame.get(entry.gameId) || 0)}</span>}
+                          <span className="font-mono text-xs text-white/60">{entry.minutes > 0 ? formatTime(entry.minutes) : '—'}</span>
+                        </span>
                         {expanded ? <ChevronDown size={14} className="shrink-0 text-white/30" /> : <ChevronRight size={14} className="shrink-0 text-white/30" />}
                       </button>
-                      {expanded && <GameDetail game={game} entry={entry} history={filteredHistory} now={now} onOpenGame={() => { if (game) { setSelectedGame(game.id); setView('games') } }} onReset={() => { if (window.confirm(`Réinitialiser les statistiques de « ${entry.gameName} » ?`)) resetSessionHistory(entry.gameId) }} />}
+                      {expanded && <GameDetail game={game} entry={entry} importedMin={importedByGame.get(entry.gameId) || 0} history={filteredHistory} now={now} onOpenGame={() => { if (game) { setSelectedGame(game.id); setView('games') } }} onReset={() => { if (window.confirm(`Réinitialiser les statistiques de « ${entry.gameName} » ?`)) resetSessionHistory(entry.gameId) }} />}
                     </li>
                   })}
                 </ul>}
@@ -288,16 +321,17 @@ export function StatisticsView() {
           </section>
         )}
 
-        <p className="px-1 text-[11px] leading-relaxed text-white/28">Suivi ZAILON uniquement — le temps Steam/EA reste séparé s’il est fourni par un add-on (§96). Historique persisté avec checkpoints toutes les ~5 min : une session interrompue par un crash de ZAILON est récupérée au prochain démarrage.</p>
+        <p className="px-1 text-[11px] leading-relaxed text-white/28">Suivi ZAILON et temps Steam importé restent toujours séparés — « Importer Steam » lit localconfig.vdf (lecture seule, minutes), jamais fusionné avec vos sessions. Historique persisté avec checkpoints toutes les ~5 min : une session interrompue par un crash de ZAILON est récupérée au prochain démarrage.</p>
       </div>
     </div>
   </div>
 }
 
 /** Détail PAR JEU (spec premium) : profils distincts, activité 7 jours, sessions. */
-function GameDetail({ game, entry, history, now, onOpenGame, onReset }: {
+function GameDetail({ game, entry, importedMin, history, now, onOpenGame, onReset }: {
   game?: { id: string; name: string; resources?: { coverPath?: string; bannerPath?: string; backgroundPath?: string; iconPath?: string }; backgroundArt?: string }
   entry: { gameId: string; gameName: string; minutes: number; sessions: number; lastEndedAt?: number; live: boolean }
+  importedMin: number
   history: TrackedSession[]
   now: number
   onOpenGame: () => void
@@ -316,6 +350,7 @@ function GameDetail({ game, entry, history, now, onOpenGame, onReset }: {
       <DetailStat label="Ce mois" value={month > 0 ? formatTime(month) : '0h'} />
       <DetailStat label="Sessions" value={String(entry.sessions)} />
       <DetailStat label="Dernière" value={last ? timeAgo(last.endedAt) : '—'} />
+      {importedMin > 0 && <DetailStat label="Steam importé" value={formatTime(importedMin)} />}
     </div>
     {/* Activité 7 jours */}
     {days.some(day => day.minutes > 0) && <div className="mt-3 flex h-12 items-end gap-1">

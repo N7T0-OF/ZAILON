@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.133.0] - 2026-08-16
+
+> **Import du temps de jeu Steam** : le compteur ne repart plus de zéro —
+> ZAILON lit l'historique Steam en lecture seule (localconfig.vdf) et l'affiche
+> SÉPARÉMENT du suivi ZAILON, jamais fusionné.
+
+### Added
+
+- **`steam_playtime` (natif Rust)** : parse `localconfig.vdf` via
+  `keyvalues-parser` (le même parseur que `steamlocate`), extrait
+  `PlaytimeForever` en **minutes** par AppID, tous comptes `userdata/*`
+  confondus (MAXIMUM par AppID, jamais de double comptage). Lecture seule —
+  aucune écriture dans Steam, aucun compte, aucune API key.
+- **`parse_steam_localconfig_playtime`** : parseur pur + 2 tests unitaires Rust.
+- **`playtimeImport.ts` (pur, testé)** : `combinedPlaytimeMin`,
+  `applySteamPlaytime` (renseigne `importedPlaytimeMin`, ne touche JAMAIS
+  `totalPlaytime`), `importedTotals`.
+- **Page Statistiques** : bouton « Importer Steam », bandeau « Temps Steam
+  importé : X sur N jeux — jamais fusionné », badge `Steam +Xh` sur chaque jeu
+  du classement et détail « Steam importé » dans la vue par jeu.
+
+### Notes
+
+- **Epic** : pas d'import activé — Epic ne stocke pas le temps localement de
+  façon fiable (données cloud). Le champ `externalPlaytimeSource` est prêt
+  (`epic`/`gog`) pour la suite.
+
 ## [1.132.0] - 2026-08-16
 
 > **Démarrage allégé — vues chargées à la demande** : les vues lourdes

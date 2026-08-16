@@ -4120,6 +4120,117 @@ fn import_candidate_roots(path: &Path) -> Vec<PathBuf> {
     }
 }
 
+/// Extrait le temps de jeu Steam (minutes) par AppID depuis `localconfig.vdf`
+/// (format KeyValues VDF) : `UserLocalConfigStore > Software > Valve > Steam >
+/// apps > <appid> > PlaytimeForever`. Le temps est en MINUTES dans ce fichier —
+/// jamais en heures. Pur et sans I/O : testable en unitaire.
+#[cfg(desktop)]
+fn parse_steam_localconfig_playtime(text: &str) -> HashMap<u32, u64> {
+    let mut result = HashMap::new();
+    let Ok(parsed) = keyvalues_parser::parse(text) else {
+        return result;
+    };
+    // La clé racine « UserLocalConfigStore » est portée par `parsed.key` —
+    // `parsed.value` est DÉJÀ l'objet racine (Software/Valve/Steam/...).
+    let Some(root) = parsed.value.get_obj() else {
+        return result;
+    };
+    let Some(software) = root
+        .0
+        .get("Software")
+        .and_then(|values| values.first())
+        .and_then(|value| value.get_obj())
+    else {
+        return result;
+    };
+    let Some(valve) = software
+        .0
+        .get("Valve")
+        .and_then(|values| values.first())
+        .and_then(|value| value.get_obj())
+    else {
+        return result;
+    };
+    let Some(steam) = valve
+        .0
+        .get("Steam")
+        .and_then(|values| values.first())
+        .and_then(|value| value.get_obj())
+    else {
+        return result;
+    };
+    let Some(apps) = steam
+        .0
+        .get("apps")
+        .and_then(|values| values.first())
+        .and_then(|value| value.get_obj())
+    else {
+        return result;
+    };
+    for (appid, values) in &apps.0 {
+        let Ok(appid) = appid.as_ref().parse::<u32>() else {
+            continue;
+        };
+        let Some(entry) = values.first().and_then(|value| value.get_obj()) else {
+            continue;
+        };
+        let Some(playtime) = entry
+            .0
+            .get("PlaytimeForever")
+            .and_then(|values| values.first())
+            .and_then(|value| value.get_str())
+        else {
+            continue;
+        };
+        let Ok(minutes) = playtime.trim().parse::<u64>() else {
+            continue;
+        };
+        result
+            .entry(appid)
+            .and_modify(|current| *current = (*current).max(minutes))
+            .or_insert(minutes);
+    }
+    result
+}
+
+/// Temps de jeu Steam par AppID (minutes) lu depuis les `localconfig.vdf` de
+/// TOUS les comptes `userdata/<id>/config/`. Plusieurs comptes : on conserve le
+/// MAXIMUM par AppID — jamais de double comptage. Lecture seule, aucune
+/// écriture dans les fichiers Steam.
+#[cfg(desktop)]
+#[tauri::command]
+fn steam_playtime(steam_path: Option<String>) -> Result<HashMap<String, u64>, String> {
+    let steam = steam_installation(steam_path)?;
+    let userdata = steam.path().join("userdata");
+    if !userdata.is_dir() {
+        return Ok(HashMap::new());
+    }
+    let mut merged: HashMap<u32, u64> = HashMap::new();
+    for entry in fs::read_dir(&userdata).map_err(to_error)? {
+        let Ok(entry) = entry else { continue };
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let config = entry.path().join("config").join("localconfig.vdf");
+        if !config.is_file() {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&config) else {
+            continue;
+        };
+        for (appid, minutes) in parse_steam_localconfig_playtime(&text) {
+            merged
+                .entry(appid)
+                .and_modify(|current| *current = (*current).max(minutes))
+                .or_insert(minutes);
+        }
+    }
+    Ok(merged
+        .into_iter()
+        .map(|(appid, minutes)| (appid.to_string(), minutes))
+        .collect())
+}
+
 #[cfg(desktop)]
 fn steam_installation(input: Option<String>) -> Result<SteamDir, String> {
     match input.filter(|path| !path.trim().is_empty()) {
@@ -17534,6 +17645,56 @@ mod tests {
         assert!(!is_steam_runtime_or_tool("Baldur's Gate 3"));
     }
 
+    #[cfg(desktop)]
+    #[test]
+    fn parses_steam_localconfig_playtime_forever_minutes() {
+        let vdf = r#"
+"UserLocalConfigStore"
+{
+    "Software"
+    {
+        "Valve"
+        {
+            "Steam"
+            {
+                "apps"
+                {
+                    "730"
+                    {
+                        "LastPlayed"		"1700000000"
+                        "PlaytimeForever"	"12345"
+                        "Playtime2Weeks"	"120"
+                    }
+                    "292030"
+                    {
+                        "PlaytimeForever"	"0"
+                    }
+                    "not-a-number"
+                    {
+                        "PlaytimeForever"	"99"
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+        let playtime = parse_steam_localconfig_playtime(vdf);
+        // PlaytimeForever est en MINUTES, pas en heures.
+        assert_eq!(playtime.get(&730), Some(&12345));
+        assert_eq!(playtime.get(&292030), Some(&0));
+        // AppID non numérique : ignoré, jamais un mauvais résultat.
+        assert!(!playtime.contains_key(&0));
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn steam_localconfig_playtime_tolerates_missing_sections() {
+        assert!(parse_steam_localconfig_playtime("").is_empty());
+        assert!(parse_steam_localconfig_playtime("\"UserLocalConfigStore\" {}").is_empty());
+        assert!(parse_steam_localconfig_playtime("not vdf at all").is_empty());
+    }
+
     #[cfg(target_os = "windows")]
     #[test]
     fn classifies_major_windows_game_providers() {
@@ -18076,6 +18237,8 @@ pub fn run() {
             visual_profiles::open_visual_windows_settings,
             #[cfg(desktop)]
             scan_steam_games,
+            #[cfg(desktop)]
+            steam_playtime,
             #[cfg(desktop)]
             scan_library,
             #[cfg(desktop)]

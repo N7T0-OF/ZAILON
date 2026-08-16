@@ -393,6 +393,12 @@ export interface Game {
    * restent la racine pour les jeux sans installations (fallback). */
   installations?: GameInstallation[]
   totalPlaytime: number
+  /** Temps de jeu importé (minutes) depuis Steam/Epic (spec « Temps Steam/Epic »
+   * §3) — JAMAIS fusionné avec le suivi ZAILON : affiché séparément
+   * (« Temps total : X · Suivi ZAILON : Y · Steam : Z »). */
+  importedPlaytimeMin?: number
+  /** Source du temps importé (`steam` | `epic` | `gog`) — `undefined` = aucun. */
+  externalPlaytimeSource?: 'steam' | 'epic' | 'gog'
   /** Temps Steam (heures) fourni par l'add-on Steam Advanced (spec §96) —
    * JAMAIS fusionné avec le suivi ZAILON : affiché séparément (« Suivi ZAILON :
    * X · Steam : Y »). */

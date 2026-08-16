@@ -1012,6 +1012,9 @@ export const native = {
     channel.onmessage = onEvent
     return invoke<SteamScan>('scan_steam_games', { steamPath, onEvent: channel })
   },
+  /** Temps de jeu Steam (minutes) par AppID, lu depuis localconfig.vdf (spec
+   * « Temps Steam/Epic » §3). Lecture seule — jamais d'écriture dans Steam. */
+  steamPlaytime: (steamPath?: string) => desktopOnly<Record<string, number>>('steam_playtime', { steamPath }),
   scanLibrary: (mode: 'quick' | 'full', onEvent: (event: DiscoveryScanEvent) => void) => {
     if (!isTauri()) return Promise.reject(new Error('La détection locale est uniquement disponible dans l’application ZAILON.'))
     const channel = new Channel<DiscoveryScanEvent>()

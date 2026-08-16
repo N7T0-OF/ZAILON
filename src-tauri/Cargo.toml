@@ -36,6 +36,7 @@ walkdir = "2"
 zip = "2"
 url = "2"
 steamlocate = "2.1"
+keyvalues-parser = "0.2"
 keyring = { version = "3.6", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 [target.'cfg(unix)'.dependencies]

@@ -5949,6 +5949,7 @@ dependencies = [
  "dirs",
  "ed25519-dalek",
  "keyring",
+ "keyvalues-parser",
  "libc",
  "reqwest 0.12.28",
  "serde",

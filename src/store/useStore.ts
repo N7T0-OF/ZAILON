@@ -5,6 +5,7 @@ import { checkpointDue } from '../lib/sessionStats'
 import { ensurePrincipalInstallation, installationDisplayName, resolveGameInstallation } from '../lib/installations'
 import { normalizeGameGroups, reorderArray } from '../lib/gameGroups'
 import { resolveGameIdentity } from '../lib/gameIdentity'
+import { applySteamPlaytime } from '../lib/playtimeImport'
 import { lastUsedProfileId } from '../lib/perGameConfig'
 import { fiveMCopyActive, type FiveMCopyOptions } from '../lib/fivemProfile'
 import { vortexProfileName } from '../lib/vortexImport'
@@ -663,6 +664,10 @@ export interface Store {
   recoverInterruptedSession: () => void
   /** Réinitialise l'historique des sessions (jeu précis ou tout, §52). */
   resetSessionHistory: (gameId?: string) => void
+  /** Importe le temps de jeu Steam (minutes par AppID depuis localconfig.vdf)
+   * et l'applique aux jeux Steam correspondants — sans jamais toucher au suivi
+   * ZAILON. Retourne le nombre de jeux enrichis (spec « Temps Steam/Epic » §3). */
+  importSteamPlaytime: () => Promise<number>
   /** Empreinte des frameworks au dernier lancement réussi, par jeu (spec
    * « Last Known Good » §41) — `undefined` = aucune référence encore. */
   lastKnownGoodFrameworks?: Record<string, FrameworkSnapshot | undefined>
@@ -2743,6 +2748,27 @@ export const useStore = create<Store>()(persist((set, get) => ({
   },
   resetSessionHistory: gameId => {
     set(state => ({ sessionHistory: gameId ? state.sessionHistory.filter(session => session.gameId !== gameId) : [] }))
+  },
+  importSteamPlaytime: async () => {
+    if (!native.isDesktop()) {
+      set({ notice: 'Import du temps Steam disponible uniquement dans l’application ZAILON.' })
+      return 0
+    }
+    try {
+      const minutesByAppId = await native.steamPlaytime()
+      const next = applySteamPlaytime(get().games, minutesByAppId)
+      const importedCount = next.reduce((count, game, index) => (game.importedPlaytimeMin !== get().games[index]?.importedPlaytimeMin ? count + 1 : count), 0)
+      set(state => ({
+        games: next,
+        notice: importedCount
+          ? `Temps Steam importé pour ${importedCount} jeu${importedCount > 1 ? 'x' : ''} — affiché séparément du suivi ZAILON.`
+          : 'Aucun temps Steam nouveau à importer (aucun AppID correspondant trouvé).',
+      }))
+      return importedCount
+    } catch (error) {
+      set({ notice: `Impossible d’importer le temps Steam : ${asError(error)}` })
+      return 0
+    }
   },
   setLibraryViewMode: libraryViewMode => set({ libraryViewMode }),
   setLibraryFilter: libraryFilter => set({ libraryFilter }),

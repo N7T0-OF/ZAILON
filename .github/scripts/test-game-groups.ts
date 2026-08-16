@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { groupLastPlayed, groupMembers, groupModCount, groupProfileCount, groupProfilePairs, groupTotalPlaytime, nextGroupProfile, reorderArray } from '../../src/lib/gameGroups.ts'
+import { groupLastPlayed, groupMembers, groupModCount, groupProfileCount, groupProfilePairs, groupTotalPlaytime, nextGroupProfile, pinnedGroupsFirst, reorderArray } from '../../src/lib/gameGroups.ts'
 import type { Game, GameGroup } from '../../src/types/index.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -98,4 +98,13 @@ test('nextGroupProfile : boucle dans la séquence du groupe, jamais de croisemen
   assert.equal(nextGroupProfile(pairs, 'ghost', 'ghost')?.profileId, 'p1')
   // Séquence vide → undefined.
   assert.equal(nextGroupProfile([], 'a', 'p1'), undefined)
+})
+
+test('pinnedGroupsFirst : épinglés en tête, ordre déclaré conservé', () => {
+  const a: GameGroup = { id: 'a', name: 'A', memberGameIds: [], createdAt: 1 }
+  const b: GameGroup = { id: 'b', name: 'B', memberGameIds: [], createdAt: 2, pinned: true }
+  const c: GameGroup = { id: 'c', name: 'C', memberGameIds: [], createdAt: 3, pinned: true }
+  const ordered = pinnedGroupsFirst([a, b, c])
+  assert.deepEqual(ordered.map(group => group.id), ['b', 'c', 'a'])
+  assert.deepEqual(pinnedGroupsFirst([]), [])
 })

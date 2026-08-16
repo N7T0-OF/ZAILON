@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.131.0] - 2026-08-16
+
+> **Groupes épinglés en tête de bibliothèque** : les groupes épinglés
+> apparaissent désormais en bandeau compact au-dessus de la grille de jeux,
+> dans tous les filtres (pas seulement la vue « Groupes »).
+
+### Added
+
+- **Bandeau « Groupes épinglés »** dans la Bibliothèque : cartes compactes
+  (nom, nombre de jeux, temps total) au-dessus de la grille, clic → vue
+  Groupes. Les membres restent individuellement accessibles — jamais fusionnés.
+- **`pinnedGroupsFirst` (pur, testé)** : épinglés d'abord (ordre déclaré),
+  puis les autres — réutilisé par la vue Groupes et le bandeau.
+
 ## [1.130.0] - 2026-08-16
 
 > **Statistiques par groupe** : la page « Temps de jeu & sessions » agrège

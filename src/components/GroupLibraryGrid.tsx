@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, Clock, FolderPlus, Layers, Pencil, Pin, PinOff, Play, Trash2, Users } from 'lucide-react'
 import type { Game, GameGroup } from '../types'
 import { useStore } from '../store/useStore'
-import { groupLastPlayed, groupMembers, groupModCount, groupProfileCount, groupTotalPlaytime } from '../lib/gameGroups'
+import { groupLastPlayed, groupMembers, groupModCount, groupProfileCount, groupTotalPlaytime, pinnedGroupsFirst } from '../lib/gameGroups'
 import { formatTime, timeAgo } from '../utils'
 import { GameGroupDialog } from './GameGroupDialog'
 
@@ -27,11 +27,7 @@ export function GroupLibraryGrid({ games, onOpen }: Props) {
 
   const [dialog, setDialog] = useState<{ mode: 'create' } | { mode: 'edit'; group: GameGroup } | undefined>()
 
-  const ordered = useMemo(() => {
-    const pinned = gameGroups.filter(group => group.pinned)
-    const rest = gameGroups.filter(group => !group.pinned)
-    return [...pinned, ...rest]
-  }, [gameGroups])
+  const ordered = useMemo(() => pinnedGroupsFirst(gameGroups), [gameGroups])
 
   return (
     <div className="space-y-4">

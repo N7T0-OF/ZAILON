@@ -60,6 +60,12 @@ export function groupTotalPlaytime(games: Game[], group: GameGroup): number {
   return games.filter(game => members.has(game.id)).reduce((sum, game) => sum + (game.totalPlaytime || 0), 0)
 }
 
+/** Groupes ordonnés : épinglés d'abord (ordre déclaré), puis les autres
+ * (spec « Groupes de jeux » §13 — épinglés en tête de bibliothèque). */
+export function pinnedGroupsFirst(groups: GameGroup[]): GameGroup[] {
+  return [...groups.filter(group => group.pinned), ...groups.filter(group => !group.pinned)]
+}
+
 /** Jeux membres d'un groupe, dans l'ordre déclaré. */
 export function groupMembers(games: Game[], group: GameGroup): Game[] {
   const byId = new Map(games.map(game => [game.id, game]))

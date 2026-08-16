@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, BarChart3, Boxes, CheckSquare2, ChevronDown, ChevronLeft, Copy, Download, ExternalLink, FolderInput, FolderOpen, FolderPlus, Gamepad2, HardDrive, Image as ImageIcon, Loader2, Lock, Monitor, Pause, PenLine, Play, Plus, Radar, RefreshCw, RotateCcw, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Star, Tag, Trash2, Unlock, Users, Wrench, X } from 'lucide-react'
+import { AlertTriangle, Archive, BarChart3, Boxes, CheckSquare2, ChevronDown, ChevronLeft, Copy, Download, ExternalLink, FolderInput, FolderOpen, FolderPlus, Gamepad2, HardDrive, Image as ImageIcon, Layers, Loader2, Lock, Monitor, Pause, PenLine, Play, Plus, Radar, RefreshCw, RotateCcw, Search, Settings, ShieldAlert, ShieldCheck, Sparkles, Star, Tag, Trash2, Unlock, Users, Wrench, X } from 'lucide-react'
 import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -16,12 +16,13 @@ import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { formatElapsedDuration, formatTime, timeAgo } from '../../utils'
 import { addonCapabilities, cyberpunkToolsAllowed, fiveMProfilesAllowed, frostyImportAllowed, hasCapability, mo2ImportAllowed, vortexImportAllowed } from '../../lib/addonGating'
 import { GroupLibraryGrid } from '../GroupLibraryGrid'
+import { groupMembers, groupTotalPlaytime, pinnedGroupsFirst } from '../../lib/gameGroups'
 import { FiveMReShadeDialog } from '../FiveMReShadeDialog'
 import { FiveMPackDialog } from '../FiveMPackDialog'
 import { FiveMInstallAssistant } from '../FiveMInstallAssistant'
 import { VortexImportDialog } from '../VortexImportDialog'
 import { FrostyImportDialog } from '../FrostyImportDialog'
-import type { Game, GameSession, GameTab, Mod, ModImportCandidate, Profile, SensitiveFileAssessment, SensitiveImportAction } from '../../types'
+import type { Game, GameGroup, GameSession, GameTab, Mod, ModImportCandidate, Profile, SensitiveFileAssessment, SensitiveImportAction } from '../../types'
 import { VisualGamePanel } from '../../visual-profiles/ui/VisualGamePanel'
 import { resolveGameInstallation } from '../../lib/installations'
 import { isRenamed, normalizeDisplayName, resolveGameName, resolveGameTitle } from '../../lib/gameIdentity'
@@ -660,7 +661,10 @@ function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, fil
       </div>
     </div>
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-4">
-      {filter === 'groups' ? <GroupLibraryGrid games={games} onOpen={onOpen} /> : visibleGames.length ? <div className={`grid gap-3 ${columns}`}>{visibleGames.map(game => <LibraryCard key={game.id} game={game} active={Boolean(activeByGame.get(game.id))} priority={priorityGameId === game.id} onOpen={() => onOpen(game.id)} onFavorite={() => setGameFavorite(game.id)} onContextMenu={(x, y) => setContext({ gameId: game.id, x, y })} />)}</div> : <div className="flex h-48 flex-col items-center justify-center gap-2 text-[11px] text-white/35"><Search size={20} /><span>{search.trim() ? 'Aucun résultat pour cette recherche.' : 'Aucun élément dans ce filtre.'}</span><button type="button" onClick={onAddGame} className="mt-1 rounded-lg border border-white/[0.1] px-3 py-1.5 text-white/55 hover:bg-white/[0.05]">Ajouter un jeu</button></div>}
+      {filter === 'groups' ? <GroupLibraryGrid games={games} onOpen={onOpen} /> : <>
+        <PinnedGroupsStrip groups={gameGroups.filter(group => group.pinned)} games={games} onOpenGroups={() => onFilter('groups')} />
+        {visibleGames.length ? <div className={`grid gap-3 ${columns}`}>{visibleGames.map(game => <LibraryCard key={game.id} game={game} active={Boolean(activeByGame.get(game.id))} priority={priorityGameId === game.id} onOpen={() => onOpen(game.id)} onFavorite={() => setGameFavorite(game.id)} onContextMenu={(x, y) => setContext({ gameId: game.id, x, y })} />)}</div> : <div className="flex h-48 flex-col items-center justify-center gap-2 text-[11px] text-white/35"><Search size={20} /><span>{search.trim() ? 'Aucun résultat pour cette recherche.' : 'Aucun élément dans ce filtre.'}</span><button type="button" onClick={onAddGame} className="mt-1 rounded-lg border border-white/[0.1] px-3 py-1.5 text-white/55 hover:bg-white/[0.05]">Ajouter un jeu</button></div>}
+      </>}
     </div>
     {context && <div className="fixed z-[300]" style={{ left: Math.min(context.x, window.innerWidth - 220), top: Math.min(context.y, window.innerHeight - 160) }}>
       <div className="fixed inset-0 z-[-1]" onClick={() => setContext(undefined)} onContextMenu={event => { event.preventDefault(); setContext(undefined) }} />
@@ -683,6 +687,29 @@ function LibraryShowcase({ games, visibleGames, summaries, search, onSearch, fil
       </div>
     </div>}
     {resourcesGame && <GameResourcesDialog game={resourcesGame} onClose={() => setResourcesGameId(undefined)} onChange={resources => setGameResources(resourcesGame.id, resources)} />}
+  </div>
+}
+
+/** Bandeau des groupes épinglés en tête de bibliothèque (spec « Groupes de
+ * jeux » §13) : cartes compactes (nom, membres, temps total), clic → vue
+ * Groupes. Les membres restent individuellement accessibles — jamais fusionnés. */
+function PinnedGroupsStrip({ groups, games, onOpenGroups }: { groups: GameGroup[]; games: Game[]; onOpenGroups: () => void }) {
+  if (!groups.length) return null
+  return <div className="mb-3">
+    <p className="mb-2 flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-[0.2em] text-white/30"><Layers size={11} className="text-gold/60" />Groupes épinglés</p>
+    <div className="flex flex-wrap gap-2">
+      {groups.map(group => {
+        const members = groupMembers(games, group)
+        const total = groupTotalPlaytime(games, group)
+        return <button key={group.id} type="button" onClick={onOpenGroups} title={`${members.length} jeu(x) · ${total > 0 ? formatTime(total) : '—'}`} className="flex items-center gap-2 rounded-xl border border-white/[0.07] bg-white/[0.02] px-3 py-2 text-left transition-colors hover:border-gold/25 hover:bg-white/[0.04]">
+          <span className="flex h-7 w-7 flex-none items-center justify-center rounded-lg border border-gold/18 bg-gold/[0.06] text-gold"><Layers size={13} /></span>
+          <span className="min-w-0">
+            <span className="block truncate text-[11px] font-semibold text-white/72">{group.name}</span>
+            <span className="block text-[10px] text-white/34">{members.length} jeu(x){total > 0 ? ` · ${formatTime(total)}` : ''}</span>
+          </span>
+        </button>
+      })}
+    </div>
   </div>
 }
 

@@ -44,3 +44,35 @@ export function shortcutProfileId(game: Game, preferredProfileId?: string): stri
   const fallback = game.profiles.find(profile => profile.isDefault) || game.profiles[0]
   return fallback?.id
 }
+
+/** Périmètre de création : profil actuel / par défaut / tous les profils. */
+export type ShortcutScope = 'current' | 'default' | 'all'
+
+export interface ShortcutPlanEntry {
+  profileId: string
+  profileName: string
+  /** Nom du fichier raccourci : « Jeu — Profil » dès qu'il y a plusieurs
+   * profils (sinon « Jeu »), pour distinguer Modded vs Vanilla. */
+  displayName: string
+}
+
+/**
+ * Plan des raccourcis à créer pour un périmètre. « Tous les profils » produit
+ * un raccourci PAR PROFIL (spec « Fix création de raccourci » — un .lnk par
+ * profil, jamais fusionnés).
+ */
+export function shortcutPlanFor(game: Game, scope: ShortcutScope, currentProfileId?: string): ShortcutPlanEntry[] {
+  const suffix = (profileName: string) => game.profiles.length > 1 ? `${game.name} — ${profileName}` : game.name
+  if (scope === 'all') {
+    return game.profiles.map(profile => ({
+      profileId: profile.id,
+      profileName: profile.name,
+      displayName: suffix(profile.name),
+    }))
+  }
+  const id = shortcutProfileId(game, scope === 'current' ? currentProfileId : undefined)
+  if (!id) return []
+  const profile = game.profiles.find(item => item.id === id)
+  const profileName = profile?.name ?? 'Default'
+  return [{ profileId: id, profileName, displayName: suffix(profileName) }]
+}

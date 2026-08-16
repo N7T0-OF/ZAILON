@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.129.0] - 2026-08-16
+
+> **Raccourcis multi-profils** : la micro-fenêtre « Créer un raccourci bureau »
+> crée désormais **un .lnk par profil** en une seule action — `Cyberpunk 2077 —
+> Modded.lnk` et `Cyberpunk 2077 — Vanilla.lnk` restent distincts.
+
+### Added
+
+- **Sélecteur de profil cible** dans la micro-fenêtre : Profil actuel / Profil
+  par défaut / **Tous les profils** — « Tous » produit un raccourci par profil,
+  jamais fusionnés.
+- **Nom de fichier suffixé par profil** dès qu'un jeu a plusieurs profils
+  (`Jeu — Profil`) — chaque raccourci lance son profil via l'URI
+  `zailon://launch/game/<id>?profile=<pid>`.
+- **Résumé de création multiple** : liste des raccourcis créés (nom, chemin,
+  méthode) + « Ouvrir le dossier », et erreurs listées par profil en cas d'échec
+  partiel.
+- `shortcutPlanFor` (pur, testé) : plan de création (périmètre → liste
+  profil/displayName), indépendant du disque.
+
 ## [1.128.0] - 2026-08-16
 
 > **Fix raccourci bureau** : un vrai raccourci système vérifié (`.lnk` Windows

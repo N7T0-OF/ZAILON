@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.146.1] - 2026-08-16
+
+### Fixed
+
+- **`remove_fivem_mod`** : le résultat inversait « fichiers supprimés » et
+  « octets libérés » (`fivem_dir_stats` renvoie octets puis fichiers). Le
+  compteur affiché après une suppression FiveM est désormais correct, et le
+  test natif verrouille `freedBytes` en plus de `removedFiles`.
+
 ## [1.146.0] - 2026-08-16
 
 > **FiveM Profiles — refonte (1/2)** : ZAILON lit le contenu RÉEL de

@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.147.0] - 2026-08-16
+
+> **FiveM Profiles — refonte (2/2)** : vérification d'intégrité du profil —
+> un verdict clair (fonctionnel / attention / introuvable) sans page
+> Diagnostic.
+
+### Added
+
+- **`verify_fivem_profile` (natif)** : constats disque sans aucune écriture —
+  racine (FiveM.exe), FiveM.app, CitizenFX.ini (avec chemin GTA V lu depuis
+  IVPath), dossier mods/ (avec compteur d'éléments), dossier plugins/ et
+  ReShade (ReShade.ini / dxgi.dll / d3d11.dll / reshade-shaders).
+- **`fivemVerify.ts` (pur, 7 tests)** : verdict `ok` / `attention` / `missing`
+  (ReShade facultatif, racine absente → `missing`) + libellés français et
+  résumé « Profil fonctionnel » / « N éléments à vérifier » (spec §20).
+- **Bouton « Vérifier le profil »** dans le panneau FiveM : résultat inline
+  avec liste des contrôles ✓/✗ et détail (ex. chemin GTA V, compteur mods).
+
+### Validation
+
+- **673 tests ✅** (+7), tsc ✅, build ✅, `cargo fmt` ✅ (2 tests natifs
+  ajoutés, exécutés en CI Linux/Windows).
+
 ## [1.146.1] - 2026-08-16
 
 ### Fixed

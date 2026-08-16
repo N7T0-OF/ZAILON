@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { File, Folder, FolderOpen, HardDrive, RefreshCw, Trash2 } from 'lucide-react'
+import { CheckCircle2, File, Folder, FolderOpen, HardDrive, RefreshCw, ShieldAlert, ShieldCheck, Trash2 } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { native } from '../lib/native'
+import { native, type FiveMProfileVerification } from '../lib/native'
 import { fiveMModLabel, formatFiveMSize } from '../lib/fivemMods'
+import { fiveMCheckLabel, fiveMProfileVerdict, fiveMVerifySummary } from '../lib/fivemVerify'
 import type { Game } from '../types'
 
 /**
@@ -16,6 +17,8 @@ export function FiveMModsPanel({ game }: { game: Game }) {
   const fiveMModsIndex = useStore(state => state.fiveMModsIndex)
   const recordNotice = useStore(state => state.recordNotice)
   const [busy, setBusy] = useState<string | null>(null)
+  const [verification, setVerification] = useState<FiveMProfileVerification | null>(null)
+  const [verifying, setVerifying] = useState(false)
 
   const listing = game.installDirectory ? fiveMModsIndex[game.id] : undefined
   const modsPath = listing?.modsPath || null
@@ -61,6 +64,15 @@ export function FiveMModsPanel({ game }: { game: Game }) {
           title="Relire le dossier mods"
         >
           <RefreshCw size={12} />Actualiser
+        </button>
+        <button
+          type="button"
+          disabled={verifying || !game.installDirectory}
+          onClick={() => void verifyProfile()}
+          className="flex items-center gap-1.5 rounded-lg border border-sky-300/18 px-2.5 py-1.5 text-[10px] font-semibold text-sky-100/70 hover:bg-sky-300/[0.07] disabled:opacity-40"
+          title="Vérifier l'intégrité du profil FiveM (racine, CitizenFX.ini, mods, plugins, ReShade)"
+        >
+          {verifying ? <RefreshCw size={12} className="animate-spin" /> : <ShieldCheck size={12} />}Vérifier le profil
         </button>
       </div>
 
@@ -110,9 +122,45 @@ export function FiveMModsPanel({ game }: { game: Game }) {
         <p className="mt-3 text-[11px] text-white/32">Le dossier mods est vide. Déposez-y vos packs (dossiers ou fichiers) puis actualisez.</p>
       ) : null}
 
+      {verification && <ProfileVerificationResult verification={verification} />}
+
       <p className="mt-3 text-[10px] leading-relaxed text-white/28">
         ZAILON n'active ni ne désactive rien : il organise uniquement ce que vous choisissez de gérer. La suppression est limitée aux éléments de premier niveau du dossier mods.
       </p>
+    </div>
+  )
+
+  async function verifyProfile() {
+    if (!game.installDirectory) return
+    setVerifying(true)
+    try {
+      setVerification(await native.verifyFiveMProfile(game.installDirectory))
+    } catch (error) {
+      recordNotice(String(error))
+    } finally {
+      setVerifying(false)
+    }
+  }
+}
+
+function ProfileVerificationResult({ verification }: { verification: FiveMProfileVerification }) {
+  const verdict = fiveMProfileVerdict(verification.checks)
+  const tone = verdict === 'ok' ? 'text-emerald-200' : verdict === 'missing' ? 'text-red-200' : 'text-amber-200'
+  const Icon = verdict === 'ok' ? CheckCircle2 : ShieldAlert
+  return (
+    <div className="mt-3 rounded-lg border border-white/[0.06] bg-black/15 p-3">
+      <p className={`flex items-center gap-1.5 text-[11px] font-semibold ${tone}`}>
+        <Icon size={13} />{fiveMVerifySummary(verification.checks)}
+      </p>
+      <ul className="mt-2 space-y-1">
+        {verification.checks.map(check => (
+          <li key={check.id} className="flex items-center gap-2 text-[10px]">
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${check.ok ? 'bg-emerald-300/70' : 'bg-red-300/70'}`} />
+            <span className={`font-medium ${check.ok ? 'text-white/55' : 'text-red-100/75'}`}>{fiveMCheckLabel(check.id)}</span>
+            {check.detail && <span className="min-w-0 flex-1 truncate text-white/30" title={check.detail}>{check.detail}</span>}
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

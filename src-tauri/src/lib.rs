@@ -2363,6 +2363,146 @@ fn remove_fivem_mod(
     })
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FiveMProfileCheck {
+    id: String,
+    ok: bool,
+    detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FiveMProfileVerification {
+    checks: Vec<FiveMProfileCheck>,
+}
+
+/// Vérification d'intégrité d'un profil FiveM (spec « FiveM Profiles » §20) :
+/// racine, FiveM.app, CitizenFX.ini (+ chemin GTA V), dossiers mods/plugins et
+/// ReShade. Le verdict (ok / attention / missing) est dérivé côté UI à partir
+/// des contrôles — le natif ne fait que des constats, jamais d'écriture.
+#[tauri::command]
+fn push_fivem_check(
+    checks: &mut Vec<FiveMProfileCheck>,
+    id: &str,
+    ok: bool,
+    detail: Option<String>,
+) {
+    checks.push(FiveMProfileCheck {
+        id: id.to_string(),
+        ok,
+        detail,
+    });
+}
+
+/// Vérification d'intégrité d'un profil FiveM (spec « FiveM Profiles » §20) :
+/// racine, FiveM.app, CitizenFX.ini (+ chemin GTA V), dossiers mods/plugins et
+/// ReShade. Le verdict (ok / attention / missing) est dérivé côté UI à partir
+/// des contrôles — le natif ne fait que des constats, jamais d'écriture.
+#[tauri::command]
+fn verify_fivem_profile(install_directory: String) -> Result<FiveMProfileVerification, String> {
+    let mut checks: Vec<FiveMProfileCheck> = Vec::new();
+    let root = match fs::canonicalize(&install_directory) {
+        Ok(root) => root,
+        Err(_) => {
+            push_fivem_check(
+                &mut checks,
+                "root",
+                false,
+                Some("Dossier d'installation introuvable".into()),
+            );
+            return Ok(FiveMProfileVerification { checks });
+        }
+    };
+    let exe_ok = root.join("FiveM.exe").is_file();
+    push_fivem_check(
+        &mut checks,
+        "root",
+        exe_ok,
+        if exe_ok {
+            Some(root.to_string_lossy().to_string())
+        } else {
+            Some("FiveM.exe introuvable à la racine".into())
+        },
+    );
+    let app_path = locate_fivem_app(&root).unwrap_or_else(|| root.join("FiveM.app"));
+    let app_ok = app_path.is_dir();
+    push_fivem_check(
+        &mut checks,
+        "app",
+        app_ok,
+        if app_ok {
+            Some(app_path.to_string_lossy().to_string())
+        } else {
+            Some("FiveM.app introuvable (premier lancement requis)".into())
+        },
+    );
+    let citizenfx = app_path.join("citizenfx.ini");
+    let has_ini = citizenfx.is_file();
+    let game_path = has_ini
+        .then(|| fs::read_to_string(&citizenfx).ok())
+        .flatten()
+        .as_deref()
+        .and_then(citizenfx_iv_path);
+    push_fivem_check(
+        &mut checks,
+        "citizenfx",
+        has_ini,
+        match (has_ini, game_path) {
+            (true, Some(path)) => Some(format!("Chemin GTA V : {path}")),
+            (true, None) => Some("citizenfx.ini présent (IVPath non déclaré)".into()),
+            (false, _) => Some("citizenfx.ini absent (premier lancement requis)".into()),
+        },
+    );
+    let mods_dir = app_path.join("mods");
+    let mods_ok = mods_dir.is_dir();
+    let mods_count = if mods_ok {
+        fs::read_dir(&mods_dir)
+            .map(|dir| dir.flatten().count())
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    push_fivem_check(
+        &mut checks,
+        "mods",
+        mods_ok,
+        if mods_ok {
+            Some(format!("{mods_count} élément(s)"))
+        } else {
+            Some("Dossier mods/ absent".into())
+        },
+    );
+    let plugins_ok = app_path.join("plugins").is_dir();
+    push_fivem_check(
+        &mut checks,
+        "plugins",
+        plugins_ok,
+        if plugins_ok {
+            Some("Dossier plugins/ présent".into())
+        } else {
+            Some("Dossier plugins/ absent".into())
+        },
+    );
+    // ReShade : ReShade.ini, dxgi.dll/d3d11.dll ou reshade-shaders/ dans
+    // FiveM.app — la DLL de ReShade s'installe à côté du jeu.
+    let reshade = app_path.join("ReShade.ini").is_file()
+        || app_path.join("dxgi.dll").is_file()
+        || app_path.join("d3d11.dll").is_file()
+        || app_path.join("reshade-shaders").is_dir();
+    push_fivem_check(
+        &mut checks,
+        "reshade",
+        reshade,
+        if reshade {
+            Some("ReShade détecté".into())
+        } else {
+            Some("ReShade non détecté (facultatif)".into())
+        },
+    );
+    Ok(FiveMProfileVerification { checks })
+}
+
 /// Normalise un chemin de pack (`\` → `/`, segments vides supprimés) pour
 /// comparer les sources du plan avec les entrées réelles de l'archive.
 fn pack_norm_path(value: &str) -> String {
@@ -16411,6 +16551,49 @@ mod tests {
     }
 
     #[test]
+    fn verify_fivem_profile_reports_each_element_and_reshade() {
+        let root = std::env::temp_dir().join(format!("zailon-fivem-verify-{}", unix_timestamp()));
+        let app = root.join("FiveM.app");
+        fs::create_dir_all(app.join("mods")).unwrap();
+        fs::write(app.join("mods").join("VisualPack"), b"x").unwrap();
+        fs::write(root.join("FiveM.exe"), b"exe").unwrap();
+        fs::write(
+            app.join("citizenfx.ini"),
+            "[Game]\nIVPath=G:\\Games\\GTAV\n",
+        )
+        .unwrap();
+        // ReShade : la DLL se place dans FiveM.app.
+        fs::write(app.join("dxgi.dll"), b"dll").unwrap();
+
+        let result = verify_fivem_profile(root.to_string_lossy().to_string()).unwrap();
+        let by_id = |id: &str| result.checks.iter().find(|c| c.id == id);
+        assert!(by_id("root").unwrap().ok);
+        assert!(by_id("app").unwrap().ok);
+        assert!(by_id("citizenfx").unwrap().ok);
+        assert!(by_id("mods").unwrap().ok);
+        assert!(!by_id("plugins").unwrap().ok); // absent → attention
+        assert!(by_id("reshade").unwrap().ok); // dxgi.dll
+        let citizenfx = by_id("citizenfx").unwrap();
+        assert!(citizenfx
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("GTA V"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn verify_fivem_profile_missing_root_reports_missing() {
+        let root =
+            std::env::temp_dir().join(format!("zailon-fivem-verify-missing-{}", unix_timestamp()));
+        // Dossier vide (aucun FiveM.exe) — le contrôle root échoue.
+        fs::create_dir_all(&root).unwrap();
+        let result = verify_fivem_profile(root.to_string_lossy().to_string()).unwrap();
+        assert!(!result.checks.iter().find(|c| c.id == "root").unwrap().ok);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn citizenfx_iv_path_reads_game_path_without_modifying() {
         let ini = "[Game]\nIVPath=G:\\Games\\GTAV\nUpdateChannel=beta\nSavedBuildNumber=3570\n\n[Addons]\n";
         assert_eq!(citizenfx_iv_path(ini), Some("G:\\Games\\GTAV".to_string()));
@@ -18551,6 +18734,7 @@ pub fn run() {
             detect_fivem_environment,
             list_fivem_mods,
             remove_fivem_mod,
+            verify_fivem_profile,
             fivem_pack_scan,
             fivem_pack_apply,
             fivem_pack_remove,

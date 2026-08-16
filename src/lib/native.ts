@@ -77,6 +77,16 @@ export interface FiveMModRemoveResult {
   freedBytes: number
 }
 
+export interface FiveMProfileCheck {
+  id: string
+  ok: boolean
+  detail?: string
+}
+
+export interface FiveMProfileVerification {
+  checks: FiveMProfileCheck[]
+}
+
 export interface FiveMPackScanResult {
   path: string
   isArchive: boolean
@@ -962,6 +972,9 @@ export const native = {
   listFiveMMods: (installDirectory: string, knownFingerprint?: string) => desktopOnly<FiveMModsListing>('list_fivem_mods', { installDirectory, knownFingerprint }),
   /** Suppression SÉCURISÉE d'un élément de premier niveau de FiveM.app/mods. */
   removeFiveMMod: (installDirectory: string, relativePath: string) => desktopOnly<FiveMModRemoveResult>('remove_fivem_mod', { installDirectory, relativePath }),
+  /** Vérification d'intégrité du profil FiveM (spec §20) : racine, FiveM.app,
+   * CitizenFX.ini (+ IVPath), mods/, plugins/, ReShade. Jamais d'écriture. */
+  verifyFiveMProfile: (installDirectory: string) => desktopOnly<FiveMProfileVerification>('verify_fivem_profile', { installDirectory }),
   fivemPackScan: (selectedPath: string) => desktopOnly<FiveMPackScanResult>('fivem_pack_scan', { selectedPath }),
   fivemPackApply: (archivePath: string, targetDir: string, manifestJson: string) =>
     desktopOnly<FiveMPackApplyResult>('fivem_pack_apply', { archivePath, targetDir, manifestJson }),

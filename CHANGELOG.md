@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.142.0] - 2026-08-16
+
+> **Passe de simplification (3/3)** : chargement différé des images — l'Accueil
+> et la Bibliothèque ne décodent plus aucune jaquette hors écran.
+
+### Added
+
+- **`ProgressiveImage`** (composant) : l'image complète n'est décodée que
+  lorsque sa carte approche du viewport (`IntersectionObserver`, marge de
+  préchargement 240px), puis fondu discret. `decoding="async"` ne bloque
+  jamais le thread UI, `onError` retombe sur un repli stable (jamais d'icône
+  cassée). En mode réduction de mouvement, le fondu est supprimé (spec §7).
+
+### Changed
+
+- **Bibliothèque** : les jaquettes des cartes passent par `ProgressiveImage` —
+  des centaines de jeux ne déclenchent plus de décodage hors écran ; le repli
+  `FallbackArtwork` (teinte déterministe) tient la place pendant le chargement.
+- **Accueil → widget Favoris** : les vignettes utilisent `ProgressiveImage`.
+- **Statistiques** : les vignettes de jeu utilisent `ProgressiveImage`.
+
+### Validation
+
+- **645 tests ✅** (+5), tsc ✅, build ✅, audit prod ✅ (0 vuln).
+
 ## [1.141.0] - 2026-08-16
 
 > **Passe de simplification (2/3)** : configuration de jeu allégée,

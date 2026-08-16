@@ -7,6 +7,7 @@ import { BackgroundTaskSnapshot, CollectionInstallPlan, Mo2ImportOptions, Mo2Imp
 import { ModCard } from '../UI/ModCard'
 import { FallbackArtwork } from '../UI/FallbackArtwork'
 import { ParallaxCover } from '../UI/ParallaxCover'
+import { ProgressiveImage } from '../UI/ProgressiveImage'
 import { ZailonSelectionCheckbox } from '../UI/ZailonSelectionCheckbox'
 import { ZailonSwitch } from '../UI/ZailonSwitch'
 import { isTouchDevice, motionReduced, parallaxActive, systemReducedMotion } from '../../lib/motion'
@@ -756,9 +757,12 @@ function LibraryCard({ game, active, priority, onOpen, onFavorite, onContextMenu
         <div className="h-full overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.02] transition-colors group-hover:border-gold/25 group-hover:bg-white/[0.04]">
           <button type="button" onClick={onOpen} className="block w-full text-left">
             <span className="relative block aspect-[3/4] w-full overflow-hidden bg-black/30">
-              {cover
-                ? <img src={cover} alt="" loading="lazy" className="h-full w-full object-cover" />
-                : <FallbackArtwork name={resolveGameName(game)} kind={game.itemKind} />}
+              <ProgressiveImage
+                src={cover}
+                alt=""
+                fallback={<FallbackArtwork name={resolveGameName(game)} kind={game.itemKind} />}
+                className="h-full w-full"
+              />
               <span className="pointer-events-none absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100"><span className="mb-3 flex items-center gap-1.5 rounded-full bg-gold px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><Play size={11} />Ouvrir</span></span>
               {active && <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-emerald-400/95 px-2 py-0.5 text-[9px] font-bold text-emerald-950"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-950" />En cours</span>}
               {priority && <span className="absolute left-2 top-8 flex items-center gap-1 rounded-full bg-gold/95 px-2 py-0.5 text-[9px] font-bold text-[var(--zailon-accent-text)]"><Star size={8} className="fill-ink-400" />Prioritaire</span>}

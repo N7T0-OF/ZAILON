@@ -20,6 +20,7 @@ import { GameContextMenu } from '../GameContextMenu'
 import { GameResourcesDialog } from '../GameResourcesDialog'
 import { shortcutPlanFor } from '../../lib/shortcuts'
 import { FallbackArtwork } from '../UI/FallbackArtwork'
+import { ProgressiveImage } from '../UI/ProgressiveImage'
 import { SessionStopModal } from '../SessionStopModal'
 import { BackgroundMediaLayer } from '../UI/BackgroundMediaLayer'
 import { ProfileSwitcherPopover } from '../UI/ProfileSwitcherPopover'
@@ -543,7 +544,7 @@ function QuickGame({ game, summary, active, onSelect, favorite }: { game: Game; 
   const cover = resourceUrl(game.resources?.coverPath || game.resources?.bannerPath || game.resources?.backgroundPath) || game.backgroundArt
   const healthTone = summary?.health ? (summary.health.verdict === 'ok' ? 'bg-emerald-300/85' : summary.health.verdict === 'vigilance' ? 'bg-amber-300/85' : 'bg-red-300/85') : undefined
   return <button type="button" onClick={onSelect} title={resolveGameName(game)} className={`group/quick relative min-w-0 overflow-hidden rounded-lg border text-left ${active ? 'border-[#dbe8e5]/28' : 'border-white/[0.06] hover:border-white/20'}`}>
-    {cover ? <img src={cover} alt="" className="absolute inset-0 h-full w-full object-cover opacity-68 transition-transform group-hover/quick:scale-105" /> : <FallbackArtwork name={resolveGameName(game)} kind={game.itemKind} />}
+    <ProgressiveImage src={cover} alt="" opacity={0.68} absolute fallback={<FallbackArtwork name={resolveGameName(game)} kind={game.itemKind} />} />
     <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent" />
     {healthTone && <span className={`absolute right-1 top-1 h-2 w-2 rounded-full ${healthTone}`} title={`Santé : ${summary?.health?.verdict}`} />}
     {favorite && <span className="absolute left-1 top-1 text-[10px] text-amber-300/90" title="Favori">★</span>}

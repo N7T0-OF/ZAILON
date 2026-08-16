@@ -2,6 +2,7 @@ import { ArrowLeft, Boxes, ChevronDown, ChevronRight, Clock3, Download, Gamepad2
 import { useMemo, useState } from 'react'
 import { useStore } from '../../store/useStore'
 import { resourceUrl } from '../../lib/native'
+import { ProgressiveImage } from '../UI/ProgressiveImage'
 import { formatElapsedDuration, formatTime, timeAgo } from '../../utils'
 import { dailyBreakdown, minutesWithin, perGame, perGroup, perProfile, recentSessions, summarizeSessions } from '../../lib/sessionStats'
 import { groupMembers } from '../../lib/gameGroups'
@@ -366,9 +367,13 @@ function GameDetail({ game, entry, importedMin, history, now, onOpenGame, onRese
 
 function GameThumb({ game, name, size = 40 }: { game?: { resources?: { coverPath?: string; bannerPath?: string; backgroundPath?: string; iconPath?: string }; backgroundArt?: string }; name: string; size?: number }) {
   const cover = resourceUrl(game?.resources?.coverPath || game?.resources?.bannerPath || game?.resources?.backgroundPath || game?.backgroundArt)
-  return cover
-    ? <img src={cover} alt="" loading="lazy" className="flex-none rounded-md object-cover" style={{ width: size, height: size * 1.4 }} />
-    : <span className="flex flex-none items-center justify-center rounded-md bg-white/[0.05] font-display font-black text-[var(--zailon-accent)]" style={{ width: size, height: size * 1.4, fontSize: size * 0.42 }}>{name.charAt(0).toUpperCase()}</span>
+  return <span className="flex-none overflow-hidden rounded-md" style={{ width: size, height: size * 1.4 }}>
+    <ProgressiveImage
+      src={cover}
+      alt=""
+      fallback={<span className="flex h-full w-full items-center justify-center bg-white/[0.05] font-display font-black text-[var(--zailon-accent)]" style={{ fontSize: size * 0.42 }}>{name.charAt(0).toUpperCase()}</span>}
+    />
+  </span>
 }
 
 function HeroStat({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {

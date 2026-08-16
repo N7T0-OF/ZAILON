@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, File, Folder, FolderOpen, HardDrive, RefreshCw, ShieldAlert, ShieldCheck, Trash2 } from 'lucide-react'
+import { Archive, CheckCircle2, Download, File, Folder, FolderOpen, HardDrive, RefreshCw, ShieldAlert, ShieldCheck, Trash2 } from 'lucide-react'
 import { useStore } from '../store/useStore'
-import { native, type FiveMProfileVerification } from '../lib/native'
+import { native, saveFiveMProfileArchive, type FiveMProfileVerification } from '../lib/native'
 import { fiveMModLabel, formatFiveMSize } from '../lib/fivemMods'
 import { fiveMCheckLabel, fiveMProfileVerdict, fiveMVerifySummary } from '../lib/fivemVerify'
 import type { Game } from '../types'
@@ -19,6 +19,7 @@ export function FiveMModsPanel({ game }: { game: Game }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [verification, setVerification] = useState<FiveMProfileVerification | null>(null)
   const [verifying, setVerifying] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const listing = game.installDirectory ? fiveMModsIndex[game.id] : undefined
   const modsPath = listing?.modsPath || null
@@ -73,6 +74,15 @@ export function FiveMModsPanel({ game }: { game: Game }) {
           title="Vérifier l'intégrité du profil FiveM (racine, CitizenFX.ini, mods, plugins, ReShade)"
         >
           {verifying ? <RefreshCw size={12} className="animate-spin" /> : <ShieldCheck size={12} />}Vérifier le profil
+        </button>
+        <button
+          type="button"
+          disabled={exporting || !game.installDirectory}
+          onClick={() => void exportProfile()}
+          className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-2.5 py-1.5 text-[10px] text-white/55 hover:bg-white/[0.05] disabled:opacity-40"
+          title="Exporter le profil : manifest + mods + plugins + CitizenFX.ini + ReShade, sans FiveM.exe ni cache/logs"
+        >
+          {exporting ? <RefreshCw size={12} className="animate-spin" /> : <Archive size={12} />}Exporter le profil
         </button>
       </div>
 
@@ -139,6 +149,21 @@ export function FiveMModsPanel({ game }: { game: Game }) {
       recordNotice(String(error))
     } finally {
       setVerifying(false)
+    }
+  }
+
+  async function exportProfile() {
+    if (!game.installDirectory) return
+    setExporting(true)
+    try {
+      const destination = await saveFiveMProfileArchive(`${game.name} — Profil`)
+      if (!destination) return
+      const result = await native.exportFiveMProfile(game.installDirectory, destination, game.name)
+      recordNotice(`Profil FiveM exporté (${result.files} fichier${result.files !== 1 ? 's' : ''}, ${formatFiveMSize(result.bytes)}).`)
+    } catch (error) {
+      recordNotice(String(error))
+    } finally {
+      setExporting(false)
     }
   }
 }

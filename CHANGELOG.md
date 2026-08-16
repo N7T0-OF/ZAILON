@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.148.0] - 2026-08-16
+
+> **FiveM Profiles — refonte (2/2)** : export intelligent du profil — on
+> partage uniquement ce qui compte, jamais FiveM.exe ni les caches.
+
+### Added
+
+- **`export_fivem_profile` (natif)** : zip `manifest.json` + `citizenfx.ini`
+  + `mods/` + `plugins/` + ReShade (`ReShade.ini`, `reshade-shaders/`) — en
+  EXCLUANT FiveM.exe, le client (`FiveM.app/citizen`), `cache/` et `logs/`.
+  Écriture atomique (fichier temporaire puis renommage), liens symboliques
+  refusés, limite 100 000 fichiers (spec §7, §19).
+- **Bouton « Exporter le profil »** : boîte de dialogue de sauvegarde
+  (`.zailon-fivem-profile`), export puis notification « N fichiers · taille ».
+
+### Validation
+
+- **675 tests ✅** (+2), tsc ✅, build ✅, `cargo fmt` ✅ (1 test natif :
+  l'archive contient manifest + mods/plugins/ini/ReShade et jamais FiveM.exe
+  ni cache/).
+
 ## [1.147.0] - 2026-08-16
 
 > **FiveM Profiles — refonte (2/2)** : vérification d'intégrité du profil —

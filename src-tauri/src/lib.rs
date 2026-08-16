@@ -2503,6 +2503,100 @@ fn verify_fivem_profile(install_directory: String) -> Result<FiveMProfileVerific
     Ok(FiveMProfileVerification { checks })
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FiveMProfileExportResult {
+    path: String,
+    files: usize,
+    bytes: u64,
+}
+
+/// Export intelligent d'un profil FiveM (spec « FiveM Profiles » §7, §19) :
+/// manifest + mods/ + plugins/ + citizenfx.ini + ReShade (ReShade.ini,
+/// reshade-shaders/) — en EXCLUANT FiveM.exe, le client (FiveM.app/citizen),
+/// cache/ et logs/. Jamais de copie inutile : les dossiers absents sont
+/// simplement omis.
+#[tauri::command]
+fn export_fivem_profile(
+    install_directory: String,
+    destination: String,
+    game_name: String,
+) -> Result<FiveMProfileExportResult, String> {
+    let root = fs::canonicalize(&install_directory).map_err(to_error)?;
+    let app_path = locate_fivem_app(&root)
+        .ok_or_else(|| "FiveM.app introuvable — impossible d'exporter un profil.".to_string())?;
+    let destination = PathBuf::from(destination);
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(to_error)?;
+    }
+    let temporary = destination.with_extension("zailon-fivem.tmp");
+    let file = fs::File::create(&temporary).map_err(to_error)?;
+    let mut writer = zip::ZipWriter::new(file);
+    let manifest = serde_json::json!({
+        "schemaVersion": 1,
+        "kind": "fivem-profile",
+        "app": "ZAILON",
+        "game": game_name,
+        "createdAt": unix_timestamp(),
+        "exclusions": ["FiveM.exe", "FiveM.app/citizen", "cache/", "logs/"],
+    });
+    writer
+        .start_file("manifest.json", zip_options())
+        .map_err(to_error)?;
+    writer
+        .write_all(&serde_json::to_vec_pretty(&manifest).map_err(to_error)?)
+        .map_err(to_error)?;
+    let mut files = 1usize;
+    let mut bytes = 0u64;
+
+    let citizenfx = app_path.join("citizenfx.ini");
+    if citizenfx.is_file() {
+        writer
+            .start_file("citizenfx.ini", zip_options())
+            .map_err(to_error)?;
+        let mut ini = fs::File::open(&citizenfx).map_err(to_error)?;
+        copy(&mut ini, &mut writer).map_err(to_error)?;
+        files += 1;
+        bytes += fs::metadata(&citizenfx).map(|meta| meta.len()).unwrap_or(0);
+    }
+
+    for (dir_name, archive_root) in [
+        ("mods", "mods"),
+        ("plugins", "plugins"),
+        ("reshade-shaders", "reshade-shaders"),
+    ] {
+        let source = app_path.join(dir_name);
+        if source.is_dir() {
+            files += add_source_to_zip(&mut writer, &source, archive_root)?;
+            bytes += fivem_dir_stats(&source).0;
+        }
+    }
+
+    let reshade_ini = app_path.join("ReShade.ini");
+    if reshade_ini.is_file() {
+        writer
+            .start_file("ReShade.ini", zip_options())
+            .map_err(to_error)?;
+        let mut ini = fs::File::open(&reshade_ini).map_err(to_error)?;
+        copy(&mut ini, &mut writer).map_err(to_error)?;
+        files += 1;
+        bytes += fs::metadata(&reshade_ini)
+            .map(|meta| meta.len())
+            .unwrap_or(0);
+    }
+
+    drop(writer);
+    if destination.exists() {
+        fs::remove_file(&destination).map_err(to_error)?;
+    }
+    fs::rename(&temporary, &destination).map_err(to_error)?;
+    Ok(FiveMProfileExportResult {
+        path: destination.to_string_lossy().to_string(),
+        files,
+        bytes,
+    })
+}
+
 /// Normalise un chemin de pack (`\` → `/`, segments vides supprimés) pour
 /// comparer les sources du plan avec les entrées réelles de l'archive.
 fn pack_norm_path(value: &str) -> String {
@@ -16581,7 +16675,6 @@ mod tests {
             .contains("GTA V"));
         fs::remove_dir_all(&root).unwrap();
     }
-
     #[test]
     fn verify_fivem_profile_missing_root_reports_missing() {
         let root =
@@ -16590,6 +16683,45 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let result = verify_fivem_profile(root.to_string_lossy().to_string()).unwrap();
         assert!(!result.checks.iter().find(|c| c.id == "root").unwrap().ok);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn export_fivem_profile_bundles_only_user_content() {
+        let root = std::env::temp_dir().join(format!("zailon-fivem-export-{}", unix_timestamp()));
+        let app = root.join("FiveM.app");
+        fs::create_dir_all(app.join("mods").join("VisualPack")).unwrap();
+        fs::create_dir_all(app.join("plugins")).unwrap();
+        fs::write(app.join("mods").join("VisualPack").join("a.txt"), b"hello").unwrap();
+        fs::write(app.join("plugins").join("plugin.dll"), b"dll").unwrap();
+        fs::write(app.join("citizenfx.ini"), "[Game]\nIVPath=X\n").unwrap();
+        fs::write(app.join("ReShade.ini"), b"reshade").unwrap();
+        fs::write(root.join("FiveM.exe"), b"exe").unwrap(); // JAMAIS exporté
+        fs::create_dir_all(app.join("cache")).unwrap(); // JAMAIS exporté
+        fs::write(app.join("cache").join("huge.dat"), b"cache").unwrap();
+        let destination = root.join("profile.zip");
+
+        let result = export_fivem_profile(
+            root.to_string_lossy().to_string(),
+            destination.to_string_lossy().to_string(),
+            "FiveM — Graphics".into(),
+        )
+        .unwrap();
+        assert!(destination.exists());
+        assert_eq!(result.files, 5); // manifest + citizenfx.ini + a.txt + plugin.dll + ReShade.ini
+
+        let file = fs::File::open(&destination).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let names: Vec<String> = (0..archive.len())
+            .map(|index| archive.by_index(index).unwrap().name().to_string())
+            .collect();
+        assert!(names.iter().any(|name| name == "manifest.json"));
+        assert!(names.iter().any(|name| name == "citizenfx.ini"));
+        assert!(names.iter().any(|name| name == "mods/VisualPack/a.txt"));
+        assert!(names.iter().any(|name| name == "plugins/plugin.dll"));
+        assert!(names.iter().any(|name| name == "ReShade.ini"));
+        assert!(!names.iter().any(|name| name.contains("FiveM.exe")));
+        assert!(!names.iter().any(|name| name.contains("cache")));
         fs::remove_dir_all(&root).unwrap();
     }
 
@@ -18735,6 +18867,7 @@ pub fn run() {
             list_fivem_mods,
             remove_fivem_mod,
             verify_fivem_profile,
+            export_fivem_profile,
             fivem_pack_scan,
             fivem_pack_apply,
             fivem_pack_remove,

@@ -87,6 +87,12 @@ export interface FiveMProfileVerification {
   checks: FiveMProfileCheck[]
 }
 
+export interface FiveMProfileExportResult {
+  path: string
+  files: number
+  bytes: number
+}
+
 export interface FiveMPackScanResult {
   path: string
   isArchive: boolean
@@ -975,6 +981,10 @@ export const native = {
   /** Vérification d'intégrité du profil FiveM (spec §20) : racine, FiveM.app,
    * CitizenFX.ini (+ IVPath), mods/, plugins/, ReShade. Jamais d'écriture. */
   verifyFiveMProfile: (installDirectory: string) => desktopOnly<FiveMProfileVerification>('verify_fivem_profile', { installDirectory }),
+  /** Export intelligent d'un profil FiveM (spec §7, §19) : manifest + mods/ +
+   * plugins/ + citizenfx.ini + ReShade, sans FiveM.exe ni cache/logs. */
+  exportFiveMProfile: (installDirectory: string, destination: string, gameName: string) =>
+    desktopOnly<FiveMProfileExportResult>('export_fivem_profile', { installDirectory, destination, gameName }),
   fivemPackScan: (selectedPath: string) => desktopOnly<FiveMPackScanResult>('fivem_pack_scan', { selectedPath }),
   fivemPackApply: (archivePath: string, targetDir: string, manifestJson: string) =>
     desktopOnly<FiveMPackApplyResult>('fivem_pack_apply', { archivePath, targetDir, manifestJson }),
@@ -1225,6 +1235,16 @@ export async function saveProfileArchive(defaultName: string) {
     title: 'Exporter le profil ZAILON',
     defaultPath: `${defaultName.replace(/[^a-z0-9_-]+/gi, '-')}.zailon-profile`,
     filters: [{ name: 'Profil ZAILON', extensions: ['zailon-profile'] }],
+  })
+  return typeof selected === 'string' ? selected : null
+}
+
+export async function saveFiveMProfileArchive(defaultName: string) {
+  if (!isTauri()) return null
+  const selected = await save({
+    title: 'Exporter le profil FiveM',
+    defaultPath: `${defaultName.replace(/[^a-z0-9_-]+/gi, '-')}.zailon-fivem-profile`,
+    filters: [{ name: 'Profil FiveM ZAILON', extensions: ['zailon-fivem-profile'] }],
   })
   return typeof selected === 'string' ? selected : null
 }

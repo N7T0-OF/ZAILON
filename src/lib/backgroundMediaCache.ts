@@ -84,6 +84,33 @@ export function validateCachedVideo(entry: CachedBackgroundVideo, videoId: strin
   return entry.videoFile === cacheVideoFilename(videoId) && entry.sizeBytes > 0
 }
 
+/** Entrée native du cache (inventaire disque) — mappée vers le manifeste. */
+export interface NativeCachedMediaEntry {
+  videoId: string
+  sizeBytes: number
+  cachedAt: number
+  sourceUrl?: string
+}
+
+/**
+ * Construit le manifeste de cache depuis l'inventaire natif RÉEL (le disque
+ * est la source de vérité — jamais un manifeste deviné). Filtre les entrées
+ * vides/invalides et trie par date décroissante.
+ */
+export function mediaCacheManifestFromNative(entries: NativeCachedMediaEntry[]): BackgroundMediaCacheManifest {
+  const mapped = entries
+    .filter(entry => Boolean(entry.videoId) && entry.sizeBytes > 0)
+    .map(entry => ({
+      videoId: entry.videoId,
+      videoFile: cacheVideoFilename(entry.videoId),
+      sizeBytes: entry.sizeBytes,
+      cachedAt: entry.cachedAt || 0,
+      sourceUrl: entry.sourceUrl || '',
+    }))
+    .sort((a, b) => b.cachedAt - a.cachedAt)
+  return { schemaVersion: MEDIA_CACHE_SCHEMA_VERSION, entries: mapped }
+}
+
 /** Pipeline d'état du téléchargement YouTube (spec) : statut lisible par l'UI. */
 export type YoutubeResolveStatus = 'idle' | 'validating' | 'identifying' | 'downloading' | 'caching' | 'verifying' | 'cached' | 'ytdlp_missing' | 'failed'
 

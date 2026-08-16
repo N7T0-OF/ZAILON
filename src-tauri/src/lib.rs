@@ -3340,6 +3340,130 @@ fn resolve_youtube_video(
     })
 }
 
+/// Entrée du cache des fonds vidéo (spec « Gestion du cache ») — inventaire
+/// RÉEL des fichiers `video_<id>.mp4` dans `media/backgrounds/` (le disque est
+/// la source de vérité, jamais un manifeste deviné).
+#[derive(serde::Serialize)]
+struct CachedBackgroundMediaEntry {
+    video_id: String,
+    video_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thumbnail_path: Option<String>,
+    size_bytes: u64,
+    cached_at: u64,
+}
+
+fn sanitize_background_video_id(video_id: &str) -> bool {
+    !video_id.is_empty()
+        && video_id.len() <= 24
+        && video_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+#[tauri::command]
+fn list_cached_background_media(app: AppHandle) -> Result<Vec<CachedBackgroundMediaEntry>, String> {
+    let cache_dir = update_data_root(&app)?.join("media").join("backgrounds");
+    if !cache_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(&cache_dir)
+        .map_err(to_error)?
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        // Format stable : `video_<id>.mp4` — la vignette réelle est
+        // `video_<id>.jpg|webp|png` (écrite par yt-dlp).
+        let Some(video_id) = name
+            .strip_prefix("video_")
+            .and_then(|rest| rest.strip_suffix(".mp4"))
+        else {
+            continue;
+        };
+        if !sanitize_background_video_id(video_id) {
+            continue;
+        }
+        let meta = fs::metadata(&path).map_err(to_error)?;
+        if !meta.is_file() {
+            continue;
+        }
+        let cached_at = meta
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        let thumbnail_path = ["jpg", "webp", "png"]
+            .iter()
+            .map(|ext| cache_dir.join(format!("video_{video_id}.{ext}")))
+            .find(|thumb| thumb.exists());
+        entries.push(CachedBackgroundMediaEntry {
+            video_id: video_id.to_string(),
+            video_path: path.to_string_lossy().to_string(),
+            thumbnail_path: thumbnail_path.map(|thumb| thumb.to_string_lossy().to_string()),
+            size_bytes: meta.len(),
+            cached_at,
+        });
+    }
+    entries.sort_by(|left, right| right.cached_at.cmp(&left.cached_at));
+    Ok(entries)
+}
+
+/// Supprime une vidéo + sa vignette (jamais d'écriture hors du dossier cache,
+/// identifiant sanitisé avant tout accès disque).
+#[tauri::command]
+fn remove_cached_background_media(app: AppHandle, video_id: String) -> Result<bool, String> {
+    if !sanitize_background_video_id(&video_id) {
+        return Err("Invalid YouTube video id.".into());
+    }
+    let cache_dir = update_data_root(&app)?.join("media").join("backgrounds");
+    let video = cache_dir.join(format!("video_{video_id}.mp4"));
+    let mut removed = false;
+    if video.exists() {
+        fs::remove_file(&video).map_err(to_error)?;
+        removed = true;
+    }
+    for ext in ["jpg", "webp", "png"] {
+        let thumb = cache_dir.join(format!("video_{video_id}.{ext}"));
+        if thumb.exists() {
+            fs::remove_file(&thumb).map_err(to_error)?;
+            removed = true;
+        }
+    }
+    Ok(removed)
+}
+
+/// Vide le cache des fonds vidéo (vidéos + vignettes), retourne le nombre de
+/// fichiers supprimés.
+#[tauri::command]
+fn clear_cached_background_media(app: AppHandle) -> Result<u32, String> {
+    let cache_dir = update_data_root(&app)?.join("media").join("backgrounds");
+    if !cache_dir.exists() {
+        return Ok(0);
+    }
+    let mut removed = 0u32;
+    for entry in fs::read_dir(&cache_dir)
+        .map_err(to_error)?
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !path.is_file() || !(name.starts_with("video_") || name.starts_with("thumbnail_")) {
+            continue;
+        }
+        if fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 fn validate_external_url(url: &str) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|_| "The source URL is invalid.".to_string())?;
     if parsed.scheme() != "https" {
@@ -17948,6 +18072,9 @@ pub fn run() {
             store_game_resource,
             cache_remote_game_resource,
             resolve_youtube_video,
+            list_cached_background_media,
+            remove_cached_background_media,
+            clear_cached_background_media,
             search_game_artwork,
             test_artwork_provider,
             remove_game_resource,

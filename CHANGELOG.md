@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.138.0] - 2026-08-16
+
+> **Gestion du cache des fonds vidéo** : Paramètres → Stockage affiche
+> l'inventaire réel des vidéos de fond téléchargées (compte + taille), avec
+> suppression ciblée et vidage complet.
+
+### Added
+
+- **`list_cached_background_media` (natif)** : inventaire RÉEL de
+  `video_<id>.mp4` dans `media/backgrounds/` (le disque est la source de
+  vérité — jamais un manifeste deviné) avec vignette, taille et date.
+- **`remove_cached_background_media` / `clear_cached_background_media`
+  (natif)** : suppression ciblée (vidéo + vignette, identifiant sanitisé avant
+  tout accès disque) et vidage complet.
+- **`mediaCacheManifestFromNative` (pur, testé)** : mapping inventaire natif →
+  manifeste filtré et trié — réutilise la base `backgroundMediaCache.ts` déjà
+  testée.
+- **Store** : état `backgroundMediaCache` (jamais persisté — dérivé du disque),
+  actions `loadBackgroundMediaCache` / `removeBackgroundMedia` /
+  `clearBackgroundMedia`.
+- **UI** : section Stockage enrichie — Stat « Fonds vidéo en cache » (compte +
+  taille), liste des vidéos (id, taille, date, Supprimer), bouton « Vider le
+  cache des fonds vidéo ». L'inventaire n'est lu qu'à l'ouverture de la
+  section (jamais au boot).
+
+### Docs
+
+- `docs/background-media-cache-management.md`.
+
 ## [1.137.0] - 2026-08-16
 
 > **Cache mods intelligent — ouverture de jeu instantanée** : ZAILON ne

@@ -28,6 +28,7 @@ import { effectivePerformance, type DownloadPolicy, type PerformanceMode, type S
 import { enabledCountFromState, isSilentClear, repairReport } from '../lib/profileConsistency'
 import { createDebouncer } from '../lib/persistDebounce'
 import { modsScanDecision } from '../lib/modsCache'
+import { EMPTY_MEDIA_CACHE, mediaCacheManifestFromNative, type BackgroundMediaCacheManifest } from '../lib/backgroundMediaCache'
 import { ZAILON_PERSIST_KEY } from '../lib/designTokens'
 
 // Cache mods intelligent (spec §37-38) : résultat du scan du dossier Mods par
@@ -390,6 +391,9 @@ export interface Store {
   artworkSourceMode: 'automatic' | 'all'
   /** Fonds multimédia de l'Accueil (spec §10) — réglages globaux. */
   backgroundMediaSettings: BackgroundMediaSettings
+  /** Inventaire du cache des fonds vidéo (spec « Gestion du cache ») — dérivé
+   * du disque (jamais persisté : le disque est la source de vérité). */
+  backgroundMediaCache: BackgroundMediaCacheManifest
   autoCheckUpdates: boolean
   autoInstallUpdates: boolean
   modUpdateFrequency: 'never' | 'startup' | 'daily' | 'weekly'
@@ -554,6 +558,13 @@ export interface Store {
   setGameResources: (gameId: string, resources: Partial<GameResources>) => void
   setGameBackgroundMedia: (gameId: string, media: Partial<GameBackgroundMedia>) => void
   setBackgroundMediaSettings: (patch: Partial<BackgroundMediaSettings>) => void
+  /** Inventaire du cache des fonds vidéo depuis le disque (spec « Gestion du
+   * cache ») — lecture seule, rafraîchi à l'ouverture du panneau. */
+  loadBackgroundMediaCache: () => Promise<void>
+  /** Supprime une vidéo + sa vignette du cache puis rafraîchit l'inventaire. */
+  removeBackgroundMedia: (videoId: string) => Promise<void>
+  /** Vide le cache des fonds vidéo puis rafraîchit l'inventaire. */
+  clearBackgroundMedia: () => Promise<void>
   setGameFavorite: (gameId: string, favorite?: boolean) => void
   setGameHidden: (gameId: string, hidden?: boolean) => void
   setGameCategories: (gameId: string, categories: string[]) => void
@@ -888,6 +899,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   artworkIgdbClientSecret: '',
   artworkSourceMode: 'automatic',
   backgroundMediaSettings: DEFAULT_BACKGROUND_MEDIA_SETTINGS,
+  backgroundMediaCache: EMPTY_MEDIA_CACHE,
   autoCheckUpdates: true,
   autoInstallUpdates: false,
   modUpdateFrequency: 'weekly',
@@ -1294,6 +1306,36 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setBackgroundMediaSettings: patch => set(state => ({
     backgroundMediaSettings: { ...state.backgroundMediaSettings, ...patch },
   })),
+  loadBackgroundMediaCache: async () => {
+    if (!native.isDesktop()) return
+    try {
+      const entries = await native.listCachedBackgroundMedia()
+      set({ backgroundMediaCache: mediaCacheManifestFromNative(entries) })
+    } catch (error) {
+      set({ notice: asError(error) })
+    }
+  },
+  removeBackgroundMedia: async videoId => {
+    if (!native.isDesktop()) return
+    try {
+      const removed = await native.removeCachedBackgroundMedia(videoId)
+      if (removed) {
+        set(state => ({ backgroundMediaCache: { ...state.backgroundMediaCache, entries: state.backgroundMediaCache.entries.filter(entry => entry.videoId !== videoId) } }))
+        set({ notice: 'Fond vidéo supprimé du cache.' })
+      }
+    } catch (error) {
+      set({ notice: asError(error) })
+    }
+  },
+  clearBackgroundMedia: async () => {
+    if (!native.isDesktop()) return
+    try {
+      const removed = await native.clearCachedBackgroundMedia()
+      set({ backgroundMediaCache: EMPTY_MEDIA_CACHE, notice: `${removed} fichier${removed !== 1 ? 's' : ''} supprimé${removed !== 1 ? 's' : ''} du cache des fonds vidéo.` })
+    } catch (error) {
+      set({ notice: asError(error) })
+    }
+  },
   setGameFavorite: (gameId, favorite) => set(state => ({
     games: state.games.map(game => game.id === gameId ? { ...game, favorite: favorite ?? !game.favorite } : game),
   })),

@@ -11,6 +11,7 @@ import {
   cacheVideoFilename,
   EMPTY_MEDIA_CACHE,
   evictLru,
+  mediaCacheManifestFromNative,
   removeCacheEntry,
   totalCacheBytes,
   upsertCacheEntry,
@@ -67,4 +68,17 @@ test('validateCachedVideo : nom attendu + taille > 0', () => {
   assert.equal(validateCachedVideo(entry('xyz', 1234, 1), 'xyz'), true)
   assert.equal(validateCachedVideo({ ...entry('xyz', 1234, 1), videoFile: 'video_other.mp4' }, 'xyz'), false)
   assert.equal(validateCachedVideo({ ...entry('xyz', 0, 1) }, 'xyz'), false)
+})
+
+test('mediaCacheManifestFromNative : inventaire disque → manifeste filtré et trié (spec « Gestion du cache »)', () => {
+  const manifest = mediaCacheManifestFromNative([
+    { videoId: 'aaa', sizeBytes: 300, cachedAt: 1 },
+    { videoId: 'bbb', sizeBytes: 100, cachedAt: 3 },
+    { videoId: '', sizeBytes: 50, cachedAt: 2 }, // vidéo invalide → ignorée
+    { videoId: 'ccc', sizeBytes: 0, cachedAt: 4 }, // taille 0 → ignorée
+  ])
+  assert.equal(manifest.entries.length, 2)
+  assert.deepEqual(manifest.entries.map(item => item.videoId), ['bbb', 'aaa'])
+  assert.equal(manifest.entries[0].videoFile, 'video_bbb.mp4')
+  assert.equal(totalCacheBytes(manifest), 400)
 })

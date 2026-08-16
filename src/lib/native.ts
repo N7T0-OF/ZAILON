@@ -813,6 +813,14 @@ export interface ResolvedBackgroundVideo {
   message?: string
 }
 
+export interface CachedBackgroundMediaEntry {
+  videoId: string
+  videoPath: string
+  thumbnailPath?: string
+  sizeBytes: number
+  cachedAt: number
+}
+
 export const native = {
   isDesktop: () => isTauri(),
   /** Active/désactive le démarrage avec le système (spec §37-42, §116) :
@@ -1056,6 +1064,12 @@ export const native = {
     desktopOnly<string>('cache_remote_game_resource', { gameId, kind, sourceUrl }),
   resolveYoutubeVideo: (url: string, videoId: string) =>
     desktopOnly<ResolvedBackgroundVideo>('resolve_youtube_video', { url, videoId }),
+  /** Inventaire RÉEL du cache des fonds vidéo (spec « Gestion du cache »). */
+  listCachedBackgroundMedia: () => desktopOnly<CachedBackgroundMediaEntry[]>('list_cached_background_media'),
+  /** Supprime une vidéo + sa vignette du cache (identifiant sanitisé). */
+  removeCachedBackgroundMedia: (videoId: string) => desktopOnly<boolean>('remove_cached_background_media', { videoId }),
+  /** Vide le cache des fonds vidéo, retourne le nombre de fichiers supprimés. */
+  clearCachedBackgroundMedia: () => desktopOnly<number>('clear_cached_background_media'),
   /** Recherche multi-source : Steam officiel toujours, + chaque fournisseur
    * dont une clé est fournie dans `apiKeys` (ex. `steamgriddb`). Les résultats
    * sont fusionnés et dédupliqués côté natif dans une seule liste. */

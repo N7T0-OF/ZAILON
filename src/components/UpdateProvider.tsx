@@ -157,7 +157,9 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   }, [autoInstallUpdates, installUpdate, recordUpdateCheck, updateChannel])
 
   useEffect(() => {
-    if (!autoCheckUpdates || automaticCheckStarted.current || !native.isDesktop()) return
+    // Mode Minimal (spec §42) : aucune vérification automatique de mise à jour.
+    const minimalMode = useStore.getState().minimalMode
+    if (!autoCheckUpdates || minimalMode || automaticCheckStarted.current || !native.isDesktop()) return
     automaticCheckStarted.current = true
     const timer = window.setTimeout(() => void checkUpdates(), 750)
     return () => window.clearTimeout(timer)

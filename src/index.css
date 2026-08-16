@@ -160,6 +160,19 @@ select {
   animation-play-state: paused !important;
 }
 
+/* Mode Minimal (spec §42) : ZAILON reste ouvert sans être perceptible —
+ * animations, transitions et parallaxe entièrement désactivées. */
+[data-minimal-mode="true"] *,
+[data-minimal-mode="true"] *::before,
+[data-minimal-mode="true"] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+[data-minimal-mode="true"] .cover-parallax,
+[data-minimal-mode="true"] [style*="transform"] {
+  transform: none !important;
+}
+
 /* Design system — ZailonSwitch (spec « Refonte globale des toggles » §9) :
  * animation courte (140 ms), uniquement le déplacement du rond et la couleur
  * de piste, jamais de bounce. Réduire les animations = transition annulée

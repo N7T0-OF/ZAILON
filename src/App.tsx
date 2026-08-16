@@ -18,6 +18,7 @@ import { createStartupProfiler, createUiWatchdog, StartupCoordinator } from './l
 import { shouldNotifyBackgroundSession, traySessionLabel } from './lib/backgroundTracking'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from './lib/keyboardPresets'
 import { isRed4extActive } from './lib/frameworkValidator'
+import { minimalModeDataset } from './lib/minimalMode'
 import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-profiles/application/shortcuts'
@@ -97,6 +98,7 @@ export default function App() {
   const setSelectedProfile = useStore(s => s.setSelectedProfile)
   const textSize = useStore(s => s.textSize)
   const uiDensity = useStore(s => s.uiDensity)
+  const minimalMode = useStore(s => s.minimalMode)
   const accentColor = useStore(s => s.accentColor)
   const quickPanelEnabled = useStore(s => s.quickPanelEnabled)
   const quickPanelShortcut = useStore(s => s.quickPanelShortcut)
@@ -431,6 +433,14 @@ export default function App() {
     document.documentElement.dataset.textSize = textSize
     document.documentElement.dataset.density = uiDensity
   }, [textSize, uiDensity])
+
+  // Mode Minimal (spec §42) : attribut data-minimal-mode → animations,
+  // transitions et parallaxe coupées via CSS — le launcher reste ouvert sans
+  // être perceptible. Décision pure dans `minimalMode.ts`.
+  useEffect(() => {
+    const { minimalMode: datasetValue } = minimalModeDataset(minimalMode)
+    document.documentElement.dataset.minimalMode = datasetValue
+  }, [minimalMode])
 
   // UIWatchdog (spec Startup §13) : en développement, tout bloc de l'event loop
   // > 250 ms est signalé — outil de chasse aux freezes futurs. Zéro coût en prod.

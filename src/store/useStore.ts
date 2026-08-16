@@ -364,6 +364,9 @@ export interface Store {
   uiDensity: UiDensity
   /** Mode d'animation global : auto (suit le système) / activées / réduites. */
   motionMode: MotionMode
+  /** Mode Minimal (spec §42) : ZAILON reste ouvert sans être perceptible —
+   * pas de vidéo, pas d'automatisme réseau, pas d'animation décorative. */
+  minimalMode: boolean
   /** Effet 3D des couvertures (parallaxe subtil, spec §12). */
   coverParallax: boolean
   /** Profil Performance par jeu (spec §5-10, §23) : id du jeu → mode. */
@@ -615,6 +618,7 @@ export interface Store {
   setTextSize: (size: TextSize) => void
   setUiDensity: (density: UiDensity) => void
   setMotionMode: (mode: MotionMode) => void
+  setMinimalMode: (enabled: boolean) => void
   setCoverParallax: (enabled: boolean) => void
   setPerformanceMode: (gameId: string, mode: PerformanceMode) => void
   setPerformanceCustom: (gameId: string, policies: Partial<ZailonPerformancePolicies>) => void
@@ -887,6 +891,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   textSize: 'normal',
   uiDensity: 'comfortable',
   motionMode: 'auto',
+  minimalMode: false,
   coverParallax: true,
   performanceModes: {},
   performanceCustom: {},
@@ -1227,7 +1232,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       // Spec Performance §12 : quand un jeu actif met les scans en pause, la
       // recherche d'artwork automatique est suspendue (reprise au prochain
       // ajout — aucune file orpheline).
-      if (get().autoArtwork && get().runtimeActivity.scans === 'normal') {
+      if (get().autoArtwork && get().runtimeActivity.scans === 'normal' && !get().minimalMode) {
         fresh.forEach(game => {
           void automaticArtworkForGame(game, { steamGridDbKey: get().artworkSteamGridDbKey, igdbClientId: get().artworkIgdbClientId, igdbClientSecret: get().artworkIgdbClientSecret }).then(resources => {
             if (!Object.keys(resources).length) return
@@ -1974,6 +1979,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   setTextSize: textSize => set({ textSize }),
   setUiDensity: uiDensity => set({ uiDensity }),
   setMotionMode: motionMode => set({ motionMode }),
+  setMinimalMode: minimalMode => set({ minimalMode }),
   setCoverParallax: coverParallax => set({ coverParallax }),
   setPerformanceMode: (gameId, mode) => set(state => ({ performanceModes: { ...state.performanceModes, [gameId]: mode } })),
   setPerformanceCustom: (gameId, policies) => set(state => ({ performanceCustom: { ...state.performanceCustom, [gameId]: { ...state.performanceCustom[gameId], ...policies } } })),
@@ -3366,6 +3372,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     textSize: state.textSize,
     uiDensity: state.uiDensity,
     motionMode: state.motionMode,
+    minimalMode: state.minimalMode,
     coverParallax: state.coverParallax,
     performanceModes: state.performanceModes,
     performanceCustom: state.performanceCustom,

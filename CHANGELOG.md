@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.139.0] - 2026-08-16
+
+> **Mode Minimal** : ZAILON peut rester ouvert sans être perceptible — un seul
+> toggle coupe vidéo de fond, animations, parallaxe et automatismes réseau.
+
+### Added
+
+- **`src/lib/minimalMode.ts` (pur, 4 tests)** : `resolveMinimalMode`,
+  `minimalBackgroundAllowed`, `minimalAutoActivityAllowed`, `minimalModeDataset`
+  — un seul endroit décide ce qui est coupé (spec §42).
+- **Store** : `minimalMode` (persisté) + `setMinimalMode` ; la recherche
+  d'illustrations automatique est coupée quand le mode est actif.
+- **UI — Paramètres → Mode jeu** : toggle « Mode minimal » avec description
+  (pas de vidéo, pas d'animation, aucune recherche auto ni rafraîchissement
+  réseau — l'essentiel reste disponible).
+
+### Changed
+
+- **`App.tsx`** : attribut `data-minimal-mode` sur `<html>` ; **CSS** :
+  `[data-minimal-mode="true"] *` désactive `animation`/`transition` (parallaxe
+  incluse).
+- **Accueil** : le fond vidéo est forcé sur « aucun » en mode minimal
+  (`minimalBackgroundAllowed`).
+- **UpdateProvider** : la vérification automatique des mises à jour ne démarre
+  pas en mode minimal.
+
+### Docs
+
+- `docs/minimal-mode.md`.
+
 ## [1.138.0] - 2026-08-16
 
 > **Gestion du cache des fonds vidéo** : Paramètres → Stockage affiche

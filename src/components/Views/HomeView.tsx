@@ -14,6 +14,7 @@ import { addonCapabilities, hasCapability } from '../../lib/addonGating'
 import { HOME_PRESET_LABELS, HOME_WIDGET_DEFAULTS, HOME_WIDGET_VARIANTS, orderHomeWidgets, widgetGridClass, type HomeLayoutPreset, type HomeWidgetConfig } from '../../lib/homeWidgets'
 import { pickPrioritySession } from '../../lib/sessionPriority'
 import { groupProfilePairs, groupMembers, nextGroupProfile } from '../../lib/gameGroups'
+import { minimalBackgroundAllowed } from '../../lib/minimalMode'
 import { resolveGameName, resolveGameTitle } from '../../lib/gameIdentity'
 import { GameContextMenu } from '../GameContextMenu'
 import { CreateShortcutDialog } from '../CreateShortcutDialog'
@@ -40,6 +41,7 @@ export function HomeView() {
   const isPlaying = useStore(state => state.isPlaying)
   const sessionTime = useStore(state => state.sessionTime)
   const backgroundMediaSettings = useStore(state => state.backgroundMediaSettings)
+  const minimalMode = useStore(state => state.minimalMode)
   const performanceMode = useStore(state => state.performanceModes[state.selectedGameId ?? ''] ?? state.globalPerformanceMode)
   const setGameBackgroundMedia = useStore(state => state.setGameBackgroundMedia)
   const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === state.selectedGameId && session.state !== 'Ended' && session.state !== 'Failed'))
@@ -160,7 +162,11 @@ export function HomeView() {
   }))
   useEffect(() => subscribeBackgroundPlayerState(() => setSessionAudio(backgroundPlayerState())), [])
   const heroMuted = sessionAudio.available ? sessionAudio.muted : shouldStartMuted(selectedGame.backgroundMedia, backgroundMediaSettings)
-  const hasBackgroundSource = resolveMediaType(selectedGame.backgroundMedia, backgroundMediaSettings, Boolean(video)) !== 'none'
+  // Mode Minimal (spec §42) : pas de fond vidéo — décision pure.
+  const hasBackgroundSource = minimalBackgroundAllowed(
+    resolveMediaType(selectedGame.backgroundMedia, backgroundMediaSettings, Boolean(video)) !== 'none',
+    minimalMode,
+  )
   // Indicateur « son coupé pour cette session » : l'utilisateur avait activé le
   // son (intention persistée non muette) mais la politique §44/§50 a démarré ce
   // lancement muet — la session est muette alors que l'intention est active.

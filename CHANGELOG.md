@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.143.0] - 2026-08-16
+
+> **ZAILON Lite / Core** : mode veille — quand rien ne tourne, rien ne
+> scrute. CPU/réseau quasi nuls au repos.
+
+### Added
+
+- **Mode veille (idle)** : décision pure `idleMode.ts` — après une durée
+  d'inactivité (par défaut 3 min, minimum 60 s), et seulement si **aucune
+  session**, **aucune tâche de fond** et **aucun suivi d'apps externes**, le
+  watcher périodique suspend les scrutateurs (preuve Steam, présence des
+  processus, fenêtres) et l'attribut `data-idle` coupe les animations CSS.
+  Au premier mouvement souris/clavier, le réveil est instantané (spec §15).
+- **Réglage Paramètres → Suivi & démarrage discret → « Mode veille »** :
+  après 1/3/5/10 minutes ou jamais — persisté.
+
+### Changed
+
+- **Zéro scan permanent** : le scrutateur App évalue `shouldIdle` **avant**
+  tout appel IPC/natif — en veille, aucune lecture du registre Steam, aucun
+  scan de processus ni de fenêtres (spec §5, §11).
+
+### Validation
+
+- **655 tests ✅** (+10), tsc ✅, build ✅, audit prod ✅ (0 vuln).
+
 ## [1.142.0] - 2026-08-16
 
 > **Passe de simplification (3/3)** : chargement différé des images — l'Accueil

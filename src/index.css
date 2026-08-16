@@ -160,6 +160,14 @@ select {
   animation-play-state: paused !important;
 }
 
+/* Mode veille (spec « ZAILON Lite » §15) : launcher au repos — mêmes
+ * coupes CSS que le mode Minimal (aucune animation en arrière-plan). */
+[data-idle="true"] *,
+[data-idle="true"] *::before,
+[data-idle="true"] *::after {
+  animation-play-state: paused !important;
+}
+
 /* Mode Minimal (spec §42) : ZAILON reste ouvert sans être perceptible —
  * animations, transitions et parallaxe entièrement désactivées. */
 [data-minimal-mode="true"] *,

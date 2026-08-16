@@ -18,6 +18,7 @@ import { shouldNotifyBackgroundSession, traySessionLabel } from './lib/backgroun
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from './lib/keyboardPresets'
 import { isRed4extActive } from './lib/frameworkValidator'
 import { minimalModeDataset } from './lib/minimalMode'
+import { shouldIdle } from './lib/idleMode'
 import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-profiles/application/shortcuts'
@@ -243,6 +244,16 @@ export default function App() {
   // Pendant une PossibleExit (jeu disparu, vérification de fermeture), le scan
   // repasse à 3 s pour terminer la session vite (spec RuntimeSessionV3 §3).
   const exitCheckRef = useRef(false)
+  // Mode veille (spec « ZAILON Lite » §15) : dernière interaction utilisateur.
+  // Aucun scrutateur périodique ne tourne quand le launcher est au repos —
+  // souris/clavier redonnent immédiatement vie au watcher.
+  const lastActivityRef = useRef(Date.now())
+  useEffect(() => {
+    const mark = () => { lastActivityRef.current = Date.now() }
+    const events: Array<keyof WindowEventMap> = ['pointermove', 'pointerdown', 'keydown', 'wheel', 'mousemove']
+    events.forEach(event => window.addEventListener(event, mark, { passive: true }))
+    return () => events.forEach(event => window.removeEventListener(event, mark))
+  }, [])
   useEffect(() => {
     let scanning = false
     let lastScan = 0
@@ -253,6 +264,23 @@ export default function App() {
       tick()
       if (!native.isDesktop()) return
       const now = Date.now()
+      // Mode veille (spec « ZAILON Lite » §15) : aucune session, aucune tâche
+      // de fond et aucune interaction depuis `idleTimeoutMs` → les scrutateurs
+      // périodiques (preuve Steam, présence, fenêtres) sont suspendus. Le
+      // battement de cœur reste à 1 s (coût nul) mais ne déclenche plus aucun
+      // IPC/natif ni lecture registre.
+      const idle = shouldIdle({
+        lastActivityAt: lastActivityRef.current,
+        now,
+        sessionActive: state.gameSessions.some(session => session.state !== 'Ended' && session.state !== 'Failed'),
+        backgroundActive: state.backgroundTasks.some(task => task.status === 'running'),
+        trackExternalApps: state.trackExternalApps,
+      }, state.idleTimeoutMs)
+      // Attribut `data-idle` → CSS coupe les animations en veille (spec §15).
+      if (document.documentElement.dataset.idle !== (idle ? 'true' : '')) {
+        document.documentElement.dataset.idle = idle ? 'true' : ''
+      }
+      if (idle) return
       // Mode jeu (spec #50-51, Performance §8) : quand un jeu tourne, le
       // watcher ralentit (6 s au lieu de 3 s) — la présence reste suivie sans
       // activité lourde. La politique effective des profils Performance (scans

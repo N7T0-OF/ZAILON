@@ -28,6 +28,7 @@ import { effectivePerformance, type DownloadPolicy, type PerformanceMode, type S
 import { enabledCountFromState, isSilentClear, repairReport } from '../lib/profileConsistency'
 import { createDebouncer } from '../lib/persistDebounce'
 import { modsScanDecision } from '../lib/modsCache'
+import { DEFAULT_IDLE_TIMEOUT_MS, normalizeIdleTimeout } from '../lib/idleMode'
 import { EMPTY_MEDIA_CACHE, mediaCacheManifestFromNative, type BackgroundMediaCacheManifest } from '../lib/backgroundMediaCache'
 import { ZAILON_PERSIST_KEY } from '../lib/designTokens'
 
@@ -430,6 +431,9 @@ export interface Store {
   trackPlaytime: boolean
   /** Suivi des apps lancées hors ZAILON (§35-36, §114). */
   trackExternalApps: boolean
+  /** Mode veille (spec « ZAILON Lite » §15) : délai d'inactivité (ms) avant de
+   * suspendre les scrutateurs périodiques. `undefined` = jamais (toujours éveillé). */
+  idleTimeoutMs?: number
   /** Démarrer ZAILON avec le système (§37, §116). */
   startWithSystem: boolean
   /** Démarrage discret : ZAILON démarre sans fenêtre principale (§37-41). */
@@ -667,6 +671,7 @@ export interface Store {
   /** Réglages de suivi (spec §114-117) : applique le autostart natif dès que
    * `startWithSystem`/`startDiscreet` changent. */
   setTrackingSettings: (patch: Partial<Pick<Store, 'trackPlaytime' | 'trackExternalApps' | 'startWithSystem' | 'startDiscreet'>>) => void
+  setIdleTimeout: (idleTimeoutMs: number | undefined) => void
   /** Récupération d'une session interrompue par un crash de ZAILON (§45) :
    * archive avec le dernier checkpoint, marquée `recovered`. */
   recoverInterruptedSession: () => void
@@ -861,6 +866,7 @@ export function migratePersistedState(persisted: unknown) {
     sessionHistory: Array.isArray(state.sessionHistory) ? state.sessionHistory : [],
     trackPlaytime: state.trackPlaytime ?? true,
     trackExternalApps: state.trackExternalApps ?? true,
+    idleTimeoutMs: state.idleTimeoutMs === undefined ? DEFAULT_IDLE_TIMEOUT_MS : normalizeIdleTimeout(state.idleTimeoutMs),
     startWithSystem: state.startWithSystem ?? false,
     startDiscreet: state.startDiscreet ?? false,
     activeTrackedSession: state.activeTrackedSession && typeof state.activeTrackedSession.gameId === 'string'
@@ -917,6 +923,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
   sessionHistory: [],
   trackPlaytime: true,
   trackExternalApps: true,
+  idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
   startWithSystem: false,
   startDiscreet: false,
   gameSessions: [],
@@ -2742,6 +2749,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
   upsertBackgroundTask: task => set(state => ({ backgroundTasks: [task, ...state.backgroundTasks.filter(item => item.id !== task.id)].sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 500) })),
   setTaskToastsEnabled: taskToastsEnabled => set({ taskToastsEnabled }),
   setTaskAutoReduceImports: taskAutoReduceImports => set({ taskAutoReduceImports }),
+  /** Mode veille (spec « ZAILON Lite » §15) : délai d'inactivité avant de
+   * suspendre les scrutateurs. `undefined` = jamais. */
+  setIdleTimeout: idleTimeoutMs => set({ idleTimeoutMs }),
   setTrackingSettings: patch => {
     const current = get()
     // Cohérence (spec §116) : discret implique un démarrage avec le système ;
@@ -3422,6 +3432,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
     activeTrackedSession: state.activeTrackedSession,
     trackPlaytime: state.trackPlaytime,
     trackExternalApps: state.trackExternalApps,
+    idleTimeoutMs: state.idleTimeoutMs,
     startWithSystem: state.startWithSystem,
     startDiscreet: state.startDiscreet,
     activityMaxEvents: state.activityMaxEvents,

@@ -142,6 +142,8 @@ export function SettingsView() {
   const trackExternalApps = useStore(state => state.trackExternalApps)
   const startWithSystem = useStore(state => state.startWithSystem)
   const startDiscreet = useStore(state => state.startDiscreet)
+  const idleTimeoutMs = useStore(state => state.idleTimeoutMs)
+  const setIdleTimeout = useStore(state => state.setIdleTimeout)
   const setTrackingSettings = useStore(state => state.setTrackingSettings)
   const setShowSupportButton = useStore(state => state.setShowSupportButton)
   const restartTour = useStore(state => state.restartTour)
@@ -369,6 +371,16 @@ export function SettingsView() {
           <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/65"><span>Suivre les apps lancées hors ZAILON</span><ZailonSwitch checked={trackExternalApps} onChange={next => setTrackingSettings({ trackExternalApps: next })} /></label>
           <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/65"><span>Démarrer ZAILON avec le système</span><ZailonSwitch checked={startWithSystem} onChange={next => setTrackingSettings({ startWithSystem: next })} /></label>
           <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/65"><span>Démarrer discrètement</span><ZailonSwitch checked={startDiscreet} onChange={next => setTrackingSettings({ startDiscreet: next })} disabled={!startWithSystem} /></label>
+          <label className="flex items-center justify-between gap-3 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/65">
+            <span className="flex items-center gap-2">Mode veille<ZailonInfoPopover text="Après cette durée sans interaction, ZAILON suspend ses scrutateurs (présence, Steam, fenêtres) et coupe les animations — CPU/réseau quasi nuls. Au moindre mouvement, le réveil est instantané. Désactivé = jamais de veille." /></span>
+            <select value={idleTimeoutMs === undefined ? 'never' : String(idleTimeoutMs)} onChange={event => setIdleTimeout(event.target.value === 'never' ? undefined : Number(event.target.value))} className="rounded-lg border border-white/[0.08] bg-[#101313] px-2.5 py-1.5 text-[11px] text-white/70 outline-none">
+              <option value="60000">Après 1 minute</option>
+              <option value="180000">Après 3 minutes</option>
+              <option value="300000">Après 5 minutes</option>
+              <option value="600000">Après 10 minutes</option>
+              <option value="never">Jamais</option>
+            </select>
+          </label>
         </div>
         {!reduceExplanations && <p className="mt-2 text-[11px] leading-relaxed text-white/32">Les statistiques restent 100 % locales — aucun compte, aucune télémétrie. « Discrètement » lance ZAILON sans ouvrir la fenêtre principale : seul le suivi des sessions tourne (fenêtre réapparaît au double-clic). {!startDiscreet && trackExternalApps && 'ⓘ Le suivi des apps hors ZAILON commence uniquement lorsque ZAILON est ouvert.'}</p>}
       </AccordionSection>

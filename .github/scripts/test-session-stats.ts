@@ -11,6 +11,7 @@ import {
   heatmapCells,
   minutesWithin,
   perGame,
+  perGroup,
   perProfile,
   recentSessions,
   summarizeSessions,
@@ -140,4 +141,28 @@ test('recentSessions : tri décroissant + borne (spec Activité récente)', () =
   assert.equal(list[0].id, 'b')
   assert.equal(list[1].id, 'c')
   assert.equal(recentSessions([], 6).length, 0)
+})
+
+test('perGroup : somme par groupe (membres jamais fusionnés), groupes vides ignorés', () => {
+  const games = [
+    { id: 'fivem-default', name: 'FiveM Default', profiles: [{ id: 'p1' }, { id: 'p2' }] },
+    { id: 'fivem-drift', name: 'FiveM Drift', profiles: [{ id: 'p3' }] },
+    { id: 'cyberpunk', name: 'Cyberpunk 2077', profiles: [{ id: 'p4' }] },
+  ]
+  const groups = [
+    { id: 'g-fivem', name: 'FiveM', memberGameIds: ['fivem-default', 'fivem-drift'] },
+    { id: 'g-vide', name: 'Groupe vide', memberGameIds: ['introuvable'] },
+  ]
+  const history = [
+    session({ id: 's1', gameId: 'fivem-default', durationMin: 40, endedAt: now - HOUR }),
+    session({ id: 's2', gameId: 'fivem-drift', durationMin: 25, endedAt: now - 2 * HOUR }),
+    session({ id: 's3', gameId: 'cyberpunk', durationMin: 60, endedAt: now - 3 * HOUR }),
+  ]
+  const stats = perGroup(history, games, groups)
+  assert.equal(stats.length, 1) // groupe vide ignoré
+  assert.equal(stats[0].groupId, 'g-fivem')
+  assert.equal(stats[0].minutes, 65) // 40 + 25, jamais fusionné par profil
+  assert.equal(stats[0].sessions, 2)
+  assert.equal(stats[0].memberCount, 2)
+  assert.equal(stats[0].profileCount, 3)
 })

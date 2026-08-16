@@ -1,9 +1,10 @@
-import { ArrowLeft, ChevronDown, ChevronRight, Clock3, Download, Gamepad2, History, Search, Timer, Trash2, Trophy } from 'lucide-react'
+import { ArrowLeft, Boxes, ChevronDown, ChevronRight, Clock3, Download, Gamepad2, History, Search, Timer, Trash2, Trophy, Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useStore } from '../../store/useStore'
 import { resourceUrl } from '../../lib/native'
 import { formatElapsedDuration, formatTime, timeAgo } from '../../utils'
-import { dailyBreakdown, minutesWithin, perGame, perProfile, recentSessions, summarizeSessions } from '../../lib/sessionStats'
+import { dailyBreakdown, minutesWithin, perGame, perGroup, perProfile, recentSessions, summarizeSessions } from '../../lib/sessionStats'
+import { groupMembers } from '../../lib/gameGroups'
 import type { TrackedSession } from '../../types'
 
 type StatsTab = 'tout' | 'jeux' | 'apps'
@@ -37,6 +38,7 @@ export function StatisticsView() {
   const activeTrackedSession = useStore(state => state.activeTrackedSession)
   const gameSessions = useStore(state => state.gameSessions)
   const games = useStore(state => state.games)
+  const gameGroups = useStore(state => state.gameGroups)
   const setView = useStore(state => state.setView)
   const setSelectedGame = useStore(state => state.setSelectedGame)
   const resetSessionHistory = useStore(state => state.resetSessionHistory)
@@ -45,6 +47,7 @@ export function StatisticsView() {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<(typeof SORT_LABELS)[number]['value']>('played')
   const [expandedGameId, setExpandedGameId] = useState<string>()
+  const [expandedGroupId, setExpandedGroupId] = useState<string>()
   const [exported, setExported] = useState<'csv' | 'json' | undefined>(undefined)
   const [exportOpen, setExportOpen] = useState(false)
 
@@ -65,6 +68,7 @@ export function StatisticsView() {
   const weekMinutes = useMemo(() => minutesWithin(filteredHistory, now, 7), [filteredHistory, now])
   const weekSessionCount = useMemo(() => filteredHistory.filter(session => session.endedAt >= now - 7 * 24 * 60 * 60 * 1000).length, [filteredHistory, now])
   const byGame = useMemo(() => perGame(filteredHistory, liveSessions), [filteredHistory, liveSessions])
+  const byGroup = useMemo(() => perGroup(filteredHistory, games, gameGroups, liveSessions), [filteredHistory, games, gameGroups, liveSessions])
   const recent = useMemo(() => recentSessions(filteredHistory, 6), [filteredHistory])
 
   const liveMinutes = useMemo(() => {
@@ -228,6 +232,61 @@ export function StatisticsView() {
                 </ul>}
           </section>
         </div>
+
+        {/* Groupes (spec « Groupes de jeux » §10 / « Stats par groupe ») :
+         * somme des membres, jamais fusionnée par profil. */}
+        {byGroup.length > 0 && (
+          <section className="rounded-xl border border-white/[0.06] bg-white/[0.018]">
+            <div className="flex items-center gap-2 border-b border-white/[0.05] px-4 py-3">
+              <Boxes size={13} className="text-gold/70" />
+              <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-white/40">Groupes</p>
+              <span className="ml-auto text-[10px] text-white/28">{byGroup.length} groupe(s)</span>
+            </div>
+            <ul className="divide-y divide-white/[0.04]">
+              {byGroup.map(group => {
+                const expanded = expandedGroupId === group.groupId
+                const maxGroup = Math.max(1, ...byGroup.map(item => item.minutes))
+                const groupDef = gameGroups.find(item => item.id === group.groupId)
+                const members = groupDef ? groupMembers(games, groupDef) : []
+                return <li key={group.groupId}>
+                  <button type="button" onClick={() => setExpandedGroupId(expanded ? undefined : group.groupId)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.025]">
+                    <span className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-white/[0.05] text-gold/70"><Boxes size={13} /></span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate text-xs font-semibold text-white/78">{group.groupName}</span>
+                        {group.live && <span className="flex shrink-0 items-center gap-1 rounded-full bg-green-400/10 px-2 py-0.5 text-[9px] font-semibold text-green-300">● En cours</span>}
+                      </div>
+                      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/[0.06]">
+                        <div className="h-full rounded-full bg-[var(--zailon-accent)]/70" style={{ width: `${Math.max(group.minutes > 0 ? 3 : 0, Math.round((group.minutes / maxGroup) * 100))}%` }} />
+                      </div>
+                      <p className="mt-1 text-[10px] text-white/30">{group.memberCount} jeu(x) · {group.profileCount} profil(s) · {group.sessions} session(s)</p>
+                    </div>
+                    <span className="shrink-0 font-mono text-xs text-white/60">{group.minutes > 0 ? formatTime(group.minutes) : '—'}</span>
+                    {expanded ? <ChevronDown size={14} className="shrink-0 text-white/30" /> : <ChevronRight size={14} className="shrink-0 text-white/30" />}
+                  </button>
+                  {expanded && (
+                    <div className="border-t border-white/[0.04] bg-black/15 px-4 py-3">
+                      <p className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-white/26"><Users size={10} />Membres — contributions distinctes, jamais fusionnées</p>
+                      <ul className="mt-2 space-y-1.5">
+                        {members.map(member => {
+                          const entry = byGame.find(item => item.gameId === member.id)
+                          return <li key={member.id} className="flex items-center gap-2">
+                            <Gamepad2 size={11} className="shrink-0 text-white/30" />
+                            <span className="w-40 truncate text-[10px] text-white/50">{member.name}</span>
+                            <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
+                              <div className="h-full rounded-full bg-white/[0.16]" style={{ width: `${Math.max(entry?.minutes ? 2 : 0, Math.round(((entry?.minutes ?? 0) / Math.max(1, group.minutes)) * 100))}%` }} />
+                            </div>
+                            <span className="w-14 shrink-0 text-right font-mono text-[10px] text-white/45">{entry?.minutes ? formatTime(entry.minutes) : '—'}</span>
+                          </li>
+                        })}
+                      </ul>
+                    </div>
+                  )}
+                </li>
+              })}
+            </ul>
+          </section>
+        )}
 
         <p className="px-1 text-[11px] leading-relaxed text-white/28">Suivi ZAILON uniquement — le temps Steam/EA reste séparé s’il est fourni par un add-on (§96). Historique persisté avec checkpoints toutes les ~5 min : une session interrompue par un crash de ZAILON est récupérée au prochain démarrage.</p>
       </div>

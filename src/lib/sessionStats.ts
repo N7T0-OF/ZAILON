@@ -6,7 +6,7 @@
  * cours/terminées non encore archivées.
  */
 
-import type { TrackedSession } from '../types'
+import type { Game, GameGroup, TrackedSession } from '../types'
 
 export interface SessionSummary {
   /** Temps total comptabilisé, en MINUTES. */
@@ -86,6 +86,57 @@ export function perGame(history: TrackedSession[], liveSessions: Array<{ gameId:
  * récente) : triées par `endedAt` décroissant, bornées à `limit`. */
 export function recentSessions(history: TrackedSession[], limit = 6): TrackedSession[] {
   return [...history].sort((a, b) => b.endedAt - a.endedAt).slice(0, limit)
+}
+
+/** Statistiques agrégées d'un groupe de jeux (spec « Groupes de jeux » §10,
+ * « Stats par groupe ») : temps + sessions des MEMBRES, jamais fusionnés par
+ * profil — chaque jeu garde sa propre contribution. */
+export interface GroupStats {
+  groupId: string
+  groupName: string
+  minutes: number
+  sessions: number
+  live: boolean
+  memberCount: number
+  profileCount: number
+}
+
+/** Répartition PAR GROUPE : somme du temps/sessions des jeux membres (triée
+ * par temps décroissant). Les groupes sans membre valide sont ignorés. */
+export function perGroup(
+  history: TrackedSession[],
+  games: Game[],
+  groups: GameGroup[],
+  liveSessions: Array<{ gameId: string; startedAt: number }> = [],
+): GroupStats[] {
+  const byGame = new Map(perGame(history, liveSessions).map(entry => [entry.gameId, entry]))
+  const gamesById = new Map(games.map(game => [game.id, game]))
+  const out: GroupStats[] = []
+  for (const group of groups) {
+    const members = group.memberGameIds.map(id => gamesById.get(id)).filter((game): game is Game => Boolean(game))
+    if (members.length === 0) continue
+    let minutes = 0
+    let sessions = 0
+    let live = false
+    for (const game of members) {
+      const entry = byGame.get(game.id)
+      if (entry) {
+        minutes += entry.minutes
+        sessions += entry.sessions
+        live = live || entry.live
+      }
+    }
+    out.push({
+      groupId: group.id,
+      groupName: group.name,
+      minutes,
+      sessions,
+      live,
+      memberCount: members.length,
+      profileCount: members.reduce((sum, game) => sum + (game.profiles?.length ?? 0), 0),
+    })
+  }
+  return out.sort((a, b) => b.minutes - a.minutes || b.memberCount - a.memberCount)
 }
 
 /** Répartition PAR PROFIL pour un jeu (spec §32, §49). */

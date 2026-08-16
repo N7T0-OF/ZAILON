@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.130.0] - 2026-08-16
+
+> **Statistiques par groupe** : la page « Temps de jeu & sessions » agrège
+> désormais les groupes de jeux — temps et sessions des membres, jamais
+> fusionnés par profil, avec détail membre au clic.
+
+### Added
+
+- **Section « Groupes »** dans Statistiques : classement visuel (temps total,
+  barre, nombre de jeux/profils/sessions, badge « En cours »), ouvert au clic
+  pour voir la **contribution distincte de chaque membre** (jamais fusionnée).
+- **`perGroup` (pur, testé)** dans `sessionStats.ts` : somme du temps/sessions
+  des membres d'un groupe, groupes vides ignorés, triés par temps décroissant.
+
 ## [1.129.0] - 2026-08-16
 
 > **Raccourcis multi-profils** : la micro-fenêtre « Créer un raccourci bureau »

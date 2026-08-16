@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.144.0] - 2026-08-16
+
+> **ZAILON Lite / Core** : cache d'images stable par identifiant — une même
+> illustration n'est plus jamais re-téléchargée ni dupliquée sur le disque.
+
+### Changed
+
+- **`cache_remote_game_resource` (natif)** : le nom de fichier temporel
+  `{kind}-remote-{timestamp}.{ext}` est remplacé par une clé stable
+  `{kind}-{sha256(url)}.{ext}`. Avant tout appel réseau, ZAILON vérifie si
+  l'image existe déjà et la renvoie directement — **zéro téléchargement,
+  zéro fichier dupliqué** (spec §8).
+- **`find_cached_resource` + `sha256_hex` (natif)** : résolution du cache par
+  préfixe de clé (l'extension peut varier), hash SHA-256 sur la chaîne de
+  l'URL.
+
+### Validation
+
+- **655 tests ✅**, tsc ✅, build ✅, `cargo fmt` ✅ (tests natifs exécutés en
+  CI Linux).
+
 ## [1.143.0] - 2026-08-16
 
 > **ZAILON Lite / Core** : mode veille — quand rien ne tourne, rien ne

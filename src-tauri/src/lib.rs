@@ -1197,6 +1197,25 @@ fn unix_timestamp() -> u64 {
         .as_secs()
 }
 
+fn sha256_hex(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    format!("{:x}", hasher.finalize())
+}
+
+fn find_cached_resource(directory: &Path, prefix: &str) -> Option<PathBuf> {
+    let needle = format!("{prefix}.");
+    fs::read_dir(directory)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&needle))
+        })
+}
+
 fn update_data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let root = app.path().app_local_data_dir().map_err(to_error)?;
     fs::create_dir_all(&root).map_err(to_error)?;
@@ -2495,6 +2514,13 @@ async fn cache_remote_game_resource(
     if parsed.scheme() != "https" || !allowed_artwork_host(&host) {
         return Err("This artwork provider is not in ZAILON's trusted source list.".into());
     }
+    // §8 — cache image stable : le hash de l'URL sert de clé. Une même
+    // illustration est réutilisée sans aucun appel réseau ni duplication disque.
+    let cache_prefix = format!("{kind}-{}", sha256_hex(source_url.as_bytes()));
+    let directory = game_resource_directory(&app, &game_id)?;
+    if let Some(existing) = find_cached_resource(&directory, &cache_prefix) {
+        return Ok(existing.to_string_lossy().to_string());
+    }
     let response = reqwest::Client::builder()
         .timeout(Duration::from_secs(25))
         .user_agent(format!("ZAILON/{}", env!("CARGO_PKG_VERSION")))
@@ -2537,18 +2563,7 @@ async fn cache_remote_game_resource(
     if bytes.len() as u64 > MAX_IMAGE_SIZE || !valid_image_bytes(&bytes, extension) {
         return Err("The remote resource failed image validation.".into());
     }
-    let directory = game_resource_directory(&app, &game_id)?;
-    let mut destination =
-        directory.join(format!("{kind}-remote-{}.{}", unix_timestamp(), extension));
-    let mut suffix = 1;
-    while destination.exists() {
-        destination = directory.join(format!(
-            "{kind}-remote-{}-{suffix}.{}",
-            unix_timestamp(),
-            extension
-        ));
-        suffix += 1;
-    }
+    let destination = directory.join(format!("{cache_prefix}.{extension}"));
     fs::write(&destination, &bytes).map_err(to_error)?;
     Ok(destination.to_string_lossy().to_string())
 }
@@ -15875,6 +15890,28 @@ mod tests {
         assert!(safe_game_id("4b2d66ca-5c39-4d35_a").is_ok());
         assert!(safe_game_id("../outside").is_err());
         assert!(safe_game_id("").is_err());
+    }
+
+    #[test]
+    fn sha256_hex_matches_known_vector() {
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn find_cached_resource_reuses_existing_file_by_prefix() {
+        let root = std::env::temp_dir().join(format!("zailon-art-cache-{}", unix_timestamp()));
+        fs::create_dir_all(&root).unwrap();
+        let existing = root.join("cover-deadbeef.webp");
+        fs::write(&existing, b"RIFF____WEBP").unwrap();
+        assert_eq!(
+            find_cached_resource(&root, "cover-deadbeef"),
+            Some(existing)
+        );
+        assert_eq!(find_cached_resource(&root, "cover-otherhash"), None);
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

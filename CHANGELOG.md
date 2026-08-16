@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.132.0] - 2026-08-16
+
+> **Démarrage allégé — vues chargées à la demande** : les vues lourdes
+> (Frosty Editor, Visual Profiles, Statistiques, Add-ons, Explore, News) ne
+> sont plus parsées/exécutées au démarrage — uniquement quand l'utilisateur
+> y navigue.
+
+### Added
+
+- **Code-splitting des vues lourdes** (`React.lazy` + `Suspense` dans
+  `AppWindow`) : `FrostyEditorView` (89 ko), `VisualProfilesPage` (42 ko),
+  `ExploreView` (70 ko), `AddonsView` (36 ko), `StatisticsView` (19 ko) et
+  `NewsView` deviennent des chunks séparés, chargés à la première navigation.
+  C'est le pendant UI de l'exigence « zéro coût de startup » : aucun code
+  Frosty/Visual/Stats/Add-ons n'est chargé tant qu'on n'y va pas.
+- **`SteamDetectionDialog` lazy** : son code n'est chargé qu'à la première
+  ouverture de la fenêtre « Bibliothèque locale ».
+- **Fallback Suspense** minimal (spinner + « Chargement… ») pendant le
+  chargement différé.
+- **Switch uniforme** : « Installer les dépendances » (Add-ons) utilise
+  `ZailonSwitch` au lieu d'une checkbox brute.
+
+### Optimized
+
+- Bundle initial réduit : les 6 vues secondaires (~260 ko minifiés) sortent du
+  chunk principal, parsées seulement à la demande.
+
 ## [1.131.0] - 2026-08-16
 
 > **Groupes épinglés en tête de bibliothèque** : les groupes épinglés

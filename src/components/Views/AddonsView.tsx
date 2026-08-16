@@ -553,7 +553,7 @@ function AddonInstallDialog({ row, installedIds, catalogEntries, onClose, onInst
             <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/15 p-3">
               {/* Spec §5 : dépendance lisible — « Nécessite Frosty Support ⓘ », pas une phrase d'ids. */}
               <p className="flex items-center gap-1.5 text-[11px] font-semibold text-white/68"><Link2 size={12} className="text-gold/70" />Nécessite {dependencyPlan.toInstall.map(id => catalogById.get(id)?.name || id).join(', ')}{dependencyPlan.missing.length > 0 ? ` + ${dependencyPlan.missing.length} introuvable(s)` : ''}</p>
-              {dependencyPlan.toInstall.length > 0 && <label className="mt-2 flex items-center gap-2 text-[11px] text-white/60"><input type="checkbox" checked={deps} onChange={event => setDeps(event.target.checked)} className="h-3.5 w-3.5 accent-[var(--zailon-accent)]" /><strong className="text-white/75">Installer les dépendances</strong> — {dependencyPlan.toInstall.map(id => catalogById.get(id)?.name || id).join(', ')} d'abord, puis cet add-on.</label>}
+              {dependencyPlan.toInstall.length > 0 && <label className="mt-2 flex items-center gap-2 text-[11px] text-white/60"><ZailonSwitch size="compact" checked={deps} onChange={setDeps} /><strong className="text-white/75">Installer les dépendances</strong> — {dependencyPlan.toInstall.map(id => catalogById.get(id)?.name || id).join(', ')} d'abord, puis cet add-on.</label>}
               {dependencyPlan.missing.length > 0 && <p className="mt-1.5 text-[10px] text-amber-100/70">Dépendances introuvables dans le catalogue : {dependencyPlan.missing.join(', ')} — installation impossible tant qu'elles ne sont pas publiées.</p>}
             </div>
           )}

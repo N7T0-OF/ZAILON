@@ -30,6 +30,7 @@ import { createDebouncer } from '../lib/persistDebounce'
 import { modsScanDecision } from '../lib/modsCache'
 import { DEFAULT_IDLE_TIMEOUT_MS, normalizeIdleTimeout } from '../lib/idleMode'
 import { EMPTY_MEDIA_CACHE, mediaCacheManifestFromNative, type BackgroundMediaCacheManifest } from '../lib/backgroundMediaCache'
+import { cleanupSummaryMessage, referencedResourcePaths, type ResourceCleanupOutcome } from '../lib/resourceCleanup'
 import { ZAILON_PERSIST_KEY } from '../lib/designTokens'
 
 // Cache mods intelligent (spec §37-38) : résultat du scan du dossier Mods par
@@ -572,6 +573,10 @@ export interface Store {
   removeBackgroundMedia: (videoId: string) => Promise<void>
   /** Vide le cache des fonds vidéo puis rafraîchit l'inventaire. */
   clearBackgroundMedia: () => Promise<void>
+  /** §10 « Nettoyage automatique » : supprime les fichiers d'artwork orphelins
+   * (non référencés par le store) dans `games/<id>/resources/`. Retourne le
+   * résultat pour l'UI ; `undefined` si non desktop. `silent` → aucun toast. */
+  runResourceCleanup: (options?: { silent?: boolean }) => Promise<ResourceCleanupOutcome | undefined>
   setGameFavorite: (gameId: string, favorite?: boolean) => void
   setGameHidden: (gameId: string, hidden?: boolean) => void
   setGameCategories: (gameId: string, categories: string[]) => void
@@ -1346,6 +1351,17 @@ export const useStore = create<Store>()(persist((set, get) => ({
       set({ backgroundMediaCache: EMPTY_MEDIA_CACHE, notice: `${removed} fichier${removed !== 1 ? 's' : ''} supprimé${removed !== 1 ? 's' : ''} du cache des fonds vidéo.` })
     } catch (error) {
       set({ notice: asError(error) })
+    }
+  },
+  runResourceCleanup: async (options) => {
+    if (!native.isDesktop()) return undefined
+    try {
+      const outcome = await native.cleanupOrphanedGameResources(referencedResourcePaths(get().games))
+      if (!options?.silent) set({ notice: cleanupSummaryMessage(outcome) })
+      return outcome
+    } catch (error) {
+      if (!options?.silent) set({ notice: asError(error) })
+      return undefined
     }
   },
   setGameFavorite: (gameId, favorite) => set(state => ({

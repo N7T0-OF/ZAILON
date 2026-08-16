@@ -1082,6 +1082,11 @@ export const native = {
     desktopOnly<string>('test_artwork_provider', { provider, apiKeys }),
   removeGameResource: (gameId: string, resourcePath: string) =>
     desktopOnly<void>('remove_game_resource', { gameId, resourcePath }),
+  /** §10 « Nettoyage automatique » : supprime les fichiers d'artwork orphelins
+   * (non référencés par le store) dans `games/<id>/resources/`. Référentiel
+   * vide → ne supprime jamais rien. Fichiers modifiés depuis < 1 h ignorés. */
+  cleanupOrphanedGameResources: (referencedPaths: string[]) =>
+    desktopOnly<{ removed: number; freedBytes: number }>('cleanup_orphaned_game_resources', { referencedPaths }),
   openPath: (path: string) => desktopOnly<void>('open_path', { path }),
   openExternalUrl: (url: string) => desktopOnly<void>('open_external_url', { url }),
   prepareUpdateBackup: (snapshot: string, currentVersion: string, targetVersion: string) =>

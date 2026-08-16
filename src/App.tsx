@@ -111,6 +111,7 @@ export default function App() {
   const reconcileRuntimeActivity = useStore(s => s.reconcileRuntimeActivity)
   const refreshStagedCatalogs = useStore(s => s.refreshStagedCatalogs)
   const importSteamPlaytime = useStore(s => s.importSteamPlaytime)
+  const runResourceCleanup = useStore(s => s.runResourceCleanup)
   const recoverInterruptedSession = useStore(s => s.recoverInterruptedSession)
   const flushPendingSettings = useStore(s => s.flushPendingSettings)
   const tourCompleted = useStore(s => s.tourCompleted)
@@ -171,6 +172,20 @@ export default function App() {
       void importSteamPlaytime({ silent: true })
     })
   }, [importSteamPlaytime])
+
+  // §10 « Nettoyage automatique » : en phase idle, les fichiers d'artwork
+  // orphelins (URLs d'illustrations remplacées, legacy `*-remote-*`) sont
+  // supprimés des `resources/` des jeux. Silencieux, jamais au boot — le store
+  // est hydraté (référentiel non vide) et la garde « < 1 h » protège tout
+  // fichier récent ou référence non encore persistée.
+  const resourceCleanupScheduled = useRef(false)
+  useEffect(() => {
+    if (resourceCleanupScheduled.current) return
+    resourceCleanupScheduled.current = true
+    startupCoordinator.schedule('idle', 'Nettoyage des ressources orphelines', () => {
+      void runResourceCleanup({ silent: true })
+    })
+  }, [runResourceCleanup])
 
   // Spec §45 : au démarrage, une session suivie interrompue par un crash de
   // ZAILON est archivée avec son dernier checkpoint (marquée « récupérée »).

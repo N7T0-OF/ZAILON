@@ -3225,6 +3225,138 @@ fn remove_game_resource(
     fs::remove_file(resource).map_err(to_error)
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResourceCleanupResult {
+    removed: usize,
+    freed_bytes: u64,
+}
+
+/// Préfixes des fichiers d'artwork dans `games/<id>/resources/` (locaux et
+/// téléchargés, anciens `*-remote-*` et nouveaux `*-{hash}.*`). Tout le reste
+/// est ignoré — défense en profondeur, on ne supprime jamais un fichier
+/// inconnu.
+const ARTWORK_CACHE_PREFIXES: [&str; 7] = [
+    "cover-",
+    "logo-",
+    "icon-",
+    "background-",
+    "banner-",
+    "hero-",
+    "video-",
+];
+
+fn is_artwork_cache_file(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    ARTWORK_CACHE_PREFIXES
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
+        && name.contains('.')
+}
+
+/// Normalisation d'un chemin pour la comparaison d'ensemble (Windows : cas
+/// insensible, séparateurs unifiés).
+fn resource_cleanup_fingerprint(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase()
+}
+
+/// §10 « Nettoyage automatique » : supprime les fichiers d'artwork orphelins
+/// dans `games/<id>/resources/` — ceux qui ne sont référencés par aucun jeu du
+/// store (anciennes URLs remplacées, legacy `*-remote-*`).
+///
+/// Gardes de sécurité :
+/// - référentiel vide → ne JAMAIS supprimer quoi que ce soit (le store peut ne
+///   pas être hydraté au démarrage) ;
+/// - uniquement les fichiers au motif d'artwork connu ;
+/// - jamais un fichier modifié dans la dernière heure (écriture en cours ou
+///   référence non encore persistée).
+#[tauri::command]
+fn cleanup_orphaned_game_resources(
+    app: AppHandle,
+    referenced_paths: Vec<String>,
+) -> Result<ResourceCleanupResult, String> {
+    if referenced_paths.is_empty() {
+        return Ok(ResourceCleanupResult {
+            removed: 0,
+            freed_bytes: 0,
+        });
+    }
+    let referenced: HashSet<String> = referenced_paths
+        .iter()
+        .map(|path| resource_cleanup_fingerprint(Path::new(path)))
+        .collect();
+    let result = cleanup_orphaned_resources_in(
+        &update_data_root(&app)?.join("games"),
+        &referenced,
+        unix_timestamp(),
+    );
+    Ok(result)
+}
+
+/// Cœur pur du nettoyage (testable sans AppHandle).
+fn cleanup_orphaned_resources_in(
+    games_root: &Path,
+    referenced: &HashSet<String>,
+    now: u64,
+) -> ResourceCleanupResult {
+    let mut removed = 0usize;
+    let mut freed_bytes = 0u64;
+    let Ok(games) = fs::read_dir(games_root) else {
+        return ResourceCleanupResult {
+            removed,
+            freed_bytes,
+        };
+    };
+    for game_entry in games.flatten() {
+        let resources_dir = game_entry.path().join("resources");
+        if !resources_dir.is_dir() {
+            continue;
+        }
+        let Ok(files) = fs::read_dir(&resources_dir) else {
+            continue;
+        };
+        for file_entry in files.flatten() {
+            let path = file_entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default();
+            if !is_artwork_cache_file(name) {
+                continue;
+            }
+            let metadata = match fs::metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(_) => continue,
+            };
+            let modified = metadata
+                .modified()
+                .ok()
+                .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs())
+                .unwrap_or(0);
+            if now.saturating_sub(modified) < 3600 {
+                continue;
+            }
+            if referenced.contains(&resource_cleanup_fingerprint(&path)) {
+                continue;
+            }
+            freed_bytes += metadata.len();
+            if fs::remove_file(&path).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    ResourceCleanupResult {
+        removed,
+        freed_bytes,
+    }
+}
+
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     let path = PathBuf::from(path);
@@ -15915,6 +16047,42 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_orphaned_resources_deletes_only_unreferenced_artwork() {
+        let root = std::env::temp_dir().join(format!("zailon-cleanup-{}", unix_timestamp()));
+        let resources = root.join("game-a").join("resources");
+        fs::create_dir_all(&resources).unwrap();
+        let referenced_file = resources.join("cover-aaaa.webp");
+        let orphan_file = resources.join("cover-remote-1699999999.jpg");
+        let unknown_file = resources.join("notes.txt");
+        fs::write(&referenced_file, b"RIFF____WEBP").unwrap();
+        fs::write(&orphan_file, b"jpg").unwrap();
+        fs::write(&unknown_file, b"keep").unwrap();
+        // « Vieillir » les fichiers : `now` est dans le futur de > 1 h, donc la
+        // garde « modifié depuis < 1 h » est franchie sans toucher aux mtimes.
+        let referenced: HashSet<String> = [resource_cleanup_fingerprint(&referenced_file)].into();
+        let result = cleanup_orphaned_resources_in(&root, &referenced, unix_timestamp() + 7200);
+        assert_eq!(result.removed, 1);
+        assert_eq!(result.freed_bytes, 3);
+        assert!(!orphan_file.exists());
+        assert!(referenced_file.exists());
+        assert!(unknown_file.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn cleanup_orphaned_resources_never_touches_recent_files() {
+        let root = std::env::temp_dir().join(format!("zailon-cleanup-recent-{}", unix_timestamp()));
+        let resources = root.join("game-a").join("resources");
+        fs::create_dir_all(&resources).unwrap();
+        let fresh_orphan = resources.join("banner-remote-1700000000.png");
+        fs::write(&fresh_orphan, b"png").unwrap(); // mtime = maintenant
+        let result = cleanup_orphaned_resources_in(&root, &HashSet::new(), unix_timestamp());
+        assert_eq!(result.removed, 0);
+        assert!(fresh_orphan.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn citizenfx_iv_path_reads_game_path_without_modifying() {
         let ini = "[Game]\nIVPath=G:\\Games\\GTAV\nUpdateChannel=beta\nSavedBuildNumber=3570\n\n[Addons]\n";
         assert_eq!(citizenfx_iv_path(ini), Some("G:\\Games\\GTAV".to_string()));
@@ -18115,6 +18283,7 @@ pub fn run() {
             search_game_artwork,
             test_artwork_provider,
             remove_game_resource,
+            cleanup_orphaned_game_resources,
             open_path,
             open_external_url,
             background_tasks,

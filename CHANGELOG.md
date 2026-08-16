@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.145.0] - 2026-08-16
+
+> **ZAILON Lite / Core** : nettoyage automatique des ressources orphelines —
+> les illustrations remplacées sont supprimées d'elles-mêmes, sans jamais
+> toucher un fichier récent ou référencé.
+
+### Added
+
+- **`cleanup_orphaned_game_resources` (natif)** : supprime les fichiers
+  d'artwork orphelins dans `games/<id>/resources/` — ceux qui ne sont plus
+  référencés par le store (anciennes URLs remplacées, legacy `*-remote-*`).
+  Trois gardes de sécurité : référentiel vide → jamais rien supprimer (store
+  pas encore hydraté), uniquement les fichiers au motif d'artwork connu,
+  jamais un fichier modifié dans la dernière heure.
+- **`resourceCleanup.ts` (pur, 5 tests)** : `referencedResourcePaths` construit
+  l'ensemble des 7 emplacements d'artwork référencés (dédupliqués),
+  `cleanupSummaryMessage` et `formatFreedBytes` (unités françaises).
+- **Nettoyage auto** : lancé en phase **idle** au démarrage (silencieux), et
+  bouton **« Nettoyer les ressources orphelines »** dans Paramètres → Stockage
+  avec confirmation du résultat (spec §10).
+
+### Changed
+
+- **2 tests natifs** (`cleanup_orphaned_resources_in`) : supprime uniquement
+  les orphelins non référencés, jamais un fichier récent.
+
+### Validation
+
+- **660 tests ✅** (+5), tsc ✅, build ✅, `cargo fmt` ✅ (tests natifs exécutés
+  en CI Linux/Windows).
+
 ## [1.144.0] - 2026-08-16
 
 > **ZAILON Lite / Core** : cache d'images stable par identifiant — une même

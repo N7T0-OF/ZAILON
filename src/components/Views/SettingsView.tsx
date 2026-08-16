@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import type { GameTab } from '../../types'
 import { appVersion, useStore } from '../../store/useStore'
-import { DiscordConnectionStatus, native, ProviderConnectionStatus } from '../../lib/native'
+import { native, ProviderConnectionStatus } from '../../lib/native'
 import { cachedProviderStatuses, providerHealthCache } from '../../lib/lazyPages'
 import { formatTime } from '../../utils'
 import { useUpdater } from '../UpdateProvider'
@@ -35,7 +35,6 @@ const SETTINGS_INDEX: Array<{ id: string; label: string; path: string; keywords:
   { id: 'artwork', label: 'Illustrations', path: 'Paramètres > Illustrations', keywords: 'illustrations images steam steamgriddb artwork couverture bannière logo icône sources', sectionLabel: 'Illustrations' },
   { id: 'tasks', label: 'Tâches et notifications', path: 'Paramètres > Tâches et notifications', keywords: 'taches notifications toasts progression', sectionLabel: 'Tâches et notifications' },
   { id: 'storage', label: 'Stockage', path: 'Paramètres > Stockage', keywords: 'stockage espace disque nettoyage', sectionLabel: 'Stockage' },
-  { id: 'discord', label: 'Discord Rich Presence', path: 'Paramètres > Discord', keywords: 'discord presence activite', sectionLabel: 'Discord Rich Presence' },
   { id: 'providers', label: 'Fournisseurs de mods', path: 'Paramètres > Fournisseurs de mods', keywords: 'nexus curseforge cle api fournisseurs credentials', sectionLabel: 'Fournisseurs de mods' },
   { id: 'nxm', label: 'Liens Nexus NXM', path: 'Paramètres > Liens Nexus NXM', keywords: 'nxm liens association vortex', sectionLabel: 'Liens Nexus NXM' },
   { id: 'mod-updates', label: 'Mises à jour des mods', path: 'Paramètres > Mises à jour des mods', keywords: 'mises a jour mods frequence', sectionLabel: 'Mises à jour des mods' },
@@ -57,7 +56,6 @@ const SETTINGS_SECTION_BY_LABEL: Record<string, string> = {
   'Apparence': 'appearance',
   'Tâches et notifications': 'notifications',
   'Illustrations': 'illustrations',
-  'Discord Rich Presence': 'discord',
   'Mode jeu': 'game-mode',
   'Panneau rapide en jeu': 'quick-panel',
   'Contenu et confidentialité': 'content',
@@ -79,14 +77,6 @@ export function SettingsView() {
   const textSize = useStore(state => state.textSize)
   const uiDensity = useStore(state => state.uiDensity)
   const autoArtwork = useStore(state => state.autoArtwork)
-  const discordPresence = useStore(state => state.discordPresence)
-  const discordClientId = useStore(state => state.discordClientId)
-  const discordLargeImageKey = useStore(state => state.discordLargeImageKey)
-  const discordShowProfile = useStore(state => state.discordShowProfile)
-  const discordShowModCount = useStore(state => state.discordShowModCount)
-  const discordShowElapsed = useStore(state => state.discordShowElapsed)
-  const discordMinimalPresence = useStore(state => state.discordMinimalPresence)
-  const lastDiscordPublished = useStore(state => state.lastDiscordPublished)
   const nsfw = useStore(state => state.nsfw)
   const hideUnclassifiedNsfw = useStore(state => state.hideUnclassifiedNsfw)
   const toggleNSFW = useStore(state => state.toggleNSFW)
@@ -121,13 +111,6 @@ export function SettingsView() {
   const setSelectedGame = useStore(state => state.setSelectedGame)
   const selectedGame = useStore(state => state.games.find(game => game.id === state.selectedGameId))
   const setAutoArtwork = useStore(state => state.setAutoArtwork)
-  const toggleDiscord = useStore(state => state.toggleDiscord)
-  const setDiscordClientId = useStore(state => state.setDiscordClientId)
-  const setDiscordLargeImageKey = useStore(state => state.setDiscordLargeImageKey)
-  const setDiscordShowProfile = useStore(state => state.setDiscordShowProfile)
-  const setDiscordShowModCount = useStore(state => state.setDiscordShowModCount)
-  const setDiscordShowElapsed = useStore(state => state.setDiscordShowElapsed)
-  const setDiscordMinimalPresence = useStore(state => state.setDiscordMinimalPresence)
   const autoCheckUpdates = useStore(state => state.autoCheckUpdates)
   const autoInstallUpdates = useStore(state => state.autoInstallUpdates)
   const updateChannel = useStore(state => state.updateChannel)
@@ -175,12 +158,10 @@ export function SettingsView() {
   const [nxmAssociated, setNxmAssociated] = useState(false)
   const [providerMessage, setProviderMessage] = useState<string>()
   const [busyProvider, setBusyProvider] = useState<string>()
-  const [discordStatus, setDiscordStatus] = useState<DiscordConnectionStatus>()
-  const [testingDiscord, setTestingDiscord] = useState(false)
   const [settingsQuery, setSettingsQuery] = useState('')
   // Gating réel (spec Add-ons §10-24, §75) : une section Paramètres n'existe
   // que si l'add-on correspondant est installé et activé. Sans l'add-on, ni
-  // Discord, ni les clés providers, ni les sources d'illustrations n'apparaissent.
+  // les clés providers, ni les sources d'illustrations n'apparaissent.
   const addonList = useStore(state => state.addons)
   const releaseNotesHistory = useStore(state => state.releaseNotesHistory)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -260,23 +241,16 @@ export function SettingsView() {
     return () => unlisten?.()
   }, [])
 
-  useEffect(() => {
-    if (!native.isDesktop()) return
-    let unlisten: (() => void) | undefined
-    void listen<DiscordConnectionStatus>('discord-status-changed', event => setDiscordStatus(event.payload)).then(listener => { unlisten = listener })
-    return () => unlisten?.()
-  }, [])
-
   // Spec §38 : « Configurer » depuis le Quick Panel ouvre les Paramètres et
-  // défile jusqu'à la section Discord Rich Presence.
+  // défile jusqu'à la section demandée.
   useEffect(() => {
     if (!native.isDesktop()) return
     let unlisten: (() => void) | undefined
     void listen<{ sectionLabel: string }>('open-settings-section', event => {
       const label = event.payload?.sectionLabel
       if (!label) return
-      // spec §53-54 : le lien interne (Quick Panel, tutoriel, diagnostics)
-      // ouvre la section repliée avant de défiler jusqu'à elle.
+      // spec §53-54 : le lien interne (tutoriel, diagnostics) ouvre la section
+      // repliée avant de défiler jusqu'à elle.
       revealSection(label)
       window.setTimeout(() => {
         const section = Array.from(document.querySelectorAll<HTMLElement>('section')).find(element => element.textContent?.includes(label))
@@ -285,18 +259,6 @@ export function SettingsView() {
     }).then(listener => { unlisten = listener })
     return () => unlisten?.()
   }, [])
-
-  const testDiscord = async () => {
-    if (!discordClientId.trim()) return
-    setTestingDiscord(true)
-    try {
-      setDiscordStatus(await native.testDiscordConnection(discordClientId.trim()))
-    } catch (reason) {
-      setDiscordStatus({ connected: false, message: reason instanceof Error ? reason.message : String(reason) })
-    } finally {
-      setTestingDiscord(false)
-    }
-  }
 
   const saveSecret = async (provider: 'nexus' | 'curseforge', secret: string) => {
     if (!secret.trim()) return
@@ -413,9 +375,8 @@ export function SettingsView() {
         </div>
       </AccordionSection>}
 
-      {hasCap('discord.presence') && <AccordionSection id="discord" title="Discord Rich Presence réelle" subtitle="Présence en jeu, diagnostic" icon=<Radio size={13} /> open={openSection === 'discord'} onToggle={() => toggleSection('discord')}><label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/62"><span><strong className="block text-white/76">Activer pendant le jeu</strong><span className="mt-1 block leading-relaxed text-white/36">ZAILON se connecte au canal IPC local de Discord au lancement du jeu, publie l’activité puis la nettoie quand le processus se ferme.</span></span><ZailonSwitch checked={discordPresence} onChange={() => toggleDiscord()} className="mt-0.5" /></label><div className="mt-3 grid gap-3 md:grid-cols-2"><label className="text-[11px] text-white/48">Application ID ZAILON (prérempli)<input value={discordClientId} onChange={event => setDiscordClientId(event.target.value.replace(/\D/g, '').slice(0, 32))} inputMode="numeric" placeholder="Identifiant numérique Discord" className="mt-1.5 block w-full rounded-lg border border-white/[0.08] bg-ink-200 px-3 py-2 text-[11px] text-white/72 outline-none focus:border-gold/30" /></label><label className="text-[11px] text-white/48">Clé de grande image (optionnelle)<input value={discordLargeImageKey} onChange={event => setDiscordLargeImageKey(event.target.value.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128))} placeholder="zailon ou clé d’asset Discord" className="mt-1.5 block w-full rounded-lg border border-white/[0.08] bg-ink-200 px-3 py-2 text-[11px] text-white/72 outline-none focus:border-gold/30" /></label></div><div className="mt-3 grid gap-2 sm:grid-cols-3"><label className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/54">Afficher le profil<ZailonSwitch checked={discordShowProfile} onChange={setDiscordShowProfile} /></label><label className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/54">Afficher les mods actifs<ZailonSwitch checked={discordShowModCount} onChange={setDiscordShowModCount} /></label><label className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/54">Afficher le temps écoulé<ZailonSwitch checked={discordShowElapsed} onChange={setDiscordShowElapsed} /></label><label className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/54">Mode minimal (jeu + « Via ZAILON »)<ZailonSwitch checked={discordMinimalPresence} onChange={setDiscordMinimalPresence} /></label></div><div className="mt-3 flex flex-wrap items-center gap-3"><button type="button" onClick={() => void testDiscord()} disabled={testingDiscord || !discordClientId.trim()} className="rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/64 hover:bg-white/[0.05] disabled:opacity-35">{testingDiscord ? 'Test IPC…' : 'Tester avec Discord lancé'}</button>{discordStatus && <span className={`text-[11px] ${discordStatus.connected ? 'text-emerald-300/72' : 'text-amber-200/72'}`}>{discordStatus.message}</span>}</div><p className="mt-3 text-[11px] leading-relaxed text-white/30">L’Application ID `1509971526987022497` est prérempli — c’est l’identifiant de l’application ZAILON, centralisé et identique pour tous. Aucun OAuth, bot ou secret n’est nécessaire pour la présence locale.</p><div className="mt-3 rounded-lg bg-ink-200/60 p-3"><div className="mb-2 flex items-center justify-between text-[11px] text-white/48"><span className="font-mono uppercase tracking-widest">Diagnostic</span><span className="text-white/30">spec §40</span></div><div className="grid gap-1.5 text-[11px]"><div className="flex justify-between"><span className="text-white/40">Application ID</span><span className="font-mono text-white/72">1509971526987022497</span></div><div className="flex justify-between"><span className="text-white/40">Discord détecté</span><span className={discordStatus ? (discordStatus.connected ? 'text-emerald-300/72' : 'text-amber-200/72') : 'text-white/36'}>{discordStatus ? (discordStatus.connected ? '✓' : '○') : '○'}</span></div><div className="flex justify-between"><span className="text-white/40">RPC connecté</span><span className={discordStatus?.connected ? 'text-emerald-300/72' : 'text-white/36'}>{discordStatus?.connected ? '✓' : '—'}</span></div><div className="flex justify-between"><span className="text-white/40">Session publiée</span><span className="text-white/72">{lastDiscordPublished?.gameName || '—'}</span></div><div className="flex justify-between"><span className="text-white/40">Asset</span><span className="font-mono text-white/72">{lastDiscordPublished?.asset || '—'}</span></div><div className="flex justify-between"><span className="text-white/40">Dernière mise à jour</span><span className="text-white/72">{lastDiscordPublished ? new Date(lastDiscordPublished.at).toLocaleTimeString() : '—'}</span></div></div></div>      </AccordionSection>}
 
-      <AccordionSection id="game-mode" title="Mode jeu" subtitle="Activité réduite, minimisation" icon=<Gamepad2 size={13} /> open={openSection === 'game-mode'} onToggle={() => toggleSection('game-mode')}><label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/62"><span><strong className="block text-white/76">Réduire l’activité ZAILON pendant le jeu</strong><span className="mt-1 block leading-relaxed text-white/36">Suspend les scans lourds et les animations non nécessaires quand un jeu tourne, pour ne garder que la présence, le clavier, le visuel, Discord et le panneau rapide.</span></span><ZailonSwitch checked={reduceActivityDuringGame} onChange={setReduceActivityDuringGame} className="mt-0.5" /></label><label className="mt-2 flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/62"><span><strong className="block text-white/76">Réduire ZAILON lorsque le jeu démarre</strong><span className="mt-1 block leading-relaxed text-white/36">Minimise automatiquement la fenêtre principale dès que le jeu est détecté (comme Steam).</span></span><ZailonSwitch checked={autoMinimizeOnGameStart} onChange={setAutoMinimizeOnGameStart} className="mt-0.5" /></label><label className="mt-2 flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/62"><span><strong className="block text-white/76">Restaurer ZAILON après le jeu</strong><span className="mt-1 block leading-relaxed text-white/36">Restaure la fenêtre principale à la fin de la session de jeu.</span></span><ZailonSwitch checked={restoreAfterGame} onChange={setRestoreAfterGame} className="mt-0.5" /></label></AccordionSection>
+      <AccordionSection id="game-mode" title="Mode jeu" subtitle="Activité réduite, minimisation" icon=<Gamepad2 size={13} /> open={openSection === 'game-mode'} onToggle={() => toggleSection('game-mode')}><label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/62"><span><strong className="block text-white/76">Réduire l’activité ZAILON pendant le jeu</strong><span className="mt-1 block leading-relaxed text-white/36">Suspend les scans lourds et les animations non nécessaires quand un jeu tourne, pour ne garder que la présence, le clavier, le visuel et le panneau rapide.</span></span><ZailonSwitch checked={reduceActivityDuringGame} onChange={setReduceActivityDuringGame} className="mt-0.5" /></label><label className="mt-2 flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/62"><span><strong className="block text-white/76">Réduire ZAILON lorsque le jeu démarre</strong><span className="mt-1 block leading-relaxed text-white/36">Minimise automatiquement la fenêtre principale dès que le jeu est détecté (comme Steam).</span></span><ZailonSwitch checked={autoMinimizeOnGameStart} onChange={setAutoMinimizeOnGameStart} className="mt-0.5" /></label><label className="mt-2 flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/62"><span><strong className="block text-white/76">Restaurer ZAILON après le jeu</strong><span className="mt-1 block leading-relaxed text-white/36">Restaure la fenêtre principale à la fin de la session de jeu.</span></span><ZailonSwitch checked={restoreAfterGame} onChange={setRestoreAfterGame} className="mt-0.5" /></label></AccordionSection>
       <AccordionSection id="quick-panel" title="Panneau rapide en jeu" subtitle="Fenêtre native, raccourci" icon=<MonitorUp size={13} /> open={openSection === 'quick-panel'} onToggle={() => toggleSection('quick-panel')}><label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/62"><span><strong className="block text-white/76">Afficher le panneau rapide ZAILON</strong><span className="mt-1 block leading-relaxed text-white/36">Fenêtre native ZAILON (jamais une injection) pour régler visuel et clavier pendant le jeu. Ouverte au raccourci, fermée automatiquement quand elle perd le focus. Indisponible en plein écran exclusif (utilisez Borderless).</span></span><ZailonSwitch checked={quickPanelEnabled} onChange={setQuickPanelEnabled} className="mt-0.5" /></label>{quickPanelEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="text-[11px] text-white/48">Raccourci d’ouverture<input value={quickPanelShortcut} onChange={event => setQuickPanelShortcut(event.target.value)} placeholder="Ctrl+Alt+Z" className="mt-1.5 block w-full rounded-lg border border-white/[0.08] bg-ink-200 px-3 py-2 font-mono text-[11px] text-white/72 outline-none focus:border-gold/30" /></label><div className="flex flex-col justify-end"><button type="button" onClick={() => native.isDesktop() && void native.quickPanel.toggle()} disabled={!native.isDesktop()} className="flex items-center justify-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] font-semibold text-white/60 hover:border-gold/25 hover:text-gold disabled:cursor-not-allowed disabled:opacity-30"><MonitorUp size={13} />Tester le panneau</button><p className="mt-1.5 text-[10px] leading-relaxed text-white/28">Ouvre la vraie fenêtre native, même sans jeu — vérifie création, taille et focus (spec Quick Panel §21).</p></div></div>}{!reduceExplanations && <p className="mt-3 text-[11px] leading-relaxed text-white/32">Le panneau est une fenêtre indépendante : il ne modifie aucun fichier du jeu et ne désactive jamais le clavier à sa fermeture (restauration du focus au jeu).</p>}</AccordionSection>
 
       <AccordionSection id="content" title="Contenu et confidentialité" subtitle="NSFW, exploration" icon=<EyeOff size={13} /> open={openSection === 'content'} onToggle={() => toggleSection('content')}>

@@ -599,14 +599,8 @@ struct BackgroundTaskEntry {
 #[derive(Clone)]
 struct BackgroundTaskRegistry(Arc<Mutex<HashMap<String, BackgroundTaskEntry>>>);
 
-trait DiscordStream: Read + Write + Send {}
-impl<T: Read + Write + Send> DiscordStream for T {}
-
-#[derive(Clone)]
-struct DiscordRuntime(Arc<Mutex<Option<Box<dyn DiscordStream>>>>);
-
 /// Gate d'add-ons natifs (spec Add-ons §74) : le Core natif ne démarre aucun
-/// service (Discord, providers, lectures Nexus, artwork) sans l'add-on
+/// service (providers, lectures Nexus, artwork) sans l'add-on
 /// correspondant installé ET activé. La liste des add-ons activés est poussée
 /// par le frontend à chaque changement (jamais de code mort côté natif).
 #[derive(Default)]
@@ -679,40 +673,10 @@ fn addon_verify_signature(
     Ok(verifying_key.verify_strict(&digest, &signature).is_ok())
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DiscordPresenceConfig {
-    enabled: bool,
-    client_id: String,
-    large_image_key: Option<String>,
-    show_profile: bool,
-    show_mod_count: bool,
-    show_elapsed: bool,
-    /// State pré-construit par le frontend (spec Discord §25, §60) : variantes
-    /// de wording, anti-« 0 mods » incertain, apps non-jeux. Prioritaire sur le
-    /// template composé quand présent et non vide.
-    #[serde(default)]
-    state_override: Option<String>,
-    /// Début réel de session (epoch secondes) — préservé à travers un
-    /// redémarrage de ZAILON pendant un jeu (spec §14, §95) : le timer Discord
-    /// ne repart pas de zéro après recovery.
-    #[serde(default)]
-    start_timestamp_override: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DiscordConnectionStatus {
-    connected: bool,
-    message: String,
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LaunchGameResult {
     pid: u32,
-    discord_connected: bool,
-    discord_message: String,
     deployment_backend: String,
     deployed_files: usize,
     conflicts_resolved: usize,
@@ -5554,178 +5518,6 @@ fn exclusive_fullscreen_active() -> bool {
     window_watcher::exclusive_fullscreen_active()
 }
 
-#[tauri::command]
-fn discord_write_frame(
-    stream: &mut dyn DiscordStream,
-    opcode: u32,
-    payload: &serde_json::Value,
-) -> Result<(), String> {
-    let body = serde_json::to_vec(payload)
-        .map_err(|_| "Unable to encode the Discord activity.".to_string())?;
-    if body.len() > 64 * 1024 {
-        return Err("Discord activity payload is too large.".into());
-    }
-    stream
-        .write_all(&opcode.to_le_bytes())
-        .map_err(|_| "Unable to write to Discord IPC.".to_string())?;
-    stream
-        .write_all(&(body.len() as u32).to_le_bytes())
-        .map_err(|_| "Unable to write to Discord IPC.".to_string())?;
-    stream
-        .write_all(&body)
-        .map_err(|_| "Unable to write to Discord IPC.".to_string())?;
-    stream
-        .flush()
-        .map_err(|_| "Unable to flush Discord IPC.".to_string())
-}
-
-fn open_discord_stream() -> Result<Box<dyn DiscordStream>, String> {
-    #[cfg(target_os = "windows")]
-    {
-        for index in 0..10 {
-            let path = format!(r"\\.\pipe\discord-ipc-{index}");
-            if let Ok(stream) = fs::OpenOptions::new().read(true).write(true).open(path) {
-                return Ok(Box::new(stream));
-            }
-        }
-    }
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    {
-        use std::os::unix::net::UnixStream;
-        let mut roots = Vec::new();
-        if let Some(path) = std::env::var_os("XDG_RUNTIME_DIR") {
-            roots.push(PathBuf::from(path));
-        }
-        if let Some(path) = std::env::var_os("TMPDIR") {
-            roots.push(PathBuf::from(path));
-        }
-        roots.push(PathBuf::from("/tmp"));
-        for root in roots {
-            for index in 0..10 {
-                for path in [
-                    root.join(format!("discord-ipc-{index}")),
-                    root.join("app/com.discordapp.Discord")
-                        .join(format!("discord-ipc-{index}")),
-                ] {
-                    if let Ok(stream) = UnixStream::connect(path) {
-                        return Ok(Box::new(stream));
-                    }
-                }
-            }
-        }
-    }
-    Err("Discord n'est pas lancé ou son canal IPC est indisponible.".into())
-}
-
-fn valid_discord_identifier(value: &str) -> bool {
-    (5..=32).contains(&value.len()) && value.chars().all(|character| character.is_ascii_digit())
-}
-
-fn discord_handshake(client_id: &str) -> Result<Box<dyn DiscordStream>, String> {
-    if !valid_discord_identifier(client_id) {
-        return Err(
-            "L'identifiant d'application Discord doit contenir uniquement des chiffres.".into(),
-        );
-    }
-    let mut stream = open_discord_stream()?;
-    discord_write_frame(
-        &mut *stream,
-        0,
-        &serde_json::json!({ "v": 1, "client_id": client_id }),
-    )?;
-    Ok(stream)
-}
-
-fn clean_discord_text(value: &str) -> String {
-    value
-        .chars()
-        .filter(|character| !character.is_control())
-        .take(120)
-        .collect::<String>()
-}
-
-fn set_discord_activity(
-    runtime: &DiscordRuntime,
-    config: &DiscordPresenceConfig,
-    game_name: &str,
-    profile_name: &str,
-    active_mods: usize,
-) -> Result<(), String> {
-    let mut stream = discord_handshake(config.client_id.trim())?;
-    let state = match config
-        .state_override
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        Some(value) => value.to_string(),
-        None => match (config.show_profile, config.show_mod_count) {
-            (true, true) => format!("Profil {profile_name} · {active_mods} mod(s) actif(s)"),
-            (true, false) => format!("Profil {profile_name}"),
-            (false, true) => format!("{active_mods} mod(s) actif(s)"),
-            (false, false) => "Lancé avec ZAILON".into(),
-        },
-    };
-    let mut activity = serde_json::json!({
-        "details": clean_discord_text(game_name),
-        "state": clean_discord_text(&state),
-        "instance": false
-    });
-    if config.show_elapsed {
-        let start = config
-            .start_timestamp_override
-            .unwrap_or_else(unix_timestamp);
-        activity["timestamps"] = serde_json::json!({ "start": start });
-    }
-    if let Some(image_key) = config
-        .large_image_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| {
-            !value.is_empty()
-                && value.len() <= 128
-                && value.chars().all(|character| {
-                    character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
-                })
-        })
-    {
-        activity["assets"] = serde_json::json!({
-            "large_image": image_key,
-            "large_text": clean_discord_text(game_name)
-        });
-    }
-    discord_write_frame(
-        &mut *stream,
-        1,
-        &serde_json::json!({
-            "cmd": "SET_ACTIVITY",
-            "args": { "pid": std::process::id(), "activity": activity },
-            "nonce": format!("{}-{}", unix_timestamp(), std::process::id())
-        }),
-    )?;
-    *runtime
-        .0
-        .lock()
-        .map_err(|_| "Discord runtime is unavailable.".to_string())? = Some(stream);
-    Ok(())
-}
-
-fn clear_discord_activity(runtime: &DiscordRuntime) {
-    if let Ok(mut current) = runtime.0.lock() {
-        if let Some(mut stream) = current.take() {
-            let _ = discord_write_frame(
-                &mut *stream,
-                1,
-                &serde_json::json!({
-                    "cmd": "SET_ACTIVITY",
-                    "args": { "pid": std::process::id(), "activity": null },
-                    "nonce": format!("clear-{}", unix_timestamp())
-                }),
-            );
-        }
-    }
-}
-
 fn file_signature(path: &Path) -> Result<u64, String> {
     let mut file = fs::File::open(path).map_err(to_error)?;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -6641,97 +6433,8 @@ fn prepare_profile_deployment(
 }
 
 #[tauri::command]
-fn test_discord_connection(
-    app: AppHandle,
-    gate: State<'_, AddonGate>,
-    client_id: String,
-) -> Result<DiscordConnectionStatus, String> {
-    if !addon_gate_enabled(&gate, "official.zailon.discord") {
-        return Err(addon_gate_error(
-            "official.zailon.discord",
-            "Discord Presence",
-        ));
-    }
-    let _stream = discord_handshake(client_id.trim())?;
-    let status = DiscordConnectionStatus {
-        connected: true,
-        message: "Discord IPC détecté. L'identifiant d'application est accepté localement.".into(),
-    };
-    let _ = app.emit("discord-status-changed", status.clone());
-    Ok(status)
-}
-
-/// Recalcule la Rich Presence Discord vers la session PRIORITAIRE (spec
-/// multi-sessions §14) : appelé par le frontend quand la priorité change
-/// (Alt+Tab, épinglage, fermeture d'une session) — sans relancer le jeu.
-#[tauri::command]
-fn set_discord_activity_for(
-    app: AppHandle,
-    gate: State<'_, AddonGate>,
-    state: State<'_, DiscordRuntime>,
-    game_name: String,
-    profile_name: String,
-    active_mods: usize,
-    config: Option<DiscordPresenceConfig>,
-) -> Result<DiscordConnectionStatus, String> {
-    let runtime = state.inner().clone();
-    // Règle absolue (spec §74) : jamais de présence publiée sans l'add-on —
-    // même si le réglage est activé dans le store.
-    if !addon_gate_enabled(&gate, "official.zailon.discord") {
-        clear_discord_activity(&runtime);
-        let status = DiscordConnectionStatus {
-            connected: false,
-            message: "Add-on Discord Presence non installé — présence désactivée.".into(),
-        };
-        let _ = app.emit("discord-status-changed", status.clone());
-        return Ok(status);
-    }
-    match config.as_ref().filter(|config| config.enabled) {
-        Some(config) => {
-            match set_discord_activity(&runtime, config, &game_name, &profile_name, active_mods) {
-                Ok(()) => {
-                    let status = DiscordConnectionStatus {
-                        connected: true,
-                        message: "Discord Rich Presence actif (session prioritaire).".into(),
-                    };
-                    let _ = app.emit("discord-status-changed", status.clone());
-                    Ok(status)
-                }
-                Err(error) => Err(error),
-            }
-        }
-        None => {
-            clear_discord_activity(&runtime);
-            let status = DiscordConnectionStatus {
-                connected: false,
-                message: "Discord Rich Presence désactivé (aucune session prioritaire).".into(),
-            };
-            let _ = app.emit("discord-status-changed", status.clone());
-            Ok(status)
-        }
-    }
-}
-
-/// Arrête la Rich Presence (plus aucune session active).
-#[tauri::command]
-fn clear_discord_activity_for(
-    app: AppHandle,
-    state: State<'_, DiscordRuntime>,
-) -> Result<DiscordConnectionStatus, String> {
-    let runtime = state.inner().clone();
-    clear_discord_activity(&runtime);
-    let status = DiscordConnectionStatus {
-        connected: false,
-        message: "Discord Rich Presence arrêtée.".into(),
-    };
-    let _ = app.emit("discord-status-changed", status.clone());
-    Ok(status)
-}
-
-#[tauri::command]
 async fn launch_game(
     app: AppHandle,
-    state: State<'_, DiscordRuntime>,
     visual_state: State<'_, visual_profiles::VisualRuntime>,
     exec_path: String,
     game_id: String,
@@ -6745,7 +6448,6 @@ async fn launch_game(
     launcher_based: bool,
     on_event: Channel<DeploymentProgressEvent>,
 ) -> Result<LaunchGameResult, String> {
-    let runtime = state.inner().clone();
     let visual_runtime = visual_state.inner().clone();
     let preparation_app = app.clone();
     let preparation_game_id = game_id.clone();
@@ -6859,11 +6561,6 @@ async fn launch_game(
             });
         }
     }
-    // Présence Discord gérée par `syncDiscordPresence` côté frontend : publiée
-    // uniquement quand la session atteint le vrai `GameRunning` (spec Discord
-    // §9) — jamais au lancement, sinon la présence démarrerait au launcher ou à
-    // l'UAC (cas NTE, critère bloquant §63).
-    let (discord_connected, discord_message) = (false, String::new());
     let _ = app.emit(
         "game-process-started",
         GameProcessEvent {
@@ -6876,7 +6573,6 @@ async fn launch_game(
         },
     );
     let worker_app = app.clone();
-    let worker_runtime = runtime.clone();
     let worker_game_name = game_name.clone();
     let worker_app_for_cleanup = app.clone();
     let worker_game_id = game_id.clone();
@@ -6914,18 +6610,9 @@ async fn launch_game(
                 "enabled"
             },
         );
-        clear_discord_activity(&worker_runtime);
         if associated_visual_applied {
             visual_profiles::restore_for_shutdown(&worker_app_for_cleanup, &worker_visual_runtime);
         }
-        let _ = worker_app.emit(
-            "discord-status-changed",
-            DiscordConnectionStatus {
-                connected: false,
-                message: "Le processus du jeu est terminé ; la présence Discord a été nettoyée."
-                    .into(),
-            },
-        );
         let _ = worker_app.emit(
             "game-process-stopped",
             GameProcessEvent {
@@ -6940,8 +6627,6 @@ async fn launch_game(
     });
     Ok(LaunchGameResult {
         pid,
-        discord_connected,
-        discord_message,
         deployment_backend: if prepared.deployed_files > 0 {
             "TemporaryCopy".into()
         } else {
@@ -17049,13 +16734,10 @@ mod tests {
     #[test]
     fn addon_gate_filters_enabled_ids() {
         let gate = AddonGate(Arc::new(Mutex::new(
-            ["official.zailon.discord".to_string()]
-                .into_iter()
-                .collect(),
+            ["official.zailon.frosty".to_string()].into_iter().collect(),
         )));
         let enabled = gate.0.lock().unwrap();
-        assert!(enabled.contains("official.zailon.discord"));
-        assert!(!enabled.contains("official.zailon.frosty"));
+        assert!(enabled.contains("official.zailon.frosty"));
         assert!(!enabled.contains("official.zailon.provider.nexus"));
     }
 
@@ -17249,8 +16931,6 @@ mod tests {
         assert!(!valid_image_bytes(b"MZ executable", "png"));
         assert!(valid_nexus_domain("skyrimspecialedition"));
         assert!(!valid_nexus_domain("../outside"));
-        assert!(valid_discord_identifier("123456789012345678"));
-        assert!(!valid_discord_identifier("client-secret"));
     }
 
     #[test]
@@ -18004,7 +17684,6 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .manage(ProviderConnectionCache(Mutex::new(HashMap::new())))
         .manage(BackgroundTaskRegistry(Arc::new(Mutex::new(HashMap::new()))))
-        .manage(DiscordRuntime(Arc::new(Mutex::new(None))))
         .manage(AddonGate::default())
         .manage(visual_profiles::VisualRuntime::default());
     #[cfg(desktop)]
@@ -18163,9 +17842,6 @@ pub fn run() {
             restore_deployment_session,
             set_enabled_addons,
             addon_verify_signature,
-            test_discord_connection,
-            set_discord_activity_for,
-            clear_discord_activity_for,
             guess_mods_path,
             install_mod,
             import_mod_candidates,

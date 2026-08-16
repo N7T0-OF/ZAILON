@@ -14,7 +14,7 @@ export type StartupPhase =
   | 'shell'       // PHASE 1 : sidebar + Accueil depuis cache, navigation cliquable
   | 'local'       // PHASE 2 : jeux configurés, favoris, profil actif, résumés
   | 'sessions'    // PHASE 3 : recovery des sessions actives (avant tout réseau)
-  | 'services'    // PHASE 4 : Discord, Steam, health cache, update checker, tray
+  | 'services'    // PHASE 4 : Steam, health cache, update checker, tray
   | 'idle'        // PHASE 5 : maintenance différée (cache, deep scans, artwork refresh)
 
 export type StartupPriority = 'critical' | 'interactive' | 'normal' | 'background' | 'idle'

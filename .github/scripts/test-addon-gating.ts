@@ -23,12 +23,12 @@ const makeAddon = (id: string, enabled = true): InstalledAddon => ({
 test('aucun add-on → aucune capacité', () => {
   const caps = addonCapabilities([])
   assert.equal(caps.size, 0)
-  assert.equal(hasCapability(caps, 'discord.presence'), false)
+  assert.equal(hasCapability(caps, 'frosty.backend'), false)
 })
 
 test('add-on installé et activé → capacité présente', () => {
-  const caps = addonCapabilities([makeAddon('official.zailon.discord')])
-  assert.equal(hasCapability(caps, 'discord.presence'), true)
+  const caps = addonCapabilities([makeAddon('official.zailon.frosty')])
+  assert.equal(hasCapability(caps, 'frosty.backend'), true)
 })
 
 test('add-on désactivé → capacité absente (spec §18)', () => {
@@ -36,7 +36,7 @@ test('add-on désactivé → capacité absente (spec §18)', () => {
   assert.equal(hasCapability(caps, 'frosty.backend'), false)
 })
 
-test('les 17 capacités du mapping sont reconnues', () => {
+test('les 16 capacités du mapping sont reconnues', () => {
   const addons = ALL_ZAILON_CAPABILITIES.map(cap => makeAddon(CAPABILITY_ADDON[cap]))
   const caps = addonCapabilities(addons)
   assert.equal(caps.size, ALL_ZAILON_CAPABILITIES.length)
@@ -69,7 +69,7 @@ test('un add-on installé mais inconnu du mapping n\'expose aucune capacité', (
 })
 
 test('set mutable et tableau équivalents pour hasCapability', () => {
-  const list: ZailonCapability[] = ['discord.presence']
-  assert.equal(hasCapability(list, 'discord.presence'), true)
-  assert.equal(hasCapability(list, 'frosty.backend'), false)
+  const list: ZailonCapability[] = ['frosty.backend']
+  assert.equal(hasCapability(list, 'frosty.backend'), true)
+  assert.equal(hasCapability(list, 'reshade.manager'), false)
 })

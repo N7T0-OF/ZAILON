@@ -222,7 +222,7 @@ export function AddonsView() {
       <p className="mt-1 max-w-sm text-xs leading-relaxed text-white/36">Modifiez la recherche ou les filtres — ou importez un add-on communautaire (.zailon-addon).</p>
     </section>}
 
-    <p className="mt-5 max-w-3xl text-[10px] leading-relaxed text-white/26">Les add-ons officiels sont gérés avec les mêmes permissions que les add-ons communautaires. Aucun compte, aucune marketplace : les add-ons communautaires s'importent localement depuis GitHub, un site ou Discord (§7-8).</p>
+    <p className="mt-5 max-w-3xl text-[10px] leading-relaxed text-white/26">Les add-ons officiels sont gérés avec les mêmes permissions que les add-ons communautaires. Aucun compte, aucune marketplace : les add-ons communautaires s'importent localement depuis GitHub ou un site (§7-8).</p>
 
     {confirming && <AddonInstallDialog
       row={confirming}

@@ -668,32 +668,8 @@ export type AddonInstallEvent =
   | { event: 'Progress'; data: { received: number } }
   | { event: 'Finished'; data: Record<string, never> }
 
-export interface DiscordPresenceConfig {
-  enabled: boolean
-  clientId: string
-  largeImageKey?: string
-  showProfile: boolean
-  showModCount: boolean
-  showElapsed: boolean
-  /** State pré-construit par le frontend (spec Discord §25, §60) — prioritaire
-   * sur le template natif : variantes de wording, anti-« 0 mods » incertain,
-   * apps non-jeux, mode minimal. */
-  stateOverride?: string
-  /** Début réel de session (epoch secondes) — préservé après un redémarrage de
-   * ZAILON pendant un jeu (spec §14, §95) : le timer Discord ne repart pas à
-   * zéro après recovery. */
-  startTimestampOverride?: number
-}
-
-export interface DiscordConnectionStatus {
-  connected: boolean
-  message: string
-}
-
 export interface LaunchGameResult {
   pid: number
-  discordConnected: boolean
-  discordMessage: string
   deploymentBackend: string
   deployedFiles: number
   conflictsResolved: number
@@ -903,7 +879,7 @@ export const native = {
   addonInstallStaged: (archivePath: string, installDir: string) => desktopOnly<void>('addon_install_staged', { archivePath, installDir }),
   addonInstallDir: () => desktopOnly<string>('addon_install_dir'),
   /** Pousse la liste des add-ons activés (installés ET activés) au gate natif —
-   * sans l'add-on, aucun service natif (Discord, providers, Nexus, artwork)
+   * sans l'add-on, aucun service natif (providers, Nexus, artwork)
    * ne démarre (spec Add-ons §74). */
   setEnabledAddons: (addons: string[]) => desktopOnly<void>('set_enabled_addons', { addons }),
   /** Vérifie la signature Ed25519 (base64) du SHA-256 d'un fichier (spec §14). */
@@ -993,18 +969,6 @@ export const native = {
    * suivant. Retourne le nombre de sessions restaurées. */
   restoreDeploymentSession: (gameId: string, gameRoot: string) =>
     desktopOnly<number>('restore_deployment_session', { gameId, gameRoot }),
-  testDiscordConnection: (clientId: string) => desktopOnly<DiscordConnectionStatus>('test_discord_connection', { clientId }),
-  /** Recalcule la Rich Presence vers la session prioritaire (multi-sessions) :
-   * publiée si une session est prioritaire et la présence activée, arrêtée
-   * sinon. Config absente = arrêter. */
-  setDiscordActivityFor: (activity: { gameName: string; profileName: string; activeMods: number; config?: DiscordPresenceConfig }) =>
-    desktopOnly<DiscordConnectionStatus>('set_discord_activity_for', {
-      gameName: activity.gameName,
-      profileName: activity.profileName,
-      activeMods: activity.activeMods,
-      config: activity.config ?? null,
-    }),
-  clearDiscordActivity: () => desktopOnly<DiscordConnectionStatus>('clear_discord_activity_for', {}),
   guessModsPath: (execPath: string) => desktopOnly<string>('guess_mods_path', { execPath }),
   scanSteamGames: (steamPath: string | undefined, onEvent: (event: SteamScanEvent) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Steam detection is only available in the ZAILON desktop app.'))

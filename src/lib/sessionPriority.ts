@@ -2,9 +2,9 @@
  * Multi-sessions actives — priorité et arbitrage (spec « X de session +
  * multi-apps actives + priorité d’activité »).
  *
- * ZAILON supporte plusieurs GameSession simultanées (Cyberpunk, NTE, Discord…).
+ * ZAILON supporte plusieurs GameSession simultanées (Cyberpunk, NTE…).
  * Parmi elles, UNE seule est « prioritaire » :
- * - pour le résumé Accueil, Discord Rich Presence, le Quick Panel et les badges ;
+ * - pour le résumé Accueil, le Quick Panel et les badges ;
  * - pour l’arbitrage des mappings clavier (un seul mapping de fenêtre actif à la
  *   fois) et des Visual Profiles (un seul écran appliqué au premier plan).
  *

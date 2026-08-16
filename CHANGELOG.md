@@ -1,5 +1,35 @@
 # Changelog
 
+## [1.135.0] - 2026-08-16
+
+> **Retrait complet de Discord / Vesktop** : aucune intégration Discord, Rich
+> Presence ou Vesktop — ni add-on, ni capacité, ni code dans le Core.
+
+### Removed
+
+- **Add-on `official.zailon.discord`** supprimé (package, manifest, icône,
+  répertoire `addons/official.zailon.discord`, entrée du catalogue officiel).
+  Le catalogue passe de **18 à 17 add-ons**.
+- **Capacité `discord.presence`** et gate `discordPresenceAllowed` supprimés de
+  `addonGating.ts`.
+- **Code Core Discord** supprimé : `src/lib/discordPresence.ts`,
+  `src/lib/discordAssets.ts`, bindings `native.ts`
+  (`test_discord_connection`, `set_discord_activity_for`,
+  `clear_discord_activity_for`), commandes Rust
+  (`discord_write_frame`, `test_discord_connection`…), et toute l'UI
+  (QuickPanel, Paramètres, Diagnostic, clavier, toasts, App, store,
+  `quickPanelState`, `sessionPriority`, `startup`).
+- **Tests et docs Discord** supprimés (`test-discord-*.ts`,
+  `docs/discord-rich-presence.md`) — les docs d'architecture de référence
+  (add-ons, catalogue) sont corrigés pour ne plus citer Discord.
+
+### Notes
+
+- **Linux reste prévu** comme compatibilité générale du launcher — sans
+  ajout Discord/Vesktop.
+- **626 tests ✅** (tests Discord retirés du lot), tsc ✅, build ✅,
+  audit prod ✅ (0 vuln).
+
 ## [1.134.0] - 2026-08-16
 
 > **Étiquette add-on sur les jeux de la Bibliothèque** : un jeu lié à un

@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "catalogSchemaVersion": 2,
-  "updatedAt": "2026-08-15",
+  "updatedAt": "2026-08-16",
   "addons": [
     {
       "id": "official.zailon.frosty",
@@ -78,29 +78,6 @@
       "sha256": "a745ac8f4f6cc6eb6b9e52eafe780ffa609014688ce48ae2e9899ee8da04b2ad",
       "downloadSize": 4516,
       "installedSize": 11290,
-      "platforms": [
-        "windows",
-        "linux",
-        "macos"
-      ]
-    },
-    {
-      "id": "official.zailon.discord",
-      "name": "Discord Presence",
-      "version": "1.0.0",
-      "category": "sources",
-      "description": "Présence Discord réelle pendant le jeu : activité publiée sur le canal IPC local de Discord (jeu, profil, mods actifs, temps écoulé), réglages et diagnostic dédiés, bascule depuis le panneau rapide.",
-      "minZailonVersion": "1.78.0",
-      "permissions": [
-        "game.read",
-        "process.read",
-        "settings"
-      ],
-      "package": "packages/discord/official.zailon.discord-v1.0.0.zailon-addon",
-      "minAddonApiVersion": "1",
-      "sha256": "0e94df6c780441e2fc9c50fcc90bc0c4f91afd219aa2b6ceeb30353896bb126c",
-      "downloadSize": 7431,
-      "installedSize": 18578,
       "platforms": [
         "windows",
         "linux",

@@ -116,7 +116,7 @@ export function GameKeyboardPanel({ game, profile, embedded = false }: { game: G
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] bg-white/[0.03] text-gold/75"><Keyboard size={16} /></span>
         <div className="min-w-0 flex-1">
           <h2 className="text-xs font-semibold text-white/80">Disposition virtuelle du jeu</h2>
-          <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-white/38">Traduit les touches uniquement pour ce jeu (ex. AZERTY ↔ QWERTY). Aucune langue Windows n’est ajoutée ni modifiée : le bureau, Discord et ZAILON gardent leurs touches.</p>
+          <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-white/38">Traduit les touches uniquement pour ce jeu (ex. AZERTY ↔ QWERTY). Aucune langue Windows n’est ajoutée ni modifiée : le bureau et ZAILON gardent leurs touches.</p>
         </div>
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-4">

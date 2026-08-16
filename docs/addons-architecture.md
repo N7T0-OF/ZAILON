@@ -41,13 +41,16 @@ télécharge aucun add-on.
 
 ## Catalogue officiel
 
-`OFFICIAL_ADDON_CATALOG` (15 entrées, Phase 1-3 du §79) sert de **cache hors
-ligne** (§6) : Frosty Support, ReShade Manager, Discord Presence, Nexus /
+`OFFICIAL_ADDON_CATALOG` (17 entrées, Phase 1-3 du §79) sert de **cache hors
+ligne** (§6) : Frosty Support, Frosty Editor, ReShade Manager, Nexus /
 GameBanana / CurseForge Providers, Cyberpunk Advanced, NTE Support, FiveM
 Profiles, MO2 / Vortex / Frosty Importers, Steam Advanced, Artwork+, Theme
-Packs, Performance+. En production, `catalog.json` sera téléchargé depuis le
-repository officiel — jamais les add-ons eux-mêmes, et **jamais de
-téléchargement automatique** (§76).
+Packs, Performance+, Visual Profiles. En production, `catalog.json` sera
+téléchargé depuis le repository officiel — jamais les add-ons eux-mêmes, et
+**jamais de téléchargement automatique** (§76).
+
+> **Discord / Vesktop retirés** : aucune intégration Discord, Rich Presence ou
+> Vesktop n'est prévue — ni add-on, ni capacité, ni code dans le Core.
 
 ## État actuel / limites
 

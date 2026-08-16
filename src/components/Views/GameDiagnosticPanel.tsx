@@ -296,7 +296,7 @@ export function GameDiagnosticPanel({ game, profile, profileMods, onOpenConfigur
           </div>
           <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
             <p className="text-[11px] uppercase tracking-widest text-white/30">Aucune langue Windows</p>
-            <p className="mt-2 text-[11px] leading-relaxed text-white/42">La traduction de touches reste locale au jeu, jamais active sur le bureau, Discord ou ZAILON.</p>
+            <p className="mt-2 text-[11px] leading-relaxed text-white/42">La traduction de touches reste locale au jeu, jamais active sur le bureau ou ZAILON.</p>
           </div>
         </div>
         <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">

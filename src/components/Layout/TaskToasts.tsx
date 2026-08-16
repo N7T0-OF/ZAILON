@@ -7,7 +7,7 @@ const isTerminal = (task: BackgroundTaskSnapshot) => task.status !== 'running'
 const terminalDelay = (status: BackgroundTaskSnapshot['status']) => status === 'completed' ? 4_000 : status === 'completed_with_warnings' ? 7_000 : status === 'cancelled' ? 3_000 : status === 'failed' ? 10_000 : 7_000
 
 /** Toasts de tâches + historique compact (spec « Nettoyage » §4) : l'ancienne
- * barre fixe du bas (jeu actif, mods, profil, Discord, version, « En ligne »)
+ * barre fixe du bas (jeu actif, mods, profil, version, « En ligne »)
  * est SUPPRIMÉE — ces infos vivent dans leurs pages respectives. Seuls
  * restent ici les notifications de tâches (section Téléchargements/Activité)
  * et le panneau d'historique, sans aucun statut global permanent (§5). */

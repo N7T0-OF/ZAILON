@@ -11,7 +11,6 @@ import type { InstalledAddon } from './addons'
 
 /** Capacités exposées au Core par les add-ons (spec §33). */
 export type ZailonCapability =
-  | 'discord.presence'
   | 'frosty.backend'
   | 'frosty.editor'
   | 'reshade.manager'
@@ -32,7 +31,6 @@ export type ZailonCapability =
 
 /** Mapping unique capacité → id d'add-on (spec §33 : jamais d'ID hardcodé dans les composants). */
 export const CAPABILITY_ADDON: Record<ZailonCapability, string> = {
-  'discord.presence': 'official.zailon.discord',
   'frosty.backend': 'official.zailon.frosty',
   'frosty.editor': 'official.zailon.frosty-editor',
   'reshade.manager': 'official.zailon.reshade',
@@ -85,16 +83,6 @@ export function addonIdForCapability(capability: ZailonCapability): string {
 /** Vrai si l'add-on de la capacité manque (non installé ou désactivé). */
 export function isCapabilityMissing(capabilities: Set<ZailonCapability>, capability: ZailonCapability): boolean {
   return !hasCapability(capabilities, capability)
-}
-
-/**
- * Gate de présence Discord (spec « Finalisation des add-ons » §57, feature
- * removal) : le Core ne publie JAMAIS sur l'IPC Discord sans l'add-on
- * installé ET activé (capacité `discord.presence`), même si le réglage
- * utilisateur est resté activé. Pur et testé (test-discord-feature-removal.ts).
- */
-export function discordPresenceAllowed(capabilities: Set<ZailonCapability>, discordEnabled: boolean): boolean {
-  return hasCapability(capabilities, 'discord.presence') && discordEnabled
 }
 
 /** Capacités manquantes parmi une liste demandée. */

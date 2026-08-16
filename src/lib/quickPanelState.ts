@@ -94,30 +94,3 @@ export function nextSessionAfterCurrent(
   return pickPrioritySession(active, pinnedGameId, foregroundGameId)
 }
 
-/** État Discord affiché par le panneau (spec §38) : honnête — ✓ « Présence
- * active » uniquement si la présence est activée ET réellement publiée pour une
- * session ; jamais de faux ✓ quand Discord est fermé ou que la présence est
- * désactivée. */
-export interface QuickPanelDiscordState {
-  /** Réglage « Présence Discord » (Paramètres > Intégrations). */
-  enabled: boolean
-  /** Connexion IPC réelle à Discord (état natif, spec §33-34). */
-  connected: boolean
-  /** Jeu dont la présence est actuellement publiée (source de vérité). */
-  publishedGameName?: string
-  /** La présence est activée ET réellement publiée. */
-  published: boolean
-}
-
-export function quickPanelDiscordState(
-  enabled: boolean,
-  connected: boolean,
-  publishedGameName?: string,
-): QuickPanelDiscordState {
-  return {
-    enabled,
-    connected,
-    publishedGameName,
-    published: enabled && connected && Boolean(publishedGameName),
-  }
-}

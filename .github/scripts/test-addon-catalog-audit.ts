@@ -6,7 +6,7 @@
  *  2. catalogue ↔ dossiers `addons/` cohérents (publié = dossier + package) ;
  *  3. chaque `capabilities` d'un manifest repointe vers SON propre add-on ;
  *  4. un add-on publié déclare au moins une capacité (rien de fantôme) ;
- *  5. aucun add-on « En développement » résiduel (18/18 publiés) ;
+ *  5. aucun add-on « En développement » résiduel (17/17 publiés) ;
  *  6. chaque capacité publiée est réellement exercée dans le Core (au moins
  *     une référence hors de `addonGating.ts` — feature removal §57).
  */
@@ -108,7 +108,7 @@ test('tout add-on publié déclare au moins une capacité', () => {
   }
 })
 
-test('aucun add-on « En développement » résiduel (18/18 publiés)', () => {
+test('aucun add-on « En développement » résiduel (17/17 publiés)', () => {
   const inDevelopment = catalog.filter(addon => !addon.package).map(addon => addon.id)
   assert.deepEqual(inDevelopment.sort(), [])
 })

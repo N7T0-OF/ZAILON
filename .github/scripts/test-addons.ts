@@ -277,7 +277,7 @@ test('parseAddonCatalog : schema 2, package chemin relatif ou null (spec §2, §
   const good = parseAddonCatalog({
     schema: 2,
     addons: [
-      { id: 'official.zailon.discord', name: 'Discord', version: '1.0.0', category: 'utilities', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok', package: null },
+      { id: 'official.zailon.reshade', name: 'ReShade', version: '1.0.0', category: 'utilities', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok', package: null },
       { id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok', package: 'packages/frosty/official.zailon.frosty-1.0.0.zailon-addon', sha256: 'a'.repeat(64), downloadSize: 100 },
     ],
   })

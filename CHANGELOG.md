@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.140.0] - 2026-08-16
+
+> **Passe de simplification (1/3)** : Paramètres allégés (sections redondantes
+> supprimées) et import Steam automatique — plus aucun bouton manuel.
+
+### Removed
+
+- **Paramètres > « Illustrations »** : section entière supprimée (clés
+  SteamGridDB/IGDB, état des sources) — Steam officiel reste la source
+  automatique principale, les réglages internes restent gérés automatiquement
+  (spec §1).
+- **Paramètres > « Library statistics »** : section supprimée — les
+  statistiques restent accessibles via la barre latérale et l'Accueil (spec §1).
+- **Statistiques > bouton « Importer Steam »** : supprimé — l'import est
+  désormais automatique (spec §2). Texte technique « Suivi ZAILON et temps
+  Steam importé restent toujours séparés… » remplacé par une ligne discrète.
+
+### Changed
+
+- **Import Steam automatique** : au démarrage (phase services, jamais
+  bloquant, silencieux — aucun toast), ZAILON lit `localconfig.vdf` et
+  renseigne `importedPlaytimeMin` pour les jeux à AppID correspondant.
+  Idempotent, jamais fusionné avec le suivi ZAILON. `importSteamPlaytime`
+  accepte désormais `{ silent }` (spec §2).
+
 ## [1.139.0] - 2026-08-16
 
 > **Mode Minimal** : ZAILON peut rester ouvert sans être perceptible — un seul

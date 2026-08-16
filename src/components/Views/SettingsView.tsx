@@ -1,17 +1,15 @@
-import { Activity, AlertCircle, CheckCircle2, ChevronRight, Compass, Database, ExternalLink, EyeOff, FileClock, FileText, Gamepad2, HardDrive, Heart, Info, KeyRound, Link2, MonitorUp, Palette, Radio, RefreshCw, Search, Settings2, ShieldAlert, Trash2 } from 'lucide-react'
+import { Activity, AlertCircle, CheckCircle2, ChevronRight, Compass, ExternalLink, EyeOff, FileClock, FileText, Gamepad2, HardDrive, Heart, Info, KeyRound, Link2, MonitorUp, Palette, Radio, RefreshCw, Search, Settings2, ShieldAlert, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import type { GameTab } from '../../types'
 import { appVersion, useStore } from '../../store/useStore'
 import { native, ProviderConnectionStatus } from '../../lib/native'
 import { cachedProviderStatuses, providerHealthCache } from '../../lib/lazyPages'
-import { formatTime } from '../../utils'
 import { useUpdater } from '../UpdateProvider'
 import { CREATOR_LINKS } from '../../config/creatorLinks'
 import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
 import { ZailonSwitch } from '../UI/ZailonSwitch'
 import { AccordionSection } from '../UI/AccordionSection'
-import { artworkProvidersWithState } from '../../lib/artworkRegistry'
 import { addonCapabilities, hasCapability, type ZailonCapability } from '../../lib/addonGating'
 import { ScrollableModal } from '../UI/ScrollableModal'
 import { SafeMarkdown } from '../UI/SafeMarkdown'
@@ -32,7 +30,6 @@ const SETTINGS_INDEX: Array<{ id: string; label: string; path: string; keywords:
   { id: 'reduce-explanations', label: 'Réduire les explications', path: 'Paramètres > Préférences et lisibilité', keywords: 'explications bulles descriptions aide', sectionLabel: 'Préférences et lisibilité' },
   { id: 'advanced-mode', label: 'Mode avancé', path: 'Paramètres > Préférences et lisibilité', keywords: 'avance technique', sectionLabel: 'Préférences et lisibilité' },
   { id: 'accent', label: 'Couleur d’accent', path: 'Paramètres > Apparence', keywords: 'accent couleur theme', sectionLabel: 'Couleur d’accent' },
-  { id: 'artwork', label: 'Illustrations', path: 'Paramètres > Illustrations', keywords: 'illustrations images steam steamgriddb artwork couverture bannière logo icône sources', sectionLabel: 'Illustrations' },
   { id: 'tasks', label: 'Tâches et notifications', path: 'Paramètres > Tâches et notifications', keywords: 'taches notifications toasts progression', sectionLabel: 'Tâches et notifications' },
   { id: 'storage', label: 'Stockage', path: 'Paramètres > Stockage', keywords: 'stockage espace disque nettoyage', sectionLabel: 'Stockage' },
   { id: 'providers', label: 'Fournisseurs de mods', path: 'Paramètres > Fournisseurs de mods', keywords: 'nexus curseforge cle api fournisseurs credentials', sectionLabel: 'Fournisseurs de mods' },
@@ -55,7 +52,6 @@ const SETTINGS_SECTION_BY_LABEL: Record<string, string> = {
   'Préférences et lisibilité': 'preferences',
   'Apparence': 'appearance',
   'Tâches et notifications': 'notifications',
-  'Illustrations': 'illustrations',
   'Mode jeu': 'game-mode',
   'Panneau rapide en jeu': 'quick-panel',
   'Contenu et confidentialité': 'content',
@@ -63,7 +59,6 @@ const SETTINGS_SECTION_BY_LABEL: Record<string, string> = {
   'Liens Nexus NXM': 'nxm',
   'Mises à jour des mods': 'mod-updates',
   'Application updates': 'app-updates',
-  'Library statistics': 'library-stats',
   'Stockage': 'storage',
   'À propos': 'about',
 }
@@ -80,7 +75,6 @@ export function SettingsView() {
   const language = useStore(state => state.language)
   const textSize = useStore(state => state.textSize)
   const uiDensity = useStore(state => state.uiDensity)
-  const autoArtwork = useStore(state => state.autoArtwork)
   const nsfw = useStore(state => state.nsfw)
   const hideUnclassifiedNsfw = useStore(state => state.hideUnclassifiedNsfw)
   const toggleNSFW = useStore(state => state.toggleNSFW)
@@ -116,7 +110,6 @@ export function SettingsView() {
   const setActiveGameTab = useStore(state => state.setActiveGameTab)
   const setSelectedGame = useStore(state => state.setSelectedGame)
   const selectedGame = useStore(state => state.games.find(game => game.id === state.selectedGameId))
-  const setAutoArtwork = useStore(state => state.setAutoArtwork)
   const autoCheckUpdates = useStore(state => state.autoCheckUpdates)
   const autoInstallUpdates = useStore(state => state.autoInstallUpdates)
   const updateChannel = useStore(state => state.updateChannel)
@@ -155,7 +148,6 @@ export function SettingsView() {
   const resetTour = useStore(state => state.resetTour)
   const setAccentColor = useStore(state => state.setAccentColor)
   const { status, update, error, checkUpdates, openLog } = useUpdater()
-  const totalPlaytime = games.reduce((sum, game) => sum + game.totalPlaytime, 0)
   const isChecking = status === 'checking'
   const latestVersion = update?.version ?? lastUpdateVersion
   const [nexusKey, setNexusKey] = useState('')
@@ -202,19 +194,6 @@ export function SettingsView() {
     setOpenSection(id)
     try { sessionStorage.setItem('zailon.settingsOpenSection', id) } catch { /* ignore */ }
   }
-  const artworkSteamGridDbKey = useStore(state => state.artworkSteamGridDbKey)
-  const setArtworkSteamGridDbKey = useStore(state => state.setArtworkSteamGridDbKey)
-  const artworkIgdbClientId = useStore(state => state.artworkIgdbClientId)
-  const setArtworkIgdbClientId = useStore(state => state.setArtworkIgdbClientId)
-  const artworkIgdbClientSecret = useStore(state => state.artworkIgdbClientSecret)
-  const setArtworkIgdbClientSecret = useStore(state => state.setArtworkIgdbClientSecret)
-  const artworkSourceMode = useStore(state => state.artworkSourceMode)
-  const setArtworkSourceMode = useStore(state => state.setArtworkSourceMode)
-  const [artworkGridDbDraft, setArtworkGridDbDraft] = useState('')
-  const [igdbIdDraft, setIgdbIdDraft] = useState('')
-  const [igdbSecretDraft, setIgdbSecretDraft] = useState('')
-  const [artworkMessage, setArtworkMessage] = useState<string>()
-  const [testingArtworkKey, setTestingArtworkKey] = useState(false)
   const settingsResults = useMemo(() => {
     const query = settingsQuery.trim().toLocaleLowerCase()
     if (!query) return []
@@ -302,18 +281,6 @@ export function SettingsView() {
     }
   }
 
-  const testArtworkConnection = async (provider: 'steamgriddb' | 'igdb' | 'gamebanana', keys: Record<string, string>) => {
-    setTestingArtworkKey(true)
-    setArtworkMessage(undefined)
-    try {
-      setArtworkMessage(await native.testArtworkProvider(provider, keys))
-    } catch (reason) {
-      setArtworkMessage(reason instanceof Error ? reason.message : String(reason))
-    } finally {
-      setTestingArtworkKey(false)
-    }
-  }
-
   const revokeProvider = async (provider: 'nexus' | 'curseforge') => {
     setBusyProvider(provider)
     try {
@@ -352,41 +319,6 @@ export function SettingsView() {
       </AccordionSection>}
 
       <AccordionSection id="notifications" title="Tâches et notifications" subtitle="Cartes de progression, toasts de session" icon=<Settings2 size={13} /> open={openSection === 'notifications'} onToggle={() => toggleSection('notifications')}><div className="grid gap-2 sm:grid-cols-2"><label className="flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/58">Afficher les cartes de progression<ZailonSwitch checked={taskToastsEnabled} onChange={setTaskToastsEnabled} /></label><label className="flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/58">Réduire automatiquement l’import<ZailonSwitch checked={taskAutoReduceImports} onChange={setTaskAutoReduceImports} /></label></div><div className="mt-2 grid gap-2 sm:grid-cols-2"><label className="flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/58">« En cours via ZAILON »<ZailonSwitch checked={toastRuntimeConnected} onChange={setToastRuntimeConnected} /></label><label className="flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/58">« Session terminée »<ZailonSwitch checked={toastSessionEnded} onChange={setToastSessionEnded} /></label></div><p className="mt-2 text-[11px] text-white/32">La bulle « En cours via ZAILON » apparaît uniquement quand le vrai processus du jeu est détecté et les fonctions runtime initialisées — jamais à l'ouverture du launcher ou de Steam. Elle rappelle le raccourci du panneau rapide (Ctrl+Alt+Z) seulement les 3 premières sessions.</p>{!reduceExplanations && <><p className="mt-2 text-[11px] text-white/32">Masquer une carte ne supprime jamais la tâche. L’historique complet reste disponible dans Téléchargements.</p><label className="mt-2 flex items-center justify-between gap-4 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/58"><span className="flex items-center gap-2"><strong className="text-white/76">Centre de notifications</strong><ZailonInfoPopover text="Désactivé : le bouton Historique, le badge et le centre disparaissent de toute l’interface, et son historique n’est pas rendu. Les erreurs critiques (corruption, sécurité, perte de données, action obligatoire) restent toujours affichées en dialogue ou toast (§23)." /></span><ZailonSwitch checked={notificationCenterEnabled} onChange={setNotificationCenterEnabled} /></label></>}</AccordionSection>
-
-      {hasCap('artwork.plus') && <AccordionSection id="illustrations" title="Illustrations" subtitle="Images automatiques, sources, état" icon=<Palette size={13} /> open={openSection === 'illustrations'} onToggle={() => toggleSection('illustrations')}>
-        <label className="flex items-center justify-between gap-4 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/62"><span className="flex items-center gap-2"><strong className="text-white/76">Images automatiques pour les nouveaux jeux</strong><ZailonInfoPopover text="ZAILON peut proposer des illustrations pour les nouveaux jeux détectés. La copie locale reste toujours soumise à confirmation. Priorité : art officiel Steam d'abord, puis les sources configurées (SteamGridDB, IGDB, GameBanana)." /></span><ZailonSwitch checked={autoArtwork} onChange={setAutoArtwork} /></label>
-        <div className="mt-2 flex items-center justify-between gap-4 rounded-lg bg-white/[0.025] px-3 py-2.5 text-[11px] text-white/62"><span className="flex items-center gap-2"><strong className="text-white/76">Source de recherche</strong><ZailonInfoPopover text="Automatique : essaie la première source fiable, puis les autres seulement si elle ne renvoie rien. Toutes les sources : une seule recherche fusionnée avec toutes les sources disponibles. Une source indisponible ne bloque jamais la recherche." /></span><select value={artworkSourceMode} onChange={event => setArtworkSourceMode(event.target.value as 'automatic' | 'all')} className="rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/72"><option value="automatic">Automatique</option><option value="all">Toutes les sources</option></select></div>
-        <div className="mt-3 rounded-lg bg-white/[0.025] p-3">
-          <p className="mb-2 text-[11px] font-semibold text-white/55">État des sources</p>
-          <div className="space-y-1.5">{artworkProvidersWithState({ steamgriddbApiKey: artworkSteamGridDbKey, igdbClientId: artworkIgdbClientId, igdbClientSecret: artworkIgdbClientSecret }).map(provider => <div key={provider.id} className="flex items-center gap-2 text-[11px]"><span className="w-36 shrink-0 text-white/65">{provider.label}</span><span className={provider.state === 'available' ? 'text-emerald-300/72' : provider.state === 'not-configured' ? 'text-amber-200/70' : 'text-white/30'}>{provider.state === 'available' ? '✓ disponible' : provider.state === 'not-configured' ? 'Non configuré' : 'Connecteur non disponible'}</span><ZailonInfoPopover text={provider.reason({ steamgriddbApiKey: artworkSteamGridDbKey, igdbClientId: artworkIgdbClientId, igdbClientSecret: artworkIgdbClientSecret })} /></div>)}</div>
-        </div>
-        <div className="mt-2 rounded-lg bg-white/[0.025] p-3">
-          <p className="mb-2 text-[11px] font-semibold text-white/55">SteamGridDB</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <input type="password" value={artworkGridDbDraft} onChange={event => setArtworkGridDbDraft(event.target.value)} autoComplete="new-password" spellCheck={false} placeholder={artworkSteamGridDbKey ? 'Coller une nouvelle clé pour la remplacer' : 'Coller la clé API SteamGridDB (gratuite)'} className="min-w-[240px] flex-1 rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-gold/30" />
-            <button type="button" onClick={() => { if (!artworkGridDbDraft.trim()) return; setArtworkSteamGridDbKey(artworkGridDbDraft.trim()); setArtworkGridDbDraft(''); setArtworkMessage('Clé SteamGridDB enregistrée localement.') }} disabled={!artworkGridDbDraft.trim()} className="rounded bg-gold px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-30">{artworkSteamGridDbKey ? 'Remplacer' : 'Enregistrer'}</button>
-            {artworkSteamGridDbKey && <button type="button" onClick={() => void testArtworkConnection('steamgriddb', { steamgriddb: artworkSteamGridDbKey })} disabled={testingArtworkKey} className="rounded border border-white/[0.1] px-3 py-1.5 text-[11px] text-white/64 disabled:opacity-35">{testingArtworkKey ? 'Test…' : 'Tester la connexion'}</button>}
-            {artworkSteamGridDbKey && <button type="button" onClick={() => { setArtworkSteamGridDbKey(''); setArtworkMessage('Clé SteamGridDB supprimée.') }} className="rounded border border-red-300/15 px-2 py-1.5 text-[11px] text-red-200/60">Supprimer</button>}
-          </div>
-          {artworkMessage && <p className="mt-2 text-[11px] text-white/45">{artworkMessage}</p>}
-          <p className="mt-2 text-[11px] leading-relaxed text-white/32">La clé est stockée localement et transmise uniquement à SteamGridDB, uniquement pour les illustrations.</p>
-        </div>
-        <div className="mt-2 rounded-lg bg-white/[0.025] p-3">
-          <p className="mb-2 text-[11px] font-semibold text-white/55">IGDB — application Twitch gratuite</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <input type="text" value={igdbIdDraft} onChange={event => setIgdbIdDraft(event.target.value)} spellCheck={false} placeholder={artworkIgdbClientId ? 'Client ID enregistré — coller pour remplacer' : 'Client ID (dev.twitch.tv/console/apps)'} className="rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-gold/30" />
-            <input type="password" value={igdbSecretDraft} onChange={event => setIgdbSecretDraft(event.target.value)} autoComplete="new-password" spellCheck={false} placeholder={artworkIgdbClientSecret ? 'Client Secret enregistré — coller pour remplacer' : 'Client Secret'} className="rounded border border-white/[0.08] bg-ink-200 px-2 py-1.5 text-[11px] text-white/70 outline-none focus:border-gold/30" />
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button type="button" onClick={() => { if (!igdbIdDraft.trim() || !igdbSecretDraft.trim()) return; setArtworkIgdbClientId(igdbIdDraft.trim()); setArtworkIgdbClientSecret(igdbSecretDraft.trim()); setIgdbIdDraft(''); setIgdbSecretDraft(''); setArtworkMessage('Client Twitch enregistré localement pour IGDB.') }} disabled={!igdbIdDraft.trim() || !igdbSecretDraft.trim()} className="rounded bg-gold px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-30">{artworkIgdbClientId && artworkIgdbClientSecret ? 'Remplacer' : 'Enregistrer'}</button>
-            {artworkIgdbClientId && artworkIgdbClientSecret && <button type="button" onClick={() => void testArtworkConnection('igdb', { igdbClientId: artworkIgdbClientId, igdbClientSecret: artworkIgdbClientSecret })} disabled={testingArtworkKey} className="rounded border border-white/[0.1] px-3 py-1.5 text-[11px] text-white/64 disabled:opacity-35">{testingArtworkKey ? 'Test…' : 'Tester la connexion'}</button>}
-            {(artworkIgdbClientId || artworkIgdbClientSecret) && <button type="button" onClick={() => { setArtworkIgdbClientId(''); setArtworkIgdbClientSecret(''); setArtworkMessage('Client Twitch supprimé (IGDB).') }} className="rounded border border-red-300/15 px-2 py-1.5 text-[11px] text-red-200/60">Supprimer</button>}
-            <button type="button" onClick={() => void testArtworkConnection('gamebanana', {})} disabled={testingArtworkKey} className="rounded border border-white/[0.1] px-3 py-1.5 text-[11px] text-white/64 disabled:opacity-35">{testingArtworkKey ? 'Test…' : 'Tester GameBanana (public)'}</button>
-          </div>
-          <p className="mt-2 text-[11px] leading-relaxed text-white/32">Le Client ID et le Client Secret sont stockés localement et transmis uniquement à Twitch/IGDB (échange Client Credentials pour obtenir un jeton). IGDB couvre les jeux absents de Steam : covers, artworks et screenshots.</p>
-        </div>
-      </AccordionSection>}
-
 
       <AccordionSection id="game-mode" title="Mode jeu" subtitle="Activité réduite, minimisation, minimal" icon=<Gamepad2 size={13} /> open={openSection === 'game-mode'} onToggle={() => toggleSection('game-mode')}><label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/62"><span><strong className="block text-white/76">Réduire l’activité ZAILON pendant le jeu</strong><span className="mt-1 block leading-relaxed text-white/36">Suspend les scans lourds et les animations non nécessaires quand un jeu tourne, pour ne garder que la présence, le clavier, le visuel et le panneau rapide.</span></span><ZailonSwitch checked={reduceActivityDuringGame} onChange={setReduceActivityDuringGame} className="mt-0.5" /></label><label className="mt-2 flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/62"><span><strong className="block text-white/76">Réduire ZAILON lorsque le jeu démarre</strong><span className="mt-1 block leading-relaxed text-white/36">Minimise automatiquement la fenêtre principale dès que le jeu est détecté (comme Steam).</span></span><ZailonSwitch checked={autoMinimizeOnGameStart} onChange={setAutoMinimizeOnGameStart} className="mt-0.5" /></label><label className="mt-2 flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/62"><span><strong className="block text-white/76">Restaurer ZAILON après le jeu</strong><span className="mt-1 block leading-relaxed text-white/36">Restaure la fenêtre principale à la fin de la session de jeu.</span></span><ZailonSwitch checked={restoreAfterGame} onChange={setRestoreAfterGame} className="mt-0.5" /></label><div className="mt-3 border-t border-white/[0.07] pt-3"><label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/62"><span><strong className="block text-white/76">Mode minimal</strong><span className="mt-1 block leading-relaxed text-white/36">ZAILON reste ouvert sans être perceptible : pas de vidéo de fond, pas d’animation ni de parallaxe, aucune recherche automatique ni rafraîchissement réseau. L’essentiel (bibliothèque, profils, lancement) reste disponible.</span></span><ZailonSwitch checked={minimalMode} onChange={setMinimalMode} className="mt-0.5" /></label></div></AccordionSection>
       <AccordionSection id="quick-panel" title="Panneau rapide en jeu" subtitle="Fenêtre native, raccourci" icon=<MonitorUp size={13} /> open={openSection === 'quick-panel'} onToggle={() => toggleSection('quick-panel')}><label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg bg-white/[0.025] p-3 text-[11px] text-white/62"><span><strong className="block text-white/76">Afficher le panneau rapide ZAILON</strong><span className="mt-1 block leading-relaxed text-white/36">Fenêtre native ZAILON (jamais une injection) pour régler visuel et clavier pendant le jeu. Ouverte au raccourci, fermée automatiquement quand elle perd le focus. Indisponible en plein écran exclusif (utilisez Borderless).</span></span><ZailonSwitch checked={quickPanelEnabled} onChange={setQuickPanelEnabled} className="mt-0.5" /></label>{quickPanelEnabled && <div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="text-[11px] text-white/48">Raccourci d’ouverture<input value={quickPanelShortcut} onChange={event => setQuickPanelShortcut(event.target.value)} placeholder="Ctrl+Alt+Z" className="mt-1.5 block w-full rounded-lg border border-white/[0.08] bg-ink-200 px-3 py-2 font-mono text-[11px] text-white/72 outline-none focus:border-gold/30" /></label><div className="flex flex-col justify-end"><button type="button" onClick={() => native.isDesktop() && void native.quickPanel.toggle()} disabled={!native.isDesktop()} className="flex items-center justify-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] font-semibold text-white/60 hover:border-gold/25 hover:text-gold disabled:cursor-not-allowed disabled:opacity-30"><MonitorUp size={13} />Tester le panneau</button><p className="mt-1.5 text-[10px] leading-relaxed text-white/28">Ouvre la vraie fenêtre native, même sans jeu — vérifie création, taille et focus (spec Quick Panel §21).</p></div></div>}{!reduceExplanations && <p className="mt-3 text-[11px] leading-relaxed text-white/32">Le panneau est une fenêtre indépendante : il ne modifie aucun fichier du jeu et ne désactive jamais le clavier à sa fermeture (restauration du focus au jeu).</p>}</AccordionSection>
@@ -441,7 +373,6 @@ export function SettingsView() {
         {!reduceExplanations && <p className="mt-2 text-[11px] leading-relaxed text-white/32">Les statistiques restent 100 % locales — aucun compte, aucune télémétrie. « Discrètement » lance ZAILON sans ouvrir la fenêtre principale : seul le suivi des sessions tourne (fenêtre réapparaît au double-clic). {!startDiscreet && trackExternalApps && 'ⓘ Le suivi des apps hors ZAILON commence uniquement lorsque ZAILON est ouvert.'}</p>}
       </AccordionSection>
 
-      <AccordionSection id="library-stats" title="Library statistics" subtitle="Jeux, mods, temps de jeu" icon=<Database size={13} /> open={openSection === 'library-stats'} onToggle={() => toggleSection('library-stats')}><div className="grid grid-cols-3 gap-2 text-center"><Stat label="Games" value={String(games.length)} /><Stat label="Mods" value={String(games.reduce((sum, game) => sum + game.installedMods.length, 0))} /><Stat label="Playtime" value={formatTime(totalPlaytime)} /></div></AccordionSection>
       <AccordionSection id="storage" title="Stockage" subtitle="Espace, nettoyage" icon=<HardDrive size={13} /> open={openSection === 'storage'} onToggle={() => toggleSection('storage')}><div className="grid grid-cols-2 gap-2 xl:grid-cols-4"><Stat label="Mods (paquets ZAILON)" value={formatBytes(games.reduce((sum, game) => sum + game.installedMods.reduce((total, mod) => total + (mod.sizeBytes || 0), 0), 0))} /><Stat label="Tâches conservées" value={String(backgroundTasks.length)} /><Stat label="Points de restauration" value={String(restorePoints.length)} /><Stat label="Fonds vidéo en cache" value={backgroundMediaCache.entries.length ? `${backgroundMediaCache.entries.length} · ${formatBytes(backgroundMediaCache.entries.reduce((sum, entry) => sum + entry.sizeBytes, 0))}` : 'Vide'} /></div><div className="mt-3 flex flex-wrap items-center gap-2"><button type="button" onClick={() => { if (window.confirm('Nettoyer l’historique des tâches terminées et en erreur ? Les mods installés et les tâches en cours ne sont pas touchés.')) clearBackgroundTasks() }} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/64 hover:bg-white/[0.05]"><Trash2 size={12} />Nettoyer l’historique des tâches</button>{backgroundMediaCache.entries.length > 0 && <button type="button" onClick={() => { if (window.confirm(`Supprimer les ${backgroundMediaCache.entries.length} fond(s) vidéo mis en cache ? Les vidéos retomberont sur le lecteur embarqué jusqu'à un nouveau téléchargement.`)) void clearBackgroundMedia() }} className="flex items-center gap-1.5 rounded-lg border border-red-300/15 px-3 py-2 text-[11px] font-semibold text-red-200/60 hover:bg-red-400/10"><Trash2 size={12} />Vider le cache des fonds vidéo</button>}</div>{backgroundMediaCache.entries.length > 0 && <div className="mt-3 space-y-1.5 rounded-xl border border-white/[0.07] bg-white/[0.018] p-3">{backgroundMediaCache.entries.map(entry => <div key={entry.videoId} className="flex items-center gap-2 rounded-lg border border-white/[0.06] bg-black/15 px-3 py-2"><span className="min-w-0 flex-1 truncate font-mono text-[11px] text-white/62" title={`YouTube ${entry.videoId}`}>{entry.videoId}</span><span className="shrink-0 text-[11px] text-white/34">{formatBytes(entry.sizeBytes)}</span><span className="shrink-0 text-[10px] text-white/24">{formatDate(entry.cachedAt * 1000)}</span><button type="button" onClick={() => void removeBackgroundMedia(entry.videoId)} title="Supprimer ce fond vidéo" className="shrink-0 rounded-md p-1.5 text-white/35 hover:bg-red-400/10 hover:text-red-200"><Trash2 size={12} /></button></div>)}</div>}{!reduceExplanations && <p className="mt-3 text-[11px] leading-relaxed text-white/32">Tailles réelles calculées depuis les paquets locaux. Les fonds vidéo téléchargés depuis YouTube sont mis en cache pour une lecture hors-ligne — supprimez-les ici, jamais un fichier utilisé par un profil, un rollback ou une Collection n'est touché.</p>}</AccordionSection>
 
       <AccordionSection id="about" title="ZAILON · À propos" subtitle="Version, visite guidée, liens" icon=<Info size={13} /> open={openSection === 'about'} onToggle={() => toggleSection('about')}><p className="text-xs text-white/55">Universal Mod Launcher · v{appVersion}</p><p className="mt-1 text-[11px] text-white/30">Runtime: {native.isDesktop() ? 'Application native Tauri' : 'aperçu web (opérations natives désactivées)'}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => { setHistoryVersion(appVersion); setHistoryOpen(true) }} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05]"><FileClock size={12} />Historique des versions</button><button type="button" onClick={() => { restartTour(); setView('home') }} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05]"><Compass size={12} />Revoir la visite guidée</button><button type="button" onClick={() => { if (window.confirm('Réinitialiser les conseils et la visite guidée ?')) resetTour() }} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05]"><RefreshCw size={12} />Réinitialiser les conseils</button></div><label className="mt-3 flex items-center justify-between rounded-lg bg-white/[0.025] p-3 text-xs text-white/55"><span className="flex items-center gap-2"><Heart size={14} className="text-rose-200/70" />Afficher « Me soutenir » dans la barre latérale</span><ZailonSwitch checked={showSupportButton} onChange={setShowSupportButton} /></label><div className="mt-3 flex flex-wrap gap-2">{CREATOR_LINKS.map(link => <button key={link.id} type="button" onClick={() => void native.openExternalUrl(link.url)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-xs text-white/58 hover:bg-white/[0.05]"><ExternalLink size={12} />{link.label}</button>)}</div><p className="mt-3 text-[11px] text-white/28">Les liens ouvrent des sites HTTPS autorisés. ZAILON ne collecte aucune donnée de paiement ni télémétrie associée.</p></AccordionSection>

@@ -675,7 +675,7 @@ export interface Store {
   /** Importe le temps de jeu Steam (minutes par AppID depuis localconfig.vdf)
    * et l'applique aux jeux Steam correspondants — sans jamais toucher au suivi
    * ZAILON. Retourne le nombre de jeux enrichis (spec « Temps Steam/Epic » §3). */
-  importSteamPlaytime: () => Promise<number>
+  importSteamPlaytime: (opts?: { silent?: boolean }) => Promise<number>
   /** Empreinte des frameworks au dernier lancement réussi, par jeu (spec
    * « Last Known Good » §41) — `undefined` = aucune référence encore. */
   lastKnownGoodFrameworks?: Record<string, FrameworkSnapshot | undefined>
@@ -2788,9 +2788,9 @@ export const useStore = create<Store>()(persist((set, get) => ({
   resetSessionHistory: gameId => {
     set(state => ({ sessionHistory: gameId ? state.sessionHistory.filter(session => session.gameId !== gameId) : [] }))
   },
-  importSteamPlaytime: async () => {
+  importSteamPlaytime: async opts => {
     if (!native.isDesktop()) {
-      set({ notice: 'Import du temps Steam disponible uniquement dans l’application ZAILON.' })
+      if (!opts?.silent) set({ notice: 'Import du temps Steam disponible uniquement dans l’application ZAILON.' })
       return 0
     }
     try {
@@ -2799,13 +2799,17 @@ export const useStore = create<Store>()(persist((set, get) => ({
       const importedCount = next.reduce((count, game, index) => (game.importedPlaytimeMin !== get().games[index]?.importedPlaytimeMin ? count + 1 : count), 0)
       set(state => ({
         games: next,
-        notice: importedCount
-          ? `Temps Steam importé pour ${importedCount} jeu${importedCount > 1 ? 'x' : ''} — affiché séparément du suivi ZAILON.`
-          : 'Aucun temps Steam nouveau à importer (aucun AppID correspondant trouvé).',
+        // Auto-import au démarrage : silencieux (aucun toast) — le temps est
+        // simplement présent dans Statistiques.
+        ...(opts?.silent ? {} : {
+          notice: importedCount
+            ? `Temps Steam importé pour ${importedCount} jeu${importedCount > 1 ? 'x' : ''} — affiché séparément du suivi ZAILON.`
+            : 'Aucun temps Steam nouveau à importer (aucun AppID correspondant trouvé).',
+        }),
       }))
       return importedCount
     } catch (error) {
-      set({ notice: `Impossible d’importer le temps Steam : ${asError(error)}` })
+      if (!opts?.silent) set({ notice: `Impossible d’importer le temps Steam : ${asError(error)}` })
       return 0
     }
   },

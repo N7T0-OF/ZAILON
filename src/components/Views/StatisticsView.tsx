@@ -43,9 +43,6 @@ export function StatisticsView() {
   const setView = useStore(state => state.setView)
   const setSelectedGame = useStore(state => state.setSelectedGame)
   const resetSessionHistory = useStore(state => state.resetSessionHistory)
-  const importSteamPlaytime = useStore(state => state.importSteamPlaytime)
-  const [importing, setImporting] = useState(false)
-  const [importedNotice, setImportedNotice] = useState<string>()
   const [tab, setTab] = useState<StatsTab>('tout')
   const [range, setRange] = useState<StatsRange>(7)
   const [query, setQuery] = useState('')
@@ -76,18 +73,6 @@ export function StatisticsView() {
   const recent = useMemo(() => recentSessions(filteredHistory, 6), [filteredHistory])
   const imported = useMemo(() => importedTotals(games), [games])
   const importedByGame = useMemo(() => new Map(games.map(game => [game.id, game.importedPlaytimeMin || 0])), [games])
-
-  const onImportSteam = async () => {
-    if (importing) return
-    setImporting(true)
-    setImportedNotice(undefined)
-    try {
-      const count = await importSteamPlaytime()
-      setImportedNotice(count ? `Temps Steam importé pour ${count} jeu${count > 1 ? 'x' : ''}.` : 'Aucun AppID Steam correspondant trouvé.')
-    } finally {
-      setImporting(false)
-    }
-  }
 
   const liveMinutes = useMemo(() => {
     if (!activeTrackedSession) return 0
@@ -153,7 +138,6 @@ export function StatisticsView() {
             </div>
           )}
         </div>
-        <button type="button" onClick={onImportSteam} disabled={importing} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-1.5 text-[11px] font-semibold text-white/60 hover:border-gold/25 hover:text-gold disabled:opacity-50" title="Importer le temps de jeu Steam (localconfig.vdf) — affiché séparément du suivi ZAILON"><Import size={12} />{importing ? 'Import…' : 'Importer Steam'}</button>
         <button type="button" onClick={() => { if (window.confirm('Réinitialiser TOUTES les statistiques ? Cette action est définitive (l’historique des sessions est supprimé localement).')) resetSessionHistory() }} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-1.5 text-[11px] font-semibold text-white/50 hover:border-red-300/25 hover:text-red-200" title="Réinitialiser toutes les statistiques"><Trash2 size={12} /></button>
       </div>
     </header>
@@ -192,14 +176,13 @@ export function StatisticsView() {
           <HeroStat icon={<Clock3 size={15} />} label="Cette semaine" value={weekMinutes > 0 ? formatTime(weekMinutes) : '0h'} sub={weekSessionCount ? `${weekSessionCount} session(s)` : 'aucune session'} />
         </div>
 
-        {/* Temps Steam importé (spec « Temps Steam/Epic » §3) : JAMAIS fusionné
-         * avec le suivi ZAILON — affiché séparément. */}
-        {(imported.minutes > 0 || importedNotice) && (
+        {/* Temps Steam importé AUTOMATIQUEMENT au démarrage (spec §2) : affiché
+         * séparément, jamais fusionné avec le suivi ZAILON. */}
+        {imported.minutes > 0 && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.018] px-4 py-2.5">
             <Import size={13} className="text-white/30" />
-            <span className="text-[11px] text-white/55">Temps Steam importé : <strong className="font-mono text-white/80">{imported.minutes > 0 ? formatTime(imported.minutes) : '—'}</strong> sur {imported.count} jeu{imported.count > 1 ? 'x' : ''}</span>
-            <span className="text-[10px] text-white/28">· en plus du suivi ZAILON, jamais fusionné</span>
-            {importedNotice && <span className="rounded-full bg-emerald-400/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">{importedNotice}</span>}
+            <span className="text-[11px] text-white/55">Temps Steam : <strong className="font-mono text-white/80">{formatTime(imported.minutes)}</strong> sur {imported.count} jeu{imported.count > 1 ? 'x' : ''}</span>
+            <span className="text-[10px] text-white/28">· détecté automatiquement, en plus du suivi ZAILON</span>
           </div>
         )}
 
@@ -321,7 +304,7 @@ export function StatisticsView() {
           </section>
         )}
 
-        <p className="px-1 text-[11px] leading-relaxed text-white/28">Suivi ZAILON et temps Steam importé restent toujours séparés — « Importer Steam » lit localconfig.vdf (lecture seule, minutes), jamais fusionné avec vos sessions. Historique persisté avec checkpoints toutes les ~5 min : une session interrompue par un crash de ZAILON est récupérée au prochain démarrage.</p>
+        <p className="px-1 text-[11px] leading-relaxed text-white/28">Temps de jeu détecté automatiquement — aucune importation manuelle nécessaire.</p>
       </div>
     </div>
   </div>

@@ -110,6 +110,7 @@ export default function App() {
   const batteryPerformanceBehavior = useStore(s => s.batteryPerformanceBehavior)
   const reconcileRuntimeActivity = useStore(s => s.reconcileRuntimeActivity)
   const refreshStagedCatalogs = useStore(s => s.refreshStagedCatalogs)
+  const importSteamPlaytime = useStore(s => s.importSteamPlaytime)
   const recoverInterruptedSession = useStore(s => s.recoverInterruptedSession)
   const flushPendingSettings = useStore(s => s.flushPendingSettings)
   const tourCompleted = useStore(s => s.tourCompleted)
@@ -157,6 +158,19 @@ export default function App() {
     const interactiveTimer = globalThis.setTimeout(() => startupProfiler.mark('interactiveAt'), 300)
     return () => globalThis.clearTimeout(interactiveTimer)
   }, [refreshStagedCatalogs])
+
+  // Statistiques (spec §2) : le temps Steam est importé AUTOMATIQUEMENT, une
+  // seule fois au démarrage (phase services, jamais bloquant) — plus aucun
+  // bouton « Importer Steam » manuel. Idempotent : seuls les jeux dont
+  // l'AppID correspond sont renseignés.
+  const steamImportStarted = useRef(false)
+  useEffect(() => {
+    if (steamImportStarted.current || !native.isDesktop()) return
+    steamImportStarted.current = true
+    startupCoordinator.schedule('services', 'Import automatique du temps Steam', () => {
+      void importSteamPlaytime({ silent: true })
+    })
+  }, [importSteamPlaytime])
 
   // Spec §45 : au démarrage, une session suivie interrompue par un crash de
   // ZAILON est archivée avec son dernier checkpoint (marquée « récupérée »).

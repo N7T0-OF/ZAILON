@@ -80,6 +80,8 @@ test('Rust : parse_steam_localconfig_playtime lit PlaytimeForever en MINUTES (lo
 
 test('Store : importSteamPlaytime applique via applySteamPlaytime, jamais totalPlaytime', () => {
   const store = read('src/store/useStore.ts')
-  assert.ok(store.includes('importSteamPlaytime: async () =>'), 'l’action existe')
+  assert.ok(store.includes('importSteamPlaytime: async opts =>'), 'l’action existe')
   assert.ok(store.includes('applySteamPlaytime(get().games, minutesByAppId)'), 'passe par la lib pure')
+  // Auto-import au démarrage : silencieux, aucun toast (spec §2).
+  assert.ok(store.includes('opts?.silent'), 'le mode silencieux existe (auto-import au démarrage)')
 })

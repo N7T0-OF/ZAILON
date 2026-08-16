@@ -9,6 +9,7 @@ import { isRed4extActive } from '../../lib/frameworkValidator'
 import { SESSION_STATE_LABELS } from '../../lib/launchAdapters'
 import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
+import { countActiveMods, countProfileMods } from '../../lib/profileState'
 import { formatElapsedDuration, formatSeconds, formatTime, timeAgo } from '../../utils'
 import { addonCapabilities, hasCapability } from '../../lib/addonGating'
 import { HOME_PRESET_LABELS, HOME_WIDGET_DEFAULTS, HOME_WIDGET_VARIANTS, orderHomeWidgets, widgetGridClass, type HomeLayoutPreset, type HomeWidgetConfig } from '../../lib/homeWidgets'
@@ -136,7 +137,7 @@ export function HomeView() {
   }
 
   const profileMods = resolveProfileMods(selectedGame, selectedProfile)
-  const activeMods = profileMods.filter(mod => mod.enabled).length
+  const activeMods = countActiveMods(profileMods)
   // Badge framework honnête (spec #38-39) : RED4ext ⚠ quand le loader est actif
   // dans le profil mais le chargement réel n'est PAS confirmé — jamais ✓ sans
   // confirmation runtime post-lancement.
@@ -406,7 +407,7 @@ export function HomeView() {
       profiles={selectedGame.profiles}
       selectedProfileId={selectedProfile.id}
       running={sessionRunning}
-      countFor={profile => resolveProfileMods(selectedGame, profile).filter(mod => mod.enabled).length}
+      countFor={profile => countProfileMods(resolveProfileMods(selectedGame, profile)).active}
       onSelect={profileId => void setSelectedProfile(profileId)}
       onCreate={name => addProfile(name)}
       onManage={() => { setActiveGameTab('profiles'); setGamesBrowsing(false); setView('games') }}

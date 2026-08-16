@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.150.0] - 2026-08-16
+
+> **Une seule source de vérité pour les compteurs de mods** : plus aucune
+> interface ne calcule « mods actifs » avec sa propre formule.
+
+### Changed
+
+- **Compteur unique `countActiveMods` + `countProfileMods` (profileState)** :
+  Accueil, Bibliothèque, Profil, Diagnostic et Quick Panel comptent TOUS via
+  `countActiveMods(resolveProfileMods(game, profile))` — la résolution centrale
+  — jamais une formule locale. Le bug « 0 mods actifs » alors que des mods
+  fonctionnent est verrouillé par un test de régression (ids ré-importés hors
+  catalogue conservés).
+- **`countProfileMods`** : les trois chiffres affichés ensemble (« X
+  référencé(s) · Y actif(s) ») sortent d'une seule passe sur la liste résolue
+  — impossible qu'ils divergent entre écrans.
+- Les 7 emplacements de comptage (App/QuickPanel, HomeView, GamesView ×4,
+  GameConfigurationPanel, GameDiagnosticPanel) passent par le module unique ;
+  un test de câblage vérifie qu'aucune de ces vues ne contient plus de
+  `filter(mod => mod.enabled).length` local.
+
+### Validation
+
+- **680 tests ✅** (+5), tsc ✅, build ✅.
+
 ## [1.149.0] - 2026-08-16
 
 > **Interface épurée — Téléchargements, Explorer et Add-ons** : tout ce qui ne

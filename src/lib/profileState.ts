@@ -53,3 +53,21 @@ export function reconcileModStates(
 export function countActiveMods(mods: Mod[]): number {
   return mods.filter(mod => mod.enabled).length
 }
+
+export interface ProfileModCounts {
+  /** Mods référencés par le profil (état résolu complet). */
+  referenced: number
+  /** Mods actifs (activés). */
+  active: number
+  /** Mods présents mais désactivés. */
+  disabled: number
+}
+
+/** Les trois compteurs affichés ensemble (« X référencé(s) · Y actif(s) »)
+ * calculés depuis UNE seule liste résolue — jamais deux passes qui pourraient
+ * diverger. À appeler avec `countProfileMods(resolveProfileMods(game,
+ * profile))`. */
+export function countProfileMods(profileMods: Mod[]): ProfileModCounts {
+  const active = countActiveMods(profileMods)
+  return { referenced: profileMods.length, active, disabled: profileMods.length - active }
+}

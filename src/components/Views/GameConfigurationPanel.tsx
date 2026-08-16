@@ -5,6 +5,7 @@ import type { LucideIcon } from 'lucide-react'
 import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from '../../lib/keyboardPresets'
 import { adapterFor, isLauncherBased, LAUNCH_BEHAVIOR_LABELS } from '../../lib/launchAdapters'
 import { pickPrioritySession } from '../../lib/sessionPriority'
+import { countActiveMods } from '../../lib/profileState'
 import {
   ANIMATION_POLICY_LABELS,
   DOWNLOAD_POLICY_LABELS,
@@ -210,7 +211,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
         <SummaryPill label="Clavier" value={LAYOUT_LABELS[effectiveLayout(game, profile.id)]} />
         <SummaryPill label="Profil visuel" value={visualName || '—'} />
         <SummaryPill label="Profils de mods" value={String(game.profiles.length)} />
-        <SummaryPill label="Mods actifs" value={`${profileMods.filter(mod => mod.enabled).length}`} />
+        <SummaryPill label="Mods actifs" value={`${countActiveMods(profileMods)}`} />
         <SummaryPill label="Temps de jeu" value={formatTime(game.totalPlaytime)} />
       </div>
     </section>

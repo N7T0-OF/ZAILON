@@ -5,6 +5,7 @@ import { AppWindow } from './components/Layout/AppWindow'
 import { GuidedTour } from './components/GuidedTour'
 import { UpdateProvider } from './components/UpdateProvider'
 import { resolveProfileMods, useStore } from './store/useStore'
+import { countActiveMods } from './lib/profileState'
 import { buildRuntimeToastContent } from './lib/runtimeToast'
 import type { PerformanceMode } from './lib/performanceProfiles'
 import { activeSessionsForQuickPanel, modsPreparedFor, nextSessionAfterCurrent, quickPanelPerformanceState, type QuickPanelSessionEntry } from './lib/quickPanelState'
@@ -56,7 +57,7 @@ function emitQuickPanelStateFor(store: ReturnType<typeof useStore.getState>, gam
   if (!session || !game) return
   const profile = game.profiles.find(item => item.id === session.profileId)
   const profileMods = profile ? resolveProfileMods(game, profile) : []
-  const activeMods = profileMods.filter(mod => mod.enabled).length
+  const activeMods = countActiveMods(profileMods)
   const performance = quickPanelPerformanceState(store.performanceModes, store.globalPerformanceMode, store.runtimeActivity, game.id)
   void emit('quick-panel-state', {
     gameId: game.id,

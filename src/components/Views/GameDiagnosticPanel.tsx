@@ -8,6 +8,7 @@ import { validateFrameworkHierarchy, type FrameworkDiagnosisKind } from '../../l
 import { adapterFor, LAUNCH_BEHAVIOR_LABELS, SESSION_STATE_LABELS } from '../../lib/launchAdapters'
 import { native, type ProfileDeploymentAudit, type QuickPanelStatus } from '../../lib/native'
 import { pickPrioritySession } from '../../lib/sessionPriority'
+import { countActiveMods } from '../../lib/profileState'
 import { useStore } from '../../store/useStore'
 import type { Game, GameTestRun, Mod, Profile } from '../../types'
 import { ZailonSwitch } from '../UI/ZailonSwitch'
@@ -22,7 +23,7 @@ export interface GameHealth {
 }
 
 export function computeGameHealth(game: Game, profile: Profile, profileMods: Mod[]): GameHealth {
-  const activeMods = profileMods.filter(mod => mod.enabled).length
+  const activeMods = countActiveMods(profileMods)
   const errors = profileMods.filter(mod => mod.deploymentStatus === 'failed').length
   const warnings = profileMods.filter(mod => mod.deploymentStatus === 'warning' || (mod.diagnostics?.length || 0) > 0).length
   const frameworks = [...new Set(game.installedMods.map(mod => mod.framework).filter((value): value is string => Boolean(value)))]

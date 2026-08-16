@@ -816,6 +816,17 @@ const desktopOnly = <T>(command: string, args?: Record<string, unknown>) => {
   return invoke<T>(command, args)
 }
 
+/** Résultat de la résolution YouTube → fichier local (spec « Fix vidéo YouTube »).
+ * `cached` : fichier MP4 local produit ; `ytdlp_missing` : yt-dlp absent (repli
+ * lecteur embarqué) ; `failed` : échec de téléchargement. */
+export interface ResolvedBackgroundVideo {
+  status: 'cached' | 'ytdlp_missing' | 'failed'
+  videoPath?: string
+  thumbnailPath?: string
+  sizeBytes?: number
+  message?: string
+}
+
 export const native = {
   isDesktop: () => isTauri(),
   /** Active/désactive le démarrage avec le système (spec §37-42, §116) :
@@ -1058,6 +1069,8 @@ export const native = {
     desktopOnly<string>('store_game_resource', { gameId, kind, sourcePath }),
   cacheRemoteGameResource: (gameId: string, kind: Exclude<GameResourceKind, 'video'>, sourceUrl: string) =>
     desktopOnly<string>('cache_remote_game_resource', { gameId, kind, sourceUrl }),
+  resolveYoutubeVideo: (url: string, videoId: string) =>
+    desktopOnly<ResolvedBackgroundVideo>('resolve_youtube_video', { url, videoId }),
   /** Recherche multi-source : Steam officiel toujours, + chaque fournisseur
    * dont une clé est fournie dans `apiKeys` (ex. `steamgriddb`). Les résultats
    * sont fusionnés et dédupliqués côté natif dans une seule liste. */

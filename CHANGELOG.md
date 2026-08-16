@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.127.0] - 2026-08-16
+
+> **Pipeline YouTube → cache local** : un lien YouTube de l'Accueil n'est plus
+> seulement collé dans le lecteur embarqué — il est résolu en fichier MP4 local
+> (yt-dlp), mis en cache dans `media/backgrounds/`, puis lu **hors-ligne**, sans
+> re-téléchargement à chaque lancement. Sans yt-dlp, repli honnête sur le
+> lecteur embarqué.
+
+### Added
+
+- **`resolve_youtube_video` (natif)** : télécharge la meilleure vidéo MP4 + une
+  vignette dans `media/backgrounds/video_<id>.mp4`, avec pipeline
+  « Validation → Identification → Téléchargement → Cache → Vérification » et
+  trois statuts explicites (`cached` / `ytdlp_missing` / `failed`).
+- **`backgroundMediaCache.ts` (pur, testé)** : manifeste de cache, noms de
+  fichiers stables (`video_<id>.mp4` / `thumbnail_<id>.jpg`), déduplication,
+  taille agrégée, éviction LRU et validation d'une entrée.
+- **`localPath` prioritaire** : le fichier local mis en cache prime sur la
+  vidéo de ressources dans l'Accueil et la config — le lien YouTube ne devient
+  jamais le lecteur.
+- **États du pipeline dans l'UI** (config jeu + « Changer l'apparence ») :
+  étapes de progression, « ✓ lecture locale hors-ligne » après cache, repli
+  expliqué avec lien d'installation yt-dlp si absent.
+
+### Changed
+
+- Le bouton « Utiliser comme fond » passe en « Téléchargement… » pendant la
+  résolution (non bloquant) et désactive le double-clic.
+
 ## [1.126.0] - 2026-08-16
 
 > **Statistiques premium + renommage des jeux + chaîne FiveM** : la page

@@ -6,6 +6,7 @@ import { Game, GameResources } from '../types'
 import { ArtworkCandidate, GameResourceKind, native, pickGameResource, resourceUrl } from '../lib/native'
 import { artworkProvidersWithState, artworkSearchPlan, dedupeArtworkCandidates, resultSourceLabels } from '../lib/artworkRegistry'
 import { parseYouTubeUrl, youtubeThumbnailUrl } from '../lib/youtubeUrl'
+import { PIPELINE_STAGES, type YoutubeResolveStatus } from '../lib/backgroundMediaCache'
 import { addonCapabilities, hasCapability } from '../lib/addonGating'
 import { ZailonSwitch } from './UI/ZailonSwitch'
 import { useStore } from '../store/useStore'
@@ -310,13 +311,43 @@ function HeroMediaStrip({ game }: { game: Game }) {
   const setBackgroundMediaSettings = useStore(state => state.setBackgroundMediaSettings)
   const [urlDraft, setUrlDraft] = useState('')
   const [feedback, setFeedback] = useState<'idle' | 'valid' | 'invalid'>('idle')
+  const [resolving, setResolving] = useState(false)
+  const [resolveStatus, setResolveStatus] = useState<YoutubeResolveStatus>('idle')
   const media = game.backgroundMedia
   const type = media?.type
-  const applyYouTube = () => {
+  // Spec « Fix vidéo YouTube » : résolution locale (yt-dlp) puis lecture du
+  // fichier en cache ; repli lecteur embarqué si yt-dlp est absent.
+  const applyYouTube = async () => {
     const parsed = parseYouTubeUrl(urlDraft)
     if (!parsed) { setFeedback('invalid'); return }
-    setGameBackgroundMedia(game.id, { type: 'youtube', youtubeUrl: urlDraft.trim(), youtubeVideoId: parsed.videoId, startSeconds: parsed.startSeconds })
-    setFeedback('valid')
+    setFeedback('idle')
+    setResolving(true)
+    setResolveStatus('validating')
+    try {
+      if (!native.isDesktop()) {
+        setGameBackgroundMedia(game.id, { type: 'youtube', youtubeUrl: urlDraft.trim(), youtubeVideoId: parsed.videoId, startSeconds: parsed.startSeconds })
+        setFeedback('valid')
+        return
+      }
+      const result = await native.resolveYoutubeVideo(urlDraft.trim(), parsed.videoId)
+      if (result.status === 'cached' && result.videoPath) {
+        setResolveStatus('cached')
+        setGameBackgroundMedia(game.id, { type: 'video', localPath: result.videoPath, youtubeUrl: urlDraft.trim(), youtubeVideoId: parsed.videoId, startSeconds: parsed.startSeconds })
+        setFeedback('valid')
+      } else if (result.status === 'ytdlp_missing') {
+        setResolveStatus('ytdlp_missing')
+        setGameBackgroundMedia(game.id, { type: 'youtube', youtubeUrl: urlDraft.trim(), youtubeVideoId: parsed.videoId, startSeconds: parsed.startSeconds })
+        setFeedback('valid')
+      } else {
+        setResolveStatus('failed')
+        setFeedback('invalid')
+      }
+    } catch {
+      setResolveStatus('failed')
+      setFeedback('invalid')
+    } finally {
+      setResolving(false)
+    }
   }
   const thumb = media?.youtubeVideoId ? youtubeThumbnailUrl(media.youtubeVideoId) : undefined
   return (
@@ -333,13 +364,16 @@ function HeroMediaStrip({ game }: { game: Game }) {
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {thumb && <img src={thumb} alt="" className="h-10 w-16 flex-none rounded border border-white/[0.08] object-cover" />}
           <input type="url" value={urlDraft} onChange={event => { setUrlDraft(event.target.value); setFeedback('idle') }} placeholder="https://youtube.com/watch?v=…" className="min-w-0 flex-1 rounded-lg border border-white/[0.1] bg-black/25 px-3 py-1.5 text-[11px] text-white/80 placeholder-white/25 outline-none focus:border-gold/40" />
-          <button type="button" onClick={applyYouTube} className="rounded-lg bg-gold px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90"><Check size={11} className="mr-1 inline" />Utiliser comme fond</button>
+          <button type="button" onClick={() => void applyYouTube()} disabled={resolving} className="rounded-lg bg-gold px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90 disabled:cursor-wait disabled:opacity-55">{resolving ? 'Téléchargement…' : <span><Check size={11} className="mr-1 inline" />Utiliser comme fond</span>}</button>
         </div>
       )}
-      {type === 'video' && <p className="mt-2 text-[11px] text-white/38">Sélectionnez le slot « Vidéo » ci-contre pour choisir un fichier MP4 ou WebM local.</p>}
+      {type === 'video' && <p className="mt-2 text-[11px] text-white/38">{media?.localPath ? 'Vidéo locale en cache — lecture hors-ligne, jamais re-téléchargée à chaque lancement.' : 'Sélectionnez le slot « Vidéo » ci-contre pour choisir un fichier MP4 ou WebM local.'}</p>}
       {type === 'image' && <p className="mt-2 text-[11px] text-white/38">Image fixe — choisissez une jaquette, bannière ou arrière-plan ci-contre.</p>}
-      {feedback === 'valid' && <p className="mt-1.5 text-[11px] text-emerald-300/85">Vidéo enregistrée — lecteur intégré, aucun téléchargement.</p>}
-      {feedback === 'invalid' && <p className="mt-1.5 text-[11px] text-red-300/85">Lien non pris en charge. Accepté : youtube.com/watch, youtu.be, shorts.</p>}
+      {resolving && <div className="mt-2 space-y-1 rounded-lg border border-white/[0.06] bg-black/15 p-2">{PIPELINE_STAGES.map(stage => <p key={stage.id} className="flex items-center gap-2 text-[10px] text-white/45"><span className="h-1.5 w-1.5 rounded-full bg-gold/70 animate-pulse" />{stage.label}</p>)}</div>}
+      {feedback === 'valid' && resolveStatus === 'cached' && <p className="mt-1.5 text-[11px] text-emerald-300/85">✓ Téléchargée et mise en cache — lecture locale hors-ligne.</p>}
+      {feedback === 'valid' && resolveStatus === 'ytdlp_missing' && <p className="mt-1.5 text-[11px] text-amber-200/80">yt-dlp introuvable — repli sur le lecteur YouTube embarqué.</p>}
+      {feedback === 'valid' && resolveStatus !== 'cached' && resolveStatus !== 'ytdlp_missing' && <p className="mt-1.5 text-[11px] text-emerald-300/85">Vidéo enregistrée.</p>}
+      {feedback === 'invalid' && <p className="mt-1.5 text-[11px] text-red-300/85">{resolveStatus === 'failed' ? 'Téléchargement échoué — vérifiez le lien.' : 'Lien non pris en charge. Accepté : youtube.com/watch, youtu.be, shorts.'}</p>}
       {media?.youtubeVideoId && (
         <div className="mt-2 flex items-center gap-2 rounded-lg border border-emerald-300/14 bg-emerald-300/[0.04] px-2.5 py-1.5">
           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-300/20 text-emerald-300"><Check size={9} /></span>

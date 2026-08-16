@@ -144,7 +144,9 @@ export function HomeView() {
     : selectedGame.resources?.bannerPath
       ? { x: selectedGame.resources.bannerPositionX, y: selectedGame.resources.bannerPositionY, zoom: selectedGame.resources.bannerZoom, fit: selectedGame.resources.bannerFit }
       : { x: selectedGame.resources?.coverPositionX, y: selectedGame.resources?.coverPositionY, zoom: selectedGame.resources?.coverZoom, fit: selectedGame.resources?.coverFit }
-  const video = resourceUrl(selectedGame.resources?.videoPath)
+  // Spec « Fix vidéo YouTube » : le fichier LOCAL mis en cache (localPath) prime
+  // — le lien YouTube ne devient jamais le lecteur, la vidéo est lue hors-ligne.
+  const video = resourceUrl(selectedGame.backgroundMedia?.localPath) || resourceUrl(selectedGame.resources?.videoPath)
   // État de SESSION du fond (spec §44, §50) : le boot démarre muet selon la
   // politique « toujours démarrer muet » (jamais l'intention persistée seule) ;
   // les bascules du Hero agissent sur la session via le pont, et l'intention

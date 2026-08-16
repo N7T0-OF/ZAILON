@@ -38,6 +38,7 @@ import {
   resolveReShadeTarget,
 } from '../../lib/reshade'
 import { describeBackgroundMedia, resolveMediaType } from '../../lib/backgroundMedia'
+import { PIPELINE_STAGES, type YoutubeResolveStatus } from '../../lib/backgroundMediaCache'
 import { parseYouTubeUrl, youtubeThumbnailUrl } from '../../lib/youtubeUrl'
 import { addonCapabilities, hasCapability } from '../../lib/addonGating'
 import { resourceUrl } from '../../lib/native'
@@ -603,9 +604,13 @@ function BackgroundPicker({ game }: { game: Game }) {
   const [urlDraft, setUrlDraft] = useState('')
   const [urlFeedback, setUrlFeedback] = useState<'idle' | 'valid' | 'invalid'>('idle')
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [resolving, setResolving] = useState(false)
+  const [resolveStatus, setResolveStatus] = useState<YoutubeResolveStatus>('idle')
 
   const media = game.backgroundMedia
-  const localVideoUrl = resourceUrl(game.resources?.videoPath)
+  // Spec « Fix vidéo YouTube » : le fichier LOCAL mis en cache (localPath) prime
+  // sur la vidéo de ressources — le lien YouTube ne devient jamais le lecteur.
+  const localVideoUrl = resourceUrl(media?.localPath) || resourceUrl(game.resources?.videoPath)
   const heroUrl = resourceUrl(game.resources?.backgroundPath || game.resources?.bannerPath || game.resources?.coverPath) || game.backgroundArt
   const effectiveType = resolveMediaType(media, backgroundMediaSettings, Boolean(localVideoUrl))
   const description = describeBackgroundMedia(media, Boolean(localVideoUrl))
@@ -614,13 +619,43 @@ function BackgroundPicker({ game }: { game: Game }) {
   const applyType = (type: 'auto' | 'image' | 'video' | 'youtube') => {
     setGameBackgroundMedia(game.id, { type })
     setUrlFeedback('idle')
+    setResolveStatus('idle')
   }
 
-  const applyYouTube = () => {
+  // Pipeline : Lien → Validation → Identification → Téléchargement → Cache
+  // local → Vérification → Lecture LOCALE (hors-ligne). Repli honnête sur le
+  // lecteur embarqué si yt-dlp est absent.
+  const applyYouTube = async () => {
     const parsed = parseYouTubeUrl(urlDraft)
     if (!parsed) { setUrlFeedback('invalid'); return }
-    setGameBackgroundMedia(game.id, { type: 'youtube', youtubeUrl: urlDraft.trim(), youtubeVideoId: parsed.videoId, startSeconds: parsed.startSeconds })
-    setUrlFeedback('valid')
+    setUrlFeedback('idle')
+    setResolving(true)
+    setResolveStatus('validating')
+    try {
+      if (!native.isDesktop()) {
+        setGameBackgroundMedia(game.id, { type: 'youtube', youtubeUrl: urlDraft.trim(), youtubeVideoId: parsed.videoId, startSeconds: parsed.startSeconds })
+        setUrlFeedback('valid')
+        return
+      }
+      const result = await native.resolveYoutubeVideo(urlDraft.trim(), parsed.videoId)
+      if (result.status === 'cached' && result.videoPath) {
+        setResolveStatus('cached')
+        setGameBackgroundMedia(game.id, { type: 'video', localPath: result.videoPath, youtubeUrl: urlDraft.trim(), youtubeVideoId: parsed.videoId, startSeconds: parsed.startSeconds })
+        setUrlFeedback('valid')
+      } else if (result.status === 'ytdlp_missing') {
+        setResolveStatus('ytdlp_missing')
+        setGameBackgroundMedia(game.id, { type: 'youtube', youtubeUrl: urlDraft.trim(), youtubeVideoId: parsed.videoId, startSeconds: parsed.startSeconds })
+        setUrlFeedback('valid')
+      } else {
+        setResolveStatus('failed')
+        setUrlFeedback('invalid')
+      }
+    } catch (error) {
+      setResolveStatus('failed')
+      setUrlFeedback('invalid')
+    } finally {
+      setResolving(false)
+    }
   }
 
   const previewMedia = media?.type === 'youtube' && media.youtubeVideoId
@@ -670,11 +705,14 @@ function BackgroundPicker({ game }: { game: Game }) {
             placeholder="https://youtube.com/watch?v=…"
             className="min-w-0 flex-1 rounded-lg border border-white/[0.1] bg-black/25 px-3 py-2 text-[11px] text-white/80 placeholder-white/25 outline-none focus:border-gold/40"
           />
-          <button type="button" onClick={applyYouTube} className="rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90">Utiliser comme fond</button>
+          <button type="button" onClick={() => void applyYouTube()} disabled={resolving} className="rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90 disabled:cursor-wait disabled:opacity-55">{resolving ? 'Téléchargement…' : 'Utiliser comme fond'}</button>
         </div>
-        {urlFeedback === 'valid' && <p className="mt-1.5 text-[11px] text-emerald-300/85">Vidéo enregistrée — lecteur intégré, aucun téléchargement.</p>}
-        {urlFeedback === 'invalid' && <p className="mt-1.5 text-[11px] text-red-300/85">Lien non pris en charge. Actuellement : YouTube (watch, youtu.be, shorts).</p>}
-        <ZailonInfoPopover text="Aucune clé API demandée : seul l’identifiant de la vidéo est utilisé, la vidéo reste diffusée par YouTube et démarre toujours muette. La lecture est suspendue quand ZAILON est en arrière-plan ou qu’un jeu démarre." />
+        {resolving && <div className="mt-2 space-y-1 rounded-lg border border-white/[0.06] bg-black/15 p-2">{PIPELINE_STAGES.map(stage => <p key={stage.id} className="flex items-center gap-2 text-[10px] text-white/45"><span className={`h-1.5 w-1.5 rounded-full ${resolveStatus === 'cached' || resolveStatus === 'ytdlp_missing' ? 'bg-emerald-300/70' : 'bg-gold/70 animate-pulse'}`} />{stage.label}</p>)}</div>}
+        {urlFeedback === 'valid' && resolveStatus === 'cached' && <p className="mt-1.5 text-[11px] text-emerald-300/85">✓ Téléchargée et mise en cache — lecture <b>locale hors-ligne</b>, jamais re-téléchargée à chaque lancement.</p>}
+        {urlFeedback === 'valid' && resolveStatus === 'ytdlp_missing' && <p className="mt-1.5 text-[11px] text-amber-200/80">yt-dlp introuvable — repli sur le lecteur YouTube embarqué (lien direct). <button type="button" onClick={() => void native.openExternalUrl('https://github.com/yt-dlp/yt-dlp')} className="underline hover:text-white">Installer yt-dlp</button> pour la lecture locale hors-ligne.</p>}
+        {urlFeedback === 'valid' && resolveStatus !== 'cached' && resolveStatus !== 'ytdlp_missing' && <p className="mt-1.5 text-[11px] text-emerald-300/85">Vidéo enregistrée.</p>}
+        {urlFeedback === 'invalid' && <p className="mt-1.5 text-[11px] text-red-300/85">{resolveStatus === 'failed' ? 'Téléchargement échoué — vérifiez le lien ou la disponibilité de la vidéo.' : 'Lien non pris en charge. Actuellement : YouTube (watch, youtu.be, shorts).'}</p>}
+        <ZailonInfoPopover text="Le lien YouTube est résolu en fichier LOCAL (yt-dlp) puis lu hors-ligne, sans re-téléchargement à chaque lancement. Sans yt-dlp, repli sur le lecteur embarqué. Aucune clé API : la lecture démarre toujours muette et se suspend quand ZAILON est en arrière-plan ou qu’un jeu démarre." />
       </div>
     )}
 

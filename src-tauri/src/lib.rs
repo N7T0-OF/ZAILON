@@ -3267,6 +3267,108 @@ fn open_path(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Résout une URL YouTube vers un fichier vidéo LOCAL (spec « Fix vidéo YouTube
+/// de l'Accueil ») : yt-dlp télécharge la meilleure vidéo MP4 + vignette dans
+/// `media/backgrounds/`, puis ZAILON lit le fichier local (hors-ligne, jamais
+/// re-téléchargé à chaque lancement). Si `yt-dlp` n'est pas installé, renvoie
+/// un statut explicite (`ytdlp_missing`) — jamais d'erreur opaque — et l'UI
+/// bascule sur le lecteur embarqué.
+#[derive(serde::Serialize)]
+struct ResolvedBackgroundVideo {
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    video_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thumbnail_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+fn truncate_message(value: &str, max: usize) -> String {
+    let trimmed = value.trim();
+    if trimmed.chars().count() <= max {
+        trimmed.to_string()
+    } else {
+        let head: String = trimmed.chars().take(max).collect();
+        format!("{head}…")
+    }
+}
+
+#[tauri::command]
+fn resolve_youtube_video(app: AppHandle, url: String, video_id: String) -> Result<ResolvedBackgroundVideo, String> {
+    // Identifiant sanitisé : jamais utilisé tel quel dans un chemin disque.
+    if video_id.is_empty()
+        || video_id.len() > 24
+        || !video_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err("Invalid YouTube video id.".into());
+    }
+    let cache_dir = update_data_root(&app)?.join("media").join("backgrounds");
+    fs::create_dir_all(&cache_dir).map_err(to_error)?;
+    let template = cache_dir.join(format!("video_{video_id}.%(ext)s"));
+    // `b[ext=mp4]` d'abord : un seul flux MP4 déjà complet (audio+vidéo) évite
+    // de dépendre de ffmpeg pour le merge ; les formats suivants servent de repli.
+    let spawned = Command::new("yt-dlp")
+        .arg("-f")
+        .arg("b[ext=mp4]/bv*[ext=mp4]+ba[ext=m4a]/b")
+        .arg("--merge-output-format")
+        .arg("mp4")
+        .arg("--write-thumbnail")
+        .arg("--convert-thumbnails")
+        .arg("jpg")
+        .arg("--no-playlist")
+        .arg("--no-progress")
+        .arg("-o")
+        .arg(&template)
+        .arg(&url)
+        .output();
+    let output = match spawned {
+        Ok(out) => out,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ResolvedBackgroundVideo {
+                status: "ytdlp_missing".into(),
+                video_path: None,
+                thumbnail_path: None,
+                size_bytes: None,
+                message: Some(
+                    "yt-dlp is not installed. Install it (https://github.com/yt-dlp/yt-dlp) or the video will play via the embedded player."
+                        .into(),
+                ),
+            });
+        }
+        Err(err) => return Err(to_error(err)),
+    };
+    if !output.status.success() {
+        return Ok(ResolvedBackgroundVideo {
+            status: "failed".into(),
+            video_path: None,
+            thumbnail_path: None,
+            size_bytes: None,
+            message: Some(truncate_message(&String::from_utf8_lossy(&output.stderr), 400)),
+        });
+    }
+    let video_path = cache_dir.join(format!("video_{video_id}.mp4"));
+    if !video_path.exists() {
+        return Err("yt-dlp finished but no MP4 was produced.".into());
+    }
+    let thumbnail_path = ["jpg", "webp", "png"]
+        .iter()
+        .map(|ext| cache_dir.join(format!("video_{video_id}.{ext}")))
+        .find(|path| path.exists());
+    let size_bytes = fs::metadata(&video_path).map(|meta| meta.len()).ok();
+    Ok(ResolvedBackgroundVideo {
+        status: "cached".into(),
+        video_path: Some(video_path.to_string_lossy().to_string()),
+        thumbnail_path: thumbnail_path.map(|path| path.to_string_lossy().to_string()),
+        size_bytes,
+        message: None,
+    })
+}
+
 fn validate_external_url(url: &str) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|_| "The source URL is invalid.".to_string())?;
     if parsed.scheme() != "https" {
@@ -17836,6 +17938,7 @@ pub fn run() {
             nxm_association_status,
             store_game_resource,
             cache_remote_game_resource,
+            resolve_youtube_video,
             search_game_artwork,
             test_artwork_provider,
             remove_game_resource,

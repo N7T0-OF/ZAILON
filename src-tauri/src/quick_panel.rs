@@ -44,11 +44,15 @@ fn flags() -> &'static Mutex<PanelFlags> {
 
 /// Coin supérieur droit de la zone de travail (hors barre des tâches), marge
 /// de 20 px (spec §9). Pur et testable — `area = (x, y, largeur, hauteur)`.
+/// Clamp : le panneau ne sort jamais à gauche de la zone de travail, même si
+/// l'écran est plus étroit que le panneau (position négative = inatteignable).
 fn top_right_position(area: (i32, i32, u32, u32)) -> (i32, i32) {
-    (
-        (area.0 + area.2 as i32).saturating_sub(WIDTH as i32 + MARGIN),
-        area.1 + MARGIN,
-    )
+    let x = area
+        .0
+        .saturating_add(area.2 as i32)
+        .saturating_sub(WIDTH as i32 + MARGIN)
+        .max(area.0);
+    (x, area.1 + MARGIN)
 }
 
 fn reposition(window: &tauri::WebviewWindow) {

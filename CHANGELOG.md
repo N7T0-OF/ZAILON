@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.151.1] - 2026-08-16
+
+> **Quick Panel — positionnement corrigé** : le panneau ne sort plus de
+> l'écran sur les petites résolutions.
+
+### Fixed
+
+- **Clamp horizontal de `top_right_position`** : sur un écran plus étroit que
+  le panneau (340 px + marge), le coin supérieur droit calculait une position
+  **négative** (`-160` px, panneau inatteignable). Le calcul est maintenant
+  borné au bord gauche de la zone de travail (`max(area.x)`) — le panneau
+  reste toujours visible, même en très petite résolution.
+
+### Validation
+
+- **684 tests ✅**, tsc ✅, build ✅, `cargo fmt` ✅ — le test natif
+  `top_right_position_never_negative` (qui attrapait ce bug en CI) passe.
+  Les tests natifs CI tournent désormais en séquentiel avec backtrace
+  complet pour un diagnostic déterministe en cas de futur échec.
+
 ## [1.151.0] - 2026-08-16
 
 > **Quick Panel — cycle de vie reconstruit** : plus jamais de fenêtre blanche,

@@ -14,6 +14,9 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   ADDON_API_VERSION,
   ADDON_EVENTS,
@@ -45,6 +48,9 @@ import {
   type CrashGuardStorage,
   type ZailonAddonManifest,
 } from '../../src/lib/addons.ts'
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const read = (relative: string) => readFileSync(join(root, relative), 'utf-8')
 
 const manifest = (overrides: Partial<ZailonAddonManifest> = {}): ZailonAddonManifest => ({
   schema: 1,
@@ -293,6 +299,16 @@ test('parseAddonCatalog : schema 2, package chemin relatif ou null (spec §2, §
     addons: [{ id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok', package: 'packages/x.zailon-addon', sha256: 'catalog', downloadSize: 100 }],
   })
   assert.equal(badPackage.ok, false, 'package déclaré sans SHA-256 réel → entrée rejetée (jamais 404)')
+})
+
+test('UI Add-ons : une version plus récente au catalogue offre un bouton « Mettre à jour » (spec §49)', () => {
+  const view = read('src/components/Views/AddonsView.tsx')
+  // La carte détecte la mise à jour (version catalogue ≠ installée) et la
+  // transforme en ACTION réelle — jamais un simple badge passif.
+  assert.ok(view.includes('updateAvailable'), 'la carte détecte version catalogue > installée')
+  assert.ok(view.includes('updateNow'), 'une décision explicite « mise à jour possible » existe')
+  assert.ok(view.includes('Mettre à jour'), 'le bouton de mise à jour est rendu')
+  assert.ok(view.includes('onInstall'), 'le bouton relance le pipeline d\'installation (remplacement propre, état conservé)')
 })
 
 test('addonCatalogStats : synthèse « disponibles · installés · mises à jour · dev » (spec §45)', () => {

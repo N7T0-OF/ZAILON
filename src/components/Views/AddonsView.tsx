@@ -331,6 +331,10 @@ function AddonCard({ row, nameById, offline = false, onInstall, onEnable, onRemo
   // jamais Installer : refus AVANT tout téléchargement.
   const availability = catalogAddonAvailability(entry)
   const installableNow = availability.installable && !offline && compatibility.ok
+  // Mise à jour réelle (spec §49) : une version plus récente existe au
+  // catalogue et son package est téléchargeable — sinon on garde le badge
+  // passif « Màj v… » (hors connexion / catalogue incohérent).
+  const updateNow = updateAvailable && availability.installable && !offline
 
   return <article className={`flex flex-col rounded-xl border bg-white/[0.018] p-4 transition-colors ${installed ? 'border-gold/14' : 'border-white/[0.07] hover:border-white/15'} ${installed && !installed.enabled ? 'opacity-75' : ''}`}>
     <div className="flex items-start gap-3">
@@ -368,7 +372,9 @@ function AddonCard({ row, nameById, offline = false, onInstall, onEnable, onRemo
         <>
           <label className="flex items-center gap-2 text-[11px] text-white/50"><ZailonSwitch size="compact" checked={installed.enabled} onChange={onEnable} />{installed.enabled ? 'Actif' : 'Inactif'}</label>
           <div className="flex items-center gap-1.5">
-            {updateAvailable && <span className="rounded bg-emerald-300/12 px-2 py-1 text-[10px] font-semibold text-emerald-200/80">Màj v{entry.version}</span>}
+            {updateAvailable && (updateNow
+              ? <button type="button" onClick={onInstall} title={`Mettre à jour vers v${entry.version}`} className="flex items-center gap-1.5 rounded-lg bg-[var(--zailon-accent)] px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] transition-colors hover:bg-white"><RefreshCw size={12} />Mettre à jour</button>
+              : <span className="rounded bg-emerald-300/12 px-2 py-1 text-[10px] font-semibold text-emerald-200/80">Màj v{entry.version}</span>)}
             <button type="button" onClick={onRemove} className="flex items-center gap-1.5 rounded-lg border border-red-300/15 px-3 py-1.5 text-[11px] font-semibold text-red-200/65 hover:bg-red-400/10"><Trash2 size={12} />Désinstaller</button>
           </div>
         </>

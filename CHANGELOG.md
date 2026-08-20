@@ -39,6 +39,15 @@
 - **`docs/nte-aurora-fusion.md`** : analyse complète du launcher Aurora et de
   ce qui a été fusionné / écarté (Everlight hors périmètre).
 
+### Fixed
+
+- **Add-ons — bouton « Mettre à jour »** : quand un add-on installé a une
+  version plus récente au catalogue, la carte affichait seulement un badge
+  passif « Màj v… » sans aucune action possible. Un vrai bouton
+  « Mettre à jour » relance le pipeline d'installation (remplacement propre,
+  état activé et données utilisateur conservés) — la mise à jour était
+  impossible à déclencher depuis la carte.
+
 ### Validation
 
 - **tsc ✅, tests TS NTE (`npm run test:nte`) ✅, tests natifs NTE ✅**

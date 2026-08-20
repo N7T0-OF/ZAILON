@@ -19825,7 +19825,7 @@ mod tests {
         assert_eq!(broken.missing, vec!["ucas".to_string()]);
         // Aucun fichier n'a bougé (validation en lecture seule).
         assert!(complete.join("MintOutfit.pak").exists());
-        assert!(broken.join("BrokenMod.pak").exists());
+        assert!(mods.join("BrokenMod").join("BrokenMod.pak").exists());
 
         fs::remove_dir_all(&root).unwrap();
     }

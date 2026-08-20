@@ -34,6 +34,11 @@
 - **Diagnostic NTE partageable** (§33) : rapport texte complet (installation,
   version, distribution, launcher, args, marqueurs, Steam, mods, pipeline)
   avec bouton « Copier le rapport » — facilite le support des futurs bugs.
+- **Monitoring de session NTE** (§16-17, Live Monitoring d'Aurora) : si le
+  dossier de mods change pendant que NTE tourne (activation/désactivation,
+  ajout, suppression), ZAILON signale « Modification détectée — redémarrage de
+  NTE nécessaire » UNE fois par session (décision pure `nteModsChangeDecision`,
+  fingerprint léger, cadence ~10 s). Jamais de redémarrage automatique.
 
 ## [1.152.0] - 2026-08-20
 

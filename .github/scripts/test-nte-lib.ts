@@ -11,11 +11,27 @@ import {
   isNtePakFile,
   nteDisplayName,
   nteLaunchArgs,
+  nteModsChangeDecision,
   nteModsPathFor,
   nteValidationMarkers,
   parseNteModJson,
   NTE_EPIC_AUTH_ARGS,
 } from '../../src/lib/nte.ts'
+
+// ── Monitoring de session (spec §16-17) ─────────────────────────────────────
+
+test('nteModsChangeDecision : capture au premier tick, notifie UNE fois par changement', () => {
+  // Premier tick de session : pas de baseline → capturer l'état actuel.
+  assert.equal(nteModsChangeDecision({ current: 'abc', notified: false }), 'capture')
+  // Fingerprint identique → rien.
+  assert.equal(nteModsChangeDecision({ baseline: 'abc', current: 'abc', notified: false }), 'wait')
+  // Fingerprint différent + jamais notifié → notifier.
+  assert.equal(nteModsChangeDecision({ baseline: 'abc', current: 'def', notified: false }), 'notify')
+  // Déjà notifié → jamais de seconde notification (spec §16 : une fois par session).
+  assert.equal(nteModsChangeDecision({ baseline: 'abc', current: 'def', notified: true }), 'wait')
+  // Changement après notification → silence (pas de spam).
+  assert.equal(nteModsChangeDecision({ baseline: 'abc', current: 'ghi', notified: true }), 'wait')
+})
 
 // ── mod.json (Aurora « Display file ») ───────────────────────────────────────
 

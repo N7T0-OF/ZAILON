@@ -675,8 +675,18 @@ export interface Store {
    * `started` = lancé par ZAILON · `detected` = récupéré hors ZAILON ·
    * `recovered` = session reprise après redémarrage de ZAILON ·
    * `ended` = session terminée (spec RuntimeSessionV3 §52). */
-  sessionToast?: { kind: 'started' | 'detected' | 'recovered' | 'ended'; gameName: string; at: number; detail?: string }
-  setSessionToast: (toast?: { kind: 'started' | 'detected' | 'recovered' | 'ended'; gameName: string; at: number; detail?: string }) => void
+  sessionToast?: { kind: 'started' | 'detected' | 'recovered' | 'ended' | 'mods-changed'; gameName: string; at: number; detail?: string }
+  setSessionToast: (toast?: { kind: 'started' | 'detected' | 'recovered' | 'ended' | 'mods-changed'; gameName: string; at: number; detail?: string }) => void
+  /** Monitoring de session NTE (spec §16-17) : fingerprint du dossier mods au
+   * début de session (baseline) et marqueur de notification déjà émise — si
+   * l'utilisateur modifie les mods pendant que NTE tourne, ZAILON signale
+   * « redémarrage nécessaire » UNE fois par session. Jamais de décompte, ni de
+   * redémarrage automatique. */
+  nteModsBaselines: Record<string, string>
+  nteModsChangeNotified: Record<string, boolean>
+  setNteModsBaseline: (gameId: string, fingerprint: string) => void
+  markNteModsChangeNotified: (gameId: string) => void
+  resetNteModsSession: (gameId: string) => void
   /** Rapport de présence du PROCESSUS FINAL pour une session en cours (spec
    * RuntimeSessionV3 §1-5). `present=false` ouvre la période PossibleExit ; si
    * elle expire sans preuve, la session se termine réellement. Le launcher
@@ -903,6 +913,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
   remoteRemovingKeys: [],
   games: [],
   modsFingerprints: {},
+  nteModsBaselines: {},
+  nteModsChangeNotified: {},
   fiveMModsIndex: {},
   selectedGameId: undefined,
   selectedProfileId: undefined,
@@ -2554,6 +2566,8 @@ export const useStore = create<Store>()(persist((set, get) => ({
       } : item),
     }))
     get().applyInputArbiter()
+    // Fin de session → le monitoring NTE repart de zéro (spec §16-17).
+    get().resetNteModsSession(gameId)
   },
   /** Watchdog de session : quand la fenêtre de rattachement expire, la session
    * passe en GameLost — SAUF si Steam indique encore que le jeu tourne
@@ -2934,6 +2948,15 @@ export const useStore = create<Store>()(persist((set, get) => ({
     state.applyInputArbiter()
   },
   setSessionToast: toast => set({ sessionToast: toast }),
+  setNteModsBaseline: (gameId, fingerprint) => set(state => ({ nteModsBaselines: { ...state.nteModsBaselines, [gameId]: fingerprint } })),
+  markNteModsChangeNotified: gameId => set(state => ({ nteModsChangeNotified: { ...state.nteModsChangeNotified, [gameId]: true } })),
+  resetNteModsSession: gameId => set(state => {
+    const baselines = { ...state.nteModsBaselines }
+    const notified = { ...state.nteModsChangeNotified }
+    delete baselines[gameId]
+    delete notified[gameId]
+    return { nteModsBaselines: baselines, nteModsChangeNotified: notified }
+  }),
   /** Last Known Good (§41) : empreinte des frameworks du profil actif, à
    * enregistrer quand le processus final est détecté (jeu fonctionnel). */
   recordLastKnownGoodFrameworks: gameId => {

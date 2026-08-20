@@ -120,3 +120,19 @@ test('pipeline de lancement NTE : détection du loader Everlight jamais téléch
   assert.ok(rust.includes('jamais téléchargé'), 'ZAILON ne télécharge pas de DLL (spec §35)')
   assert.ok(rust.includes('nte_pipeline_steps'), 'logique pure des étapes testée')
 })
+
+test('monitoring de session NTE : modification des mods → « redémarrage nécessaire » (spec §16-17)', () => {
+  const app = read('src/App.tsx')
+  const store = read('src/store/useStore.ts')
+  const lib = read('src/lib/nte.ts')
+  // La logique pure décide capture/notify/wait (testée dans test-nte-lib).
+  assert.ok(lib.includes('nteModsChangeDecision'), 'décision pure de monitoring')
+  // Le tick d'App.tsx branche le monitoring (cadencé, fingerprint léger).
+  assert.ok(app.includes('nteModsChangeDecision'), 'monitoring branché dans App.tsx')
+  assert.ok(app.includes('mods-changed'), 'toast dédié « mods modifiés »')
+  assert.ok(app.includes('redémarrage de NTE nécessaire'), 'message de redémarrage nécessaire')
+  // Le store garde baseline + notification par session, réinitialisés à la fin.
+  assert.ok(store.includes('nteModsBaselines'), 'baseline des mods par session')
+  assert.ok(store.includes('nteModsChangeNotified'), 'notification unique par session')
+  assert.ok(store.includes('resetNteModsSession'), 'réinitialisation à la fin de session')
+})

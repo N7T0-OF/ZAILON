@@ -20,6 +20,8 @@ import { effectiveInputProfile, effectiveLayout, LAYOUT_LABELS } from './lib/key
 import { isRed4extActive } from './lib/frameworkValidator'
 import { minimalModeDataset } from './lib/minimalMode'
 import { shouldIdle } from './lib/idleMode'
+import { isNteGame, nteModsChangeDecision } from './lib/nte'
+import { addonCapabilities, nteModsAllowed } from './lib/addonGating'
 import { register, unregister, unregisterAll } from '@tauri-apps/plugin-global-shortcut'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getVisualShortcutConfig, VISUAL_SHORTCUTS_CHANGED } from './visual-profiles/application/shortcuts'
@@ -292,6 +294,7 @@ export default function App() {
     let scanning = false
     let lastScan = 0
     let lastSteamCheck = 0
+    let lastNteModsCheck = 0
     let recovering = false
     const id = setInterval(() => {
       const state = useStore.getState()
@@ -403,6 +406,38 @@ export default function App() {
           .catch(() => undefined)
       }
       state.sessionWatchdog(steamAppIdsRef.current)
+      // Monitoring de session NTE (spec « Refonte NTE/Aurora » §16-17, Live
+      // Monitoring d'Aurora) : si le dossier de mods change pendant que NTE
+      // tourne (activation/désactivation, ajout, suppression), ZAILON signale
+      // « redémarrage nécessaire » UNE fois par session — jamais de redémarrage
+      // automatique. Cadencé (~10 s) : le fingerprint est léger mais reste un
+      // appel natif.
+      if (state.nteModsBaselines || state.games.some(game => isNteGame({ execPath: game.execPath, gameName: game.name, nteAllowed: nteModsAllowed(addonCapabilities(state.addons)) }))) {
+        const nteSessions = state.gameSessions.filter(session => session.state === 'GameRunning')
+        if (nteSessions.length > 0 && now - lastNteModsCheck >= 10_000) {
+          lastNteModsCheck = now
+          for (const session of nteSessions) {
+            const game = state.games.find(item => item.id === session.gameId)
+            if (!game?.modsPath) continue
+            if (!isNteGame({ execPath: game.execPath, gameName: game.name, nteAllowed: nteModsAllowed(addonCapabilities(useStore.getState().addons)) })) continue
+            void native.modsFolderFingerprint(game.modsPath)
+              .then(fingerprint => {
+                const storeNow = useStore.getState()
+                const decision = nteModsChangeDecision({
+                  baseline: storeNow.nteModsBaselines[game.id],
+                  current: fingerprint,
+                  notified: storeNow.nteModsChangeNotified[game.id] ?? false,
+                })
+                if (decision === 'capture') storeNow.setNteModsBaseline(game.id, fingerprint)
+                if (decision === 'notify') {
+                  storeNow.markNteModsChangeNotified(game.id)
+                  storeNow.setSessionToast({ kind: 'mods-changed', gameName: game.name, at: Date.now(), detail: 'Modification des mods détectée — redémarrage de NTE nécessaire pour appliquer les changements.' })
+                }
+              })
+              .catch(() => undefined)
+          }
+        }
+      }
       if (scanning || now - lastScan < (gameModeActive && !exitCheckRef.current ? 6000 : 3000)) return
       const waiters = state.gameSessions.filter(session => session.state === 'WaitingForGame' || session.state === 'GameLost' || session.state === 'WaitingForElevation')
       const activeIds = state.gameSessions.filter(session => session.state !== 'Ended' && session.state !== 'Failed').map(session => session.gameId)
@@ -814,6 +849,7 @@ const SESSION_TOAST_TITLES = {
   detected: 'Jeu détecté par ZAILON',
   recovered: 'Session récupérée',
   ended: 'Session terminée',
+  'mods-changed': 'Mods modifiés pendant la session',
 } as const
 
 function SessionToast({ toast, games, shortcutLabel, shortcutHintCount, toastRuntimeConnected, toastSessionEnded, onShortcutHintShown, onDismiss }: {
@@ -843,15 +879,20 @@ function SessionToast({ toast, games, shortcutLabel, shortcutHintCount, toastRun
   }, [toast?.at, toast?.kind])
   if (!toast) return null
   const ended = toast.kind === 'ended'
+  // Spec §16-17 : le toast « mods modifiés » est un état de session actif — il
+  // s'affiche comme les toasts de connexion (pas une fin de session).
   if (ended && !toastSessionEnded) return null
-  if (!ended && !toastRuntimeConnected) return null
+  if (!ended && !toastRuntimeConnected && toast.kind !== 'mods-changed') return null
   const game = games.find(item => item.name === toast.gameName)
   const session = sessions.find(item => item.gameId === game?.id && item.state === 'GameRunning')
-  const content = !ended && session ? buildRuntimeToastContent(session, game, shortcutHintCount, shortcutLabel) : undefined
-  return <div className={`fixed right-4 top-4 z-[240] flex w-[min(340px,calc(100vw-2rem))] items-start gap-3 rounded-xl border bg-[#0e1212]/95 p-3 shadow-2xl backdrop-blur-xl ${ended ? 'border-white/[0.09]' : content?.warning ? 'border-amber-300/30' : 'border-emerald-300/25'}`}>
-    <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${ended ? 'bg-white/[0.06] text-white/55' : content?.warning ? 'bg-amber-300/15 text-amber-200' : 'bg-emerald-300/15 text-emerald-200'}`}>{ended ? <Info size={14} /> : <CheckCircle2 size={14} />}</span>
+  // Spec §16-17 : « mods-changed » est un avertissement dédié (aucun contenu de
+  // session runtime — le détail porte le message de redémarrage nécessaire).
+  const content = toast.kind === 'mods-changed' ? undefined : !ended && session ? buildRuntimeToastContent(session, game, shortcutHintCount, shortcutLabel) : undefined
+  const warning = toast.kind === 'mods-changed' || (content?.warning ?? false)
+  return <div className={`fixed right-4 top-4 z-[240] flex w-[min(340px,calc(100vw-2rem))] items-start gap-3 rounded-xl border bg-[#0e1212]/95 p-3 shadow-2xl backdrop-blur-xl ${ended ? 'border-white/[0.09]' : warning ? 'border-amber-300/30' : 'border-emerald-300/25'}`}>
+    <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${ended ? 'bg-white/[0.06] text-white/55' : warning ? 'bg-amber-300/15 text-amber-200' : 'bg-emerald-300/15 text-emerald-200'}`}>{ended ? <Info size={14} /> : warning ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}</span>
     <div className="min-w-0 flex-1">
-      <p className={`font-mono text-[10px] uppercase tracking-widest ${ended ? 'text-white/45' : content?.warning ? 'text-amber-200/85' : 'text-emerald-200/85'}`}>{SESSION_TOAST_TITLES[toast.kind]}</p>
+      <p className={`font-mono text-[10px] uppercase tracking-widest ${ended ? 'text-white/45' : warning ? 'text-amber-200/85' : 'text-emerald-200/85'}`}>{SESSION_TOAST_TITLES[toast.kind]}</p>
       <p className="mt-0.5 truncate text-xs font-semibold text-white/85">{toast.gameName}</p>
       {content?.badges.length ? <p className="mt-0.5 text-[11px] text-white/62">{content.badges.map(badge => `${badge.label} ✓`).join(' · ')}{content.warning && <span className="ml-1.5 text-amber-200/75">· connexion partielle</span>}</p> : null}
       {content?.shortcutHint && <p className="mt-0.5 text-[10px] text-white/35">{content.shortcutHint}</p>}

@@ -260,3 +260,32 @@ export function isNteGame(input: { execPath?: string; gameName?: string; nteAllo
     nteAllowed: input.nteAllowed,
   }) === 'nte-pak'
 }
+
+/**
+ * Monitoring de session NTE (spec « Refonte NTE/Aurora » §16-17, Live
+ * Monitoring d'Aurora) : si l'utilisateur modifie le dossier de mods pendant
+ * que NTE tourne (activation/désactivation, ajout, suppression), ZAILON signale
+ * « Modification détectée — redémarrage nécessaire ». Décision PURE, testable :
+ * le fingerprint du dossier mods (léger : métadonnées de premier niveau) est
+ * comparé au baseline capturé au début de la session.
+ *
+ * - `capture` : premier tick de session → enregistrer le baseline (jamais de
+ *   fausse alerte sur l'état initial).
+ * - `notify` : le fingerprint a changé et aucune notification n'a été émise.
+ * - `wait` : rien à faire (inchangé, ou déjà notifié).
+ */
+export type NteModsChangeDecision = 'capture' | 'notify' | 'wait'
+
+export function nteModsChangeDecision(input: {
+  baseline?: string
+  current?: string
+  notified: boolean
+}): NteModsChangeDecision {
+  if (input.baseline === undefined) {
+    // Aucun baseline : c'est le premier tick de session → capturer l'état actuel.
+    return 'capture'
+  }
+  if (input.notified) return 'wait'
+  // Fingerprint vide (dossier mods absent) ≠ baseline : changement réel.
+  return input.current !== input.baseline ? 'notify' : 'wait'
+}

@@ -76,4 +76,5 @@ jobs:
       - name: Run native unit tests
         env:
           RUST_BACKTRACE: full
+          CI_DIAG_FULL_LOG: "true"
         run: python .github/scripts/run-native-tests.py -- --test-threads=1

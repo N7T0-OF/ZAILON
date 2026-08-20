@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "catalogSchemaVersion": 2,
-  "updatedAt": "2026-08-16",
+  "updatedAt": "2026-08-20",
   "addons": [
     {
       "id": "official.zailon.frosty",
@@ -183,9 +183,9 @@
     {
       "id": "official.zailon.game.nte",
       "name": "NTE Support",
-      "version": "1.0.0",
+      "version": "1.20.0",
       "category": "game-support",
-      "description": "Support du mod loader de Neverness to Everness : détection du backend PAK (.pak/.utoc/.ucas) pour les jeux NTE. Sans cet add-on, aucun jeu n'est classé NTE PAK — la détection de processus au lancement reste dans le Core.",
+      "description": "Support du mod loader de Neverness to Everness : backend PAK (.pak/.utoc/.ucas), dossier AuroraMods, activation réelle .pak ↔ .pak.disabled, métadonnées mod.json, détection de version (Global/CN/TW) et de distribution (Epic/Steam/Standalone). Sans cet add-on, aucun jeu n'est classé NTE PAK — la détection de processus au lancement reste dans le Core.",
       "minZailonVersion": "1.78.0",
       "permissions": [
         "game.read",
@@ -194,11 +194,11 @@
         "mods.read",
         "mods.write"
       ],
-      "package": "packages/nte/official.zailon.game.nte-v1.0.0.zailon-addon",
+      "package": "packages/nte/official.zailon.game.nte-v1.20.0.zailon-addon",
       "minAddonApiVersion": "1",
-      "sha256": "292ab6027ab8cc4aaf7b83ff496b9867a3bcad244e7107a6f29f3707c65cfc65",
-      "downloadSize": 5668,
-      "installedSize": 14170,
+      "sha256": "5cd0edfd7d1449957460b8698327bb31e3d5878f0c5c5e6381230fffb6473a81",
+      "downloadSize": 9205,
+      "installedSize": 23013,
       "platforms": [
         "windows",
         "linux",

@@ -1,5 +1,50 @@
 # Changelog
 
+## [Unreleased]
+
+> **NTE Support — fusion du launcher Aurora** : les mods installés dans
+> ZAILON pour Neverness to Everness deviennent réellement fonctionnels
+> (activation `.pak` ↔ `.pak.disabled`, métadonnées `mod.json`, diagnostic
+> version/distribution) + wrapper Steam-safe intégré.
+
+### Added
+
+- **Backend NTE natif (fusion Aurora)** : `scan_nte_mods` (layout AuroraMods —
+  un dossier = un mod, `mod.json` lu, état `.pak.disabled`, staging
+  `.aurora-installing-*` ignoré, .pak lâches tolérés), `toggle_nte_mod`
+  (renommage transactionnel `.pak` ↔ `.pak.disabled` — le mécanisme réel du
+  moteur Aurora/Everlight, avec rollback) et `nte_game_report` (version
+  Global/CN/TW par launcher, distribution Epic par
+  `NTEGlobal/EOSSDK-Win64-Shipping.dll` avec args d'auth, marqueurs de
+  validation, chemins AuroraMods/Win64).
+- **Branché sur le store** : les jeux NTE (gate `nte.modloader` ouverte)
+  utilisent le scan/toggle NTE au lieu du générique — y compris l'application
+  d'un profil (`setSelectedProfile`). `guess_mods_path` détecte le dossier
+  AuroraMods.
+- **`src/lib/nte.ts`** (pur, testé) : versions, distributions, marqueurs,
+  parseur `mod.json` Aurora (clés insensibles à la casse, BOM, lien de support
+  avec schéma), nom d'affichage sans `_P`.
+- **Carte NTE dans la configuration du jeu** (gated par l'add-on NTE Support) :
+  diagnostic d'installation, version/distribution, bouton « Utiliser le
+  dossier AuroraMods », test d'installation, affichage des args Epic.
+- **Add-on NTE v1.20.0** : slots `Game.Tools`/`Game.Diagnostic`, module
+  enrichi, README documenté (AuroraMods, mod.json, versions, Steam). Nouvelle
+  version publiée au catalogue (`zailon-addons/catalog.json`) avec package
+  versionné `official.zailon.game.nte-v1.20.0.zailon-addon` (SHA-256
+  recalculé — les anciennes versions v1.0.0 → v1.2.0 restent disponibles pour
+  rollback).
+- **Steam wrapper** : `tools/steam-wrapper/` (Rust, zéro dépendance — portage
+  de `chdonncha/steam-wrapper-launcher` dans l'esprit du steam-wrapper
+  d'Aurora) + `docs/steam-wrapper-integration.md`.
+- **`docs/nte-aurora-fusion.md`** : analyse complète du launcher Aurora et de
+  ce qui a été fusionné / écarté (Everlight hors périmètre).
+
+### Validation
+
+- **tsc ✅, tests TS NTE (`npm run test:nte`) ✅, tests natifs NTE ✅**
+  (11 tests Rust : mod.json, classifieurs, rapport version/distribution,
+  scan layout Aurora, toggle transactionnel) + 11 tests TS de la lib pure.
+
 ## [1.151.1] - 2026-08-16
 
 > **Quick Panel — positionnement corrigé** : le panneau ne sort plus de

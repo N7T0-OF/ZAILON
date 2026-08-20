@@ -9,6 +9,14 @@
 // backend PAK (.pak/.utoc/.ucas) de Neverness to Everness n'existe pas
 // (feature removal §57).
 //
+// Fusion du launcher open-source Aurora (GPL-3.0) :
+// - dossier de mods `<jeu>/Client/WindowsNoEditor/HT/Content/Paks/AuroraMods`
+//   (un dossier = un mod), activation `.pak` ↔ `.pak.disabled` (transactionnel)
+//   — le mécanisme réel du moteur Aurora (Everlight) ;
+// - métadonnées `mod.json` (nom, version, auteur, lien de support, icône) ;
+// - versions Global/CN/TW (NTEGlobalLauncher/NTELauncher/NTETWLauncher) et
+//   distribution Epic (args d'auth) — détectées par `nte_game_report`.
+//
 // La détection de processus au lancement (ntegloballauncher.exe comme stage
 // intermédiaire valide, session tracking) reste dans le Core — mécanique de
 // lancement, spec « Séparation des responsabilités » §113.
@@ -39,15 +47,20 @@ interface AddonModule {
 
 const addon: AddonModule = {
   async activate(api) {
-    api.log('NTE Support activé — détection du backend PAK (Neverness to Everness) disponible.')
-    // Marqueur pour l'UI/diagnostic : le backend NTE PAK est disponible.
+    api.log('NTE Support activé — backend PAK (AuroraMods), activation .pak/.pak.disabled, métadonnées mod.json et diagnostic version/distribution disponibles pour Neverness to Everness.')
+    // Marqueurs pour l'UI/diagnostic : le backend NTE PAK est disponible, ainsi
+    // que les outils de configuration/diagnostic (carte NTE, slots
+    // Game.Tools / Game.Diagnostic).
     api.storage.set('nteBackendAvailable', true)
+    api.storage.set('nteToolsAvailable', true)
   },
 
   async deactivate(api) {
     // Le Core ne classe plus aucun jeu en NTE PAK sans la capacité. On retire
-    // le marqueur : les jeux NTE retombent sur le dossier générique.
+    // les marqueurs : les jeux NTE retombent sur le dossier générique et la
+    // carte de diagnostic disparaît.
     api?.storage?.remove?.('nteBackendAvailable')
+    api?.storage?.remove?.('nteToolsAvailable')
   },
 }
 

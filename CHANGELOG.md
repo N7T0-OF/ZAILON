@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.152.0] - 2026-08-20
 
 > **NTE Support — fusion du launcher Aurora** : les mods installés dans
 > ZAILON pour Neverness to Everness deviennent réellement fonctionnels

@@ -102,6 +102,7 @@ const nativeModToMod = (mod: NativeMod, previous?: Mod, priority = 0): Mod => wi
   version: mod.version ?? previous?.version,
   author: mod.author ?? previous?.author,
   sourceUrl: mod.sourceUrl ?? previous?.sourceUrl,
+  thumbnail: mod.icon ?? previous?.thumbnail,
   storage: mod.storage,
   stageId: mod.stageId,
   profileIds: mod.profileIds,

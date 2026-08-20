@@ -48,6 +48,11 @@
   `.pak`/`.utoc`/`.ucas` incomplets — décision pure `nteLaunchBlocker` après
   la garde Steam. Le loader Everlight absent reste un warning non bloquant
   (spec §11-14, §35).
+- **Icônes de mods NTE** (§7) : `mod.json` lit le champ `icon` (chemin
+  relatif), résolu au dossier du mod — repli `icon.png`/`preview.png` local,
+  puis `custom image url` distante (`nte_resolve_mod_icon`). L'icône est
+  propagée (`NativeMod.icon` → `Mod.thumbnail`) et affichée comme vignette
+  dans la liste des mods (fichier local via `convertFileSrc`, URL directe).
 
 ## [1.152.0] - 2026-08-20
 

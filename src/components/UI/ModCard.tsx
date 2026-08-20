@@ -2,7 +2,7 @@ import { AlertTriangle, ArrowDown, ArrowUp, ExternalLink, FolderOpen, HelpCircle
 import type { MouseEvent } from 'react'
 import { Mod } from '../../types'
 import { LOADER_COLORS, PLATFORM_COLORS } from '../../utils'
-import { native } from '../../lib/native'
+import { native, resourceUrl } from '../../lib/native'
 import { ZailonSelectionCheckbox } from './ZailonSelectionCheckbox'
 import { ZailonSwitch } from './ZailonSwitch'
 
@@ -32,6 +32,8 @@ export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteC
         : 'bg-white/[0.02] border-white/[0.03] opacity-60 hover:opacity-80'
     }`}>
       {onSelect && <ZailonSelectionCheckbox checked={Boolean(selected)} onClick={onSelect} aria-label={`Sélectionner ${mod.name}`} />}
+      {/* Icône du mod (spec §7) : fichier local via convertFileSrc, URL distante directe. */}
+      {mod.thumbnail && <img src={/^https?:\/\//i.test(mod.thumbnail) ? mod.thumbnail : resourceUrl(mod.thumbnail)} alt="" className="h-9 w-9 shrink-0 rounded-lg border border-white/[0.06] object-cover" draggable={false} />}
       {/* Loader badge */}
       <span className="text-[11px] font-mono font-bold px-1.5 py-0.5 rounded flex-shrink-0"
         style={{ color: loaderColor, backgroundColor: `${loaderColor}20`, border: `1px solid ${loaderColor}40` }}>

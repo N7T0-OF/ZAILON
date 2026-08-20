@@ -121,6 +121,14 @@ test('socle NTE : état Steam, création validée AuroraMods et validation des m
   assert.ok(store.includes('nteLaunchPipeline'), 'garde pipeline dans le store')
   assert.ok(store.includes('nteLaunchBlocker'), 'décision pure de blocage (spec §40)')
   assert.ok(nteLaunchBlocker !== undefined, 'nteLaunchBlocker importé dans le store')
+
+  // Spec §7 : icône des mods — mod.json `icon` / icon.png résolu côté natif,
+  // propagé jusqu'à l'affichage.
+  assert.ok(rust.includes('nte_resolve_mod_icon'), 'résolution d\'icône locale (spec §7)')
+  assert.ok(rust.includes('icon: Option<String>'), 'champ icône du NativeMod natif')
+  assert.ok(native.includes('icon?: string'), 'champ icône du type NativeMod TS')
+  assert.ok(store.includes('thumbnail: mod.icon'), 'icône propagée vers le catalogue (thumbnail)')
+  assert.ok(read('src/components/UI/ModCard.tsx').includes('mod.thumbnail'), 'vignette affichée dans ModCard')
 })
 
 test('pipeline de lancement NTE : détection du loader Everlight jamais téléchargé (spec §11-14, §35)', () => {

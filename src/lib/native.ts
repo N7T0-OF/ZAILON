@@ -314,6 +314,7 @@ export interface NativeMod {
   sourceUrl?: string
   version?: string
   author?: string
+  icon?: string
   storage: 'staged' | 'game-folder'
   stageId?: string
   profileIds: string[]

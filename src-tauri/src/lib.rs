@@ -60,6 +60,9 @@ struct NativeMod {
     source_url: Option<String>,
     version: Option<String>,
     author: Option<String>,
+    /// Icône du mod (chemin local ou URL, spec §7) — vide pour les mods sans
+    /// mod.json ni fichier icon.png/preview.png.
+    icon: Option<String>,
     storage: String,
     stage_id: Option<String>,
     profile_ids: Vec<String>,
@@ -4447,6 +4450,7 @@ fn inspect_native_mod(path: &Path) -> NativeMod {
         source_url,
         version,
         author: None,
+        icon: None,
         storage: "game-folder".into(),
         stage_id: None,
         profile_ids: Vec::new(),
@@ -6979,7 +6983,9 @@ fn nte_find_mod_json(folder: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Parse un `mod.json` Aurora → (name, version, author, support_link, image_url).
+/// Parse un `mod.json` Aurora → (name, version, author, support_link, image_url,
+/// icon). `icon` est un chemin relatif (ex. `icon.png`) résolu par
+/// `nte_resolve_mod_icon` — jamais un schéma ajouté (spec §7).
 #[allow(clippy::type_complexity)]
 fn nte_parse_mod_json(
     raw: &str,
@@ -6989,14 +6995,15 @@ fn nte_parse_mod_json(
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
 ) {
     let trimmed = raw.trim_start().trim_start_matches('\u{feff}');
     let value: serde_json::Value = match serde_json::from_str(trimmed) {
         Ok(value) => value,
-        Err(_) => return (None, None, None, None, None),
+        Err(_) => return (None, None, None, None, None, None),
     };
     let Some(root) = value.as_object() else {
-        return (None, None, None, None, None);
+        return (None, None, None, None, None, None);
     };
 
     let field = |name: &str| {
@@ -7034,7 +7041,35 @@ fn nte_parse_mod_json(
         str_field("author"),
         optional("support link").map(with_scheme),
         optional("custom image url").map(with_scheme),
+        str_field("icon"),
     )
+}
+
+/// Résout l'icône d'un mod NTE (spec §7) : champ `icon` du mod.json résolu au
+/// dossier du mod si le fichier existe, sinon `icon.png`/`preview.png` dans le
+/// dossier, sinon l'image distante (`custom image url`). Retourne un chemin
+/// local absolu (affichable via convertFileSrc) ou une URL http(s).
+fn nte_resolve_mod_icon(
+    folder: &Path,
+    icon_field: Option<&str>,
+    image_url: Option<&str>,
+) -> Option<String> {
+    // Champ `icon` du mod.json : relatif au dossier du mod (spec §7).
+    if let Some(relative) = icon_field {
+        let candidate = folder.join(relative);
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+    }
+    // Convention locale : icon.png / preview.png à la racine du mod.
+    for name in ["icon.png", "preview.png"] {
+        let candidate = folder.join(name);
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+    }
+    // Repli : image distante déclarée dans mod.json.
+    image_url.map(ToOwned::to_owned)
 }
 
 /// Un mod NTE au layout Aurora : un sous-dossier de AuroraMods contenant des
@@ -7051,11 +7086,12 @@ fn inspect_nte_mod_folder(folder: &Path) -> NativeMod {
     let mut version = None;
     let mut author = None;
     let mut source_url = None;
+    let mut icon = None;
     let mut manifests: Vec<String> = Vec::new();
 
     if let Some(json_path) = nte_find_mod_json(folder) {
         if let Ok(raw) = fs::read_to_string(&json_path) {
-            let (name, json_version, json_author, support_link, _image_url) =
+            let (name, json_version, json_author, support_link, image_url, icon_field) =
                 nte_parse_mod_json(&raw);
             if let Some(name) = name {
                 display_name = name;
@@ -7064,6 +7100,9 @@ fn inspect_nte_mod_folder(folder: &Path) -> NativeMod {
             version = json_version.or_else(|| Some("1.0.0".to_string()));
             author = json_author;
             source_url = support_link;
+            // Spec §7 : icône = fichier local (champ icon ou icon.png/preview.png)
+            // résolu au dossier du mod, sinon image distante.
+            icon = nte_resolve_mod_icon(folder, icon_field.as_deref(), image_url.as_deref());
             manifests.push("mod.json".to_string());
         }
     }
@@ -7083,6 +7122,7 @@ fn inspect_nte_mod_folder(folder: &Path) -> NativeMod {
         source_url,
         version,
         author,
+        icon,
         storage: "game-folder".into(),
         stage_id: None,
         profile_ids: Vec::new(),
@@ -7124,6 +7164,7 @@ fn inspect_nte_loose_mod(file: &Path) -> NativeMod {
         source_url: None,
         version: None,
         author: None,
+        icon: None,
         storage: "game-folder".into(),
         stage_id: None,
         profile_ids: Vec::new(),
@@ -10444,6 +10485,7 @@ fn staged_native_mod(stage_directory: &Path) -> Result<NativeMod, String> {
         source_url: text("sourceUrl").or(inspected.source_url),
         version: text("version").or(inspected.version),
         author: text("author").or(inspected.author),
+        icon: text("icon").or(inspected.icon),
         storage: "staged".into(),
         stage_id: Some(stage_id),
         profile_ids: manifest
@@ -19555,19 +19597,21 @@ mod tests {
     "custom image url": "https://i.imgur.com/abc.png"
   }
 }"#;
-        let (name, version, author, support, image) = nte_parse_mod_json(raw);
+        let (name, version, author, support, image, icon) = nte_parse_mod_json(raw);
         assert_eq!(name.as_deref(), Some("Dress Up"));
         assert_eq!(version.as_deref(), Some("1.2.3"));
         assert_eq!(author.as_deref(), Some("Someone"));
         // Schéma https:// ajouté si absent (Aurora `with_scheme`).
         assert_eq!(support.as_deref(), Some("https://discord.gg/example"));
         assert_eq!(image.as_deref(), Some("https://i.imgur.com/abc.png"));
+        // Champ `icon` (chemin relatif, spec §7) — jamais de schéma ajouté.
+        assert_eq!(icon.as_deref(), Some("2.9"));
     }
 
     #[test]
     fn nte_mod_json_is_case_insensitive_and_tolerates_bom() {
         let raw = "\u{feff}{ \"NAME\": \"X\", \"VERSION\": \"2.0.0\", \"Optionals\": { \"SUPPORT LINK\": \"example.com\" } }";
-        let (name, version, author, support, _) = nte_parse_mod_json(raw);
+        let (name, version, author, support, _, _) = nte_parse_mod_json(raw);
         assert_eq!(name.as_deref(), Some("X"));
         assert_eq!(version.as_deref(), Some("2.0.0"));
         assert_eq!(author, None);
@@ -19576,11 +19620,44 @@ mod tests {
 
     #[test]
     fn nte_mod_json_invalid_returns_none() {
-        let (name, version, author, support, image) = nte_parse_mod_json("not json");
+        let (name, version, author, support, image, icon) = nte_parse_mod_json("not json");
         assert_eq!(
-            (name, version, author, support, image),
-            (None, None, None, None, None)
+            (name, version, author, support, image, icon),
+            (None, None, None, None, None, None)
         );
+    }
+
+    #[test]
+    fn nte_resolve_mod_icon_prefers_local_file_then_falls_back_to_url() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-icon-{}", unix_timestamp()));
+        fs::create_dir_all(&root).unwrap();
+
+        // Champ `icon` résolu au dossier du mod (spec §7).
+        fs::write(root.join("icon.png"), b"png").unwrap();
+        let icon = nte_resolve_mod_icon(&root, Some("icon.png"), Some("https://i.imgur.com/x.png"));
+        let resolved = icon.unwrap();
+        assert!(resolved.ends_with("icon.png"), "{resolved}");
+        assert!(Path::new(&resolved).is_file());
+
+        // Convention locale icon.png sans champ icon.
+        let icon = nte_resolve_mod_icon(&root, None, Some("https://i.imgur.com/x.png"));
+        assert!(icon.unwrap().ends_with("icon.png"));
+
+        // preview.png comme repli local.
+        fs::remove_file(root.join("icon.png")).unwrap();
+        fs::write(root.join("preview.png"), b"png").unwrap();
+        let icon = nte_resolve_mod_icon(&root, None, None);
+        assert!(icon.unwrap().ends_with("preview.png"));
+
+        // Aucun fichier local → URL distante (custom image url).
+        fs::remove_file(root.join("preview.png")).unwrap();
+        let icon = nte_resolve_mod_icon(&root, None, Some("https://i.imgur.com/x.png"));
+        assert_eq!(icon.as_deref(), Some("https://i.imgur.com/x.png"));
+
+        // Rien du tout → None.
+        assert_eq!(nte_resolve_mod_icon(&root, None, None), None);
+
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

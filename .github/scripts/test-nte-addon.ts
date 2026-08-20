@@ -105,6 +105,8 @@ test('socle NTE : état Steam, création validée AuroraMods et validation des m
   assert.ok(panel.includes('Valider les mods'), 'validation des ensembles de mods')
   assert.ok(panel.includes('Vérifier le lancement'), 'pipeline de lancement (spec §15, §40)')
   assert.ok(panel.includes('Pipeline de lancement'), 'affichage des étapes du pipeline')
+  assert.ok(panel.includes('Copier le rapport'), 'rapport de diagnostic partageable (spec §33)')
+  assert.ok(panel.includes('ZAILON NTE Diagnostic'), 'en-tête du rapport de diagnostic (spec §33)')
 
   // Garde au lancement : un jeu NTE Steam sans Steam ne se lance pas (spec §40).
   assert.ok(store.includes('nteSteamCheck'), 'garde Steam dans le store')

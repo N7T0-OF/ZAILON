@@ -31,6 +31,9 @@
   §15, §40). Le loader Everlight (`version.dll`/`dsound.dll` dans
   Binaries/Win64) est DÉTECTÉ, jamais téléchargé (spec §11-14, §35). Bouton
   « Vérifier le lancement » dans la carte NTE.
+- **Diagnostic NTE partageable** (§33) : rapport texte complet (installation,
+  version, distribution, launcher, args, marqueurs, Steam, mods, pipeline)
+  avec bouton « Copier le rapport » — facilite le support des futurs bugs.
 
 ## [1.152.0] - 2026-08-20
 

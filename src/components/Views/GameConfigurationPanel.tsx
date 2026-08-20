@@ -975,18 +975,37 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
 
   if (!isNte) return null
 
+  // Spec §33 : rapport de diagnostic NTE complet, facilement partageable —
+  // chaque ligne est un état vérifiable, et le bouton « Copier le rapport »
+  // envoie le texte au presse-papiers (pattern ProfileShareDialog).
+  const buildDiagnosticReport = (): string => {
+    const lines: string[] = [
+      'ZAILON NTE Diagnostic',
+      '---------------------',
+      `Installation : ${report?.valid ? 'valide ✓' : 'invalide — launcher ou arbre client introuvable'}`,
+      `Version : ${report ? NTE_VERSION_LABELS[report.version] : '—'}`,
+      `Distribution : ${report ? NTE_DISTRIBUTION_LABELS[report.distribution] : '—'}`,
+      `Launcher : ${report?.launcher || 'aucun trouvé'}`,
+      `Dossier mods : ${report?.modsPath || '—'}`,
+      ...(report?.launchArgs.length ? [`Args de lancement : ${report.launchArgs.join(' ')}`] : []),
+      ...(report?.markers ?? []).map(marker => `${marker.found ? '✓' : '✗'} ${marker.label} — ${marker.marker}`),
+      `Steam : ${steam ? (steam.launchReady ? 'prêt ✓' : 'non détecté ✗') : '—'}`,
+      ...(steam?.steamPath ? [`Chemin Steam : ${steam.steamPath}`] : []),
+      ...(validation ? [`Mods : ${validation.completeCount}/${validation.total} valides`, ...validation.incomplete.map(mod => `  ✗ ${mod.name} — manquant : ${mod.missing.join(', ')}`)] : []),
+      ...(pipeline ? [`Pipeline : ${pipeline.ready ? 'prêt ✓' : `bloqué ✗ — ${pipeline.blockerSummary}`}`, ...pipeline.steps.map(step => `  ${step.status === 'ok' ? '✓' : step.status === 'error' ? '✗' : '⚠'} ${step.label} — ${step.detail}${step.action ? ` → ${step.action}` : ''}`)] : []),
+    ]
+    return lines.join('\n')
+  }
+
   const runTest = () => {
     if (!report) return
-    const lines = [
-      `Installation : ${report.valid ? 'valide ✓' : 'invalide — launcher ou arbre client introuvable'}`,
-      `Version : ${NTE_VERSION_LABELS[report.version]}`,
-      `Distribution : ${NTE_DISTRIBUTION_LABELS[report.distribution]}`,
-      `Launcher : ${report.launcher || 'aucun trouvé'}`,
-      `Dossier mods : ${report.modsPath}`,
-      ...(report.launchArgs.length ? [`Args de lancement : ${report.launchArgs.join(' ')}`] : []),
-      ...report.markers.map(marker => `${marker.found ? '✓' : '✗'} ${marker.label} — ${marker.marker}`),
-    ]
-    setTested(lines.join('\n'))
+    setTested(buildDiagnosticReport())
+  }
+
+  const copyDiagnosticReport = () => {
+    const text = buildDiagnosticReport()
+    void navigator.clipboard?.writeText(text).catch(() => undefined)
+    setTested(text)
   }
 
   const useAuroraMods = () => {
@@ -1070,6 +1089,7 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <button type="button" onClick={load} disabled={busy} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-50">{busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}Analyser l’installation</button>
         <button type="button" onClick={runTest} disabled={!report} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-50"><ShieldCheck size={13} />Tester l’installation</button>
+        <button type="button" onClick={copyDiagnosticReport} disabled={!report} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-50"><Copy size={13} />Copier le rapport</button>
         {report && !report.markers.find(marker => marker.marker === 'Client/WindowsNoEditor/HT/Content/Paks/AuroraMods')?.found && (
           <button type="button" onClick={ensureModsDir} className="flex items-center gap-1.5 rounded-lg border border-gold/25 bg-gold/[0.06] px-3 py-1.5 text-[11px] font-semibold text-gold hover:border-gold/45 hover:bg-gold/10"><FolderOpen size={13} />Créer le dossier AuroraMods (après validation du chemin)</button>
         )}

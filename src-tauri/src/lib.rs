@@ -6400,19 +6400,23 @@ fn nte_game_report(install_dir: String, platform: Option<String>) -> Result<NteG
         ])
         .collect();
 
+    // E0382 (use of moved value) : `launch_args` est calculé AVANT le
+    // déplacement de `distribution` dans le struct — jamais réutilisé après.
+    let launch_args: Vec<String> = if distribution == "epic" {
+        NTE_EPIC_AUTH_ARGS
+            .iter()
+            .map(|argument| (*argument).to_string())
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     Ok(NteGameReport {
         valid,
         version,
         distribution,
         launcher,
-        launch_args: if distribution == "epic" {
-            NTE_EPIC_AUTH_ARGS
-                .iter()
-                .map(|argument| (*argument).to_string())
-                .collect()
-        } else {
-            Vec::new()
-        },
+        launch_args,
         mods_path: mods.to_string_lossy().to_string(),
         binaries_path: root.join(NTE_CLIENT_WIN64).to_string_lossy().to_string(),
         markers,

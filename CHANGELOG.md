@@ -41,6 +41,11 @@
 
 ### Fixed
 
+- **Compilation native (E0382)** : `nte_game_report` déplaçait `distribution`
+  dans le struct `NteGameReport` puis la relisait pour calculer
+  `launch_args` — « borrow of moved value ». `launch_args` est désormais
+  calculé avant le déplacement : les tests natifs (ubuntu + windows) et les
+  builds natifs recompilent en CI.
 - **Add-ons — bouton « Mettre à jour »** : quand un add-on installé a une
   version plus récente au catalogue, la carte affichait seulement un badge
   passif « Màj v… » sans aucune action possible. Un vrai bouton

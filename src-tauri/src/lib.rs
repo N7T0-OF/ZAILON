@@ -6371,10 +6371,16 @@ fn nte_game_report(install_dir: String, platform: Option<String>) -> Result<NteG
     let epic_sdk = root.join(NTE_EPIC_SDK);
 
     let mut distribution = "standalone".to_string();
-    if platform.as_deref() == Some("epic") || epic_sdk.is_file() {
+    // La plateforme DÉCLARÉE par ZAILON prime toujours (Aurora
+    // `detect_distribution`) ; le marqueur Epic ne sert de preuve indépendante
+    // que pour les builds non déclarées (standalone) réellement installées par
+    // Epic — cohérent avec `detectNteDistribution` côté TS.
+    if platform.as_deref() == Some("epic") {
         distribution = "epic".into();
     } else if platform.as_deref() == Some("steam") {
         distribution = "steam".into();
+    } else if epic_sdk.is_file() {
+        distribution = "epic".into();
     }
 
     let valid = launcher.is_some() || paks.is_dir();

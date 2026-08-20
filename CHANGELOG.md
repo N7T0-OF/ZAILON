@@ -41,11 +41,14 @@
 
 ### Fixed
 
-- **Compilation native (E0382)** : `nte_game_report` déplaçait `distribution`
-  dans le struct `NteGameReport` puis la relisait pour calculer
-  `launch_args` — « borrow of moved value ». `launch_args` est désormais
-  calculé avant le déplacement : les tests natifs (ubuntu + windows) et les
-  builds natifs recompilent en CI.
+- **CI native (2 erreurs)** : (1) compilation E0382 — `nte_game_report`
+  déplaçait `distribution` dans le struct puis la relisait pour `launch_args`
+  (« borrow of moved value ») ; `launch_args` est calculé avant le
+  déplacement. (2) test
+  `nte_game_report_platform_steam_wins_over_sdk_check` — le marqueur Epic
+  (EOSSDK-Win64-Shipping.dll) primait sur la plateforme déclarée Steam ; la
+  plateforme déclarée prime désormais, le marqueur ne servant que pour les
+  builds non déclarées (cohérent avec `detectNteDistribution` TS).
 - **Add-ons — bouton « Mettre à jour »** : quand un add-on installé a une
   version plus récente au catalogue, la carte affichait seulement un badge
   passif « Màj v… » sans aucune action possible. Un vrai bouton

@@ -261,6 +261,45 @@ export function isNteGame(input: { execPath?: string; gameName?: string; nteAllo
   }) === 'nte-pak'
 }
 
+/** Étape du pipeline de lancement NTE (miroir du type natif, sans dépendre du
+ * backend — utilisable en logique pure et dans les tests node). */
+export interface NtePipelineStep {
+  id: string
+  label: string
+  status: 'ok' | 'warning' | 'error'
+  detail: string
+  action: string
+}
+
+/** Résultat du pipeline de lancement NTE (spec §15, §40). */
+export interface NteLaunchPipeline {
+  ready: boolean
+  steps: NtePipelineStep[]
+  blockerSummary: string
+}
+
+/**
+ * Décision de lancement NTE (spec §10, §22, §40) : le lancement est BLOQUÉ si
+ * le pipeline n'est pas prêt (installation invalide, Steam absent pour une
+ * build Steam, dossier mods manquant, ensembles .pak/.utoc/.ucas incomplets).
+ * Les warnings (loader Everlight absent) ne bloquent JAMAIS — ZAILON ne
+ * télécharge pas de DLL (spec §11-14, §35) mais le jeu peut se lancer sans.
+ *
+ * Retourne le message de blocage (ou undefined si le lancement est autorisé).
+ * PURE et testable : aucune dépendance au backend.
+ */
+export function nteLaunchBlocker(pipeline: NteLaunchPipeline | undefined | null): string | undefined {
+  if (!pipeline) return undefined
+  if (pipeline.ready) return undefined
+  const blocker = pipeline.blockerSummary || pipeline.steps
+    .filter(step => step.status === 'error')
+    .map(step => step.label)
+    .join(', ')
+  if (!blocker) return 'Lancement bloqué — pipeline de lancement non prêt.'
+  // Le résumé natif se termine déjà par un point — pas de double ponctuation.
+  return blocker.endsWith('.') ? `Lancement bloqué — ${blocker}` : `Lancement bloqué — ${blocker}.`
+}
+
 /**
  * Monitoring de session NTE (spec « Refonte NTE/Aurora » §16-17, Live
  * Monitoring d'Aurora) : si l'utilisateur modifie le dossier de mods pendant

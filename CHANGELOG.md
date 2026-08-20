@@ -39,6 +39,15 @@
   ajout, suppression), ZAILON signale « Modification détectée — redémarrage de
   NTE nécessaire » UNE fois par session (décision pure `nteModsChangeDecision`,
   fingerprint léger, cadence ~10 s). Jamais de redémarrage automatique.
+- **Bouton Lancer intelligent dans la carte NTE** (§22, §39) : l'action
+  principale change selon l'état — ▶ « Lancer NTE » (prêt), ⚠ « Corriger
+  avant lancement » (pipeline bloqué), ● « NTE en cours » (session active),
+  « Préparation du lancement… » (déjà en cours).
+- **Garde pipeline au lancement** (§10, §40) : un jeu NTE ne se lance jamais
+  avec une installation invalide, un dossier mods manquant ou des ensembles
+  `.pak`/`.utoc`/`.ucas` incomplets — décision pure `nteLaunchBlocker` après
+  la garde Steam. Le loader Everlight absent reste un warning non bloquant
+  (spec §11-14, §35).
 
 ## [1.152.0] - 2026-08-20
 

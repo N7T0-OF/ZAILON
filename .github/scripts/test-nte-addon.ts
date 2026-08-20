@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { addonCapabilities, CAPABILITY_ADDON, nteModsAllowed } from '../../src/lib/addonGating.ts'
 import { OFFICIAL_ADDON_CATALOG, catalogAddonAvailability, validateAddonManifest } from '../../src/lib/addons.ts'
 import { detectModBackend } from '../../src/lib/modBackends.ts'
+import { nteLaunchBlocker } from '../../src/lib/nte.ts'
 import type { InstalledAddon } from '../../src/lib/addons.ts'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -111,6 +112,15 @@ test('socle NTE : état Steam, création validée AuroraMods et validation des m
   // Garde au lancement : un jeu NTE Steam sans Steam ne se lance pas (spec §40).
   assert.ok(store.includes('nteSteamCheck'), 'garde Steam dans le store')
   assert.ok(store.includes('Lancement bloqué'), 'message de blocage au lancement')
+
+  // Spec §10, §22, §40 : le bouton principal intelligent + la garde pipeline
+  // (jamais de faux « NTE lancé » avec des mods incomplets).
+  assert.ok(panel.includes('Lancer NTE'), 'bouton « Lancer NTE » (spec §22, §39)')
+  assert.ok(panel.includes('Corriger avant lancement'), 'bouton « Corriger avant lancement » quand le pipeline est bloqué')
+  assert.ok(panel.includes('NTE en cours'), 'état « NTE en cours » pendant la session')
+  assert.ok(store.includes('nteLaunchPipeline'), 'garde pipeline dans le store')
+  assert.ok(store.includes('nteLaunchBlocker'), 'décision pure de blocage (spec §40)')
+  assert.ok(nteLaunchBlocker !== undefined, 'nteLaunchBlocker importé dans le store')
 })
 
 test('pipeline de lancement NTE : détection du loader Everlight jamais téléchargé (spec §11-14, §35)', () => {

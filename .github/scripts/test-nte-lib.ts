@@ -11,12 +11,44 @@ import {
   isNtePakFile,
   nteDisplayName,
   nteLaunchArgs,
+  nteLaunchBlocker,
   nteModsChangeDecision,
   nteModsPathFor,
   nteValidationMarkers,
   parseNteModJson,
   NTE_EPIC_AUTH_ARGS,
 } from '../../src/lib/nte.ts'
+
+// ── Blocage de lancement (spec §10, §22, §40) ───────────────────────────────
+
+test('nteLaunchBlocker : bloque un pipeline non prêt, laisse passer les warnings', () => {
+  // Pipeline prêt → aucun blocage.
+  assert.equal(nteLaunchBlocker({ ready: true, steps: [], blockerSummary: '' }), undefined)
+  // Pipeline absent (non vérifié) → aucun blocage best-effort.
+  assert.equal(nteLaunchBlocker(undefined), undefined)
+  // Loader Everlight absent = WARNING non bloquant (spec §11-14, §35).
+  const warningOnly = {
+    ready: true,
+    blockerSummary: '',
+    steps: [
+      { id: 'loader', label: 'Loader (Everlight)', status: 'warning' as const, detail: 'Aucune DLL', action: 'Installez un loader' },
+    ],
+  }
+  assert.equal(nteLaunchBlocker(warningOnly), undefined)
+  // Mods incomplets → blocage nommé (spec §10 : « Impossible de lancer avec ce mod »).
+  const blocked = {
+    ready: false,
+    blockerSummary: 'Étape(s) échouée(s) : Mods.',
+    steps: [
+      { id: 'installation', label: 'Installation NTE', status: 'ok' as const, detail: '', action: '' },
+      { id: 'mods', label: 'Mods', status: 'error' as const, detail: '1 ensemble(s) incomplet(s)', action: 'Désactivez' },
+    ],
+  }
+  assert.equal(nteLaunchBlocker(blocked), 'Lancement bloqué — Étape(s) échouée(s) : Mods.')
+  // Sans résumé → repli sur les labels des étapes en échec.
+  const noSummary = { ready: false, blockerSummary: '', steps: [{ id: 'provider', label: 'Provider', status: 'error' as const, detail: '', action: '' }] }
+  assert.equal(nteLaunchBlocker(noSummary), 'Lancement bloqué — Provider.')
+})
 
 // ── Monitoring de session (spec §16-17) ─────────────────────────────────────
 

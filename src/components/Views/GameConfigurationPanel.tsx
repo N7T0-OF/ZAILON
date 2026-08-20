@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, HardDrive, History, Keyboard, Layers3, Loader2, MonitorDown, Package, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Snowflake, Trash2, Upload, Wand2, Wrench } from 'lucide-react'
+import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, HardDrive, History, Keyboard, Layers3, Loader2, MonitorDown, Package, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Snowflake, Trash2, Upload, Wand2, Wrench } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
@@ -896,6 +896,12 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
       return Array.isArray(saved) && saved.includes('nte')
     } catch { return false }
   })
+  // Spec §22, §39 : le bouton principal NTE change selon l'état — ▶ Lancer NTE
+  // (prêt), ⚠ Corriger avant lancement (pipeline bloqué), ● NTE en cours.
+  const launchSelectedGame = useStore(state => state.launchSelectedGame)
+  const isLaunching = useStore(state => state.isLaunching)
+  const activeSession = useStore(state => state.gameSessions.find(session => session.gameId === game.id && session.state !== 'Ended' && session.state !== 'Failed'))
+  const sessionRunning = activeSession?.state === 'GameRunning'
   const toggle = () => {
     setOpen(current => {
       const next = !current
@@ -1086,7 +1092,19 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
         <p className="mt-2 flex items-start gap-2 rounded-lg border border-emerald-300/15 bg-emerald-300/[0.04] px-3 py-2 text-[11px] text-emerald-100/70"><CheckCircle2 size={13} className="mt-0.5 shrink-0 text-emerald-300/80" />{validation.total} mod(s) — ensembles .pak/.utoc/.ucas complets.</p>
       )}
 
+      {/* Spec §22, §39 : bouton principal intelligent — chaque état produit une
+          action (▶ Lancer NTE / ⚠ Corriger / ● En cours). Le lancement passe par
+          la garde du store (Steam + pipeline) : jamais de faux « NTE lancé ». */}
       <div className="mt-3 flex flex-wrap items-center gap-3">
+        {sessionRunning ? (
+          <button type="button" disabled title="NTE est en cours." className="flex items-center gap-1.5 rounded-lg bg-emerald-300/90 px-4 py-2 text-[11px] font-bold text-[#0c1212] disabled:opacity-80"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-900/60" />NTE en cours</button>
+        ) : isLaunching ? (
+          <button type="button" disabled className="flex items-center gap-1.5 rounded-lg bg-[var(--zailon-accent)] px-4 py-2 text-[11px] font-bold text-[var(--zailon-accent-text)] opacity-70"><Loader2 size={13} className="animate-spin" />Préparation du lancement…</button>
+        ) : pipeline && !pipeline.ready ? (
+          <button type="button" onClick={runPipeline} title="Corrigez les étapes en échec, puis relancez la vérification." className="flex items-center gap-1.5 rounded-lg border border-amber-300/30 bg-amber-300/[0.07] px-4 py-2 text-[11px] font-bold text-amber-100 hover:bg-amber-300/15"><AlertTriangle size={13} />Corriger avant lancement</button>
+        ) : (
+          <button type="button" onClick={() => void launchSelectedGame()} disabled={!report?.valid} className="flex items-center gap-1.5 rounded-lg bg-[var(--zailon-accent)] px-4 py-2 text-[11px] font-bold text-[var(--zailon-accent-text)] hover:-translate-y-0.5 hover:bg-white disabled:opacity-35"><Play size={12} fill="currentColor" />Lancer NTE</button>
+        )}
         <button type="button" onClick={load} disabled={busy} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-50">{busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}Analyser l’installation</button>
         <button type="button" onClick={runTest} disabled={!report} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-50"><ShieldCheck size={13} />Tester l’installation</button>
         <button type="button" onClick={copyDiagnosticReport} disabled={!report} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-50"><Copy size={13} />Copier le rapport</button>

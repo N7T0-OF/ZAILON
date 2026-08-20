@@ -42,7 +42,7 @@ import { ZAILON_PERSIST_KEY } from '../lib/designTokens'
 const folderModsCache = new Map<string, { fingerprint: string; folderMods: NativeMod[]; at: number }>()
 import { modMatchesRemote, remoteIdentityFromCatalog, remoteModKey } from '../lib/remoteInstallState'
 import { addonCapabilities, fiveMProfilesAllowed, frostyImportAllowed, mo2ImportAllowed, nteModsAllowed, performancePlusAllowed, steamAdvancedAllowed, vortexImportAllowed } from '../lib/addonGating'
-import { isNteGame } from '../lib/nte'
+import { isNteGame, nteLaunchBlocker } from '../lib/nte'
 import { launchProcessPriority, shouldApplyProcessPriority } from '../lib/performancePlus'
 import { DEFAULT_BACKGROUND_MEDIA_SETTINGS, type BackgroundMediaSettings } from '../lib/backgroundMedia'
 import { applyHomeLayoutPreset, HOME_WIDGET_DEFAULTS, normalizeHomeWidgets, type HomeLayoutPreset, type HomeWidgetConfig } from '../lib/homeWidgets'
@@ -2175,6 +2175,20 @@ export const useStore = create<Store>()(persist((set, get) => ({
           const steamState = await native.nteSteamCheck(resolved.rootPath || knownRoot, game.platform || null)
           if (!steamState.launchReady) {
             set({ notice: `Lancement bloqué — ${steamState.message} Utilisez « Ouvrir Steam » depuis la configuration NTE du jeu, puis relancez.` })
+            return
+          }
+        } catch { /* garde best-effort : un échec du check ne bloque pas le jeu */ }
+      }
+      // Spec « Refonte NTE/Aurora » §10, §40 : jamais de faux « NTE lancé » — un
+      // jeu NTE ne se lance pas si le pipeline est bloqué (installation
+      // invalide, dossier mods manquant, ensembles .pak/.utoc/.ucas incomplets).
+      // Le loader Everlight absent reste un WARNING non bloquant (§11-14, §35).
+      if (isNteGame({ execPath: game.execPath, gameName: game.name, nteAllowed: nteModsAllowed(addonCapabilities(get().addons)) })) {
+        try {
+          const pipeline = await native.nteLaunchPipeline(resolved.rootPath || knownRoot, game.platform || null, game.modsPath || '')
+          const blocker = nteLaunchBlocker(pipeline)
+          if (blocker) {
+            set({ notice: `${blocker} Corrigez les mods (carte NTE) ou utilisez « Lancer sans mods » pour diagnostiquer.` })
             return
           }
         } catch { /* garde best-effort : un échec du check ne bloque pas le jeu */ }

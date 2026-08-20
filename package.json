@@ -10,6 +10,7 @@
     "test:visual-safety": "node .github/scripts/check-visual-safety.mjs",
     "test:input-backends": "node --test .github/scripts/test-input-backends.ts",
     "test:game-presence": "node --test .github/scripts/test-game-presence.ts",
+    "test:nte": "node --test .github/scripts/test-nte-lib.ts",
     "addon:init": "node .github/scripts/addon-cli.ts init",
     "addon:validate": "node .github/scripts/addon-cli.ts validate",
     "addon:pack": "node .github/scripts/addon-cli.ts pack",

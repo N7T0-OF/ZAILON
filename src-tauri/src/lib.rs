@@ -59,6 +59,7 @@ struct NativeMod {
     manifests: Vec<String>,
     source_url: Option<String>,
     version: Option<String>,
+    author: Option<String>,
     storage: String,
     stage_id: Option<String>,
     profile_ids: Vec<String>,
@@ -4445,6 +4446,7 @@ fn inspect_native_mod(path: &Path) -> NativeMod {
         manifests,
         source_url,
         version,
+        author: None,
         storage: "game-folder".into(),
         stage_id: None,
         profile_ids: Vec::new(),
@@ -6267,6 +6269,445 @@ fn toggle_mod(mod_path: String, mods_root: String, enable: bool) -> Result<Strin
     Ok(target.to_string_lossy().to_string())
 }
 
+// ── NTE (Neverness to Everness) — fusion du launcher Aurora ──────────────────
+//
+// Connaissances fusionnées depuis Aurora-Launcher (GPL-3.0, crates/shared et
+// crates/main) :
+//
+// - Dossier de mods : `<jeu>/Client/WindowsNoEditor/HT/Content/Paks/AuroraMods`
+//   (Aurora `paths::CLIENT_PAK_DIR`). Chaque mod est UN sous-dossier contenant
+//   .pak/.utoc/.ucas ; un fichier `.pak` DÉSACTIVÉ est renommé `.pak.disabled`
+//   (Aurora `modmanager.rs` : `TOGGLE_EXTENSION = "pak"`, transactionnel avec
+//   rollback). C'est LE mécanisme qui rend un mod réellement chargé/ignoré par
+//   le moteur Everlight — un simple renommage du dossier (`DISABLED_*`) ne
+//   suffirait pas.
+// - Versions : NTEGlobalLauncher.exe (global), NTELauncher.exe (cn),
+//   NTETWLauncher.exe (tw) — `version::LAUNCHER_MAP`.
+// - Distribution Epic : `NTEGlobal/EOSSDK-Win64-Shipping.dll` présent → args
+//   d'auth `-AUTH_PASSWORD=1234 -AUTH_TYPE=exchangecode` (`Distribution`).
+// - Métadonnées : `mod.json` (Aurora « Display file ») — clés insensibles à la
+//   casse, BOM toléré, `optionals.support link` / `optionals.custom image url`,
+//   schéma https:// ajouté si absent, nom d'affichage sans le suffixe `_P`.
+
+const NTE_LAUNCHERS: &[(&str, &str)] = &[
+    ("NTEGlobalLauncher.exe", "global"),
+    ("NTELauncher.exe", "cn"),
+    ("NTETWLauncher.exe", "tw"),
+];
+const NTE_CLIENT_WIN64: &str = "Client/WindowsNoEditor/HT/Binaries/Win64";
+const NTE_MODS_RELATIVE: &str = "Client/WindowsNoEditor/HT/Content/Paks/AuroraMods";
+const NTE_PAKS_MARKER: &str = "Client/WindowsNoEditor/HT/Content/Paks";
+const NTE_EPIC_SDK: &str = "NTEGlobal/EOSSDK-Win64-Shipping.dll";
+const NTE_EPIC_AUTH_ARGS: &[&str] = &["-AUTH_PASSWORD=1234", "-AUTH_TYPE=exchangecode"];
+const NTE_STAGING_PREFIX: &str = ".aurora-installing-";
+const NTE_DISABLED_SUFFIX: &str = ".disabled";
+
+fn nte_is_mod_file(name: &str) -> bool {
+    Path::new(name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            ext.eq_ignore_ascii_case("pak")
+                || ext.eq_ignore_ascii_case("utoc")
+                || ext.eq_ignore_ascii_case("ucas")
+        })
+}
+
+fn nte_is_disabled_mod_file(name: &str) -> bool {
+    name.strip_suffix(NTE_DISABLED_SUFFIX)
+        .is_some_and(nte_is_mod_file)
+}
+
+fn nte_is_pak_file(name: &str) -> bool {
+    Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("pak"))
+}
+
+/// Nom d'affichage Aurora : sans le suffixe `_P` (convention des mods NTE).
+fn nte_display_name(name: &str) -> String {
+    name.strip_suffix("_P").unwrap_or(name).to_string()
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteMarkerStatus {
+    label: String,
+    marker: String,
+    found: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteGameReport {
+    valid: bool,
+    version: String,
+    distribution: String,
+    launcher: Option<String>,
+    launch_args: Vec<String>,
+    mods_path: String,
+    binaries_path: String,
+    markers: Vec<NteMarkerStatus>,
+}
+
+/// Diagnostic d'une installation NTE (version, distribution, marqueurs,
+/// chemins AuroraMods/Win64) — utilisé par la carte NTE de la configuration
+/// d'un jeu (gated par la capacité `nte.modloader`, feature removal §57).
+#[tauri::command]
+fn nte_game_report(install_dir: String, platform: Option<String>) -> Result<NteGameReport, String> {
+    let root = PathBuf::from(&install_dir);
+    let mut version = "unknown".to_string();
+    let mut launcher = None;
+    for (exe, label) in NTE_LAUNCHERS {
+        if root.join(exe).is_file() {
+            version = (*label).to_string();
+            launcher = Some((*exe).to_string());
+            break;
+        }
+    }
+
+    let paks = root.join(NTE_PAKS_MARKER);
+    let mods = root.join(NTE_MODS_RELATIVE);
+    let epic_sdk = root.join(NTE_EPIC_SDK);
+
+    let mut distribution = "standalone".to_string();
+    if platform.as_deref() == Some("epic") || epic_sdk.is_file() {
+        distribution = "epic".into();
+    } else if platform.as_deref() == Some("steam") {
+        distribution = "steam".into();
+    }
+
+    let valid = launcher.is_some() || paks.is_dir();
+
+    let markers = NTE_LAUNCHERS
+        .iter()
+        .map(|(exe, label)| NteMarkerStatus {
+            label: format!("Launcher {label}"),
+            marker: (*exe).to_string(),
+            found: root.join(exe).is_file(),
+        })
+        .chain([
+            NteMarkerStatus {
+                label: "Arbre client (Paks)".into(),
+                marker: NTE_PAKS_MARKER.into(),
+                found: paks.is_dir(),
+            },
+            NteMarkerStatus {
+                label: "Dossier mods (AuroraMods)".into(),
+                marker: NTE_MODS_RELATIVE.into(),
+                found: mods.is_dir(),
+            },
+        ])
+        .collect();
+
+    Ok(NteGameReport {
+        valid,
+        version,
+        distribution,
+        launcher,
+        launch_args: if distribution == "epic" {
+            NTE_EPIC_AUTH_ARGS
+                .iter()
+                .map(|argument| (*argument).to_string())
+                .collect()
+        } else {
+            Vec::new()
+        },
+        mods_path: mods.to_string_lossy().to_string(),
+        binaries_path: root.join(NTE_CLIENT_WIN64).to_string_lossy().to_string(),
+        markers,
+    })
+}
+
+/// `mod.json` Aurora : à la racine du mod, sinon un niveau plus bas.
+fn nte_find_mod_json(folder: &Path) -> Option<PathBuf> {
+    let direct = folder.join("mod.json");
+    if direct.exists() {
+        return Some(direct);
+    }
+    for sub in fs::read_dir(folder).ok()?.flatten() {
+        let nested = sub.path().join("mod.json");
+        if sub.file_type().is_ok_and(|kind| kind.is_dir()) && nested.exists() {
+            return Some(nested);
+        }
+    }
+    None
+}
+
+/// Parse un `mod.json` Aurora → (name, version, author, support_link, image_url).
+#[allow(clippy::type_complexity)]
+fn nte_parse_mod_json(
+    raw: &str,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    let trimmed = raw.trim_start().trim_start_matches('\u{feff}');
+    let value: serde_json::Value = match serde_json::from_str(trimmed) {
+        Ok(value) => value,
+        Err(_) => return (None, None, None, None, None),
+    };
+    let Some(root) = value.as_object() else {
+        return (None, None, None, None, None);
+    };
+
+    let field = |name: &str| {
+        root.iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value)
+    };
+    let optionals = field("optionals").and_then(|value| value.as_object());
+    let optional = |name: &str| {
+        optionals
+            .and_then(|map| map.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)))
+            .and_then(|(_, value)| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    };
+    let with_scheme = |value: String| {
+        if value.starts_with("http://") || value.starts_with("https://") {
+            value
+        } else {
+            format!("https://{value}")
+        }
+    };
+    let str_field = |name: &str| {
+        field(name)
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    };
+
+    (
+        str_field("name"),
+        str_field("version"),
+        str_field("author"),
+        optional("support link").map(with_scheme),
+        optional("custom image url").map(with_scheme),
+    )
+}
+
+/// Un mod NTE au layout Aurora : un sous-dossier de AuroraMods contenant des
+/// .pak/.utoc/.ucas. Activé = aucun fichier `.pak.disabled` dans l'arbre.
+fn inspect_nte_mod_folder(folder: &Path) -> NativeMod {
+    let files = mod_files(folder);
+    let enabled = !files.iter().any(|file| nte_is_disabled_mod_file(file));
+    let folder_name = folder
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let mut display_name = nte_display_name(&folder_name);
+    let mut version = None;
+    let mut author = None;
+    let mut source_url = None;
+    let mut manifests: Vec<String> = Vec::new();
+
+    if let Some(json_path) = nte_find_mod_json(folder) {
+        if let Ok(raw) = fs::read_to_string(&json_path) {
+            let (name, json_version, json_author, support_link, _image_url) =
+                nte_parse_mod_json(&raw);
+            if let Some(name) = name {
+                display_name = name;
+            }
+            // Aurora : un mod.json valide donne toujours une version (défaut 1.0.0).
+            version = json_version.or_else(|| Some("1.0.0".to_string()));
+            author = json_author;
+            source_url = support_link;
+            manifests.push("mod.json".to_string());
+        }
+    }
+
+    let fingerprint = fingerprint_path(folder);
+    NativeMod {
+        id: fingerprint.clone(),
+        name: display_name,
+        path: folder.to_string_lossy().to_string(),
+        enabled,
+        mod_type: "Folder".into(),
+        size_bytes: entry_size(folder),
+        files,
+        fingerprint,
+        framework: "Unreal Pak".into(),
+        manifests,
+        source_url,
+        version,
+        author,
+        storage: "game-folder".into(),
+        stage_id: None,
+        profile_ids: Vec::new(),
+        deployment_status: "unknown".into(),
+        diagnostics: Vec::new(),
+        quarantine_path: None,
+    }
+}
+
+/// Un .pak/.utoc/.ucas LÂCHE à la racine de AuroraMods (layout non-Aurora mais
+/// toléré) : chaque fichier est un mod autonome.
+fn inspect_nte_loose_mod(file: &Path) -> NativeMod {
+    let file_name = file
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let enabled = !nte_is_disabled_mod_file(&file_name);
+    let clean = file_name
+        .strip_suffix(NTE_DISABLED_SUFFIX)
+        .unwrap_or(&file_name)
+        .to_string();
+    let stem = Path::new(&clean)
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| clean.clone());
+    let fingerprint = fingerprint_path(file);
+    NativeMod {
+        id: fingerprint.clone(),
+        name: nte_display_name(&stem),
+        path: file.to_string_lossy().to_string(),
+        enabled,
+        mod_type: mod_type(file),
+        size_bytes: entry_size(file),
+        files: vec![file_name],
+        fingerprint,
+        framework: "Unreal Pak".into(),
+        manifests: Vec::new(),
+        source_url: None,
+        version: None,
+        author: None,
+        storage: "game-folder".into(),
+        stage_id: None,
+        profile_ids: Vec::new(),
+        deployment_status: "unknown".into(),
+        diagnostics: Vec::new(),
+        quarantine_path: None,
+    }
+}
+
+/// Scan du dossier Mods NTE au layout Aurora (un dossier = un mod, mod.json
+/// lu, état `.pak.disabled`, staging `.aurora-installing-*` ignoré).
+#[tauri::command]
+fn scan_nte_mods(mods_path: String) -> Result<Vec<NativeMod>, String> {
+    let folder = PathBuf::from(mods_path);
+    if !folder.exists() {
+        return Ok(Vec::new());
+    }
+    let mut mods = Vec::new();
+    for entry in fs::read_dir(&folder)
+        .map_err(to_error)?
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+        if file_name.starts_with('.') || file_name.starts_with(NTE_STAGING_PREFIX) {
+            continue;
+        }
+        if path.is_dir() {
+            mods.push(inspect_nte_mod_folder(&path));
+        } else if nte_is_mod_file(&file_name) || nte_is_disabled_mod_file(&file_name) {
+            mods.push(inspect_nte_loose_mod(&path));
+        }
+    }
+    mods.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+    });
+    Ok(mods)
+}
+
+/// Renommage transactionnel avec rollback (Aurora `ModManager::rename_all`).
+fn rename_all_transactional(pairs: &[(PathBuf, PathBuf)]) -> Result<(), String> {
+    let mut done: Vec<&(PathBuf, PathBuf)> = Vec::with_capacity(pairs.len());
+    for pair in pairs {
+        let (old, new) = pair;
+        if let Err(error) = fs::rename(old, new) {
+            // Rollback best-effort : l'erreur principale est remontée avec son
+            // contexte ; un échec de rollback laisse un état mixte signalé.
+            for (rolled_old, rolled_new) in done.iter().rev() {
+                let _ = fs::rename(rolled_new, rolled_old);
+            }
+            return Err(format!("Could not rename '{}': {error}", old.display()));
+        }
+        done.push(pair);
+    }
+    Ok(())
+}
+
+/// Activation/désactivation d'un mod NTE au mécanisme Aurora : renommage
+/// `.pak` ↔ `.pak.disabled` DANS le dossier du mod (transactionnel), ou du
+/// fichier lui-même pour un .pak lâche à la racine. Retourne le chemin du mod.
+#[tauri::command]
+fn toggle_nte_mod(mod_path: String, enable: bool) -> Result<String, String> {
+    let source = PathBuf::from(&mod_path);
+    if !source.exists() {
+        return Err("Mod not found.".into());
+    }
+
+    if source.is_dir() {
+        let files = mod_files(&source);
+        let mut pairs: Vec<(PathBuf, PathBuf)> = Vec::new();
+        for relative in files {
+            if enable {
+                if nte_is_disabled_mod_file(&relative) {
+                    let old = source.join(&relative);
+                    let new = source.join(
+                        relative
+                            .strip_suffix(NTE_DISABLED_SUFFIX)
+                            .unwrap_or(&relative),
+                    );
+                    pairs.push((old, new));
+                }
+            } else if nte_is_pak_file(&relative) {
+                let old = source.join(&relative);
+                let new = source.join(format!("{relative}{NTE_DISABLED_SUFFIX}"));
+                pairs.push((old, new));
+            }
+        }
+        if pairs.is_empty() {
+            return Err(if enable {
+                "No .disabled pak to re-enable.".into()
+            } else {
+                "No .pak file to disable.".into()
+            });
+        }
+        rename_all_transactional(&pairs)?;
+        Ok(source.to_string_lossy().to_string())
+    } else {
+        let name = source
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| "Invalid mod file name.".to_string())?;
+        let (old, new) = if enable {
+            let clean = name.strip_suffix(NTE_DISABLED_SUFFIX).unwrap_or(name);
+            if !nte_is_mod_file(clean) {
+                return Err("Not an NTE mod file.".into());
+            }
+            (source.clone(), source.with_file_name(clean))
+        } else {
+            if !nte_is_mod_file(name) {
+                return Err("Not an NTE mod file.".into());
+            }
+            (
+                source.clone(),
+                source.with_file_name(format!("{name}{NTE_DISABLED_SUFFIX}")),
+            )
+        };
+        if old != new {
+            fs::rename(&old, &new).map_err(to_error)?;
+        }
+        Ok(new.to_string_lossy().to_string())
+    }
+}
+
 #[tauri::command]
 fn delete_mod(mod_path: String, mods_root: String) -> Result<(), String> {
     let path = validated_mod_entry(&mods_root, &mod_path)?;
@@ -7443,6 +7884,9 @@ fn guess_mods_path(exec_path: String) -> String {
     let mut candidates = vec![base.join("mods"), base.join("Mods"), base.join("~mods")];
     for ancestor in base.ancestors().take(5) {
         candidates.push(ancestor.join("Content/Paks/~mods"));
+        // NTE (Neverness to Everness) — dossier mods du launcher Aurora
+        // (fusion Aurora, paths::CLIENT_PAK_DIR).
+        candidates.push(ancestor.join("Client/WindowsNoEditor/HT/Content/Paks/AuroraMods"));
     }
     candidates
         .into_iter()
@@ -9454,6 +9898,7 @@ fn staged_native_mod(stage_directory: &Path) -> Result<NativeMod, String> {
         manifests: inspected.manifests,
         source_url: text("sourceUrl").or(inspected.source_url),
         version: text("version").or(inspected.version),
+        author: text("author").or(inspected.author),
         storage: "staged".into(),
         stage_id: Some(stage_id),
         profile_ids: manifest
@@ -18550,6 +18995,215 @@ mod tests {
         let entries = vec![provider_entry("red4ext/plugins/SomeMod/main.js")];
         assert_eq!(provider_ids(&entries), Vec::<String>::new());
     }
+
+    // ── NTE (Neverness to Everness) — fusion du launcher Aurora ──────────────
+
+    #[test]
+    fn nte_mod_json_parses_aurora_display_file() {
+        let raw = r#"{
+  "name": "Dress Up",
+  "version": "1.2.3",
+  "author": "Someone",
+  "icon": "2.9",
+  "optionals": {
+    "support link": "discord.gg/example",
+    "custom image url": "https://i.imgur.com/abc.png"
+  }
+}"#;
+        let (name, version, author, support, image) = nte_parse_mod_json(raw);
+        assert_eq!(name.as_deref(), Some("Dress Up"));
+        assert_eq!(version.as_deref(), Some("1.2.3"));
+        assert_eq!(author.as_deref(), Some("Someone"));
+        // Schéma https:// ajouté si absent (Aurora `with_scheme`).
+        assert_eq!(support.as_deref(), Some("https://discord.gg/example"));
+        assert_eq!(image.as_deref(), Some("https://i.imgur.com/abc.png"));
+    }
+
+    #[test]
+    fn nte_mod_json_is_case_insensitive_and_tolerates_bom() {
+        let raw = "\u{feff}{ \"NAME\": \"X\", \"VERSION\": \"2.0.0\", \"Optionals\": { \"SUPPORT LINK\": \"example.com\" } }";
+        let (name, version, author, support, _) = nte_parse_mod_json(raw);
+        assert_eq!(name.as_deref(), Some("X"));
+        assert_eq!(version.as_deref(), Some("2.0.0"));
+        assert_eq!(author, None);
+        assert_eq!(support.as_deref(), Some("https://example.com"));
+    }
+
+    #[test]
+    fn nte_mod_json_invalid_returns_none() {
+        let (name, version, author, support, image) = nte_parse_mod_json("not json");
+        assert_eq!(
+            (name, version, author, support, image),
+            (None, None, None, None, None)
+        );
+    }
+
+    #[test]
+    fn nte_display_name_strips_p_suffix() {
+        assert_eq!(nte_display_name("DressUp_P"), "DressUp");
+        assert_eq!(nte_display_name("DressUp"), "DressUp");
+    }
+
+    #[test]
+    fn nte_file_classifiers() {
+        assert!(nte_is_mod_file("a.pak"));
+        assert!(nte_is_mod_file("a.utoc"));
+        assert!(nte_is_mod_file("a.UCAS"));
+        assert!(!nte_is_mod_file("a.txt"));
+        assert!(nte_is_disabled_mod_file("a.pak.disabled"));
+        assert!(!nte_is_disabled_mod_file("a.pak"));
+        assert!(nte_is_pak_file("a.pak"));
+        assert!(!nte_is_pak_file("a.utoc"));
+    }
+
+    #[test]
+    fn nte_game_report_detects_version_distribution_and_markers() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-report-{}", unix_timestamp()));
+        fs::create_dir_all(root.join(NTE_MODS_RELATIVE)).unwrap();
+        fs::create_dir_all(root.join(NTE_CLIENT_WIN64)).unwrap();
+        fs::write(root.join("NTEGlobalLauncher.exe"), b"x").unwrap();
+        fs::create_dir_all(root.join("NTEGlobal")).unwrap();
+        fs::write(root.join(NTE_EPIC_SDK), b"x").unwrap();
+
+        let report = nte_game_report(root.to_string_lossy().to_string(), None).unwrap();
+        assert!(report.valid);
+        assert_eq!(report.version, "global");
+        assert_eq!(report.distribution, "epic");
+        assert_eq!(report.launcher.as_deref(), Some("NTEGlobalLauncher.exe"));
+        assert_eq!(
+            report.launch_args,
+            vec!["-AUTH_PASSWORD=1234", "-AUTH_TYPE=exchangecode"]
+        );
+        assert_eq!(
+            report.mods_path,
+            root.join(NTE_MODS_RELATIVE).to_string_lossy().to_string()
+        );
+        assert!(report
+            .markers
+            .iter()
+            .any(|marker| marker.marker == "NTELauncher.exe" && !marker.found));
+        assert!(report
+            .markers
+            .iter()
+            .any(|marker| marker.marker == NTE_MODS_RELATIVE && marker.found));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn nte_game_report_falls_back_to_standalone_without_epic_sdk() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-report2-{}", unix_timestamp()));
+        fs::create_dir_all(root.join(NTE_PAKS_MARKER)).unwrap();
+        fs::write(root.join("NTETWLauncher.exe"), b"x").unwrap();
+        let report = nte_game_report(root.to_string_lossy().to_string(), None).unwrap();
+        assert!(report.valid);
+        assert_eq!(report.version, "tw");
+        assert_eq!(report.distribution, "standalone");
+        assert!(report.launch_args.is_empty());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn nte_game_report_platform_steam_wins_over_sdk_check() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-report3-{}", unix_timestamp()));
+        fs::create_dir_all(root.join("NTEGlobal")).unwrap();
+        fs::write(root.join(NTE_EPIC_SDK), b"x").unwrap();
+        fs::write(root.join("NTEGlobalLauncher.exe"), b"x").unwrap();
+        let report = nte_game_report(
+            root.to_string_lossy().to_string(),
+            Some("steam".to_string()),
+        )
+        .unwrap();
+        assert_eq!(report.distribution, "steam");
+        assert!(report.launch_args.is_empty());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn scan_nte_mods_reads_folders_loose_files_and_disabled_state() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-scan-{}", unix_timestamp()));
+        let mods = root.join("AuroraMods");
+        fs::create_dir_all(mods.join("DressUp_P")).unwrap();
+        fs::write(mods.join("DressUp_P").join("DressUp_P.pak"), b"a").unwrap();
+        fs::write(
+            mods.join("DressUp_P").join("mod.json"),
+            br#"{"name":"Dress Up","version":"1.0.0","author":"N7"}"#,
+        )
+        .unwrap();
+
+        fs::create_dir_all(mods.join("OldMod")).unwrap();
+        fs::write(mods.join("OldMod").join("OldMod.pak.disabled"), b"b").unwrap();
+
+        fs::write(mods.join("LooseMod_P.pak"), b"c").unwrap();
+
+        let scanned = scan_nte_mods(mods.to_string_lossy().to_string()).unwrap();
+        let by_name = |name: &str| scanned.iter().find(|mod_| mod_.name == name).unwrap();
+        let dress_up = by_name("Dress Up");
+        assert!(dress_up.enabled);
+        assert_eq!(dress_up.version.as_deref(), Some("1.0.0"));
+        assert_eq!(dress_up.author.as_deref(), Some("N7"));
+        assert!(dress_up.manifests.contains(&"mod.json".to_string()));
+        assert_eq!(dress_up.mod_type, "Folder");
+
+        let old = by_name("OldMod");
+        assert!(!old.enabled);
+        assert!(old.files.iter().any(|file| file.ends_with(".pak.disabled")));
+
+        let loose = by_name("LooseMod");
+        assert!(loose.enabled);
+        assert_eq!(loose.mod_type, "UE5");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn toggle_nte_mod_renames_pak_transactionally() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-toggle-{}", unix_timestamp()));
+        let mods = root.join("AuroraMods");
+        let folder = mods.join("MyMod");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("MyMod.pak"), b"a").unwrap();
+        fs::write(folder.join("MyMod.utoc"), b"b").unwrap();
+        fs::write(folder.join("MyMod.ucas"), b"c").unwrap();
+
+        // Désactiver : SEUL le .pak est renommé (Aurora TOGGLE_EXTENSION) —
+        // .utoc/.ucas orphelins = ensemble inactif pour le moteur.
+        toggle_nte_mod(folder.to_string_lossy().to_string(), false).unwrap();
+        assert!(folder.join("MyMod.pak.disabled").exists());
+        assert!(!folder.join("MyMod.pak").exists());
+        assert!(folder.join("MyMod.utoc").exists());
+
+        // Réactiver : le .pak.disabled redevient .pak.
+        toggle_nte_mod(folder.to_string_lossy().to_string(), true).unwrap();
+        assert!(folder.join("MyMod.pak").exists());
+        assert!(!folder.join("MyMod.pak.disabled").exists());
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn toggle_nte_mod_loose_file_renames_the_entry() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-toggle2-{}", unix_timestamp()));
+        let mods = root.join("AuroraMods");
+        fs::create_dir_all(&mods).unwrap();
+        let file = mods.join("Loose.pak");
+        fs::write(&file, b"x").unwrap();
+
+        toggle_nte_mod(file.to_string_lossy().to_string(), false).unwrap();
+        assert!(mods.join("Loose.pak.disabled").exists());
+
+        toggle_nte_mod(
+            mods.join("Loose.pak.disabled")
+                .to_string_lossy()
+                .to_string(),
+            true,
+        )
+        .unwrap();
+        assert!(mods.join("Loose.pak").exists());
+        assert!(!mods.join("Loose.pak.disabled").exists());
+
+        fs::remove_dir_all(&root).unwrap();
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -18837,6 +19491,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan_mods,
             mods_folder_fingerprint,
+            scan_nte_mods,
+            toggle_nte_mod,
+            nte_game_report,
             list_staged_mods,
             scan_mod_import,
             scan_mod_import_background,

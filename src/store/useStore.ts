@@ -41,7 +41,8 @@ import { ZAILON_PERSIST_KEY } from '../lib/designTokens'
 // sessions via `refreshModsIfChanged`.
 const folderModsCache = new Map<string, { fingerprint: string; folderMods: NativeMod[]; at: number }>()
 import { modMatchesRemote, remoteIdentityFromCatalog, remoteModKey } from '../lib/remoteInstallState'
-import { addonCapabilities, fiveMProfilesAllowed, frostyImportAllowed, mo2ImportAllowed, performancePlusAllowed, steamAdvancedAllowed, vortexImportAllowed } from '../lib/addonGating'
+import { addonCapabilities, fiveMProfilesAllowed, frostyImportAllowed, mo2ImportAllowed, nteModsAllowed, performancePlusAllowed, steamAdvancedAllowed, vortexImportAllowed } from '../lib/addonGating'
+import { isNteGame } from '../lib/nte'
 import { launchProcessPriority, shouldApplyProcessPriority } from '../lib/performancePlus'
 import { DEFAULT_BACKGROUND_MEDIA_SETTINGS, type BackgroundMediaSettings } from '../lib/backgroundMedia'
 import { applyHomeLayoutPreset, HOME_WIDGET_DEFAULTS, normalizeHomeWidgets, type HomeLayoutPreset, type HomeWidgetConfig } from '../lib/homeWidgets'
@@ -99,6 +100,7 @@ const nativeModToMod = (mod: NativeMod, previous?: Mod, priority = 0): Mod => wi
   framework: mod.framework,
   manifests: mod.manifests,
   version: mod.version ?? previous?.version,
+  author: mod.author ?? previous?.author,
   sourceUrl: mod.sourceUrl ?? previous?.sourceUrl,
   storage: mod.storage,
   stageId: mod.stageId,
@@ -1113,14 +1115,21 @@ export const useStore = create<Store>()(persist((set, get) => ({
     if (!game || !profile) return
     if (game.modsPath && native.isDesktop()) {
       try {
-        const actual = await native.scanMods(game.modsPath)
+        // NTE (fusion Aurora) : layout AuroraMods (dossier = mod, mod.json,
+        // toggle `.pak` ↔ `.pak.disabled`) — le scan/toggle générique ne
+        // suffit pas (il renommerait le DOSSIER, invisible pour le moteur).
+        const nte = isNteGame({ execPath: game.execPath, gameName: game.name, nteAllowed: nteModsAllowed(addonCapabilities(get().addons)) })
+        const actual = nte ? await native.scanNteMods(game.modsPath) : await native.scanMods(game.modsPath)
         const desiredMods = resolveProfileMods(game, profile)
         const desired = new Map(desiredMods.map(mod => [mod.name.toLowerCase(), mod.enabled]))
         for (const mod of actual) {
           const enabled = desired.get(mod.name.toLowerCase())
-          if (enabled !== undefined && enabled !== mod.enabled) await native.toggleMod(mod.path, game.modsPath, enabled)
+          if (enabled !== undefined && enabled !== mod.enabled) {
+            if (nte) await native.toggleNteMod(mod.path, enabled)
+            else await native.toggleMod(mod.path, game.modsPath, enabled)
+          }
         }
-        const refreshed = await native.scanMods(game.modsPath)
+        const refreshed = nte ? await native.scanNteMods(game.modsPath) : await native.scanMods(game.modsPath)
         const catalog = scannedMods(refreshed, game.installedMods || desiredMods)
         const games = get().games.map(item => item.id !== game.id ? item : {
           ...item,
@@ -1860,7 +1869,10 @@ export const useStore = create<Store>()(persist((set, get) => ({
         const fingerprint = await native.modsFolderFingerprint(folderPath)
         const cached = folderModsCache.get(game.id)
         if (opts?.force || !cached || cached.fingerprint !== fingerprint) {
-          folderMods = await native.scanMods(folderPath)
+          // NTE (fusion Aurora) : layout AuroraMods + mod.json + `.pak.disabled`.
+          folderMods = isNteGame({ execPath: game.execPath, gameName: game.name, nteAllowed: nteModsAllowed(addonCapabilities(get().addons)) })
+            ? await native.scanNteMods(folderPath)
+            : await native.scanMods(folderPath)
           folderModsCache.set(game.id, { fingerprint, folderMods, at: Date.now() })
           set(state => ({ modsFingerprints: { ...state.modsFingerprints, [game.id]: fingerprint } }))
         } else {
@@ -1944,7 +1956,14 @@ export const useStore = create<Store>()(persist((set, get) => ({
     if (!game || !profile || !mod) return
     if (profile.locked) { set({ notice: `Le profil « ${profile.name} » est verrouillé.` }); return }
     try {
-      const path = mod.storage !== 'staged' && mod.path ? await native.toggleMod(mod.path, game.modsPath || '', !mod.enabled) : undefined
+      // NTE (fusion Aurora) : le toggle réel d'un mod NTE renomme `.pak` →
+      // `.pak.disabled` DANS le dossier (mécanisme du moteur Everlight) — le
+      // toggle générique `DISABLED_*` rendrait le mod invisible/inactif
+      // différemment et casserait le layout Aurora.
+      const nte = isNteGame({ execPath: game.execPath, gameName: game.name, nteAllowed: nteModsAllowed(addonCapabilities(get().addons)) })
+      const path = mod.storage !== 'staged' && mod.path
+        ? (nte ? await native.toggleNteMod(mod.path, !mod.enabled) : await native.toggleMod(mod.path, game.modsPath || '', !mod.enabled))
+        : undefined
       set(state => ({ games: state.games.map(item => item.id !== game.id ? item : {
         ...item,
         installedMods: item.installedMods.map(current => current.id === modId ? { ...current, path: path ?? current.path } : current),

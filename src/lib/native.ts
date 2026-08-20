@@ -313,12 +313,25 @@ export interface NativeMod {
   manifests: string[]
   sourceUrl?: string
   version?: string
+  author?: string
   storage: 'staged' | 'game-folder'
   stageId?: string
   profileIds: string[]
   deploymentStatus: 'imported' | 'stored' | 'validated' | 'enabled' | 'deployed' | 'runtime-visible' | 'loaded-by-game' | 'failed' | 'unknown'
   diagnostics: string[]
   quarantinePath?: string
+}
+
+/** Diagnostic d'une installation NTE (fusion Aurora, `nte_game_report`). */
+export interface NteGameReport {
+  valid: boolean
+  version: 'global' | 'cn' | 'tw' | 'unknown'
+  distribution: 'epic' | 'steam' | 'standalone'
+  launcher?: string | null
+  launchArgs: string[]
+  modsPath: string
+  binariesPath: string
+  markers: Array<{ label: string; marker: string; found: boolean }>
 }
 
 export interface CyberpunkRepairMove {
@@ -945,6 +958,16 @@ export const native = {
   },
   toggleMod: (modPath: string, modsRoot: string, enable: boolean) => desktopOnly<string>('toggle_mod', { modPath, modsRoot, enable }),
   deleteMod: (modPath: string, modsRoot: string) => desktopOnly<void>('delete_mod', { modPath, modsRoot }),
+  // ── NTE (Neverness to Everness) — fusion Aurora ────────────────────────────
+  /** Scan du dossier Mods NTE au layout Aurora (un dossier = un mod, mod.json,
+   * état `.pak.disabled`, staging `.aurora-installing-*` ignoré). */
+  scanNteMods: (modsPath: string) => desktopOnly<NativeMod[]>('scan_nte_mods', { modsPath }),
+  /** Activation/désactivation NTE : renommage `.pak` ↔ `.pak.disabled` dans le
+   * dossier du mod (transactionnel) — le mécanisme réel du moteur Aurora. */
+  toggleNteMod: (modPath: string, enable: boolean) => desktopOnly<string>('toggle_nte_mod', { modPath, enable }),
+  /** Diagnostic d'une installation NTE (version, distribution, marqueurs). */
+  nteGameReport: (installDir: string, platform?: string | null) =>
+    desktopOnly<NteGameReport>('nte_game_report', { installDir, platform: platform || null }),
   deleteStagedMod: (gameId: string, stageId: string) => desktopOnly<void>('delete_staged_mod', { gameId, stageId }),
   previewStagedDuplicates: (gameId: string) =>
     desktopOnly<StagedDuplicatePreview>('preview_staged_duplicates', { gameId }),

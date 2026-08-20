@@ -26,7 +26,7 @@ import {
   type ZailonPerformancePolicies,
   type ZailonPriorityPolicy,
 } from '../../lib/performanceProfiles'
-import { native, pickExecutable, pickFolder, type ShortcutCreationResult } from '../../lib/native'
+import { native, pickExecutable, pickFolder, type NteGameReport, type ShortcutCreationResult } from '../../lib/native'
 import { shortcutPlanFor } from '../../lib/shortcuts'
 import { resolveGameInstallation, shortPathName } from '../../lib/installations'
 import { ProfileShareDialog } from '../UI/ProfileShareDialog'
@@ -125,6 +125,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
   const hasNteCap = hasCapability(capabilities, 'nte.modloader')
   const hasPerformancePlus = hasCapability(capabilities, 'performance.plus')
   const frostyEligible = detectModBackend({ execPath: game.execPath, gameName: game.name, nteAllowed: hasNteCap }) === 'frosty'
+  const nteEligible = detectModBackend({ execPath: game.execPath, gameName: game.name, nteAllowed: hasNteCap }) === 'nte-pak'
   const reshadeEligible = resolveReShadeTarget(game).confidence >= 0.6
   const setView = useStore(state => state.setView)
   const openAddons = () => setView('addons')
@@ -409,6 +410,15 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
         ? <ReShadeConfigCard game={game} profile={profile} />
         : reshadeEligible
           ? <AddonAvailableCard icon={<Wand2 size={14} />} addonName="ReShade Manager" description="Installation ReShade, mises à jour, presets et shaders pour ce jeu — sans clé API." onInstall={openAddons} />
+          : null}
+
+      {/* NTE (Neverness to Everness) — fusion du launcher Aurora : la carte de
+          diagnostic n'existe qu'avec l'add-on NTE Support installé ET activé
+          (capacité `nte.modloader`, feature removal §57). */}
+      {hasNteCap
+        ? <NteConfigCard game={game} profile={profile} />
+        : nteEligible
+          ? <AddonAvailableCard icon={<Package size={14} />} addonName="NTE Support" description="Support du mod loader de Neverness to Everness : détection de la version (Global/CN/TW), dossier AuroraMods, activation réelle des .pak et métadonnées mod.json." onInstall={openAddons} />
           : null}
 
       <ConfigCard id="performances" title="Performances" icon={Gamepad2} badge={modeLabel(performanceMode)} open={open.includes('performances')} onToggle={() => toggle('performances')}>
@@ -840,6 +850,134 @@ function ReShadeConfigCard({ game, profile }: { game: Game; profile: Profile }) 
       </div>
 
       <p className="mt-2 text-[10px] leading-relaxed text-white/30">Le runtime ReShade est partagé par installation de jeu ; l&apos;activation, le preset et le verrou de version sont propres à chaque profil (§36). Jamais de mise à jour pendant qu&apos;un jeu tourne (§14).</p>
+    </ConfigCard>
+  )
+}
+
+// ──────────────────────────── NTE (fusion Aurora) ───────────────────────────
+
+const NTE_VERSION_LABELS: Record<NteGameReport['version'], string> = {
+  global: 'Global',
+  cn: 'China (CN)',
+  tw: 'Taiwan (TW)',
+  unknown: 'Inconnue',
+}
+
+const NTE_DISTRIBUTION_LABELS: Record<NteGameReport['distribution'], string> = {
+  epic: 'Epic Games',
+  steam: 'Steam',
+  standalone: 'Standalone',
+}
+
+/**
+ * Carte NTE (fusion du launcher Aurora) : diagnostic de l'installation
+ * (version Global/CN/TW, distribution Epic/Steam/Standalone, marqueurs de
+ * validation), configuration du dossier AuroraMods en un clic et test.
+ * Gated par la capacité `nte.modloader` (feature removal §57) — sans l'add-on
+ * NTE Support, aucun jeu n'est classé NTE PAK et cette carte n'existe pas.
+ */
+function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
+  const capabilities = addonCapabilities(useStore(state => state.addons))
+  const hasNteCap = hasCapability(capabilities, 'nte.modloader')
+  const setModsPath = useStore(state => state.setModsPath)
+  const isNte = detectModBackend({ execPath: game.execPath, gameName: game.name, nteAllowed: hasNteCap }) === 'nte-pak'
+  const [open, setOpen] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(`zailon:config-open:${game.id}`) || 'null') as string[] | null
+      return Array.isArray(saved) && saved.includes('nte')
+    } catch { return false }
+  })
+  const toggle = () => {
+    setOpen(current => {
+      const next = !current
+      try {
+        const saved = JSON.parse(localStorage.getItem(`zailon:config-open:${game.id}`) || 'null') as string[] | null
+        const list = Array.isArray(saved) ? saved : []
+        const updated = next ? [...new Set([...list, 'nte'])] : list.filter(item => item !== 'nte')
+        localStorage.setItem(`zailon:config-open:${game.id}`, JSON.stringify(updated))
+      } catch { /* persistance best-effort */ }
+      return next
+    })
+  }
+  const [report, setReport] = useState<NteGameReport | null>(null)
+  const [tested, setTested] = useState<string>()
+  const [busy, setBusy] = useState(false)
+
+  // Racine d'installation : installation référencée par le profil, sinon
+  // dossier de l'exécutable configuré (le launcher NTE vit à la racine).
+  const installRoot = game.installDirectory
+    || (game.execPath ? game.execPath.replace(/[\\/][^\\/]+$/, '') : '')
+
+  const load = async () => {
+    if (!installRoot || !native.isDesktop()) return
+    setBusy(true)
+    try {
+      setReport(await native.nteGameReport(installRoot, game.platform || null))
+    } catch {
+      setReport(null)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    if (open || tested) void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, game.id, installRoot, game.platform])
+
+  if (!isNte) return null
+
+  const runTest = () => {
+    if (!report) return
+    const lines = [
+      `Installation : ${report.valid ? 'valide ✓' : 'invalide — launcher ou arbre client introuvable'}`,
+      `Version : ${NTE_VERSION_LABELS[report.version]}`,
+      `Distribution : ${NTE_DISTRIBUTION_LABELS[report.distribution]}`,
+      `Launcher : ${report.launcher || 'aucun trouvé'}`,
+      `Dossier mods : ${report.modsPath}`,
+      ...(report.launchArgs.length ? [`Args de lancement : ${report.launchArgs.join(' ')}`] : []),
+      ...report.markers.map(marker => `${marker.found ? '✓' : '✗'} ${marker.label} — ${marker.marker}`),
+    ]
+    setTested(lines.join('\n'))
+  }
+
+  const useAuroraMods = () => {
+    if (report?.modsPath) setModsPath(game.id, report.modsPath)
+  }
+
+  return (
+    <ConfigCard id="nte" title="NTE" icon={Package} badge={report?.valid ? `Version ${NTE_VERSION_LABELS[report.version]}` : 'À vérifier'} open={open} onToggle={toggle}>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="rounded-xl border border-white/[0.07] bg-black/15 p-3">
+          <p className="text-[11px] font-semibold text-white/68">Backend</p>
+          <p className="mt-1 text-[11px] text-white/45">NTE PAK — dossier AuroraMods (`.pak`/`.utoc`/`.ucas`), moteur Aurora (Everlight) chargé côté jeu.</p>
+        </div>
+        <div className="rounded-xl border border-white/[0.07] bg-black/15 p-3">
+          <p className="text-[11px] font-semibold text-white/68">Version · Distribution</p>
+          <p className="mt-1 text-[11px] text-white/45">{report ? `${NTE_VERSION_LABELS[report.version]} · ${NTE_DISTRIBUTION_LABELS[report.distribution]}` : '—'}</p>
+        </div>
+      </div>
+
+      {report && !report.valid && (
+        <p className="mt-2 flex items-start gap-2 rounded-lg border border-amber-300/25 bg-amber-300/[0.05] px-3 py-2 text-[11px] text-amber-100/80"><AlertTriangle size={13} className="mt-0.5 shrink-0 text-amber-300/90" />Aucun launcher NTE (NTEGlobalLauncher / NTELauncher / NTETWLauncher) ni arbre client détecté — vérifiez le chemin de l’installation.</p>
+      )}
+
+      {report?.launchArgs.length ? (
+        <p className="mt-2 flex items-start gap-2 rounded-lg border border-sky-300/18 bg-sky-300/[0.04] px-3 py-2 text-[11px] text-sky-100/70"><AlertTriangle size={13} className="mt-0.5 shrink-0 text-sky-300/80" />Build Epic détectée : le launcher doit recevoir <code className="font-mono">{report.launchArgs.join(' ')}</code> au lancement (franchit l’auth Epic).</p>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button type="button" onClick={load} disabled={busy} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-50">{busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}Analyser l’installation</button>
+        <button type="button" onClick={runTest} disabled={!report} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-50"><ShieldCheck size={13} />Tester l’installation</button>
+        {report?.modsPath && game.modsPath !== report.modsPath && (
+          <button type="button" onClick={useAuroraMods} className="flex items-center gap-1.5 rounded-lg border border-gold/25 bg-gold/[0.06] px-3 py-1.5 text-[11px] font-semibold text-gold hover:border-gold/45 hover:bg-gold/10"><CheckCircle2 size={13} />Utiliser le dossier AuroraMods</button>
+        )}
+        {game.modsPath && <button type="button" onClick={() => void native.openPath(game.modsPath!)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold"><FolderOpen size={13} />Ouvrir le dossier Mods</button>}
+      </div>
+
+      {tested && <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-black/25 px-3 py-2 font-mono text-[10px] leading-relaxed text-white/55">{tested}</pre>}
+
+      <p className="mt-2 text-[10px] leading-relaxed text-white/30">L’activation d’un mod NTE renomme `.pak` → `.pak.disabled` dans son dossier (mécanisme Aurora, transactionnel) — le moteur Everlight ignore les `.disabled`. Les métadonnées `mod.json` (nom, version, auteur, lien de support) enrichissent la liste des mods. ZAILON installe et organise ; Aurora charge.</p>
     </ConfigCard>
   )
 }

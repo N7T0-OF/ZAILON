@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "official.zailon.artwork",
+  "name": "Artwork+",
+  "version": "1.0.0",
+  "author": "ZAILON",
+  "description": "Illustrations automatiques pour les jeux : sources SteamGridDB, IGDB et GameBanana, recherche automatique et personnalisation des images. Sans cet add-on, aucune source d'illustrations ni configuration n'apparaît.",
+  "category": "appearance",
+  "entrypoint": "module/index.ts",
+  "minZailonVersion": "1.78.0",
+  "minAddonApiVersion": "1",
+  "permissions": [
+    "network",
+    "settings"
+  ],
+  "supportedPlatforms": ["windows", "linux", "macos"],
+  "capabilities": ["artwork.plus"],
+  "slots": [
+    "Settings.Appearance",
+    "Game.Resources"
+  ],
+  "events": []
+}

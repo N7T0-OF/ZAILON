@@ -7,30 +7,19 @@
   --zailon-accent-hover: #ffffff;
   --zailon-accent-active: #cfd8d6;
   --zailon-accent-muted: rgb(243 250 248 / 0.14);
+  --zailon-accent-border: rgb(243 250 248 / 0.35);
   --zailon-accent-text: #090b0b;
+  --zailon-accent-contrast: #090b0b;
+  /* Palette danger indépendante de l'accent (spec §14, §70-71). */
+  --zailon-danger: #f87171;
+  --zailon-danger-hover: #ef4444;
+  --zailon-danger-muted: rgb(248 113 113 / 0.12);
   --zailon-focus-ring: rgb(243 250 248 / 0.78);
   --zailon-caption: 15px;
   --zailon-small: 16px;
   --zailon-body: 16px;
   --zailon-control-height: 38px;
   --zailon-window-background: linear-gradient(135deg, #090b0b 0%, #111414 100%);
-}
-
-:root[data-liquid-glass-active='true'] {
-  --zailon-window-background:
-    radial-gradient(circle at 18% 4%, rgba(219, 232, 229, var(--liquid-reflection)), transparent 34%),
-    linear-gradient(135deg, rgba(9, 11, 11, var(--liquid-opacity)), rgba(17, 20, 20, var(--liquid-opacity)));
-}
-
-:root[data-liquid-glass-active='true'] .zailon-window-surface {
-  backdrop-filter: blur(var(--liquid-blur)) saturate(var(--liquid-saturation));
-  -webkit-backdrop-filter: blur(var(--liquid-blur)) saturate(var(--liquid-saturation));
-  border: 1px solid rgba(219, 232, 229, var(--liquid-border));
-  box-shadow: inset 0 1px rgba(255, 255, 255, var(--liquid-reflection)), 0 24px 90px rgba(0, 0, 0, var(--liquid-shadow));
-}
-
-:root[data-effects-motion='true'] .zailon-window-surface {
-  transition: background 260ms ease, backdrop-filter 260ms ease, box-shadow 260ms ease;
 }
 
 :root[data-text-size='small'] {
@@ -162,4 +151,75 @@ select {
 }
 .thin-scroll::-webkit-scrollbar-thumb:hover {
     background: rgba(219, 232, 229, 0.34);
+}
+
+/* Mode jeu ZAILON (spec #50-51) : quand un jeu tourne, les animations
+ * décoratives sont suspendues — la fenêtre principale est minimisée de toute
+ * façon, inutile de faire tourner des keyframes en arrière-plan. */
+[data-game-mode="true"] * {
+  animation-play-state: paused !important;
+}
+
+/* Mode veille (spec « ZAILON Lite » §15) : launcher au repos — mêmes
+ * coupes CSS que le mode Minimal (aucune animation en arrière-plan). */
+[data-idle="true"] *,
+[data-idle="true"] *::before,
+[data-idle="true"] *::after {
+  animation-play-state: paused !important;
+}
+
+/* Mode Minimal (spec §42) : ZAILON reste ouvert sans être perceptible —
+ * animations, transitions et parallaxe entièrement désactivées. */
+[data-minimal-mode="true"] *,
+[data-minimal-mode="true"] *::before,
+[data-minimal-mode="true"] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+[data-minimal-mode="true"] .cover-parallax,
+[data-minimal-mode="true"] [style*="transform"] {
+  transform: none !important;
+}
+
+/* Design system — ZailonSwitch (spec « Refonte globale des toggles » §9) :
+ * animation courte (140 ms), uniquement le déplacement du rond et la couleur
+ * de piste, jamais de bounce. Réduire les animations = transition annulée
+ * (spec §9, §63 — tests Reduce Motion). */
+.zailon-switch-thumb {
+  transition: transform 140ms ease;
+}
+.zailon-switch {
+  transition: background-color 140ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .zailon-switch,
+  .zailon-switch-thumb {
+    transition: none !important;
+  }
+}
+
+/* Accordions Paramètres (spec « Refonte globale » §36) : apparition 180 ms
+ * (fade + léger glissement), chevron 150 ms — instantané en mode réduit. */
+.accordion-body {
+  animation: zailon-accordion-in 180ms ease;
+}
+.accordion-chevron {
+  transition: transform 150ms ease;
+}
+@keyframes zailon-accordion-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .accordion-body,
+  .accordion-chevron {
+    animation: none;
+    transition: none;
+  }
 }

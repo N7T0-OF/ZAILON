@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "official.zailon.importer.vortex",
+  "name": "Vortex Importer",
+  "version": "1.0.0",
+  "author": "ZAILON",
+  "description": "Import du déploiement Vortex : lecture de vortex.deployment.json (mods actifs, fichiers déployés, dossier de staging) et création d'un profil ZAILON en références — aucune copie, aucun lien recréé. Sans cet add-on, aucun import Vortex n'existe.",
+  "category": "utilities",
+  "entrypoint": "module/index.ts",
+  "minZailonVersion": "1.78.0",
+  "minAddonApiVersion": "1",
+  "permissions": [
+    "game.read",
+    "game.files.read",
+    "mods.read",
+    "mods.write",
+    "profile.write",
+    "filesystem.external"
+  ],
+  "supportedPlatforms": ["windows", "linux", "macos"],
+  "capabilities": ["importer.vortex"],
+  "slots": [
+    "Game.Profiles",
+    "Game.Mods"
+  ],
+  "events": []
+}

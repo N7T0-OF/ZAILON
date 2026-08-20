@@ -10,6 +10,17 @@ permissions:
   contents: read
 
 jobs:
+  release-notes:
+    name: Release notes generator
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm run release:notes -- --allow-empty
+
   gamebanana-contract:
     name: GameBanana live API contract
     runs-on: ubuntu-22.04
@@ -31,7 +42,20 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run test:visual-safety
       - run: npm run build
+
+  addon-catalog:
+    name: Validate add-on catalog
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Spec §37-38, §49 : impossible de publier un catalogue cassé — un add-on
+      # « disponible » doit référencer une release explicite + un SHA-256 réel.
+      - run: node .github/scripts/validate-addon-catalog.mjs
 
   native:
     name: Native tests (${{ matrix.os }})
@@ -49,4 +73,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libsecret-1-dev libdbus-1-dev
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-      - run: python .github/scripts/run-native-tests.py
+      - name: Run native unit tests
+        env:
+          RUST_BACKTRACE: full
+        run: python .github/scripts/run-native-tests.py -- --test-threads=1

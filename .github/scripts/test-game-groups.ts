@@ -1,0 +1,110 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { groupLastPlayed, groupMembers, groupModCount, groupProfileCount, groupProfilePairs, groupTotalPlaytime, nextGroupProfile, pinnedGroupsFirst, reorderArray } from '../../src/lib/gameGroups.ts'
+import type { Game, GameGroup } from '../../src/types/index.ts'
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+const game = (id: string, overrides: Partial<Game> = {}): Game => ({
+  id,
+  name: id,
+  installedMods: [],
+  profiles: [],
+  totalPlaytime: 0,
+  ...overrides,
+})
+
+const group = (memberGameIds: string[]): GameGroup => ({ id: 'g1', name: 'FiveM', memberGameIds, createdAt: 0 })
+
+test('groupProfileCount : somme des profils des membres, jamais fusionnée', () => {
+  const games = [
+    game('a', { profiles: [{ id: 'p1', name: 'Default' }, { id: 'p2', name: 'Graphics' }] }),
+    game('b', { profiles: [{ id: 'p3', name: 'Vanilla' }] }),
+    game('c', { profiles: [{ id: 'p4', name: 'Autre' }] }),
+  ]
+  assert.equal(groupProfileCount(games, group(['a', 'b'])), 3)
+})
+
+test('groupModCount : somme des mods des membres', () => {
+  const games = [
+    game('a', { installedMods: [{ id: 'm1' }, { id: 'm2' }, { id: 'm3' }] }),
+    game('b', { installedMods: [{ id: 'm4' }] }),
+  ]
+  assert.equal(groupModCount(games, group(['a', 'b'])), 4)
+})
+
+test('groupLastPlayed : le plus récent des membres, undefined si aucun', () => {
+  const games = [
+    game('a', { lastPlayed: 1_000 }),
+    game('b', { lastPlayed: 3_000 }),
+    game('c', { lastPlayed: 2_000 }),
+  ]
+  assert.equal(groupLastPlayed(games, group(['a', 'b'])), 3_000)
+  assert.equal(groupLastPlayed(games, group([])), undefined)
+  assert.equal(groupLastPlayed([game('x')], group(['x'])), undefined)
+})
+
+test('groupMembers : ordre déclaré, membres inexistants ignorés', () => {
+  const games = [game('a'), game('b')]
+  assert.deepEqual(groupMembers(games, group(['b', 'a', 'ghost'])).map(g => g.id), ['b', 'a'])
+})
+
+test('persistance : gameGroups fait partie de partialize (jamais perdu au redémarrage)', () => {
+  const store = readFileSync(join(root, 'src/store/useStore.ts'), 'utf8')
+  assert.ok(store.includes('gameGroups: state.gameGroups'), 'gameGroups persisté via partialize')
+})
+
+test('reorderArray : décale d\'une case, bornes respectées', () => {
+  const items = ['a', 'b', 'c']
+  assert.deepEqual(reorderArray(items, 0, 1), ['b', 'a', 'c'])
+  assert.deepEqual(reorderArray(items, 2, -1), ['a', 'c', 'b'])
+  // Aux bornes : aucun changement (jamais de perte d'ordre).
+  assert.deepEqual(reorderArray(items, 0, -1), items)
+  assert.deepEqual(reorderArray(items, 2, 1), items)
+  assert.equal(reorderArray(items, 0, -1), items) // même référence si sans effet
+})
+
+test('groupTotalPlaytime : somme, séparée des profils', () => {
+  const games = [game('a', { totalPlaytime: 42 }), game('b', { totalPlaytime: 61 })]
+  assert.equal(groupTotalPlaytime(games, group(['a', 'b'])), 103)
+})
+
+test('groupProfilePairs : tous les profils des membres, chacun avec son jeu', () => {
+  const games = [
+    game('a', { name: 'FiveM — Default', profiles: [{ id: 'p1', name: 'Default' }, { id: 'p2', name: 'Graphics' }] }),
+    game('b', { name: 'FiveM — ReShade', profiles: [{ id: 'p3', name: 'ReShade' }] }),
+  ]
+  const pairs = groupProfilePairs(games, group(['a', 'b']))
+  assert.equal(pairs.length, 3)
+  assert.deepEqual(pairs[0], { gameId: 'a', gameName: 'FiveM — Default', profileId: 'p1', profileName: 'Default' })
+  assert.equal(pairs[1].profileId, 'p2')
+  assert.equal(pairs[2].gameId, 'b')
+  assert.equal(pairs[2].profileName, 'ReShade')
+})
+
+test('nextGroupProfile : boucle dans la séquence du groupe, jamais de croisement', () => {
+  const pairs = groupProfilePairs([
+    game('a', { profiles: [{ id: 'p1', name: 'Default' }, { id: 'p2', name: 'Graphics' }] }),
+    game('b', { profiles: [{ id: 'p3', name: 'ReShade' }] }),
+  ], group(['a', 'b']))
+  assert.equal(nextGroupProfile(pairs, 'a', 'p1')?.profileId, 'p2')
+  assert.deepEqual(nextGroupProfile(pairs, 'a', 'p2'), { gameId: 'b', gameName: 'b', profileId: 'p3', profileName: 'ReShade' })
+  // Boucle : dernier → premier.
+  assert.equal(nextGroupProfile(pairs, 'b', 'p3')?.profileId, 'p1')
+  // Position introuvable → premier pair.
+  assert.equal(nextGroupProfile(pairs, 'ghost', 'ghost')?.profileId, 'p1')
+  // Séquence vide → undefined.
+  assert.equal(nextGroupProfile([], 'a', 'p1'), undefined)
+})
+
+test('pinnedGroupsFirst : épinglés en tête, ordre déclaré conservé', () => {
+  const a: GameGroup = { id: 'a', name: 'A', memberGameIds: [], createdAt: 1 }
+  const b: GameGroup = { id: 'b', name: 'B', memberGameIds: [], createdAt: 2, pinned: true }
+  const c: GameGroup = { id: 'c', name: 'C', memberGameIds: [], createdAt: 3, pinned: true }
+  const ordered = pinnedGroupsFirst([a, b, c])
+  assert.deepEqual(ordered.map(group => group.id), ['b', 'c', 'a'])
+  assert.deepEqual(pinnedGroupsFirst([]), [])
+})

@@ -1,4 +1,4 @@
-import { FolderCog, FolderOpen, Heart, MonitorDown, MoreHorizontal, Palette, Play, Tag, Trash2, Wrench, X } from 'lucide-react'
+import { FolderCog, FolderOpen, Heart, MonitorDown, MoreHorizontal, Play, Tag, Trash2, Wrench } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -10,13 +10,13 @@ interface GameContextMenuProps {
   game: Game
   position: { x: number; y: number }
   onClose: () => void
-  onEditResources: () => void
+  onCreateShortcut: (profileId: string) => void
 }
 
 type MenuItem = { label: string; icon: LucideIcon; action?: () => void; disabled?: boolean; hint?: string; danger?: boolean }
 type MenuEntry = MenuItem | { separator: true }
 
-export function GameContextMenu({ game, position, onClose, onEditResources }: GameContextMenuProps) {
+export function GameContextMenu({ game, position, onClose, onCreateShortcut }: GameContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
   const [activeIndex, setActiveIndex] = useState(0)
@@ -32,19 +32,21 @@ export function GameContextMenu({ game, position, onClose, onEditResources }: Ga
   const shortcutProfile = game.profiles.find(profile => profile.id === selectedProfileId) || game.profiles[0]
 
   const gameFolder = game.installDirectory || game.execPath?.replace(/[\\/][^\\/]+$/, '')
+  // Spec « Passe de correction » §5 : le menu ⋯ reste réservé aux actions
+  // secondaires — « Modifier l’apparence » possède déjà un bouton dédié sur
+  // l’Accueil, et « Ouvrir le dossier des mods » n'apparaît QUE si un dossier
+  // mods est réellement configuré (aucun bouton grisé inutile).
   const items: MenuEntry[] = [
     { label: 'Jouer', icon: Play, action: () => { setSelectedGame(game.id); void launchSelectedGame(); onClose() } },
-    { label: 'Lancer sans mods', icon: X, disabled: true, hint: 'Indisponible tant que le moteur de déploiement ne peut pas restaurer les fichiers sans risque après le lancement.' },
     { separator: true },
     { label: 'Gérer les mods', icon: Wrench, action: () => { setSelectedGame(game.id); setActiveGameTab('mods'); onClose() } },
-    { label: 'Modifier l’apparence', icon: Palette, action: () => { setSelectedGame(game.id); onEditResources(); onClose() } },
     { label: game.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris', icon: Heart, action: () => { setGameFavorite(game.id); onClose() } },
     { label: 'Modifier les catégories', icon: Tag, action: () => { const next = window.prompt('Catégories, séparées par des virgules', (game.categories || []).join(', ')); if (next !== null) setGameCategories(game.id, next.split(',').map(category => category.trim()).filter(Boolean)); onClose() } },
     { label: game.hidden ? 'Afficher dans la bibliothèque' : 'Masquer dans la bibliothèque', icon: Tag, action: () => { setGameHidden(game.id); onClose() } },
     { separator: true },
-    { label: 'Créer un raccourci bureau', icon: MonitorDown, disabled: !shortcutProfile, action: () => { if (!shortcutProfile) return; void native.createDesktopShortcut(game.id, shortcutProfile.id, game.name, game.resources?.iconPath || game.execPath).then(path => window.alert(`Raccourci créé :\n${path}`)).catch(error => window.alert(String(error))); onClose() } },
+    { label: 'Créer un raccourci bureau', icon: MonitorDown, disabled: !shortcutProfile, action: () => { if (!shortcutProfile) return; onCreateShortcut(shortcutProfile.id); onClose() } },
     { label: 'Ouvrir le dossier du jeu', icon: FolderOpen, disabled: !gameFolder, action: () => { if (gameFolder) void native.openPath(gameFolder); onClose() } },
-    { label: 'Ouvrir le dossier des mods', icon: FolderCog, disabled: !game.modsPath, action: () => { if (game.modsPath) void native.openPath(game.modsPath); onClose() } },
+    ...(game.modsPath ? [{ label: 'Ouvrir le dossier des mods', icon: FolderCog, action: () => { void native.openPath(game.modsPath!); onClose() } } as MenuItem] : []),
     { separator: true },
     { label: 'Retirer de ZAILON', icon: Trash2, danger: true, action: () => { if (window.confirm(`Retirer « ${game.name} » de ZAILON ? Les fichiers du jeu et des mods seront conservés.`)) removeGame(game.id); onClose() } },
   ]

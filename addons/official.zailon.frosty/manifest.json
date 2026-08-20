@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "id": "official.zailon.frosty",
+  "name": "Frosty Support",
+  "version": "1.0.0",
+  "author": "ZAILON",
+  "description": "Compatibilité Frosty : détection du runtime officiel, scan des données du jeu, Worker natif isolé et parsing des catalogues .cat pour les jeux Frostbite supportés.",
+  "category": "game-support",
+  "entrypoint": "module/index.ts",
+  "minZailonVersion": "1.78.0",
+  "minAddonApiVersion": "1",
+  "permissions": [
+    "game.read",
+    "game.files.write",
+    "mods.read",
+    "mods.write",
+    "network",
+    "process.launch",
+    "game.launch"
+  ],
+  "supportedPlatforms": ["windows"],
+  "capabilities": ["frosty.backend"],
+  "supportedGames": [
+    "Need for Speed",
+    "Need for Speed: Rivals",
+    "Need for Speed Heat",
+    "Need for Speed Unbound",
+    "Dragon Age: Inquisition",
+    "Battlefield 4",
+    "Mass Effect Andromeda",
+    "Mirror's Edge Catalyst"
+  ],
+  "events": ["OnGameSelected", "OnGameLaunching", "OnGameStarted", "OnGameStopped"]
+}

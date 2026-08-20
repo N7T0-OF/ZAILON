@@ -1,0 +1,140 @@
+# Add-on ZAILON — Frosty Editor (architecture)
+
+> `official.zailon.frosty-editor` · dépend de `official.zailon.frosty` (spec §1, §57).
+> Frosty Support ne dépend pas de l'éditeur : jouer avec des mods n'installe jamais
+> tout l'éditeur.
+
+## Vue d'ensemble
+
+```
+ZAILON Core (léger, offline)
+   │
+   ├── Frosty Support (add-on)          ← INSTALL / APPLY / RUN (§113)
+   │     détecte le runtime Frosty officiel externe (jamais bundle)
+   │
+   └── Frosty Editor (add-on)           ← CREATE (§113)
+         │
+         ├── UI ZAILON (Création Frosty)
+         │     projets, assets, matrice de capacités, build, diagnostic
+         │
+         └── FrostyEditorWorker (processus séparé)     ← §76-83
+               ├── Frosty SDK (runtime externe officiel)
+               ├── plugins Frosty (à la demande §43)
+               └── opérations assets (parsers lourds)
+```
+
+## Découpage des responsabilités
+
+| Acteur | Rôle |
+| ------ | ---- |
+| **Frosty Editor** | CREATE (projets, édition, build `.fbmod`) |
+| **Frosty Support** | INSTALL / APPLY / RUN (ModData, lancement, .fbmod) |
+| **Adapter NFS** | RÈGLES DU JEU (profils, versions) |
+| **ZAILON Core** | BIBLIOTHÈQUE / PROFIL / SESSION / UI |
+
+Le résultat du build de l'éditeur passe par le **même backend Frosty Support** que les
+mods téléchargés (§57) — jamais un second pipeline.
+
+## Bridge
+
+`ZailonFrostyEditorBridge` — API interne stable (spec §9) :
+
+```
+openProject() createProject() loadGameProfile() searchAssets()
+openAsset() exportAsset() importAsset() duplicateAsset() modifyAsset()
+buildMod() validateProject()
+```
+
+L'UI ZAILON ne parle qu'à ce bridge ; le Worker exécute. Permet de remplacer le backend
+réel (runtime Frosty 1.0.6, puis réécriture .NET 8 quand elle sera fonctionnelle) sans
+toucher l'UI.
+
+## Projet
+
+`FrostyProject` (spec §10-11) — stocké **hors du dossier du jeu** :
+`ZAILON_DATA/editor-projects/<game>/<project-id>/`.
+
+- autosave par snapshots légers (rotation 5, §12) ;
+- récents (historique Frosty 1.0.6.x réimplémenté proprement, §13) ;
+- notes locales par asset, favoris, bookmarks (§95-97) ;
+- historique de build + taille estimée avant build (§103-104).
+
+## Matrice de capacités
+
+`FROSTY_EDITOR_SUPPORT` (spec §59-60) : `{ ebx, textures, mesh, audio, localization,
+bundles, build }` par jeu, issue des profils/plugins Frosty — jamais inventée.
+NFS 2015 (`nfs16.exe`) = cible de validation complète (§58).
+
+## Gating
+
+- La vue « Création Frosty » n'existe **que** si `frosty.backend` ET `frosty.editor`
+  sont actifs (capabilities, spec Add-ons §10-24) ;
+- sinon : écran « nécessite Frosty Support + Frosty Editor » → lien Add-ons ;
+- l'entrée « Éditer avec Frosty » dans la config du jeu n'apparaît qu'avec l'add-on.
+
+## Sécurité / isolation
+
+- Worker séparé (§76-83) : parsers, plugins et assets lourds ; un crash redémarre le
+  Worker, jamais ZAILON ;
+- fermeture → warm 45 s (5 s en Performance, 0 en Max) puis kill : **RAM libérée** ;
+- plugins désactivés après 2 crashs (§83) ;
+- sandbox plugins tiers dans le Worker (§82).
+
+## Licence
+
+Aucun code Frosty dans l'add-on (CC BY-NC-ND 4.0, voir `docs/frosty-license-audit.md`).
+Le runtime officiel est **externe**, détecté par Frosty Support. Attribution conservée.
+
+## Voir aussi
+
+- `docs/frosty-editor-worker.md` — cycle de vie du Worker
+- `docs/frosty-source-audit.md` — audit du dépôt
+- `docs/frosty-plugin-inventory.md` — les 29 plugins
+
+## Suite 1.77.0 — navigation, édition, export
+
+- **Asset Browser** (`src/lib/frostyAssets.ts`) : index par jeu, recherche
+  debounced par pertinence, filtres types/bundles, liste virtualisée par
+  fenêtre (jamais des centaines de milliers de lignes rendues), sélection
+  multiple toggle/plage, favoris et historique.
+- **Éditeur EBX** (`src/lib/frostyEbx.ts`) : propriétés typées, validation par
+  type avec bornes (§21), diff Original | Modified + revert (§22), PointerRef
+  (aller à / copier / nouveau panneau, §20), impact analysis (§100).
+- **Plugin Manager** (`src/lib/frostyPlugins.ts`) : plugins Frosty gérés en
+  interne, jamais dans la page Add-ons (§42), chargés à la demande par type
+  d'asset (§43), désactivés après 2 crashs (§83).
+- **Projets** (`src/lib/frostyProjectFile.ts`) : export/import
+  `.zailon-frosty-project` — sources d'édition uniquement, jamais de caches ni
+  de builds (§109) ; le profil partage le .fbmod final, le projet partage les
+  sources (§107). Écriture atomique native (temp+rename).
+- **Bulk Export** (`src/lib/frostyBulk.ts`) : textures DDS / meshes / audio
+  EALayer3 selon les capacités réelles du backend (§44-45), en arrière-plan.
+
+## Suite 1.78.0 — pont natif vers le runtime réel
+
+- **`frosty_detect_runtime`** : détection du runtime Frosty officiel (ModManager >
+  Editor > Cmd) — dossier du jeu, dossier Frosty, addon-data, chemins fournis.
+  Jamais bundle : le runtime reste l'installation officielle de l'utilisateur.
+- **`frosty_scan_game_data`** : inventaire réel des données du jeu (Data/),
+  plafonné, avec chemins/tailles/mtime — alimente l'index d'assets au lieu des
+  données de démonstration (spec §16 : « l'index vient des vrais fichiers »).
+- **Worker natif** : `frosty_worker_start` (processus séparé), `frosty_worker_status`
+  (running + RAM via tasklist), `frosty_worker_stop` (kill cross-platform) —
+  l'isolation §76-83 devient réelle : fermer l'éditeur tue le processus et libère
+  sa RAM.
+- **`src/lib/frostyBridge.ts`** : classification honnête par extension
+  (cas/cat/toc/bin-cat → chunks, ebx, dds → texture, mesh → mesh, spk/ea3 → audio),
+  résumé du scan, politique de crash, exigence de runtime réel avant build (§102).
+
+## Suite 1.79.0 — parsing réel .cat + command palette
+
+- **`src/lib/frostyCat.ts`** : parser du catalogue Frostbite, vérifié contre
+  `FrostySdk/IO/CatReader.cs` de la source auditée — magic
+  « NyanNyanNyanNyan », legacy (NFS 2015 : 32 o/entrée) et moderne (36 o +
+  variante chiffrée 80 o), auto-validé par la longueur exacte. Les ressources
+  réelles (sha1, taille, archive) alimentent l'Asset Browser en mode
+  « Catalogue (.cat) ».
+- **`frosty_read_cat_file`** : lecture bornée avec garde anti-traversal.
+- **Command palette éditeur** (spec §72-73) : Ctrl+K / Ctrl+P / Ctrl+S / Ctrl+B,
+  actions Build/Sauvegarder/Exporter/Créer/Rechercher — la palette globale se
+  désactive sur la vue Création Frosty.

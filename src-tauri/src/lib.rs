@@ -6723,6 +6723,242 @@ fn nte_validate_mods(mods_path: String) -> Result<NteModsValidation, String> {
     })
 }
 
+// ── NTE : pipeline de lancement vérifiable (spec §15, §40) ──────────────────
+// Chaque étape produit un état (ok/warning/error) + une action suggérée —
+// jamais un faux « NTE lancé » : si un mod ne charge pas, on sait QUELLE étape
+// échoue (Loader → Game, cause probable : loader absent/incompatible).
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NtePipelineStep {
+    /// Identifiant stable de l'étape (installation/provider/mods_path/mods/loader).
+    id: String,
+    label: String,
+    /// ok | warning | error
+    status: String,
+    detail: String,
+    /// Action suggérée (vide quand l'étape est ok).
+    action: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteLaunchPipeline {
+    /// Vrai si toutes les étapes bloquantes sont ok (warnings autorisés).
+    ready: bool,
+    steps: Vec<NtePipelineStep>,
+    /// Synthèse lisible des blocages (vide si prêt).
+    blocker_summary: String,
+}
+
+/// Noms des DLL d'injection Everlight (Aurora) dans Binaries/Win64 : leur
+/// présence indique que le moteur chargera les .pak d'AuroraMods. ZAILON ne
+/// télécharge JAMAIS ces fichiers — il détecte un loader déjà installé par
+/// l'utilisateur (spec §11-14, §35).
+const NTE_LOADER_DLLS: &[&str] = &["version.dll", "dsound.dll"];
+
+/// Vrai si un des DLL d'injection Everlight est présent dans les binaires.
+fn nte_everlight_loader_present(binaries_path: &Path) -> bool {
+    NTE_LOADER_DLLS
+        .iter()
+        .any(|name| binaries_path.join(name).is_file())
+}
+
+/// Construit les étapes du pipeline (pure, testable) : chaque étape produit un
+/// état + une action. `mods_incomplete` = noms des ensembles incomplets.
+#[allow(clippy::too_many_arguments)]
+fn nte_pipeline_steps(
+    installation_valid: bool,
+    distribution: &str,
+    steam_running: bool,
+    mods_path_exists: bool,
+    mods_total: usize,
+    mods_incomplete: &[String],
+    everlight_present: bool,
+) -> NteLaunchPipeline {
+    let mut steps = Vec::new();
+
+    // 1. Installation (launcher ou arbre Paks) — bloquant.
+    if installation_valid {
+        steps.push(NtePipelineStep {
+            id: "installation".into(),
+            label: "Installation NTE".into(),
+            status: "ok".into(),
+            detail: "Launcher ou arbre client détecté.".into(),
+            action: String::new(),
+        });
+    } else {
+        steps.push(NtePipelineStep {
+            id: "installation".into(),
+            label: "Installation NTE".into(),
+            status: "error".into(),
+            detail: "Aucun launcher (NTEGlobalLauncher/NTELauncher/NTETWLauncher) ni arbre Paks trouvé.".into(),
+            action: "Vérifiez le chemin de l'installation du jeu.".into(),
+        });
+    }
+
+    // 2. Provider / Steam — bloquant pour Steam (spec §20).
+    let (provider_ok, provider_detail, provider_action) = match distribution {
+        "steam" if !steam_running => (
+            false,
+            "Steam non détecté — le launcher NTE afficherait « Cannot create IPC pipe to Steam client process ».".to_string(),
+            "Ouvrir Steam puis relancez.".to_string(),
+        ),
+        "steam" => (true, "Steam détecté — lancement Steam prêt.".to_string(), String::new()),
+        "epic" => (true, "Build Epic — arguments d'authentification fournis au lancement.".to_string(), String::new()),
+        _ => (true, "Standalone — aucun prérequis Steam.".to_string(), String::new()),
+    };
+    steps.push(NtePipelineStep {
+        id: "provider".into(),
+        label: "Provider".into(),
+        status: if provider_ok { "ok" } else { "error" }.into(),
+        detail: provider_detail,
+        action: provider_action,
+    });
+
+    // 3. Dossier mods (AuroraMods) — bloquant (spec §4).
+    if mods_path_exists {
+        steps.push(NtePipelineStep {
+            id: "mods_path".into(),
+            label: "Dossier mods (AuroraMods)".into(),
+            status: "ok".into(),
+            detail: "Dossier AuroraMods présent.".into(),
+            action: String::new(),
+        });
+    } else {
+        steps.push(NtePipelineStep {
+            id: "mods_path".into(),
+            label: "Dossier mods (AuroraMods)".into(),
+            status: "error".into(),
+            detail: "Le dossier AuroraMods n'existe pas.".into(),
+            action: "Créer le dossier AuroraMods (après validation du chemin).".into(),
+        });
+    }
+
+    // 4. Mods — bloquant si des ensembles ACTIFS sont incomplets (spec §5, §10).
+    if mods_total == 0 {
+        steps.push(NtePipelineStep {
+            id: "mods".into(),
+            label: "Mods".into(),
+            status: "warning".into(),
+            detail: "Aucun mod dans AuroraMods.".into(),
+            action: String::new(),
+        });
+    } else if mods_incomplete.is_empty() {
+        steps.push(NtePipelineStep {
+            id: "mods".into(),
+            label: "Mods".into(),
+            status: "ok".into(),
+            detail: format!("{mods_total} mod(s), ensembles .pak/.utoc/.ucas complets."),
+            action: String::new(),
+        });
+    } else {
+        steps.push(NtePipelineStep {
+            id: "mods".into(),
+            label: "Mods".into(),
+            status: "error".into(),
+            detail: format!("{} ensemble(s) incomplet(s) : {}", mods_incomplete.len(), mods_incomplete.join(", ")),
+            action: "Désactivez ou corrigez ces mods avant le lancement.".into(),
+        });
+    }
+
+    // 5. Loader Everlight — WARNING (le jeu peut se lancer, mais les .pak ne
+    // chargeront pas sans l'injection). Jamais bloquant : ZAILON ne télécharge
+    // pas de DLL (spec §11-14, §35).
+    if everlight_present {
+        steps.push(NtePipelineStep {
+            id: "loader".into(),
+            label: "Loader (Everlight)".into(),
+            status: "ok".into(),
+            detail: "Injection Everlight détectée (version.dll/dsound.dll).".into(),
+            action: String::new(),
+        });
+    } else {
+        steps.push(NtePipelineStep {
+            id: "loader".into(),
+            label: "Loader (Everlight)".into(),
+            status: "warning".into(),
+            detail: "Aucune DLL d'injection Everlight (version.dll/dsound.dll) dans les binaires.".into(),
+            action: "Installez un loader Everlight compatible (jamais téléchargé automatiquement par ZAILON).".into(),
+        });
+    }
+
+    let blockers: Vec<&str> = steps
+        .iter()
+        .filter(|step| step.status == "error")
+        .map(|step| step.label.as_str())
+        .collect();
+    let ready = blockers.is_empty();
+    let blocker_summary = if ready {
+        String::new()
+    } else {
+        format!("Étape(s) échouée(s) : {}.", blockers.join(", "))
+    };
+
+    NteLaunchPipeline {
+        ready,
+        steps,
+        blocker_summary,
+    }
+}
+
+/// Pipeline de lancement NTE (spec §15, §40) : assemble le diagnostic, l'état
+/// Steam, la présence du dossier mods, la validation des ensembles et la
+/// détection du loader Everlight — chaque étape produit un état vérifiable.
+#[tauri::command]
+fn nte_launch_pipeline(
+    install_dir: String,
+    platform: Option<String>,
+    mods_path: String,
+) -> Result<NteLaunchPipeline, String> {
+    let root = PathBuf::from(&install_dir);
+    let launcher_present = NTE_LAUNCHERS
+        .iter()
+        .any(|(exe, _)| root.join(exe).is_file());
+    let installation_valid = launcher_present || root.join(NTE_PAKS_MARKER).is_dir();
+
+    let distribution = if platform.as_deref() == Some("epic") {
+        "epic"
+    } else if platform.as_deref() == Some("steam") {
+        "steam"
+    } else if root.join(NTE_EPIC_SDK).is_file() {
+        "epic"
+    } else {
+        "standalone"
+    };
+    let candidates = process_scanner::enumerate_processes();
+    let steam_running = steam_process_present(&candidates);
+
+    let mods_folder = PathBuf::from(&mods_path);
+    let mods_path_exists = mods_folder.is_dir();
+    let (mods_total, incomplete_names) = if mods_path_exists {
+        let validation = nte_validate_mods(mods_path.clone())?;
+        (
+            validation.total,
+            validation
+                .incomplete
+                .into_iter()
+                .map(|mod_| mod_.name)
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        (0, Vec::new())
+    };
+
+    let binaries_path = root.join(NTE_CLIENT_WIN64);
+    let everlight_present = nte_everlight_loader_present(&binaries_path);
+
+    Ok(nte_pipeline_steps(
+        installation_valid,
+        distribution,
+        steam_running,
+        mods_path_exists,
+        mods_total,
+        &incomplete_names,
+        everlight_present,
+    ))
+}
+
 /// `mod.json` Aurora : à la racine du mod, sinon un niveau plus bas.
 fn nte_find_mod_json(folder: &Path) -> Option<PathBuf> {
     let direct = folder.join("mod.json");
@@ -19590,6 +19826,64 @@ mod tests {
     }
 
     #[test]
+    fn nte_pipeline_steps_produce_verifiable_states() {
+        // Tout ok → prêt, aucune action.
+        let pipeline = nte_pipeline_steps(true, "steam", true, true, 3, &[], true);
+        assert!(pipeline.ready);
+        assert!(pipeline.blocker_summary.is_empty());
+        assert_eq!(pipeline.steps.len(), 5);
+        assert!(pipeline.steps.iter().all(|step| step.status == "ok"));
+
+        // Steam absent → erreur « Ouvrir Steam » (spec §20-21).
+        let pipeline = nte_pipeline_steps(true, "steam", false, true, 3, &[], true);
+        assert!(!pipeline.ready);
+        let provider = pipeline.steps.iter().find(|step| step.id == "provider").unwrap();
+        assert_eq!(provider.status, "error");
+        assert!(provider.action.contains("Ouvrir Steam"));
+        assert!(pipeline.blocker_summary.contains("Provider"));
+
+        // Mods incomplets → erreur nommée (spec §5, §10).
+        let pipeline = nte_pipeline_steps(true, "standalone", false, true, 2, &["BrokenMod".to_string()], false);
+        assert!(!pipeline.ready);
+        let mods = pipeline.steps.iter().find(|step| step.id == "mods").unwrap();
+        assert_eq!(mods.status, "error");
+        assert!(mods.detail.contains("BrokenMod"));
+
+        // Loader absent → WARNING (jamais bloquant — ZAILON ne télécharge pas
+        // de DLL, spec §11-14, §35), le reste prêt.
+        let pipeline = nte_pipeline_steps(true, "standalone", false, true, 1, &[], false);
+        assert!(pipeline.ready);
+        let loader = pipeline.steps.iter().find(|step| step.id == "loader").unwrap();
+        assert_eq!(loader.status, "warning");
+        assert!(loader.action.contains("jamais téléchargé"));
+
+        // Installation invalide + dossier mods absent → 2 blocages.
+        let pipeline = nte_pipeline_steps(false, "standalone", false, false, 0, &[], false);
+        assert!(!pipeline.ready);
+        let errors: Vec<&str> = pipeline
+            .steps
+            .iter()
+            .filter(|step| step.status == "error")
+            .map(|step| step.id.as_str())
+            .collect();
+        assert_eq!(errors, vec!["installation", "mods_path"]);
+    }
+
+    #[test]
+    fn nte_everlight_loader_detects_injection_dlls() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-loader-{}", unix_timestamp()));
+        let binaries = root.join(NTE_CLIENT_WIN64);
+        fs::create_dir_all(&binaries).unwrap();
+        assert!(!nte_everlight_loader_present(&binaries));
+        fs::write(binaries.join("version.dll"), b"x").unwrap();
+        assert!(nte_everlight_loader_present(&binaries));
+        fs::remove_file(binaries.join("version.dll")).unwrap();
+        fs::write(binaries.join("dsound.dll"), b"x").unwrap();
+        assert!(nte_everlight_loader_present(&binaries));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn toggle_nte_mod_loose_file_renames_the_entry() {
         let root = std::env::temp_dir().join(format!("zailon-nte-toggle2-{}", unix_timestamp()));
         let mods = root.join("AuroraMods");
@@ -19906,6 +20200,7 @@ pub fn run() {
             open_steam,
             nte_ensure_mods_dir,
             nte_validate_mods,
+            nte_launch_pipeline,
             list_staged_mods,
             scan_mod_import,
             scan_mod_import_background,

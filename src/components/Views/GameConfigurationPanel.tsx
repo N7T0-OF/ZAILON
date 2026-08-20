@@ -26,7 +26,7 @@ import {
   type ZailonPerformancePolicies,
   type ZailonPriorityPolicy,
 } from '../../lib/performanceProfiles'
-import { native, pickExecutable, pickFolder, type NteGameReport, type NteModsValidation, type NteSteamStatus, type ShortcutCreationResult } from '../../lib/native'
+import { native, pickExecutable, pickFolder, type NteGameReport, type NteLaunchPipeline, type NteModsValidation, type NteSteamStatus, type ShortcutCreationResult } from '../../lib/native'
 import { shortcutPlanFor } from '../../lib/shortcuts'
 import { resolveGameInstallation, shortPathName } from '../../lib/installations'
 import { ProfileShareDialog } from '../UI/ProfileShareDialog'
@@ -886,6 +886,10 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
   // Spec §5, §10 : validation des ensembles .pak/.utoc/.ucas avant lancement.
   const [validation, setValidation] = useState<NteModsValidation | null>(null)
   const [validationBusy, setValidationBusy] = useState(false)
+  // Spec §15, §40 : pipeline de lancement vérifiable — chaque étape produit un
+  // état (installation, provider/Steam, dossier mods, mods, loader Everlight).
+  const [pipeline, setPipeline] = useState<NteLaunchPipeline | null>(null)
+  const [pipelineBusy, setPipelineBusy] = useState(false)
   const [open, setOpen] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(`zailon:config-open:${game.id}`) || 'null') as string[] | null
@@ -952,6 +956,18 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
     } catch { /* best-effort */ }
   }
 
+  const runPipeline = async () => {
+    if (!installRoot || !native.isDesktop()) return
+    setPipelineBusy(true)
+    try {
+      setPipeline(await native.nteLaunchPipeline(installRoot, game.platform || null, game.modsPath || report?.modsPath || ''))
+    } catch {
+      setPipeline(null)
+    } finally {
+      setPipelineBusy(false)
+    }
+  }
+
   useEffect(() => {
     if (open || tested) void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1011,6 +1027,29 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
         <p className="mt-2 flex items-start gap-2 rounded-lg border border-emerald-300/15 bg-emerald-300/[0.04] px-3 py-2 text-[11px] text-emerald-100/70"><CheckCircle2 size={13} className="mt-0.5 shrink-0 text-emerald-300/80" />{steam.message}</p>
       )}
 
+      {/* Spec §15, §40 : pipeline de lancement — chaque étape produit un état
+          vérifiable, jamais un faux « NTE lancé ». Si un mod ne charge pas, on
+          sait quelle étape échoue (Loader → Game, cause probable). */}
+      {pipeline && (
+        <div className={`mt-2 space-y-1.5 rounded-lg border px-3 py-2 ${pipeline.ready ? 'border-emerald-300/15 bg-emerald-300/[0.03]' : 'border-amber-300/25 bg-amber-300/[0.05]'}`}>
+          <p className={`flex items-center gap-2 text-[11px] font-semibold ${pipeline.ready ? 'text-emerald-100/85' : 'text-amber-100/85'}`}>
+            {pipeline.ready ? <CheckCircle2 size={13} className="shrink-0 text-emerald-300/90" /> : <AlertTriangle size={13} className="shrink-0 text-amber-300/90" />}
+            {pipeline.ready ? 'Pipeline de lancement prêt — NTE peut être lancé.' : 'Pipeline de lancement bloqué.'}
+          </p>
+          {pipeline.blockerSummary && <p className="pl-5 text-[11px] text-amber-100/75">{pipeline.blockerSummary}</p>}
+          {pipeline.steps.map(step => (
+            <p key={step.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 pl-5 text-[11px] text-white/55">
+              <span className={step.status === 'ok' ? 'text-emerald-300/80' : step.status === 'error' ? 'text-red-300/80' : 'text-amber-200/80'}>
+                {step.status === 'ok' ? '✓' : step.status === 'error' ? '✗' : '⚠'}
+              </span>
+              <span className="font-medium text-white/70">{step.label}</span>
+              <span className="text-white/40">{step.detail}</span>
+              {step.action && <span className="text-gold/75">→ {step.action}</span>}
+            </p>
+          ))}
+        </div>
+      )}
+
       {/* Spec §5, §10 : un mod = un ensemble .pak/.utoc/.ucas ; les ensembles
           incomplets sont signalés AVANT lancement (jamais de faux « NTE lancé »). */}
       {validation && validation.incomplete.length > 0 && (
@@ -1034,6 +1073,7 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
         {report && !report.markers.find(marker => marker.marker === 'Client/WindowsNoEditor/HT/Content/Paks/AuroraMods')?.found && (
           <button type="button" onClick={ensureModsDir} className="flex items-center gap-1.5 rounded-lg border border-gold/25 bg-gold/[0.06] px-3 py-1.5 text-[11px] font-semibold text-gold hover:border-gold/45 hover:bg-gold/10"><FolderOpen size={13} />Créer le dossier AuroraMods (après validation du chemin)</button>
         )}
+        <button type="button" onClick={runPipeline} disabled={!installRoot || pipelineBusy} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-50">{pipelineBusy ? <Loader2 size={13} className="animate-spin" /> : <Rocket size={13} />}Vérifier le lancement</button>
         <button type="button" onClick={runValidation} disabled={!report?.modsPath || validationBusy} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-50">{validationBusy ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}Valider les mods</button>
         {report?.modsPath && game.modsPath !== report.modsPath && (
           <button type="button" onClick={useAuroraMods} className="flex items-center gap-1.5 rounded-lg border border-gold/25 bg-gold/[0.06] px-3 py-1.5 text-[11px] font-semibold text-gold hover:border-gold/45 hover:bg-gold/10"><CheckCircle2 size={13} />Utiliser le dossier AuroraMods</button>

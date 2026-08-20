@@ -25,6 +25,12 @@
 - **Carte NTE enrichie** : état Steam détecté/absent + « Ouvrir Steam », bouton
   « Créer le dossier AuroraMods » (après validation), bouton « Valider les
   mods » avec liste des ensembles incomplets.
+- **Pipeline de lancement vérifiable** (`nte_launch_pipeline`) : chaque étape
+  produit un état (installation, provider/Steam, dossier AuroraMods, mods,
+  loader Everlight) + action suggérée — jamais un faux « NTE lancé » (spec
+  §15, §40). Le loader Everlight (`version.dll`/`dsound.dll` dans
+  Binaries/Win64) est DÉTECTÉ, jamais téléchargé (spec §11-14, §35). Bouton
+  « Vérifier le lancement » dans la carte NTE.
 
 ## [1.152.0] - 2026-08-20
 

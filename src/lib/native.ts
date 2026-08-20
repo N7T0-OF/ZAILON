@@ -372,6 +372,22 @@ export interface NteModsValidation {
   incomplete: NteModSetStatus[]
 }
 
+/** Une étape du pipeline de lancement NTE (spec §40). */
+export interface NtePipelineStep {
+  id: string
+  label: string
+  status: 'ok' | 'warning' | 'error'
+  detail: string
+  action: string
+}
+
+/** Pipeline de lancement NTE : chaque étape produit un état vérifiable. */
+export interface NteLaunchPipeline {
+  ready: boolean
+  steps: NtePipelineStep[]
+  blockerSummary: string
+}
+
 export interface CyberpunkRepairMove {
   from: string
   to: string
@@ -1020,6 +1036,11 @@ export const native = {
    * fichiers. */
   nteValidateMods: (modsPath: string) =>
     desktopOnly<NteModsValidation>('nte_validate_mods', { modsPath }),
+  /** Pipeline de lancement NTE (spec §15, §40) : chaque étape produit un état
+   * vérifiable (installation, provider/Steam, dossier mods, mods, loader
+   * Everlight) — jamais un faux « NTE lancé ». */
+  nteLaunchPipeline: (installDir: string, platform: string | null, modsPath: string) =>
+    desktopOnly<NteLaunchPipeline>('nte_launch_pipeline', { installDir, platform, modsPath }),
   deleteStagedMod: (gameId: string, stageId: string) => desktopOnly<void>('delete_staged_mod', { gameId, stageId }),
   previewStagedDuplicates: (gameId: string) =>
     desktopOnly<StagedDuplicatePreview>('preview_staged_duplicates', { gameId }),

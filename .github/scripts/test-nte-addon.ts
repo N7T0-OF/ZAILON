@@ -85,7 +85,7 @@ test('socle NTE : état Steam, création validée AuroraMods et validation des m
   const store = read('src/store/useStore.ts')
 
   // Backend natif : commandes enregistrées.
-  for (const command of ['nte_steam_check', 'open_steam', 'nte_ensure_mods_dir', 'nte_validate_mods']) {
+  for (const command of ['nte_steam_check', 'open_steam', 'nte_ensure_mods_dir', 'nte_validate_mods', 'nte_launch_pipeline']) {
     assert.ok(rust.includes(command), `commande native ${command}`)
     assert.ok(rust.includes(`            ${command},`), `${command} enregistrée dans invoke_handler`)
   }
@@ -97,13 +97,24 @@ test('socle NTE : état Steam, création validée AuroraMods et validation des m
   assert.ok(native.includes('openSteam'))
   assert.ok(native.includes('nteEnsureModsDir'))
   assert.ok(native.includes('nteValidateMods'))
+  assert.ok(native.includes('nteLaunchPipeline'))
 
-  // Carte de configuration : état Steam + actions.
+  // Carte de configuration : état Steam + actions + pipeline.
   assert.ok(panel.includes('Ouvrir Steam'), 'bouton « Ouvrir Steam »')
   assert.ok(panel.includes('Créer le dossier AuroraMods'), 'création validée AuroraMods')
   assert.ok(panel.includes('Valider les mods'), 'validation des ensembles de mods')
+  assert.ok(panel.includes('Vérifier le lancement'), 'pipeline de lancement (spec §15, §40)')
+  assert.ok(panel.includes('Pipeline de lancement'), 'affichage des étapes du pipeline')
 
   // Garde au lancement : un jeu NTE Steam sans Steam ne se lance pas (spec §40).
   assert.ok(store.includes('nteSteamCheck'), 'garde Steam dans le store')
   assert.ok(store.includes('Lancement bloqué'), 'message de blocage au lancement')
+})
+
+test('pipeline de lancement NTE : détection du loader Everlight jamais téléchargé (spec §11-14, §35)', () => {
+  const rust = read('src-tauri/src/lib.rs')
+  assert.ok(rust.includes('version.dll'), 'DLL d\'injection Everlight version.dll')
+  assert.ok(rust.includes('dsound.dll'), 'DLL d\'injection Everlight dsound.dll')
+  assert.ok(rust.includes('jamais téléchargé'), 'ZAILON ne télécharge pas de DLL (spec §35)')
+  assert.ok(rust.includes('nte_pipeline_steps'), 'logique pure des étapes testée')
 })

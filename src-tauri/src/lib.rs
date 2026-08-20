@@ -6490,7 +6490,10 @@ fn steam_process_present(candidates: &[process_scanner::ProcessCandidate]) -> bo
 /// processus est vide → Steam non détecté (comportement identique, aucun faux
 /// positif). Le chemin Steam vient de steamlocate (desktop) si disponible.
 #[tauri::command]
-fn nte_steam_check(install_dir: String, platform: Option<String>) -> Result<NteSteamStatus, String> {
+fn nte_steam_check(
+    install_dir: String,
+    platform: Option<String>,
+) -> Result<NteSteamStatus, String> {
     // Même logique de distribution que `nte_game_report` : la plateforme
     // déclarée prime, sinon marqueur Epic SDK.
     let root = PathBuf::from(&install_dir);
@@ -6669,9 +6672,7 @@ fn nte_validate_mods(mods_path: String) -> Result<NteModsValidation, String> {
             .and_then(|name| name.to_str())
             .unwrap_or_default()
             .to_string();
-        if !path.is_dir()
-            || file_name.starts_with('.')
-            || file_name.starts_with(NTE_STAGING_PREFIX)
+        if !path.is_dir() || file_name.starts_with('.') || file_name.starts_with(NTE_STAGING_PREFIX)
         {
             continue;
         }
@@ -6696,9 +6697,7 @@ fn nte_validate_mods(mods_path: String) -> Result<NteModsValidation, String> {
         if ucas && !utoc {
             missing.push("utoc".to_string());
         }
-        let enabled = !files
-            .iter()
-            .any(|file| nte_is_disabled_mod_file(file));
+        let enabled = !files.iter().any(|file| nte_is_disabled_mod_file(file));
         total += 1;
         if missing.is_empty() {
             complete_count += 1;
@@ -6792,7 +6791,9 @@ fn nte_pipeline_steps(
             id: "installation".into(),
             label: "Installation NTE".into(),
             status: "error".into(),
-            detail: "Aucun launcher (NTEGlobalLauncher/NTELauncher/NTETWLauncher) ni arbre Paks trouvé.".into(),
+            detail:
+                "Aucun launcher (NTEGlobalLauncher/NTELauncher/NTETWLauncher) ni arbre Paks trouvé."
+                    .into(),
             action: "Vérifiez le chemin de l'installation du jeu.".into(),
         });
     }
@@ -6857,7 +6858,11 @@ fn nte_pipeline_steps(
             id: "mods".into(),
             label: "Mods".into(),
             status: "error".into(),
-            detail: format!("{} ensemble(s) incomplet(s) : {}", mods_incomplete.len(), mods_incomplete.join(", ")),
+            detail: format!(
+                "{} ensemble(s) incomplet(s) : {}",
+                mods_incomplete.len(),
+                mods_incomplete.join(", ")
+            ),
             action: "Désactivez ou corrigez ces mods avant le lancement.".into(),
         });
     }
@@ -19837,15 +19842,31 @@ mod tests {
         // Steam absent → erreur « Ouvrir Steam » (spec §20-21).
         let pipeline = nte_pipeline_steps(true, "steam", false, true, 3, &[], true);
         assert!(!pipeline.ready);
-        let provider = pipeline.steps.iter().find(|step| step.id == "provider").unwrap();
+        let provider = pipeline
+            .steps
+            .iter()
+            .find(|step| step.id == "provider")
+            .unwrap();
         assert_eq!(provider.status, "error");
         assert!(provider.action.contains("Ouvrir Steam"));
         assert!(pipeline.blocker_summary.contains("Provider"));
 
         // Mods incomplets → erreur nommée (spec §5, §10).
-        let pipeline = nte_pipeline_steps(true, "standalone", false, true, 2, &["BrokenMod".to_string()], false);
+        let pipeline = nte_pipeline_steps(
+            true,
+            "standalone",
+            false,
+            true,
+            2,
+            &["BrokenMod".to_string()],
+            false,
+        );
         assert!(!pipeline.ready);
-        let mods = pipeline.steps.iter().find(|step| step.id == "mods").unwrap();
+        let mods = pipeline
+            .steps
+            .iter()
+            .find(|step| step.id == "mods")
+            .unwrap();
         assert_eq!(mods.status, "error");
         assert!(mods.detail.contains("BrokenMod"));
 
@@ -19853,7 +19874,11 @@ mod tests {
         // de DLL, spec §11-14, §35), le reste prêt.
         let pipeline = nte_pipeline_steps(true, "standalone", false, true, 1, &[], false);
         assert!(pipeline.ready);
-        let loader = pipeline.steps.iter().find(|step| step.id == "loader").unwrap();
+        let loader = pipeline
+            .steps
+            .iter()
+            .find(|step| step.id == "loader")
+            .unwrap();
         assert_eq!(loader.status, "warning");
         assert!(loader.action.contains("jamais téléchargé"));
 

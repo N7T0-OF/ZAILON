@@ -2152,6 +2152,21 @@ export const useStore = create<Store>()(persist((set, get) => ({
       const stagedModIds = enabledMods
         .map(mod => mod.stageId || (mod.storage === 'staged' ? mod.id : undefined))
         .filter((id): id is string => Boolean(id))
+      // Spec « Refonte NTE/Aurora » §20-21, §40 : avant de lancer un jeu NTE
+      // classé Steam, l'état Steam est vérifié — si Steam ne tourne pas, le
+      // launcher NTE afficherait « Cannot create IPC pipe to Steam client
+      // process ». L'erreur est anticipée : lancement bloqué avec message clair
+      // et action « Ouvrir Steam » (jamais un crash silencieux du jeu).
+      if (isNteGame({ execPath: game.execPath, gameName: game.name, nteAllowed: nteModsAllowed(addonCapabilities(get().addons)) })
+          && (game.platform === 'steam' || game.provider === 'Steam')) {
+        try {
+          const steamState = await native.nteSteamCheck(resolved.rootPath || knownRoot, game.platform || null)
+          if (!steamState.launchReady) {
+            set({ notice: `Lancement bloqué — ${steamState.message} Utilisez « Ouvrir Steam » depuis la configuration NTE du jeu, puis relancez.` })
+            return
+          }
+        } catch { /* garde best-effort : un échec du check ne bloque pas le jeu */ }
+      }
       set({
         isLaunching: true,
         launchProgress: { phase: 'starting', current: 0, total: 0, message: 'Préparation du jeu…' },

@@ -69,3 +69,41 @@ test('le manifest de l’add-on déclare la capabilité nte.modloader et des per
     assert.ok(['game.read', 'game.launch', 'process.read', 'mods.read', 'mods.write'].includes(permission), `permission : ${permission}`)
   }
 })
+
+// ── Socle « Refonte NTE/Aurora » (spec §4, §5, §10, §20-21, §40) ────────────
+// L'erreur « Cannot create IPC pipe to Steam client process » du launcher NTE
+// Steam doit être un état identifiable (Steam détecté / non détecté) avec une
+// action « Ouvrir Steam », jamais un crash. Le dossier mods n'est créé
+// qu'après validation du chemin. Un mod = un ensemble .pak/.utoc/.ucas.
+
+const read = (relative: string) => readFileSync(join(root, relative), 'utf-8')
+
+test('socle NTE : état Steam, création validée AuroraMods et validation des mods sont câblés', () => {
+  const rust = read('src-tauri/src/lib.rs')
+  const native = read('src/lib/native.ts')
+  const panel = read('src/components/Views/GameConfigurationPanel.tsx')
+  const store = read('src/store/useStore.ts')
+
+  // Backend natif : commandes enregistrées.
+  for (const command of ['nte_steam_check', 'open_steam', 'nte_ensure_mods_dir', 'nte_validate_mods']) {
+    assert.ok(rust.includes(command), `commande native ${command}`)
+    assert.ok(rust.includes(`            ${command},`), `${command} enregistrée dans invoke_handler`)
+  }
+  // Message « Ouvrir Steam » qui remplace le crash IPC (spec §20).
+  assert.ok(rust.includes('Cannot create IPC pipe to Steam client process'))
+
+  // Bindings frontend.
+  assert.ok(native.includes('nteSteamCheck'))
+  assert.ok(native.includes('openSteam'))
+  assert.ok(native.includes('nteEnsureModsDir'))
+  assert.ok(native.includes('nteValidateMods'))
+
+  // Carte de configuration : état Steam + actions.
+  assert.ok(panel.includes('Ouvrir Steam'), 'bouton « Ouvrir Steam »')
+  assert.ok(panel.includes('Créer le dossier AuroraMods'), 'création validée AuroraMods')
+  assert.ok(panel.includes('Valider les mods'), 'validation des ensembles de mods')
+
+  // Garde au lancement : un jeu NTE Steam sans Steam ne se lance pas (spec §40).
+  assert.ok(store.includes('nteSteamCheck'), 'garde Steam dans le store')
+  assert.ok(store.includes('Lancement bloqué'), 'message de blocage au lancement')
+})

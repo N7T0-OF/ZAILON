@@ -26,7 +26,7 @@ import {
   type ZailonPerformancePolicies,
   type ZailonPriorityPolicy,
 } from '../../lib/performanceProfiles'
-import { native, pickExecutable, pickFolder, type NteGameReport, type ShortcutCreationResult } from '../../lib/native'
+import { native, pickExecutable, pickFolder, type NteGameReport, type NteModsValidation, type NteSteamStatus, type ShortcutCreationResult } from '../../lib/native'
 import { shortcutPlanFor } from '../../lib/shortcuts'
 import { resolveGameInstallation, shortPathName } from '../../lib/installations'
 import { ProfileShareDialog } from '../UI/ProfileShareDialog'
@@ -881,6 +881,11 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
   const hasNteCap = hasCapability(capabilities, 'nte.modloader')
   const setModsPath = useStore(state => state.setModsPath)
   const isNte = detectModBackend({ execPath: game.execPath, gameName: game.name, nteAllowed: hasNteCap }) === 'nte-pak'
+  // Spec §20-21 : l'état Steam est un état identifiable (jamais un crash IPC).
+  const [steam, setSteam] = useState<NteSteamStatus | null>(null)
+  // Spec §5, §10 : validation des ensembles .pak/.utoc/.ucas avant lancement.
+  const [validation, setValidation] = useState<NteModsValidation | null>(null)
+  const [validationBusy, setValidationBusy] = useState(false)
   const [open, setOpen] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(`zailon:config-open:${game.id}`) || 'null') as string[] | null
@@ -913,11 +918,38 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
     setBusy(true)
     try {
       setReport(await native.nteGameReport(installRoot, game.platform || null))
+      // L'état Steam accompagne le diagnostic (spec §20-21) : distribution
+      // Steam + Steam absent = « Ouvrir Steam », pas un crash du launcher.
+      setSteam(await native.nteSteamCheck(installRoot, game.platform || null))
     } catch {
       setReport(null)
+      setSteam(null)
     } finally {
       setBusy(false)
     }
+  }
+
+  const runValidation = async () => {
+    if (!report?.modsPath || !native.isDesktop()) return
+    setValidationBusy(true)
+    try {
+      setValidation(await native.nteValidateMods(report.modsPath))
+    } catch {
+      setValidation(null)
+    } finally {
+      setValidationBusy(false)
+    }
+  }
+
+  const ensureModsDir = async () => {
+    if (!installRoot || !native.isDesktop()) return
+    try {
+      const result = await native.nteEnsureModsDir(installRoot)
+      if (result.validated && result.modsPath) {
+        setModsPath(game.id, result.modsPath)
+        setReport(await native.nteGameReport(installRoot, game.platform || null))
+      }
+    } catch { /* best-effort */ }
   }
 
   useEffect(() => {
@@ -966,9 +998,43 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
         <p className="mt-2 flex items-start gap-2 rounded-lg border border-sky-300/18 bg-sky-300/[0.04] px-3 py-2 text-[11px] text-sky-100/70"><AlertTriangle size={13} className="mt-0.5 shrink-0 text-sky-300/80" />Build Epic détectée : le launcher doit recevoir <code className="font-mono">{report.launchArgs.join(' ')}</code> au lancement (franchit l’auth Epic).</p>
       ) : null}
 
+      {/* Spec §20 : l'erreur « Cannot create IPC pipe to Steam client process »
+          du launcher NTE est anticipée — état Steam identifiable + action
+          « Ouvrir Steam », jamais un crash silencieux. */}
+      {steam && !steam.launchReady && (
+        <div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg border border-red-300/20 bg-red-300/[0.05] px-3 py-2">
+          <p className="flex min-w-0 flex-1 items-start gap-2 text-[11px] text-red-100/80"><AlertTriangle size={13} className="mt-0.5 shrink-0 text-red-300/90" />{steam.message}</p>
+          <button type="button" onClick={() => void native.openSteam()} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-gold px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90"><Gamepad2 size={13} />Ouvrir Steam</button>
+        </div>
+      )}
+      {steam && steam.launchReady && steam.distribution === 'steam' && (
+        <p className="mt-2 flex items-start gap-2 rounded-lg border border-emerald-300/15 bg-emerald-300/[0.04] px-3 py-2 text-[11px] text-emerald-100/70"><CheckCircle2 size={13} className="mt-0.5 shrink-0 text-emerald-300/80" />{steam.message}</p>
+      )}
+
+      {/* Spec §5, §10 : un mod = un ensemble .pak/.utoc/.ucas ; les ensembles
+          incomplets sont signalés AVANT lancement (jamais de faux « NTE lancé »). */}
+      {validation && validation.incomplete.length > 0 && (
+        <div className="mt-2 space-y-1.5 rounded-lg border border-amber-300/25 bg-amber-300/[0.05] px-3 py-2">
+          <p className="flex items-center gap-2 text-[11px] font-semibold text-amber-100/85"><AlertTriangle size={13} className="shrink-0 text-amber-300/90" />{validation.incomplete.length} mod(s) incomplet(s) — {validation.completeCount}/{validation.total} valides</p>
+          {validation.incomplete.map(mod => (
+            <p key={mod.name} className="flex flex-wrap items-center gap-2 pl-5 text-[11px] text-amber-100/70">
+              <span className="font-medium text-amber-100/85">{mod.name}</span>
+              <span className="font-mono text-[10px] text-amber-200/60">manquant : {mod.missing.join(', ')}</span>
+            </p>
+          ))}
+        </div>
+      )}
+      {validation && validation.incomplete.length === 0 && validation.total > 0 && (
+        <p className="mt-2 flex items-start gap-2 rounded-lg border border-emerald-300/15 bg-emerald-300/[0.04] px-3 py-2 text-[11px] text-emerald-100/70"><CheckCircle2 size={13} className="mt-0.5 shrink-0 text-emerald-300/80" />{validation.total} mod(s) — ensembles .pak/.utoc/.ucas complets.</p>
+      )}
+
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <button type="button" onClick={load} disabled={busy} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-50">{busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}Analyser l’installation</button>
         <button type="button" onClick={runTest} disabled={!report} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-50"><ShieldCheck size={13} />Tester l’installation</button>
+        {report && !report.markers.find(marker => marker.marker === 'Client/WindowsNoEditor/HT/Content/Paks/AuroraMods')?.found && (
+          <button type="button" onClick={ensureModsDir} className="flex items-center gap-1.5 rounded-lg border border-gold/25 bg-gold/[0.06] px-3 py-1.5 text-[11px] font-semibold text-gold hover:border-gold/45 hover:bg-gold/10"><FolderOpen size={13} />Créer le dossier AuroraMods (après validation du chemin)</button>
+        )}
+        <button type="button" onClick={runValidation} disabled={!report?.modsPath || validationBusy} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-1.5 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-50">{validationBusy ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}Valider les mods</button>
         {report?.modsPath && game.modsPath !== report.modsPath && (
           <button type="button" onClick={useAuroraMods} className="flex items-center gap-1.5 rounded-lg border border-gold/25 bg-gold/[0.06] px-3 py-1.5 text-[11px] font-semibold text-gold hover:border-gold/45 hover:bg-gold/10"><CheckCircle2 size={13} />Utiliser le dossier AuroraMods</button>
         )}

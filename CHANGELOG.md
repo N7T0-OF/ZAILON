@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased]
+
+> **Refonte NTE/Aurora — socle pipeline** : l'erreur Steam « Cannot create
+> IPC pipe to Steam client process » devient un état identifiable (« Ouvrir
+> Steam »), le dossier AuroraMods n'est créé qu'après validation du chemin,
+> et les mods sont validés comme ensembles `.pak`/`.utoc`/`.ucas` avant
+> lancement.
+
+### Added
+
+- **État Steam pour NTE** (`nte_steam_check` + bouton « Ouvrir Steam ») : la
+  distribution Steam avec Steam absent est détectée AVANT lancement — message
+  propre et action au lieu du crash IPC du launcher NTE (spec §20-21).
+- **Garde Steam au lancement** : un jeu NTE classé Steam ne se lance pas si
+  Steam ne tourne pas (spec §40 — jamais de faux « NTE lancé »).
+- **Création validée d'AuroraMods** (`nte_ensure_mods_dir`) : le dossier de
+  mods n'est créé qu'après validation du chemin (launcher NTE ou arbre Paks
+  présent) — jamais de `create_dir_all` aveugle (spec §4).
+- **Validation des ensembles de mods** (`nte_validate_mods`) : un mod = un
+  dossier `.pak`/`.utoc`/`.ucas` ; les ensembles incomplets (ex. `.pak` sans
+  `.ucas`, `.utoc` orphelin) sont signalés avant lancement, sans toucher aux
+  fichiers (spec §5, §10).
+- **Carte NTE enrichie** : état Steam détecté/absent + « Ouvrir Steam », bouton
+  « Créer le dossier AuroraMods » (après validation), bouton « Valider les
+  mods » avec liste des ensembles incomplets.
+
 ## [1.152.0] - 2026-08-20
 
 > **NTE Support — fusion du launcher Aurora** : les mods installés dans

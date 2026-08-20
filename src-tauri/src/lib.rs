@@ -6429,6 +6429,300 @@ fn nte_game_report(install_dir: String, platform: Option<String>) -> Result<NteG
     })
 }
 
+// ── NTE : état Steam, création validée d'AuroraMods, validation des mods ────
+// Spec « Refonte NTE/Aurora » §4, §5, §10, §20-21, §40 : l'erreur « Cannot
+// create IPC pipe to Steam client process » du launcher NTE Steam doit être un
+// état identifiable (Steam détecté / non détecté) avec une action « Ouvrir
+// Steam », jamais un crash. Le dossier mods n'est créé qu'APRÈS validation du
+// chemin (jamais de create_dir aveugle). Un mod = un ensemble .pak/.utoc/.ucas.
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteSteamStatus {
+    /// Distribution effective (epic/steam/standalone) — cohérente avec
+    /// `nte_game_report` : plateforme déclarée prime, marqueur Epic sinon.
+    distribution: String,
+    /// Vrai si le processus Steam (steam.exe) est détecté en cours d'exécution.
+    steam_running: bool,
+    /// Chemin de steam.exe s'il a pu être localisé (sinon None).
+    steam_path: Option<String>,
+    /// Vrai si un lancement Steam est possible (distribution non-Steam, ou
+    /// Steam détecté). C'est L'état qui remplace le crash IPC du launcher NTE.
+    launch_ready: bool,
+    /// Message utilisateur propre, en français (spec §20 : « Ouvrir Steam »).
+    message: String,
+}
+
+/// Message et état de lancement selon distribution + présence Steam (pure,
+/// testable partout). L'erreur IPC du launcher NTE Steam est anticipée : si la
+/// distribution est Steam et que Steam ne tourne pas, le lancement n'est PAS
+/// prêt — on affiche l'action « Ouvrir Steam » au lieu du crash.
+fn nte_steam_launch_state(distribution: &str, steam_running: bool) -> (bool, String) {
+    match distribution {
+        "steam" if steam_running => (
+            true,
+            "Steam détecté — lancement Steam prêt.".to_string(),
+        ),
+        "steam" => (
+            false,
+            "Steam non détecté : le launcher NTE afficherait « Cannot create IPC pipe to Steam client process ». Lancez Steam puis relancez NTE.".to_string(),
+        ),
+        "epic" => (
+            true,
+            "Distribution Epic — les arguments d'authentification seront fournis au lancement.".to_string(),
+        ),
+        _ => (
+            true,
+            "Distribution standalone — aucun prérequis Steam.".to_string(),
+        ),
+    }
+}
+
+/// Vrai si un processus `steam.exe` est présent dans la liste (pure, testable).
+fn steam_process_present(candidates: &[process_scanner::ProcessCandidate]) -> bool {
+    candidates
+        .iter()
+        .any(|candidate| candidate.executable_name.eq_ignore_ascii_case("steam.exe"))
+}
+
+/// État Steam pour une installation NTE (spec §20-21). La détection du
+/// processus est native (Windows) ; sur les autres plateformes, la liste des
+/// processus est vide → Steam non détecté (comportement identique, aucun faux
+/// positif). Le chemin Steam vient de steamlocate (desktop) si disponible.
+#[tauri::command]
+fn nte_steam_check(install_dir: String, platform: Option<String>) -> Result<NteSteamStatus, String> {
+    // Même logique de distribution que `nte_game_report` : la plateforme
+    // déclarée prime, sinon marqueur Epic SDK.
+    let root = PathBuf::from(&install_dir);
+    let distribution = if platform.as_deref() == Some("epic") {
+        "epic"
+    } else if platform.as_deref() == Some("steam") {
+        "steam"
+    } else if root.join(NTE_EPIC_SDK).is_file() {
+        "epic"
+    } else {
+        "standalone"
+    };
+
+    let candidates = process_scanner::enumerate_processes();
+    let steam_running = steam_process_present(&candidates);
+    let (launch_ready, message) = nte_steam_launch_state(distribution, steam_running);
+
+    let steam_path = find_steam_executable();
+
+    Ok(NteSteamStatus {
+        distribution: distribution.to_string(),
+        steam_running,
+        steam_path,
+        launch_ready,
+        message,
+    })
+}
+
+/// Localise steam.exe (steamlocate, desktop) ; None partout ailleurs ou si
+/// Steam n'est pas installé. Utilisé par le bouton « Ouvrir Steam ».
+fn find_steam_executable() -> Option<String> {
+    #[cfg(desktop)]
+    {
+        let steam = SteamDir::locate().ok()?;
+        let exe = steam.path().join("steam.exe");
+        if exe.is_file() {
+            return Some(exe.to_string_lossy().to_string());
+        }
+    }
+    None
+}
+
+/// Ouvre le client Steam (spec §20 : « Ouvrir Steam »). Préfère steam.exe
+/// localisé ; sinon lance le protocole `steam://open/games` via le handler
+/// système (Windows : rundll32 url.dll). Jamais de téléchargement.
+#[tauri::command]
+fn open_steam() -> Result<(), String> {
+    if let Some(steam_exe) = find_steam_executable() {
+        Command::new(&steam_exe)
+            .spawn()
+            .map(|_| ())
+            .map_err(to_error)?;
+        return Ok(());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("rundll32.exe")
+            .args(["url.dll,FileProtocolHandler", "steam://open/games"])
+            .spawn()
+            .map(|_| ())
+            .map_err(to_error)?;
+        return Ok(());
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Steam n'est pas détecté sur ce système.".to_string())
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteEnsureModsResult {
+    /// Chemin du dossier AuroraMods (existant ou créé).
+    mods_path: String,
+    /// Vrai si le dossier a été créé par cet appel.
+    created: bool,
+    /// Vrai si le chemin a été validé comme installation NTE avant création.
+    validated: bool,
+    /// Raison lisible (validation refusée / dossier déjà présent / créé).
+    reason: String,
+}
+
+/// Crée le dossier AuroraMods (spec §4) — MAIS uniquement après validation du
+/// chemin : la racine doit contenir un launcher NTE connu OU l'arbre client
+/// Paks. Jamais de `create_dir_all` aveugle sur un chemin utilisateur.
+#[tauri::command]
+fn nte_ensure_mods_dir(install_dir: String) -> Result<NteEnsureModsResult, String> {
+    let root = PathBuf::from(&install_dir);
+    if !root.is_dir() {
+        return Ok(NteEnsureModsResult {
+            mods_path: String::new(),
+            created: false,
+            validated: false,
+            reason: "Le dossier d'installation n'existe pas.".to_string(),
+        });
+    }
+    let launcher_present = NTE_LAUNCHERS
+        .iter()
+        .any(|(exe, _)| root.join(exe).is_file());
+    let paks_present = root.join(NTE_PAKS_MARKER).is_dir();
+    if !launcher_present && !paks_present {
+        return Ok(NteEnsureModsResult {
+            mods_path: String::new(),
+            created: false,
+            validated: false,
+            reason: "Le chemin n'est pas une installation NTE valide (aucun launcher ni arbre Paks). Aucun dossier n'a été créé.".to_string(),
+        });
+    }
+    let mods = root.join(NTE_MODS_RELATIVE);
+    if mods.is_dir() {
+        return Ok(NteEnsureModsResult {
+            mods_path: mods.to_string_lossy().to_string(),
+            created: false,
+            validated: true,
+            reason: "Le dossier AuroraMods existe déjà.".to_string(),
+        });
+    }
+    fs::create_dir_all(&mods).map_err(to_error)?;
+    Ok(NteEnsureModsResult {
+        mods_path: mods.to_string_lossy().to_string(),
+        created: true,
+        validated: true,
+        reason: "Dossier AuroraMods créé (après validation du chemin NTE).".to_string(),
+    })
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteModSetStatus {
+    /// Nom d'affichage du mod (sans suffixe `_P`).
+    name: String,
+    enabled: bool,
+    /// Présence d'un fichier .pak (actif ou .disabled).
+    pak: bool,
+    utoc: bool,
+    ucas: bool,
+    /// Vrai si l'ensemble est complet : .pak présent ET (.utoc/.ucas ensemble
+    /// ou tous deux absents — un .utoc sans .ucas est un ensemble cassé).
+    complete: bool,
+    /// Extensions manquantes pour rendre l'ensemble complet.
+    missing: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteModsValidation {
+    mods_path: String,
+    total: usize,
+    complete_count: usize,
+    incomplete: Vec<NteModSetStatus>,
+}
+
+/// Validation des ensembles de mods NTE (spec §5, §10) : un mod = UN dossier
+/// contenant .pak/.utoc/.ucas — chaque fichier n'est JAMAIS un mod à part. La
+/// validation signale les ensembles incomplets (ex. .pak sans .ucas, ou .utoc
+/// orphelin) avant lancement, sans jamais modifier les fichiers.
+#[tauri::command]
+fn nte_validate_mods(mods_path: String) -> Result<NteModsValidation, String> {
+    let folder = PathBuf::from(&mods_path);
+    if !folder.is_dir() {
+        return Ok(NteModsValidation {
+            mods_path: mods_path.clone(),
+            ..Default::default()
+        });
+    }
+    let mut total = 0usize;
+    let mut complete_count = 0usize;
+    let mut incomplete = Vec::new();
+    for entry in fs::read_dir(&folder)
+        .map_err(to_error)?
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+        if !path.is_dir()
+            || file_name.starts_with('.')
+            || file_name.starts_with(NTE_STAGING_PREFIX)
+        {
+            continue;
+        }
+        let files = mod_files(&path);
+        let has = |extension: &str| {
+            files.iter().any(|file| {
+                let lower = file.to_ascii_lowercase();
+                lower.ends_with(&format!(".{extension}"))
+                    || lower.ends_with(&format!(".{extension}.disabled"))
+            })
+        };
+        let pak = has("pak");
+        let utoc = has("utoc");
+        let ucas = has("ucas");
+        let mut missing = Vec::new();
+        if !pak {
+            missing.push("pak".to_string());
+        }
+        if utoc && !ucas {
+            missing.push("ucas".to_string());
+        }
+        if ucas && !utoc {
+            missing.push("utoc".to_string());
+        }
+        let enabled = !files
+            .iter()
+            .any(|file| nte_is_disabled_mod_file(file));
+        total += 1;
+        if missing.is_empty() {
+            complete_count += 1;
+        } else {
+            incomplete.push(NteModSetStatus {
+                name: nte_display_name(&file_name),
+                enabled,
+                pak,
+                utoc,
+                ucas,
+                complete: false,
+                missing,
+            });
+        }
+    }
+    incomplete.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(NteModsValidation {
+        mods_path,
+        total,
+        complete_count,
+        incomplete,
+    })
+}
+
 /// `mod.json` Aurora : à la racine du mod, sinon un niveau plus bas.
 fn nte_find_mod_json(folder: &Path) -> Option<PathBuf> {
     let direct = folder.join("mod.json");
@@ -19192,6 +19486,110 @@ mod tests {
     }
 
     #[test]
+    fn nte_steam_launch_state_anticipates_ipc_error() {
+        // Distribution Steam sans Steam → PAS prêt + message « Ouvrir Steam »
+        // (l'erreur IPC du launcher NTE est anticipée, jamais subie).
+        let (ready, message) = nte_steam_launch_state("steam", false);
+        assert!(!ready);
+        assert!(message.contains("Cannot create IPC pipe to Steam client process"));
+        assert!(message.contains("Lancez Steam"));
+
+        let (ready, message) = nte_steam_launch_state("steam", true);
+        assert!(ready);
+        assert!(message.contains("Steam détecté"));
+
+        let (ready, _) = nte_steam_launch_state("epic", false);
+        assert!(ready);
+        let (ready, _) = nte_steam_launch_state("standalone", false);
+        assert!(ready);
+    }
+
+    #[test]
+    fn steam_process_present_detects_steam_exe() {
+        let candidate = |name: &str| process_scanner::ProcessCandidate {
+            pid: 1,
+            executable_name: name.to_string(),
+            executable_path: format!("C:\\Program Files (x86)\\Steam\\{name}"),
+        };
+        assert!(steam_process_present(&[candidate("steam.exe")]));
+        assert!(steam_process_present(&[
+            candidate("explorer.exe"),
+            candidate("STEAM.EXE"),
+        ]));
+        assert!(!steam_process_present(&[candidate("explorer.exe")]));
+        assert!(!steam_process_present(&[]));
+    }
+
+    #[test]
+    fn nte_ensure_mods_dir_creates_only_after_validation() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-ensure-{}", unix_timestamp()));
+        fs::create_dir_all(&root).unwrap();
+
+        // Chemin non-NTE : refusé, AUCUN dossier créé (spec §4).
+        let result = nte_ensure_mods_dir(root.to_string_lossy().to_string()).unwrap();
+        assert!(!result.validated);
+        assert!(!result.created);
+        assert!(!root.join(NTE_MODS_RELATIVE).exists());
+
+        // Launcher présent → création validée.
+        fs::write(root.join("NTEGlobalLauncher.exe"), b"x").unwrap();
+        let result = nte_ensure_mods_dir(root.to_string_lossy().to_string()).unwrap();
+        assert!(result.validated);
+        assert!(result.created);
+        assert_eq!(
+            result.mods_path,
+            root.join(NTE_MODS_RELATIVE).to_string_lossy().to_string()
+        );
+        assert!(root.join(NTE_MODS_RELATIVE).is_dir());
+
+        // Deuxième appel : déjà présent, pas de création.
+        let result = nte_ensure_mods_dir(root.to_string_lossy().to_string()).unwrap();
+        assert!(result.validated);
+        assert!(!result.created);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn nte_validate_mods_flags_incomplete_sets_without_touching_files() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-validate-{}", unix_timestamp()));
+        let mods = root.join("AuroraMods");
+        // Ensemble complet (pak+utoc+ucas).
+        let complete = mods.join("MintOutfit");
+        fs::create_dir_all(&complete).unwrap();
+        fs::write(complete.join("MintOutfit.pak"), b"a").unwrap();
+        fs::write(complete.join("MintOutfit.utoc"), b"b").unwrap();
+        fs::write(complete.join("MintOutfit.ucas"), b"c").unwrap();
+        // Ensemble cassé : pak + utoc, SANS ucas.
+        let broken = mods.join("BrokenMod");
+        fs::create_dir_all(&broken).unwrap();
+        fs::write(broken.join("BrokenMod.pak"), b"d").unwrap();
+        fs::write(broken.join("BrokenMod.utoc"), b"e").unwrap();
+        // Fichier lâche à la racine : ignoré par la validation des ensembles.
+        fs::write(mods.join("Loose.pak"), b"f").unwrap();
+        // Dossier staging : ignoré.
+        fs::create_dir_all(mods.join(".aurora-installing-Tmp")).unwrap();
+        fs::write(mods.join(".aurora-installing-Tmp").join("T.pak"), b"g").unwrap();
+
+        let validation = nte_validate_mods(mods.to_string_lossy().to_string()).unwrap();
+        assert_eq!(validation.total, 2);
+        assert_eq!(validation.complete_count, 1);
+        assert_eq!(validation.incomplete.len(), 1);
+        let broken = &validation.incomplete[0];
+        assert_eq!(broken.name, "BrokenMod");
+        assert!(broken.pak);
+        assert!(broken.utoc);
+        assert!(!broken.ucas);
+        assert!(!broken.complete);
+        assert_eq!(broken.missing, vec!["ucas".to_string()]);
+        // Aucun fichier n'a bougé (validation en lecture seule).
+        assert!(complete.join("MintOutfit.pak").exists());
+        assert!(broken.join("BrokenMod.pak").exists());
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn toggle_nte_mod_loose_file_renames_the_entry() {
         let root = std::env::temp_dir().join(format!("zailon-nte-toggle2-{}", unix_timestamp()));
         let mods = root.join("AuroraMods");
@@ -19504,6 +19902,10 @@ pub fn run() {
             scan_nte_mods,
             toggle_nte_mod,
             nte_game_report,
+            nte_steam_check,
+            open_steam,
+            nte_ensure_mods_dir,
+            nte_validate_mods,
             list_staged_mods,
             scan_mod_import,
             scan_mod_import_background,

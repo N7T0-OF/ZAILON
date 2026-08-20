@@ -334,6 +334,44 @@ export interface NteGameReport {
   markers: Array<{ label: string; marker: string; found: boolean }>
 }
 
+/** État Steam pour NTE (spec §20-21) : `launchReady=false` quand la
+ * distribution est Steam et que Steam ne tourne pas — l'erreur IPC du launcher
+ * NTE est anticipée et remplacée par l'action « Ouvrir Steam ». */
+export interface NteSteamStatus {
+  distribution: 'epic' | 'steam' | 'standalone'
+  steamRunning: boolean
+  steamPath?: string | null
+  launchReady: boolean
+  message: string
+}
+
+/** Résultat de la création validée du dossier AuroraMods (spec §4). */
+export interface NteEnsureModsResult {
+  modsPath: string
+  created: boolean
+  validated: boolean
+  reason: string
+}
+
+/** État d'un ensemble de mods NTE (spec §5, §10). */
+export interface NteModSetStatus {
+  name: string
+  enabled: boolean
+  pak: boolean
+  utoc: boolean
+  ucas: boolean
+  complete: boolean
+  missing: string[]
+}
+
+/** Validation complète du dossier Mods NTE. */
+export interface NteModsValidation {
+  modsPath: string
+  total: number
+  completeCount: number
+  incomplete: NteModSetStatus[]
+}
+
 export interface CyberpunkRepairMove {
   from: string
   to: string
@@ -968,6 +1006,20 @@ export const native = {
   /** Diagnostic d'une installation NTE (version, distribution, marqueurs). */
   nteGameReport: (installDir: string, platform?: string | null) =>
     desktopOnly<NteGameReport>('nte_game_report', { installDir, platform: platform || null }),
+  /** État Steam pour NTE (spec §20-21) : la distribution Steam avec Steam
+   * absent est un état identifiable « Ouvrir Steam », jamais un crash IPC. */
+  nteSteamCheck: (installDir: string, platform?: string | null) =>
+    desktopOnly<NteSteamStatus>('nte_steam_check', { installDir, platform: platform || null }),
+  /** Ouvre le client Steam (spec §20 : action « Ouvrir Steam »). */
+  openSteam: () => desktopOnly<void>('open_steam', {}),
+  /** Crée le dossier AuroraMods APRÈS validation du chemin NTE (spec §4). */
+  nteEnsureModsDir: (installDir: string) =>
+    desktopOnly<NteEnsureModsResult>('nte_ensure_mods_dir', { installDir }),
+  /** Validation des ensembles de mods (spec §5, §10) : un mod = un dossier
+   * .pak/.utoc/.ucas ; signale les ensembles incomplets sans toucher aux
+   * fichiers. */
+  nteValidateMods: (modsPath: string) =>
+    desktopOnly<NteModsValidation>('nte_validate_mods', { modsPath }),
   deleteStagedMod: (gameId: string, stageId: string) => desktopOnly<void>('delete_staged_mod', { gameId, stageId }),
   previewStagedDuplicates: (gameId: string) =>
     desktopOnly<StagedDuplicatePreview>('preview_staged_duplicates', { gameId }),

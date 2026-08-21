@@ -5943,7 +5943,7 @@ dependencies = [
 
 [[package]]
 name = "zailon"
-version = "1.153.0"
+version = "1.154.0"
 dependencies = [
  "base64 0.22.1",
  "dirs",

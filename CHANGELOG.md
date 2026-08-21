@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [1.154.0] - 2026-08-21
+
+> **Add-ons — l'écosystème local complet, 100 % hors ligne** : « Ajouter un
+> addon » devient un importeur réel (drop zone ZIP/dossier/manifest, analyse
+> sans exécution, installation transactionnelle), le créateur génère un
+> manifest toujours valide et exporte un ZIP déterministe, et « Tester mon
+> addon » valide l'addon dans un bac à sable avant partage. Côté NTE : état
+> réel des mods (activé ≠ chargé), lancement via Steam et installation du
+> loader Aurora avec sauvegarde/rollback. Toggles globaux corrigés — le
+> conteneur du switch n'est plus jamais plus haut que le rond.
+
 ### Added
 
 - **État réel des mods NTE** (`nte_mods_state`) : le diagnostic distingue

@@ -6317,6 +6317,7 @@ const NTE_EPIC_AUTH_ARGS: &[&str] = &["-AUTH_PASSWORD=1234", "-AUTH_TYPE=exchang
 const NTE_STAGING_PREFIX: &str = ".aurora-installing-";
 const NTE_DISABLED_SUFFIX: &str = ".disabled";
 const NTE_GROUP_PREFIX: &str = "AU GRP - ";
+const NTE_MOD_JSON: &str = "mod.json";
 
 fn nte_is_mod_file(name: &str) -> bool {
     Path::new(name)
@@ -20174,7 +20175,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn scan_nte_mods_splits_groups_into_entry_and_members() {
         let root = std::env::temp_dir().join(format!("zailon-nte-groups-{}", unix_timestamp()));
         let mods = root.join("AuroraMods");
@@ -20283,7 +20283,6 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
     }
 
-    #[test]
     #[test]
     fn nte_deploy_mod_creates_aurora_folder_with_hardlinks() {
         let root = std::env::temp_dir().join(format!("zailon-nte-deploy-{}", unix_timestamp()));

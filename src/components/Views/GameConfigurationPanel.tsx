@@ -26,7 +26,7 @@ import {
   type ZailonPerformancePolicies,
   type ZailonPriorityPolicy,
 } from '../../lib/performanceProfiles'
-import { native, pickExecutable, pickFolder, type NteGameReport, type NteLaunchPipeline, type NteModsState, type NteModsValidation, type NteSteamStatus, type ShortcutCreationResult } from '../../lib/native'
+import { native, pickExecutable, pickFolder, type NteGameReport, type NteLaunchPipeline, type NteLoaderInstallResult, type NteLoaderProbe, type NteLoaderUninstallResult, type NteModsState, type NteModsValidation, type NteSteamStatus, type ShortcutCreationResult } from '../../lib/native'
 import { shortcutPlanFor } from '../../lib/shortcuts'
 import { resolveGameInstallation, shortPathName } from '../../lib/installations'
 import { ProfileShareDialog } from '../UI/ProfileShareDialog'
@@ -894,6 +894,13 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
   // installés/activés/complets + loader détecté (DLL wrapper Aurora dans les
   // binaires du jeu). Le chargement runtime reste toujours NON confirmable.
   const [modsState, setModsState] = useState<NteModsState | null>(null)
+  // Spec §12 : installation RÉELLE du loader Aurora — détection d'une source
+  // locale, copie des DLL wrapper avec sauvegarde/manifest/rollback,
+  // désinstallation restauratrice. Jamais de téléchargement : ZAILON n'installe
+  // que ce que l'utilisateur possède déjà (§12, §16).
+  const [loaderProbe, setLoaderProbe] = useState<NteLoaderProbe | null>(null)
+  const [loaderBusy, setLoaderBusy] = useState(false)
+  const [loaderResult, setLoaderResult] = useState<string | null>(null)
   const [open, setOpen] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(`zailon:config-open:${game.id}`) || 'null') as string[] | null
@@ -957,6 +964,52 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report?.modsPath, installRoot, game.platform])
+
+  const refreshLoader = async () => {
+    if (!installRoot || !native.isDesktop()) return
+    setLoaderBusy(true)
+    try {
+      setLoaderProbe(await native.nteLoaderProbe(installRoot))
+    } catch {
+      setLoaderProbe(null)
+    } finally {
+      setLoaderBusy(false)
+    }
+  }
+
+  const installLoader = async (sourceDir?: string) => {
+    if (!installRoot || !native.isDesktop()) return
+    setLoaderBusy(true)
+    try {
+      let source = sourceDir
+      if (!source) source = loaderProbe?.sources[0]?.path
+      if (!source) source = (await pickFolder('Choisir le dossier racine d’Aurora (contenant Bin/Wrappers)')) ?? undefined
+      if (!source) return
+      const result: NteLoaderInstallResult = await native.nteLoaderInstall(installRoot, source)
+      setLoaderResult(`Loader installé depuis ${result.source} — ${result.installed.length ? `copié : ${result.installed.join(', ')}` : 'déjà en place'}${result.backedUp.length ? ` · originaux sauvegardés : ${result.backedUp.join(', ')}` : ''}.`)
+      await refreshLoader()
+    } catch (error) {
+      setLoaderResult(error instanceof Error ? error.message : String(error))
+      await refreshLoader()
+    } finally {
+      setLoaderBusy(false)
+    }
+  }
+
+  const uninstallLoader = async () => {
+    if (!installRoot || !native.isDesktop()) return
+    if (!window.confirm('Désinstaller le loader Aurora ? Les fichiers d’origine seront restaurés depuis les sauvegardes.')) return
+    setLoaderBusy(true)
+    try {
+      const result: NteLoaderUninstallResult = await native.nteLoaderUninstall(installRoot)
+      setLoaderResult(result.message)
+      await refreshLoader()
+    } catch (error) {
+      setLoaderResult(error instanceof Error ? error.message : String(error))
+    } finally {
+      setLoaderBusy(false)
+    }
+  }
 
   const runValidation = async () => {
     if (!report?.modsPath || !native.isDesktop()) return
@@ -1112,6 +1165,31 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
           <p className="pl-5 text-[11px] text-white/45">Chargement runtime : non confirmable — la preuve nécessite un hook actif au lancement, jamais déduite de la présence des fichiers.</p>
         </div>
       )}
+
+      {/* Spec §12 : le loader s'installe RÉELLEMENT — depuis une source Aurora
+          locale (détectée ou choisie), avec sauvegarde des originaux, manifest
+          sha256 et rollback. Jamais de téléchargement : ZAILON n'installe que
+          ce que l'utilisateur possède déjà (§12, §16). */}
+      <div className="mt-2 space-y-1.5 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="flex items-center gap-2 text-[11px] font-semibold text-white/68"><ShieldCheck size={13} className="shrink-0 text-white/40" />Loader Aurora (installé localement)</p>
+          <button type="button" onClick={() => void refreshLoader()} disabled={loaderBusy} title="Détecter les installations Aurora sur ce système" className="rounded-md border border-white/[0.07] p-1 text-white/40 hover:bg-white/[0.06] hover:text-gold disabled:opacity-40"><RefreshCw size={12} className={loaderBusy ? 'animate-spin' : ''} /></button>
+        </div>
+        {loaderProbe?.installed
+          ? <p className="pl-5 text-[11px] text-emerald-100/75">Présent dans le jeu : {loaderProbe.installedDlls.join(', ')} — les .pak peuvent être chargés.</p>
+          : <p className="pl-5 text-[11px] text-amber-100/75">Aucun loader dans le jeu — les .pak ne chargeront pas tant que les DLL wrapper ne sont pas installées.</p>}
+        {loaderProbe && loaderProbe.sources.length > 0 && (
+          <p className="pl-5 text-[11px] text-white/45">Source Aurora détectée : {loaderProbe.sources[0].path} ({loaderProbe.sources[0].dlls.join(', ')}){loaderProbe.sources[0].appIdMatch ? ' · AppID NTE confirmé' : ''}.</p>
+        )}
+        {loaderResult && <p className="pl-5 text-[11px] text-white/55">{loaderResult}</p>}
+        <div className="flex flex-wrap items-center gap-2 pl-5">
+          <button type="button" onClick={() => void installLoader()} disabled={loaderBusy} className="rounded-lg bg-gold px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90 disabled:cursor-not-allowed disabled:opacity-40">Installer le loader</button>
+          {loaderProbe?.installed && (
+            <button type="button" onClick={() => void uninstallLoader()} disabled={loaderBusy} className="rounded-lg border border-red-300/15 px-3 py-1.5 text-[11px] text-red-200/70 hover:bg-red-300/[0.05] disabled:cursor-not-allowed disabled:opacity-40">Désinstaller le loader</button>
+          )}
+          <span className="text-[10px] text-white/32">Source : Aurora locale ou dossier choisi — jamais téléchargé.</span>
+        </div>
+      </div>
 
       {/* Spec §5, §10 : un mod = un ensemble .pak/.utoc/.ucas ; les ensembles
           incomplets sont signalés AVANT lancement (jamais de faux « NTE lancé »). */}

@@ -7065,6 +7065,12 @@ struct NteLaunchPipeline {
 /// moins une de ces DLL dans les binaires est la PREUVE qu'un loader est
 /// installé — sans elle, les .pak ne chargent pas, point.
 const NTE_LOADER_DLLS: &[&str] = &["version.dll", "dsound.dll", "dwmapi.dll"];
+/// Sous-dossier des DLL wrapper dans une installation Aurora (`Bin/Wrappers/`).
+const NTE_LOADER_AURORA_WRAPPERS_REL: &str = "Bin/Wrappers";
+/// Manifest du loader géré par ZAILON, relatif au Win64 du jeu :
+/// `.zailon-loader/manifest.json` (+ `backup/` pour les fichiers d'origine).
+const NTE_LOADER_MANIFEST_REL: &str = ".zailon-loader/manifest.json";
+const NTE_LOADER_BACKUP_REL: &str = ".zailon-loader/backup";
 
 /// Vrai si un des DLL d'injection Everlight est présent dans les binaires.
 fn nte_everlight_loader_present(binaries_path: &Path) -> bool {
@@ -7523,6 +7529,337 @@ fn nte_launch_game(
             })
         }
     }
+}
+
+// ── NTE : installation du loader (spec §12) ────────────────────────────────
+// Le bouton « installer le loader » fait RÉELLEMENT quelque chose : il copie
+// les DLL wrapper Aurora (version/dsound/dwmapi) depuis une installation
+// Aurora LOCALE de l'utilisateur vers le Win64 du jeu — avec sauvegarde des
+// fichiers existants, manifest sha256 et rollback à la moindre erreur. JAMAIS
+// de téléchargement : ZAILON n'installe que ce que l'utilisateur possède déjà
+// (§12, §16). Tout est réversible (désinstallation = restauration).
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteLoaderSource {
+    /// Racine de l'installation Aurora détectée.
+    path: String,
+    /// DLL wrapper présentes dans `Bin/Wrappers/`.
+    dlls: Vec<String>,
+    /// Vrai si `steam_appid.txt` correspond à l'AppID NTE (4508340) — le
+    /// marqueur Aurora vérifié dans son source, jamais deviné.
+    app_id_match: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteLoaderProbe {
+    /// DLL wrapper présentes dans le Win64 du jeu (loader déjà installé ?).
+    installed_dlls: Vec<String>,
+    /// Vrai si au moins une DLL wrapper est déjà dans le Win64.
+    installed: bool,
+    /// Sources Aurora locales détectées (Bin/Wrappers valide).
+    sources: Vec<NteLoaderSource>,
+}
+
+/// Racines candidates pour une installation Aurora : dossiers d'application
+/// standards (%LOCALAPPDATA%, %APPDATA%, Program Files…) — l'utilisateur peut
+/// aussi fournir le dossier racine lui-même (sélecteur de dossier).
+fn aurora_install_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            let base = PathBuf::from(local);
+            candidates.push(base.join("Aurora"));
+            candidates.push(base.join("Programs").join("Aurora"));
+        }
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            candidates.push(PathBuf::from(appdata).join("Aurora"));
+        }
+        if let Some(programs) = std::env::var_os("PROGRAMFILES") {
+            candidates.push(PathBuf::from(programs).join("Aurora"));
+        }
+        if let Some(programs_x86) = std::env::var_os("PROGRAMFILES(X86)") {
+            candidates.push(PathBuf::from(programs_x86).join("Aurora"));
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            candidates.push(PathBuf::from(home).join("Aurora"));
+        }
+    }
+    candidates
+}
+
+/// Valide une source Aurora locale : `Bin/Wrappers/` contenant ≥ 1 DLL wrapper
+/// (le mécanisme de hook réel, spec §12). `steam_appid.txt` à la racine et
+/// correspondant à NTE renforce la confiance mais n'est pas exigé (une
+/// installation Aurora fraîche peut ne pas l'avoir encore écrit).
+fn nte_loader_source_for(root: &Path) -> Option<NteLoaderSource> {
+    let wrappers = root.join(NTE_LOADER_AURORA_WRAPPERS_REL);
+    if !wrappers.is_dir() {
+        return None;
+    }
+    let dlls = NTE_LOADER_DLLS
+        .iter()
+        .filter(|name| wrappers.join(name).is_file())
+        .map(|name| (*name).to_string())
+        .collect::<Vec<_>>();
+    if dlls.is_empty() {
+        return None;
+    }
+    let app_id_match = fs::read_to_string(root.join("steam_appid.txt"))
+        .map(|raw| raw.contains(&NTE_STEAM_APP_ID.to_string()))
+        .unwrap_or(false);
+    Some(NteLoaderSource {
+        path: root.to_string_lossy().to_string(),
+        dlls,
+        app_id_match,
+    })
+}
+
+/// Détecte un loader déjà présent dans le jeu + les sources Aurora locales
+/// (spec §12) : jamais un téléchargement, toujours une détection.
+#[tauri::command]
+fn nte_loader_probe(install_dir: String) -> Result<NteLoaderProbe, String> {
+    let root = PathBuf::from(&install_dir);
+    let binaries_path = root.join(NTE_CLIENT_WIN64);
+    let installed_dlls = NTE_LOADER_DLLS
+        .iter()
+        .filter(|name| binaries_path.join(name).is_file())
+        .map(|name| (*name).to_string())
+        .collect::<Vec<_>>();
+
+    let mut sources = Vec::new();
+    for candidate in aurora_install_candidates() {
+        if let Some(source) = nte_loader_source_for(&candidate) {
+            sources.push(source);
+        }
+    }
+    sources.sort_by(|left, right| left.path.cmp(&right.path));
+    sources.dedup_by(|left, right| left.path == right.path);
+    let installed = !installed_dlls.is_empty();
+
+    Ok(NteLoaderProbe {
+        installed_dlls,
+        installed,
+        sources,
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteLoaderInstallResult {
+    /// DLL copiées depuis la source Aurora.
+    installed: Vec<String>,
+    /// DLL déjà identiques dans le Win64 (aucune copie nécessaire).
+    skipped: Vec<String>,
+    /// DLL d'origine sauvegardées avant remplacement.
+    backed_up: Vec<String>,
+    /// Chemin du manifest `.zailon-loader/manifest.json`.
+    manifest_path: String,
+    /// Racine de la source Aurora utilisée.
+    source: String,
+}
+
+/// Installe le loader Aurora (spec §12) : copie les DLL wrapper depuis une
+/// source Aurora LOCALE vers le Win64 du jeu. Transactionnel : sauvegarde des
+/// fichiers existants, manifest sha256, rollback à la moindre erreur. Refuse
+/// de réinstaller par-dessus un loader déjà géré par ZAILON.
+#[tauri::command]
+fn nte_loader_install(
+    install_dir: String,
+    source_dir: String,
+) -> Result<NteLoaderInstallResult, String> {
+    let root = PathBuf::from(&install_dir);
+    let source_root = PathBuf::from(&source_dir);
+    let source = nte_loader_source_for(&source_root).ok_or_else(|| {
+        "Aucun wrapper Aurora (Bin/Wrappers/version.dll, dsound.dll, dwmapi.dll) dans le dossier source. Choisissez le dossier racine d'une installation Aurora.".to_string()
+    })?;
+    let binaries = root.join(NTE_CLIENT_WIN64);
+    if !binaries.is_dir() {
+        return Err(
+            "Le dossier Client/WindowsNoEditor/HT/Binaries/Win64 du jeu est introuvable — vérifiez le chemin de l'installation."
+                .to_string(),
+        );
+    }
+    let manifest_dir = binaries.join(".zailon-loader");
+    let backup_dir = manifest_dir.join("backup");
+    let manifest_path = manifest_dir.join("manifest.json");
+    if manifest_path.exists() {
+        return Err(
+            "Un loader est déjà géré par ZAILON (manifest présent). Désinstallez d'abord (« Désinstaller le loader »), puis réinstallez."
+                .to_string(),
+        );
+    }
+
+    let wrappers = source_root.join(NTE_LOADER_AURORA_WRAPPERS_REL);
+    // 1. Plan : hash source + hash cible — AUCUN écrit avant validation complète.
+    let mut plan = Vec::new();
+    let mut skipped = Vec::new();
+    for name in &source.dlls {
+        let source_file = wrappers.join(name);
+        let target = binaries.join(name);
+        if !source_file.is_file() {
+            continue;
+        }
+        let source_hash = file_sha256(&source_file)?;
+        if target.is_file() {
+            let target_hash = file_sha256(&target)?;
+            if target_hash == source_hash {
+                skipped.push(name.clone());
+                continue;
+            }
+        }
+        plan.push((name.clone(), source_file, target, source_hash));
+    }
+
+    // 2. Écriture transactionnelle avec rollback complet en cas d'erreur.
+    fs::create_dir_all(&backup_dir).map_err(to_error)?;
+    let mut done: Vec<(String, Option<PathBuf>)> = Vec::new();
+    let mut installed = Vec::new();
+    let mut backed_up = Vec::new();
+    let mut manifest_files = Vec::new();
+    let write_result = (|| {
+        for (name, source_file, target, hash) in &plan {
+            let backup_name = if target.exists() {
+                let backup = backup_dir.join(format!("{name}.bak"));
+                fs::copy(target, &backup).map_err(to_error)?;
+                backed_up.push(name.clone());
+                Some(format!("{name}.bak"))
+            } else {
+                None
+            };
+            fs::copy(source_file, target).map_err(to_error)?;
+            installed.push(name.clone());
+            manifest_files.push(serde_json::json!({
+                "name": name,
+                "sha256": hash,
+                "backup": backup_name,
+            }));
+            done.push((name.clone(), backup_name.map(|name| backup_dir.join(name))));
+        }
+        for name in &skipped {
+            let hash = file_sha256(&wrappers.join(name))?;
+            manifest_files.push(serde_json::json!({
+                "name": name,
+                "sha256": hash,
+                "backup": serde_json::Value::Null,
+            }));
+        }
+        Ok::<_, String>(())
+    })();
+    if let Err(error) = write_result {
+        // Rollback : retirer les DLL copiées, restaurer les sauvegardes.
+        for (name, backup) in done.iter().rev() {
+            let _ = fs::remove_file(binaries.join(name));
+            if let Some(backup) = backup {
+                let _ = fs::copy(backup, binaries.join(name));
+            }
+        }
+        let _ = fs::remove_dir_all(&manifest_dir);
+        return Err(format!(
+            "Installation du loader interrompue — rollback effectué : {error}"
+        ));
+    }
+
+    let manifest = serde_json::json!({
+        "version": 1,
+        "installed_at": unix_timestamp(),
+        "source": source.path,
+        "files": manifest_files,
+    });
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).map_err(to_error)?,
+    )
+    .map_err(to_error)?;
+
+    Ok(NteLoaderInstallResult {
+        installed,
+        skipped,
+        backed_up,
+        manifest_path: manifest_path.to_string_lossy().to_string(),
+        source: source.path,
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteLoaderUninstallResult {
+    /// DLL retirées du Win64.
+    removed: Vec<String>,
+    /// DLL d'origine restaurées depuis les sauvegardes.
+    restored: Vec<String>,
+    /// Vrai si le manifest ZAILON a été supprimé.
+    manifest_removed: bool,
+    /// Message lisible (français).
+    message: String,
+}
+
+/// Désinstalle le loader géré par ZAILON (spec §12) : retire les DLL copiées,
+/// restaure les fichiers d'origine depuis les sauvegardes, supprime le
+/// manifest. Sans manifest ZAILON, les DLL présentes ne sont JAMAIS supprimées
+/// (elles peuvent appartenir à Aurora) — message honnête.
+#[tauri::command]
+fn nte_loader_uninstall(install_dir: String) -> Result<NteLoaderUninstallResult, String> {
+    let root = PathBuf::from(&install_dir);
+    let binaries = root.join(NTE_CLIENT_WIN64);
+    let manifest_dir = binaries.join(".zailon-loader");
+    let backup_dir = manifest_dir.join("backup");
+    let manifest_path = manifest_dir.join("manifest.json");
+    if !manifest_path.exists() {
+        let present = NTE_LOADER_DLLS
+            .iter()
+            .filter(|name| binaries.join(name).is_file())
+            .count();
+        return Ok(NteLoaderUninstallResult {
+            removed: Vec::new(),
+            restored: Vec::new(),
+            manifest_removed: false,
+            message: if present > 0 {
+                "Des DLL wrapper sont présentes dans le jeu mais ne sont pas gérées par ZAILON (aucun manifest) — ZAILON ne les supprime pas (elles peuvent appartenir à une autre installation).".to_string()
+            } else {
+                "Aucun loader installé.".to_string()
+            },
+        });
+    }
+    let raw = fs::read_to_string(&manifest_path).map_err(to_error)?;
+    let value: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|error| format!("Manifest illisible : {error}"))?;
+    let files = value
+        .get("files")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut removed = Vec::new();
+    let mut restored = Vec::new();
+    for entry in files {
+        let Some(name) = entry.get("name").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        let target = binaries.join(name);
+        if target.is_file() {
+            fs::remove_file(&target).map_err(to_error)?;
+            removed.push(name.to_string());
+        }
+        if let Some(backup) = entry.get("backup").and_then(|value| value.as_str()) {
+            let backup_path = backup_dir.join(backup);
+            if backup_path.is_file() {
+                fs::copy(&backup_path, &target).map_err(to_error)?;
+                restored.push(name.to_string());
+            }
+        }
+    }
+    let _ = fs::remove_dir_all(&manifest_dir);
+    Ok(NteLoaderUninstallResult {
+        removed,
+        restored,
+        manifest_removed: true,
+        message: "Loader désinstallé — les fichiers d'origine ont été restaurés.".to_string(),
+    })
 }
 
 /// `mod.json` Aurora : à la racine du mod, sinon un niveau plus bas.
@@ -20794,6 +21131,147 @@ mod tests {
     }
 
     #[test]
+    fn nte_loader_source_for_validates_aurora_layout() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-loader-src-{}", unix_timestamp()));
+        // Bin/Wrappers absent → aucune source.
+        fs::create_dir_all(&root).unwrap();
+        assert!(nte_loader_source_for(&root).is_none());
+
+        // Wrappers présents mais sans DLL connue → aucune source.
+        fs::create_dir_all(root.join("Bin/Wrappers")).unwrap();
+        fs::write(root.join("Bin/Wrappers/unknown.dll"), b"x").unwrap();
+        assert!(nte_loader_source_for(&root).is_none());
+
+        // version.dll présent → source valide ; steam_appid.txt absent → pas de
+        // correspondance AppID (mais la source reste exploitable).
+        fs::write(root.join("Bin/Wrappers/version.dll"), b"wrapper").unwrap();
+        let source = nte_loader_source_for(&root).unwrap();
+        assert!(source.dlls.contains(&"version.dll".to_string()));
+        assert!(!source.app_id_match);
+
+        // steam_appid.txt = 4508340 → AppID confirmé (marqueur Aurora).
+        fs::write(root.join("steam_appid.txt"), "4508340").unwrap();
+        let source = nte_loader_source_for(&root).unwrap();
+        assert!(source.app_id_match);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn nte_loader_install_backs_up_restores_and_skips_identical() {
+        let root =
+            std::env::temp_dir().join(format!("zailon-nte-loader-install-{}", unix_timestamp()));
+        // Jeu : Win64 avec un version.dll existant (différent du wrapper).
+        let win64 = root.join("Client/WindowsNoEditor/HT/Binaries/Win64");
+        fs::create_dir_all(&win64).unwrap();
+        fs::write(win64.join("version.dll"), b"original-version").unwrap();
+        // Source Aurora : version.dll + dsound.dll.
+        let aurora = root.join("Aurora");
+        fs::create_dir_all(aurora.join("Bin/Wrappers")).unwrap();
+        fs::write(aurora.join("Bin/Wrappers/version.dll"), b"wrapper-version").unwrap();
+        fs::write(aurora.join("Bin/Wrappers/dsound.dll"), b"wrapper-dsound").unwrap();
+        fs::write(aurora.join("steam_appid.txt"), "4508340").unwrap();
+
+        // Installer : version.dll remplacé (sauvegardé), dsound.dll ajouté.
+        let result = nte_loader_install(
+            root.to_string_lossy().to_string(),
+            aurora.to_string_lossy().to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            result.installed,
+            vec!["version.dll".to_string(), "dsound.dll".to_string()]
+        );
+        assert!(result.backed_up.contains(&"version.dll".to_string()));
+        assert!(result.skipped.is_empty());
+        assert_eq!(
+            fs::read(win64.join("version.dll")).unwrap(),
+            b"wrapper-version"
+        );
+        // Manifest écrit avec sha256.
+        let manifest = fs::read_to_string(win64.join(".zailon-loader/manifest.json")).unwrap();
+        assert!(manifest.contains("\"sha256\""));
+        assert!(manifest.contains("version.dll"));
+
+        // Réinstaller avec la même source : tout est identique → skipped.
+        let result = nte_loader_install(
+            root.to_string_lossy().to_string(),
+            aurora.to_string_lossy().to_string(),
+        )
+        .unwrap_err();
+        assert!(result.contains("manifest présent"));
+
+        // Désinstaller : version.dll restauré, dsound.dll retiré.
+        let uninstall = nte_loader_uninstall(root.to_string_lossy().to_string()).unwrap();
+        assert!(uninstall.removed.contains(&"dsound.dll".to_string()));
+        assert!(uninstall.restored.contains(&"version.dll".to_string()));
+        assert!(uninstall.manifest_removed);
+        assert_eq!(
+            fs::read(win64.join("version.dll")).unwrap(),
+            b"original-version"
+        );
+        assert!(!win64.join("dsound.dll").exists());
+        assert!(!win64.join(".zailon-loader").exists());
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn nte_loader_install_rolls_back_midway() {
+        let root =
+            std::env::temp_dir().join(format!("zailon-nte-loader-rollback-{}", unix_timestamp()));
+        let win64 = root.join("Client/WindowsNoEditor/HT/Binaries/Win64");
+        fs::create_dir_all(&win64).unwrap();
+        // version.dll EXISTANT (sera sauvegardé puis remplacé)…
+        fs::write(win64.join("version.dll"), b"original-version").unwrap();
+        // …et dsound.dll est un DOSSIER : la copie échouera APRÈS que
+        // version.dll ait été installé → rollback intermédiaire obligatoire.
+        fs::create_dir_all(win64.join("dsound.dll")).unwrap();
+        let aurora = root.join("Aurora");
+        fs::create_dir_all(aurora.join("Bin/Wrappers")).unwrap();
+        fs::write(aurora.join("Bin/Wrappers/version.dll"), b"wrapper-version").unwrap();
+        fs::write(aurora.join("Bin/Wrappers/dsound.dll"), b"wrapper-dsound").unwrap();
+
+        let error = nte_loader_install(
+            root.to_string_lossy().to_string(),
+            aurora.to_string_lossy().to_string(),
+        )
+        .unwrap_err();
+        assert!(error.contains("rollback"));
+        // version.dll restauré à l'original (jamais le wrapper).
+        assert_eq!(
+            fs::read(win64.join("version.dll")).unwrap(),
+            b"original-version"
+        );
+        // Aucun manifest, aucun répertoire de gestion laissé.
+        assert!(!win64.join(".zailon-loader").exists());
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn nte_loader_uninstall_without_manifest_leaves_files_alone() {
+        let root =
+            std::env::temp_dir().join(format!("zailon-nte-loader-unmanaged-{}", unix_timestamp()));
+        let win64 = root.join("Client/WindowsNoEditor/HT/Binaries/Win64");
+        fs::create_dir_all(&win64).unwrap();
+        // DLL présente mais NON gérée par ZAILON (elle peut appartenir à Aurora
+        // elle-même) → jamais supprimée (spec §12, §16).
+        fs::write(win64.join("version.dll"), b"aurora-managed").unwrap();
+
+        let result = nte_loader_uninstall(root.to_string_lossy().to_string()).unwrap();
+        assert!(!result.manifest_removed);
+        assert!(result.removed.is_empty());
+        assert!(result.message.contains("ne les supprime pas"));
+        assert_eq!(
+            fs::read(win64.join("version.dll")).unwrap(),
+            b"aurora-managed"
+        );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn steam_process_present_detects_steam_exe() {
         let candidate = |name: &str| process_scanner::ProcessCandidate {
             pid: 1,
@@ -21276,6 +21754,9 @@ pub fn run() {
             nte_launch_pipeline,
             nte_mods_state,
             nte_launch_game,
+            nte_loader_probe,
+            nte_loader_install,
+            nte_loader_uninstall,
             nte_deploy_mod,
             list_staged_mods,
             scan_mod_import,

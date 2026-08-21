@@ -23,6 +23,14 @@
   mods » dans la carte NTE, « 0/0 valides » remplacé par « aucun mod dans
   AuroraMods », ligne « Chargement runtime : non confirmable » dans le
   diagnostic partageable.
+- **Installation réelle du loader Aurora** (`nte_loader_probe` /
+  `nte_loader_install` / `nte_loader_uninstall`) : détection des sources
+  Aurora locales (`Bin/Wrappers/` + `steam_appid.txt` 4508340), copie des
+  DLL wrapper (`version.dll`/`dsound.dll`/`dwmapi.dll`) vers le Win64 du jeu
+  avec sauvegarde des originaux, manifest sha256 et rollback transactionnel.
+  Désinstallation restauratrice (manifest ZAILON) ; sans manifest, les DLL
+  présentes ne sont JAMAIS supprimées. Jamais de téléchargement : ZAILON
+  n'installe que ce que l'utilisateur possède déjà (spec §12, §16).
 
 ## [1.153.0] - 2026-08-21
 

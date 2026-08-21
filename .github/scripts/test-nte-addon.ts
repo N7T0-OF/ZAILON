@@ -175,6 +175,38 @@ test('état réel des mods + lancement via Steam (spec §4-5, §8, §18) : jamai
   assert.ok(panel.includes('aucun mod dans AuroraMods'), '« 0/0 valides » remplacé par un message honnête')
 })
 
+test('loader Aurora (spec §12) : installation réelle depuis une source locale, jamais téléchargée', () => {
+  const rust = read('src-tauri/src/lib.rs')
+  const native = read('src/lib/native.ts')
+  const panel = read('src/components/Views/GameConfigurationPanel.tsx')
+
+  // Backend natif : probe + install + uninstall enregistrés.
+  for (const command of ['nte_loader_probe', 'nte_loader_install', 'nte_loader_uninstall']) {
+    assert.ok(rust.includes(command), `commande native ${command}`)
+    assert.ok(rust.includes(`            ${command},`), `${command} enregistrée dans invoke_handler`)
+  }
+  // Le mécanisme réel d'Aurora : Bin/Wrappers + steam_appid.txt (AppID NTE).
+  assert.ok(rust.includes('NTE_LOADER_AURORA_WRAPPERS_REL'), 'chemin Bin/Wrappers d\'Aurora')
+  assert.ok(rust.includes('.zailon-loader/manifest.json'), 'manifest du loader géré par ZAILON')
+  assert.ok(rust.includes('rollback'), 'rollback transactionnel en cas d\'échec')
+  assert.ok(rust.includes('ne les supprime pas'), 'DLL non gérées jamais supprimées (sans manifest)')
+  // Jamais de téléchargement : copie depuis une source LOCALE uniquement.
+  assert.ok(rust.includes('JAMAIS') && rust.includes('téléchargement'), 'principe « jamais de téléchargement » documenté')
+
+  // Bindings frontend.
+  assert.ok(native.includes('nteLoaderProbe'), 'binding natif nteLoaderProbe')
+  assert.ok(native.includes('nteLoaderInstall'), 'binding natif nteLoaderInstall')
+  assert.ok(native.includes('nteLoaderUninstall'), 'binding natif nteLoaderUninstall')
+  assert.ok(native.includes('NteLoaderProbe'), 'type NteLoaderProbe')
+
+  // UI : le bouton fait réellement quelque chose (installer/désinstaller).
+  assert.ok(panel.includes('Installer le loader'), 'bouton « Installer le loader » (spec §12)')
+  assert.ok(panel.includes('Désinstaller le loader'), 'bouton « Désinstaller le loader » (spec §12)')
+  assert.ok(panel.includes('native.nteLoaderInstall(installRoot, source)'), 'installation réelle depuis la source Aurora')
+  assert.ok(panel.includes('Bin/Wrappers'), 'source décrite par son mécanisme réel')
+  assert.ok(panel.includes('jamais téléchargé'), 'principe « jamais téléchargé » affiché dans l\'UI')
+})
+
 test('groupes de mods Aurora (spec §25) : entrée groupe + membres, toggle bulk, validation', () => {
   const rust = read('src-tauri/src/lib.rs')
   const native = read('src/lib/native.ts')

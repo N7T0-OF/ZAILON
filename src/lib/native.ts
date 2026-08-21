@@ -432,6 +432,38 @@ export interface NteLaunchResult {
   message: string
 }
 
+/** Source Aurora locale détectée (spec §12) : `Bin/Wrappers/` valide. */
+export interface NteLoaderSource {
+  path: string
+  dlls: string[]
+  appIdMatch: boolean
+}
+
+/** Détection du loader : installé dans le jeu + sources Aurora locales. */
+export interface NteLoaderProbe {
+  installedDlls: string[]
+  installed: boolean
+  sources: NteLoaderSource[]
+}
+
+/** Résultat de l'installation du loader Aurora (spec §12) : les DLL copiées,
+ * celles déjà identiques (skipped), les fichiers d'origine sauvegardés. */
+export interface NteLoaderInstallResult {
+  installed: string[]
+  skipped: string[]
+  backedUp: string[]
+  manifestPath: string
+  source: string
+}
+
+/** Résultat de la désinstallation : DLL retirées + fichiers restaurés. */
+export interface NteLoaderUninstallResult {
+  removed: string[]
+  restored: string[]
+  manifestRemoved: boolean
+  message: string
+}
+
 export interface CyberpunkRepairMove {
   from: string
   to: string
@@ -1096,6 +1128,21 @@ export const native = {
    * launcher direct. */
   nteLaunchGame: (installDir: string, platform: string | null, launcherPath: string | null) =>
     desktopOnly<NteLaunchResult>('nte_launch_game', { installDir, platform, launcherPath }),
+  /** Détecte un loader déjà présent + les sources Aurora locales (spec §12) —
+   * jamais un téléchargement, toujours une détection. */
+  nteLoaderProbe: (installDir: string) =>
+    desktopOnly<NteLoaderProbe>('nte_loader_probe', { installDir }),
+  /** Installe le loader Aurora depuis une source LOCALE (spec §12) : copie
+   * les DLL wrapper vers le Win64 du jeu avec sauvegarde, manifest sha256 et
+   * rollback — transactionnel, refuse de réinstaller par-dessus un loader
+   * déjà géré par ZAILON. */
+  nteLoaderInstall: (installDir: string, sourceDir: string) =>
+    desktopOnly<NteLoaderInstallResult>('nte_loader_install', { installDir, sourceDir }),
+  /** Désinstalle le loader géré par ZAILON : retire les DLL, restaure les
+   * fichiers d'origine, supprime le manifest. Sans manifest ZAILON, les DLL
+   * présentes ne sont JAMAIS supprimées (message honnête). */
+  nteLoaderUninstall: (installDir: string) =>
+    desktopOnly<NteLoaderUninstallResult>('nte_loader_uninstall', { installDir }),
   /** Staging par hardlinks NTE (spec §9) : déploie un paquet staged vers
    * AuroraMods en LIANT les .pak/.utoc/.ucas (repli copie si le système de
    * fichiers refuse le lien). Transactionnel, écrit mod.json + deployedPath. */

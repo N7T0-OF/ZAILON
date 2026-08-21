@@ -18502,6 +18502,308 @@ fn addon_install_staged(archive_path: String, install_dir: String) -> Result<(),
     }
 }
 
+// ── Import d'addon : analyse + installation depuis un dossier ───────────────
+// « Ajouter un addon » accepte un .zip (`.zailon-addon`), un dossier ou un
+// manifest seul. L'ANALYSE lit l'archive/le dossier SANS rien extraire ni
+// exécuter : elle retourne le manifest, la liste des fichiers, les compteurs
+// PAK/UTOC/UCAS, la taille et les problèmes de sécurité (Zip Slip, symlinks,
+// archives imbriquées, limites). L'aperçu est affiché AVANT installation ;
+// l'installation reste transactionnelle (staging → swap → rollback).
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AddonAnalyzeResult {
+    /// "zip" | "folder"
+    kind: String,
+    /// Contenu brut de `manifest.json` (racine) si trouvé — jamais exécuté.
+    manifest_text: Option<String>,
+    /// Nombre de fichiers (hors dossiers).
+    entry_count: usize,
+    /// Taille totale des fichiers, en octets.
+    total_size: u64,
+    /// Fichiers .pak détectés (mods PAK Unreal — spec §9).
+    pak_count: usize,
+    /// Fichiers .utoc détectés.
+    utoc_count: usize,
+    /// Fichiers .ucas détectés.
+    ucas_count: usize,
+    /// `icon.png`/`icon.jpg`/`icon.webp` à la racine.
+    has_icon: bool,
+    /// `README.md` à la racine.
+    has_readme: bool,
+    /// `LICENSE`/`LICENSE.md`/`LICENSE.txt` à la racine.
+    has_license: bool,
+    /// Problèmes de sécurité ou de structure (affichés avant installation).
+    issues: Vec<String>,
+}
+
+const MAX_ADDON_ANALYZE_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_ADDON_ANALYZE_ENTRIES: usize = 100_000;
+
+/// Classe un fichier d'addon (compteurs + métadonnées), pur et testable.
+fn classify_addon_file(relative: &Path, result: &mut AddonAnalyzeResult) {
+    let lower = relative.to_string_lossy().to_ascii_lowercase();
+    if lower.ends_with(".pak") {
+        result.pak_count += 1;
+    } else if lower.ends_with(".utoc") {
+        result.utoc_count += 1;
+    } else if lower.ends_with(".ucas") {
+        result.ucas_count += 1;
+    }
+    if lower.ends_with(".zip") || lower.ends_with(".zailon-addon") {
+        result.issues.push(format!(
+            "Archive imbriquée détectée (refusée) : {}",
+            relative.display()
+        ));
+    }
+    if relative == Path::new("icon.png")
+        || relative == Path::new("icon.jpg")
+        || relative == Path::new("icon.webp")
+    {
+        result.has_icon = true;
+    }
+    if relative == Path::new("README.md") {
+        result.has_readme = true;
+    }
+    if relative == Path::new("LICENSE")
+        || relative == Path::new("LICENSE.md")
+        || relative == Path::new("LICENSE.txt")
+    {
+        result.has_license = true;
+    }
+}
+
+/// Analyse une archive ZIP SANS extraire : répertoire central + manifest en
+/// mémoire. Zip Slip et symlinks signalés, jamais extraits (spec §6).
+fn addon_analyze_zip(path: &Path, bytes: &[u8]) -> Result<AddonAnalyzeResult, String> {
+    let mut result = AddonAnalyzeResult {
+        kind: "zip".into(),
+        ..Default::default()
+    };
+    if !is_zip_archive(bytes) {
+        return Err("Le fichier n'est pas une archive ZIP valide.".into());
+    }
+    let file = fs::File::open(path).map_err(to_error)?;
+    let mut zip = zip::ZipArchive::new(file).map_err(to_error)?;
+    if zip.len() > MAX_ADDON_ANALYZE_ENTRIES {
+        return Err("L'archive contient trop d'entrées.".into());
+    }
+    for index in 0..zip.len() {
+        let entry = zip.by_index(index).map_err(to_error)?;
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry.name().to_string();
+        let relative = match entry.enclosed_name() {
+            Some(relative) => relative,
+            None => {
+                result
+                    .issues
+                    .push(format!("Chemin non sûr dans l'archive (Zip Slip) : {name}"));
+                continue;
+            }
+        };
+        if validate_archive_relative(&relative).is_err() {
+            result
+                .issues
+                .push(format!("Chemin non sûr dans l'archive : {name}"));
+            continue;
+        }
+        if archive_is_symlink(entry.unix_mode()) {
+            result
+                .issues
+                .push(format!("Lien symbolique refusé : {name}"));
+            continue;
+        }
+        result.total_size = result.total_size.saturating_add(entry.size());
+        if result.total_size > MAX_ADDON_ANALYZE_BYTES {
+            result
+                .issues
+                .push("Archive trop volumineuse (limite 512 Mo après extraction).".into());
+            break;
+        }
+        result.entry_count += 1;
+        classify_addon_file(&relative, &mut result);
+        if relative == Path::new("manifest.json") {
+            let mut entry = zip.by_index(index).map_err(to_error)?;
+            let mut text = String::new();
+            use std::io::Read;
+            entry.read_to_string(&mut text).map_err(to_error)?;
+            result.manifest_text = Some(text);
+        }
+    }
+    if result.manifest_text.is_none() {
+        result
+            .issues
+            .push("manifest.json introuvable à la racine de l'archive.".into());
+    }
+    Ok(result)
+}
+
+/// Analyse un dossier d'addon : marche récursive, chemins relatifs sûrs par
+/// construction, symlinks refusés, limites de taille/entrées (spec §6).
+fn addon_analyze_folder(path: &Path) -> Result<AddonAnalyzeResult, String> {
+    let mut result = AddonAnalyzeResult {
+        kind: "folder".into(),
+        ..Default::default()
+    };
+    for entry in WalkDir::new(path)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        let relative = match entry.path().strip_prefix(path) {
+            Ok(relative) => relative.to_path_buf(),
+            Err(_) => continue,
+        };
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+        if entry.file_type().is_symlink() {
+            result
+                .issues
+                .push(format!("Lien symbolique refusé : {}", relative.display()));
+            continue;
+        }
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        result.total_size = result
+            .total_size
+            .saturating_add(entry.metadata().map(|meta| meta.len()).unwrap_or(0));
+        if result.total_size > MAX_ADDON_ANALYZE_BYTES {
+            result
+                .issues
+                .push("Dossier trop volumineux (limite 512 Mo).".into());
+            break;
+        }
+        if result.entry_count >= MAX_ADDON_ANALYZE_ENTRIES {
+            result
+                .issues
+                .push("Trop de fichiers (limite 100 000).".into());
+            break;
+        }
+        result.entry_count += 1;
+        classify_addon_file(&relative, &mut result);
+        if relative == Path::new("manifest.json") {
+            result.manifest_text = fs::read_to_string(entry.path()).ok();
+        }
+    }
+    if result.manifest_text.is_none() {
+        result
+            .issues
+            .push("manifest.json introuvable à la racine du dossier.".into());
+    }
+    Ok(result)
+}
+
+/// Analyse une source d'addon (ZIP `.zailon-addon` ou dossier) SANS l'installer
+/// ni exécuter quoi que ce soit : l'aperçu est affiché avant décision (spec
+/// §2, §6). Jamais de code exécuté — le manifest ne décrit que des fichiers.
+#[tauri::command]
+fn addon_analyze(source_path: String) -> Result<AddonAnalyzeResult, String> {
+    let path = PathBuf::from(&source_path);
+    if path.is_dir() {
+        addon_analyze_folder(&path)
+    } else if path.is_file() {
+        let bytes = fs::read(&path).map_err(to_error)?;
+        addon_analyze_zip(&path, &bytes)
+    } else {
+        Err("Le chemin sélectionné n'existe pas.".into())
+    }
+}
+
+/// Installe un addon depuis un DOSSIER : copie en staging → swap atomique →
+/// rollback (même posture de sécurité que l'archive ZIP : symlinks refusés,
+/// chemins validés, limites). `manifest.json` à la racine exigé. L'ancienne
+/// version est déplacée en backup et restaurée en cas d'échec.
+#[tauri::command]
+fn addon_install_folder(source_dir: String, install_dir: String) -> Result<(), String> {
+    let source = PathBuf::from(&source_dir);
+    let install = PathBuf::from(&install_dir);
+    if !source.is_dir() {
+        return Err("Le dossier source n'existe pas.".into());
+    }
+    if !source.join("manifest.json").is_file() {
+        return Err("Le dossier source ne contient pas manifest.json à sa racine.".into());
+    }
+    let parent = install
+        .parent()
+        .ok_or_else(|| "Dossier d'installation invalide.".to_string())?;
+    let token = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_nanos())
+        .unwrap_or(0);
+    let staging = parent.join(format!(".zailon-addon-staging-{token}"));
+    let backup = parent.join(format!(".zailon-addon-backup-{token}"));
+    fs::create_dir_all(&staging).map_err(to_error)?;
+
+    let mut total = 0u64;
+    let mut count = 0usize;
+    let copy_result = (|| -> Result<(), String> {
+        for entry in WalkDir::new(&source)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
+            let relative = match entry.path().strip_prefix(&source) {
+                Ok(relative) => relative.to_path_buf(),
+                Err(_) => continue,
+            };
+            if relative.as_os_str().is_empty() {
+                continue;
+            }
+            if entry.file_type().is_symlink() {
+                return Err(format!("Lien symbolique refusé : {}", relative.display()));
+            }
+            if entry.file_type().is_dir() {
+                continue;
+            }
+            validate_archive_relative(&relative)?;
+            count += 1;
+            if count > MAX_ADDON_ANALYZE_ENTRIES {
+                return Err("Trop de fichiers (limite 100 000).".into());
+            }
+            total = total.saturating_add(entry.metadata().map_err(to_error)?.len());
+            if total > MAX_ADDON_ANALYZE_BYTES {
+                return Err("Dépassement de la limite d'extraction (512 Mo).".into());
+            }
+            let output = staging.join(&relative);
+            if let Some(parent_dir) = output.parent() {
+                fs::create_dir_all(parent_dir).map_err(to_error)?;
+            }
+            fs::copy(entry.path(), &output).map_err(to_error)?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = copy_result {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(format!(
+            "Import du dossier interrompu (aucun fichier installé) : {error}"
+        ));
+    }
+
+    if install.exists() {
+        fs::rename(&install, &backup).map_err(to_error)?;
+    }
+    match fs::rename(&staging, &install) {
+        Ok(()) => {
+            if backup.exists() {
+                let _ = fs::remove_dir_all(&backup);
+            }
+            Ok(())
+        }
+        Err(error) => {
+            // Rollback : restaure l'ancienne version si le swap a échoué.
+            if backup.exists() {
+                let _ = fs::rename(&backup, &install);
+            }
+            let _ = fs::remove_dir_all(&staging);
+            Err(to_error(error))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -19802,6 +20104,159 @@ mod tests {
         let enabled = gate.0.lock().unwrap();
         assert!(enabled.contains("official.zailon.frosty"));
         assert!(!enabled.contains("official.zailon.provider.nexus"));
+    }
+
+    fn write_addon_zip(path: &Path, entries: &[(&str, &str)]) {
+        let file = fs::File::create(path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        for (name, content) in entries {
+            writer.start_file(name, zip_options()).unwrap();
+            writer.write_all(content.as_bytes()).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    #[test]
+    fn addon_analyze_zip_detects_manifest_and_pak_counts() {
+        let dir = std::env::temp_dir().join(format!("zailon-addon-analyze-{}", unix_timestamp()));
+        fs::create_dir_all(&dir).unwrap();
+        let zip_path = dir.join("AuroraPakLoader.zailon-addon");
+        write_addon_zip(
+            &zip_path,
+            &[
+                (
+                    "manifest.json",
+                    "{\"id\":\"aurora-pak-loader\",\"name\":\"Aurora PAK Loader\"}",
+                ),
+                ("files/Aurora.pak", "PAK"),
+                ("files/Aurora.utoc", "UTOC"),
+                ("files/Aurora.ucas", "UCAS"),
+                ("icon.png", "PNG"),
+                ("README.md", "docs"),
+            ],
+        );
+
+        let bytes = fs::read(&zip_path).unwrap();
+        let analyzed = addon_analyze_zip(&zip_path, &bytes).unwrap();
+        assert_eq!(analyzed.kind, "zip");
+        assert_eq!(analyzed.entry_count, 6);
+        assert_eq!(analyzed.pak_count, 1);
+        assert_eq!(analyzed.utoc_count, 1);
+        assert_eq!(analyzed.ucas_count, 1);
+        assert!(analyzed.has_icon);
+        assert!(analyzed.has_readme);
+        assert!(analyzed.issues.is_empty());
+        let manifest = analyzed.manifest_text.expect("manifest lu");
+        assert!(manifest.contains("aurora-pak-loader"));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn addon_analyze_zip_flags_zip_slip_and_nested_archives() {
+        let dir = std::env::temp_dir().join(format!("zailon-addon-slip-{}", unix_timestamp()));
+        fs::create_dir_all(&dir).unwrap();
+        let zip_path = dir.join("evil.zailon-addon");
+        write_addon_zip(
+            &zip_path,
+            &[
+                ("manifest.json", "{\"id\":\"x\"}"),
+                ("../escape.txt", "evil"),
+                ("payload.zip", "PK\x03\x04nested"),
+            ],
+        );
+
+        let bytes = fs::read(&zip_path).unwrap();
+        let analyzed = addon_analyze_zip(&zip_path, &bytes).unwrap();
+        assert!(analyzed
+            .issues
+            .iter()
+            .any(|issue| issue.contains("Zip Slip")));
+        assert!(analyzed
+            .issues
+            .iter()
+            .any(|issue| issue.contains("Archive imbriquée")));
+        assert_eq!(analyzed.entry_count, 2); // manifest + payload.zip (le slip est exclu)
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn addon_analyze_folder_detects_pak_icon_and_license() {
+        let dir = std::env::temp_dir().join(format!("zailon-addon-folder-{}", unix_timestamp()));
+        let addon = dir.join("MonAddon");
+        fs::create_dir_all(addon.join("files")).unwrap();
+        fs::write(
+            addon.join("manifest.json"),
+            "{\"id\":\"mon.addon\",\"name\":\"Mon Addon\"}",
+        )
+        .unwrap();
+        fs::write(addon.join("files/Mod.pak"), b"pak").unwrap();
+        fs::write(addon.join("icon.png"), b"png").unwrap();
+        fs::write(addon.join("LICENSE"), b"mit").unwrap();
+
+        let analyzed = addon_analyze_folder(&addon).unwrap();
+        assert_eq!(analyzed.kind, "folder");
+        assert_eq!(analyzed.entry_count, 4);
+        assert_eq!(analyzed.pak_count, 1);
+        assert!(analyzed.has_icon);
+        assert!(analyzed.has_license);
+        assert!(analyzed.manifest_text.unwrap().contains("mon.addon"));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn addon_install_folder_swaps_atomically_and_rejects_missing_manifest() {
+        let dir =
+            std::env::temp_dir().join(format!("zailon-addon-folder-install-{}", unix_timestamp()));
+        let source = dir.join("Addon");
+        fs::create_dir_all(source.join("files")).unwrap();
+        fs::write(
+            source.join("manifest.json"),
+            "{\"id\":\"v2.addon\",\"name\":\"V2\"}",
+        )
+        .unwrap();
+        fs::write(source.join("files/Mod.pak"), b"new-pak").unwrap();
+        let install = dir.join("installed").join("v2.addon");
+        fs::create_dir_all(dir.join("installed")).unwrap();
+        // Première version installée.
+        fs::create_dir_all(&install).unwrap();
+        fs::write(install.join("manifest.json"), "{\"id\":\"v2.addon\"}").unwrap();
+        fs::write(install.join("old.txt"), b"old").unwrap();
+
+        // Réinstallation par-dessus : swap atomique, l'ancienne version disparaît.
+        addon_install_folder(
+            source.to_string_lossy().to_string(),
+            install.to_string_lossy().to_string(),
+        )
+        .unwrap();
+        assert!(install.join("files/Mod.pak").is_file());
+        assert_eq!(fs::read(install.join("files/Mod.pak")).unwrap(), b"new-pak");
+        assert!(!install.join("old.txt").exists());
+        assert!(install.join("manifest.json").is_file());
+
+        // Dossier sans manifest → refus, aucun répertoire de staging laissé.
+        let bad = dir.join("Bad");
+        fs::create_dir_all(&bad).unwrap();
+        fs::write(bad.join("data.txt"), b"x").unwrap();
+        let bad_install = dir.join("installed").join("bad.addon");
+        let error = addon_install_folder(
+            bad.to_string_lossy().to_string(),
+            bad_install.to_string_lossy().to_string(),
+        )
+        .unwrap_err();
+        assert!(error.contains("manifest.json"));
+        assert!(!bad_install.exists());
+        assert!(!dir.join("installed").read_dir().unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".zailon-addon-staging")
+        }));
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -21814,6 +22269,8 @@ pub fn run() {
             addon_download,
             addon_verify_sha256,
             addon_install_staged,
+            addon_analyze,
+            addon_install_folder,
             addon_install_dir,
             save_project_archive,
             frosty_detect_runtime,

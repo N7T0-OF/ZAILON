@@ -329,3 +329,41 @@ test('addonCatalogStats : synthèse « disponibles · installés · mises à jou
   assert.equal(stats.updates, 1, '1 mise à jour (version catalogue > installée)')
   assert.equal(stats.dev, 1, '1 en développement (package null)')
 })
+
+test('importeur d’addons (refonte) : analyse native, drop zone, aperçu, installation dossier', () => {
+  const rust = read('src-tauri/src/lib.rs')
+  const native = read('src/lib/native.ts')
+  const dialog = read('src/components/UI/AddonImportDialog.tsx')
+  const view = read('src/components/Views/AddonsView.tsx')
+
+  // Backend natif : analyse (sans exécution) + installation depuis un dossier.
+  for (const command of ['addon_analyze', 'addon_install_folder']) {
+    assert.ok(rust.includes(command), `commande native ${command}`)
+    assert.ok(rust.includes(`            ${command},`), `${command} enregistrée dans invoke_handler`)
+  }
+  // Sécurité : Zip Slip, symlinks, archives imbriquées, limites — jamais de code exécuté.
+  assert.ok(rust.includes('Zip Slip'), 'Zip Slip signalé à l’analyse')
+  assert.ok(rust.includes('Lien symbolique refusé'), 'symlinks refusés')
+  assert.ok(rust.includes('Archive imbriquée'), 'archives imbriquées refusées')
+  assert.ok(rust.includes('ni exécuter quoi que ce soit'), 'aucun code exécuté pendant l’analyse')
+
+  // Bindings frontend + picker.
+  assert.ok(native.includes('addonAnalyze'), 'binding natif addonAnalyze')
+  assert.ok(native.includes('addonInstallFolder'), 'binding natif addonInstallFolder')
+  assert.ok(native.includes('pickAddonFile'), 'sélecteur de fichier addon')
+  assert.ok(native.includes('AddonAnalyzeResult'), 'type AddonAnalyzeResult')
+
+  // Dialog : drop zone, aperçu avant installation, formats acceptés.
+  assert.ok(dialog.includes('Glissez votre addon ici'), 'drop zone')
+  assert.ok(dialog.includes('onDragDropEvent'), 'drag & drop depuis l’Explorateur')
+  assert.ok(dialog.includes('ZIP · dossier · manifest.json'), 'formats acceptés')
+  assert.ok(dialog.includes('Coller un manifest JSON'), 'collage JSON conservé')
+  assert.ok(dialog.includes('native.addonAnalyze(path)'), 'analyse avant installation')
+  assert.ok(dialog.includes('addonInstallStaged(source, targetDir)'), 'installation ZIP transactionnelle')
+  assert.ok(dialog.includes('addonInstallFolder(source, targetDir)'), 'installation dossier transactionnelle')
+  assert.ok(dialog.includes('Aucun code exécuté'), 'principe « aucun code exécuté » affiché')
+
+  // AddonsView : l’ancien modal texte est remplacé par le nouvel importeur.
+  assert.ok(view.includes('AddonImportDialog'), 'dialog d’import câblé dans AddonsView')
+  assert.ok(!view.includes('runImport'), 'l’ancien import « coller uniquement » est retiré')
+})

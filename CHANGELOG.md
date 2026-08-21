@@ -31,6 +31,14 @@
   Désinstallation restauratrice (manifest ZAILON) ; sans manifest, les DLL
   présentes ne sont JAMAIS supprimées. Jamais de téléchargement : ZAILON
   n'installe que ce que l'utilisateur possède déjà (spec §12, §16).
+- **Importeur d'addons réel** (refonte « Ajouter un addon ») : zone de dépôt
+  (glisser-déposer depuis l'Explorateur) acceptant `.zip`/`.zailon-addon`,
+  dossier ou `manifest.json`, plus collage JSON conservé. `addon_analyze`
+  lit la source SANS rien installer ni exécuter (manifest, fichiers,
+  compteurs PAK/UTOC/UCAS, taille, Zip Slip / symlinks / archives imbriquées
+  / limites) et affiche un aperçu avant décision ; `addon_install_folder`
+  installe un dossier avec staging → swap atomique → rollback (mêmes gardes
+  que l'archive). Aucun code contenu dans un addon n'est exécuté.
 
 ## [1.153.0] - 2026-08-21
 

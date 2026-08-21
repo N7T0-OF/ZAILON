@@ -850,6 +850,27 @@ export type AddonInstallEvent =
   | { event: 'Progress'; data: { received: number } }
   | { event: 'Finished'; data: Record<string, never> }
 
+/** Analyse d'une source d'addon (spec §2, §6) — jamais exécutée, jamais
+ * installée : l'aperçu précède la décision. Les compteurs PAK/UTOC/UCAS
+ * guident la détection automatique de type (PAK mod, etc.). */
+export interface AddonAnalyzeResult {
+  /** 'zip' | 'folder' */
+  kind: 'zip' | 'folder'
+  /** Contenu brut de manifest.json (racine) si trouvé. */
+  manifestText?: string | null
+  entryCount: number
+  totalSize: number
+  pakCount: number
+  utocCount: number
+  ucasCount: number
+  hasIcon: boolean
+  hasReadme: boolean
+  hasLicense: boolean
+  /** Problèmes de sécurité ou de structure (Zip Slip, symlinks, archives
+   * imbriquées, limites) — affichés avant installation. */
+  issues: string[]
+}
+
 export interface LaunchGameResult {
   pid: number
   deploymentBackend: string
@@ -1071,6 +1092,16 @@ export const native = {
   },
   addonVerifySha256: (path: string, expected: string) => desktopOnly<boolean>('addon_verify_sha256', { path, expected }),
   addonInstallStaged: (archivePath: string, installDir: string) => desktopOnly<void>('addon_install_staged', { archivePath, installDir }),
+  /** Analyse une source d'addon (ZIP `.zailon-addon` ou dossier) SANS l'installer
+   * ni exécuter quoi que ce soit : manifest, fichiers, compteurs PAK/UTOC/UCAS,
+   * taille et problèmes de sécurité — l'aperçu précède toujours l'installation. */
+  addonAnalyze: (sourcePath: string) =>
+    desktopOnly<AddonAnalyzeResult>('addon_analyze', { sourcePath }),
+  /** Installe un addon depuis un DOSSIER : copie en staging → swap atomique →
+   * rollback (mêmes gardes que l'archive : symlinks refusés, chemins validés,
+   * limites). `manifest.json` à la racine exigé. */
+  addonInstallFolder: (sourceDir: string, installDir: string) =>
+    desktopOnly<void>('addon_install_folder', { sourceDir, installDir }),
   addonInstallDir: () => desktopOnly<string>('addon_install_dir'),
   /** Pousse la liste des add-ons activés (installés ET activés) au gate natif —
    * sans l'add-on, aucun service natif (providers, Nexus, artwork)
@@ -1407,6 +1438,16 @@ export async function pickExecutable() {
 export async function pickFolder(title = 'Select the mods folder') {
   if (!isTauri()) return null
   const selected = await open({ title, directory: true, multiple: false })
+  return typeof selected === 'string' ? selected : null
+}
+
+export async function pickAddonFile() {
+  if (!isTauri()) return null
+  const selected = await open({
+    title: 'Sélectionnez un addon (ZIP ou .zailon-addon)',
+    multiple: false,
+    filters: [{ name: 'Addon ZAILON', extensions: ['zip', 'zailon-addon'] }],
+  })
   return typeof selected === 'string' ? selected : null
 }
 

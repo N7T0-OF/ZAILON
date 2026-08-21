@@ -14,7 +14,6 @@ import {
   OFFICIAL_ADDON_REPOSITORY_URL,
   planAddonUninstall,
   resolveAddonDependencies,
-  validateAddonManifest,
   ZAILON_CURRENT_VERSION,
   type AddonCatalog,
   type AddonCatalogEntry,
@@ -25,6 +24,7 @@ import {
 import { ADDON_INSTALL_INITIAL_STATE, addonInstallReducer, addonSignaturePolicy, addonStorageReport, describeAddonDownloadError, fetchAddonCatalog, hasAddonSignature, hasRealSha256, mirrorAddonUrl, type CatalogFetchResult } from '../../lib/addonsInstall'
 import { native } from '../../lib/native'
 import { useStore } from '../../store/useStore'
+import { AddonImportDialog } from '../UI/AddonImportDialog'
 import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
 import { ZailonSwitch } from '../UI/ZailonSwitch'
 
@@ -114,7 +114,6 @@ export function AddonsView() {
   const installAddon = useStore(state => state.installAddon)
   const uninstallAddon = useStore(state => state.uninstallAddon)
   const setAddonEnabled = useStore(state => state.setAddonEnabled)
-  const importAddonManifest = useStore(state => state.importAddonManifest)
 
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<(typeof FILTERS)[number]['id']>('all')
@@ -126,8 +125,6 @@ export function AddonsView() {
   const [syncing, setSyncing] = useState(false)
   const [confirming, setConfirming] = useState<CatalogRow>()
   const [importing, setImporting] = useState(false)
-  const [importText, setImportText] = useState('')
-  const [importError, setImportError] = useState<string>()
   const [removing, setRemoving] = useState<CatalogRow>()
 
   // Ouverture d'Add-ons : cache frais (6 h) sinon réseau (spec §45 — jamais
@@ -192,20 +189,7 @@ export function AddonsView() {
   const remove = (row: CatalogRow) => setRemoving(row)
 
   const startImport = () => {
-    setImportText('')
-    setImportError(undefined)
     setImporting(true)
-  }
-  const runImport = () => {
-    let json: unknown
-    try { json = JSON.parse(importText) } catch { setImportError('Manifest JSON invalide.'); return }
-    const result = validateAddonManifest(json)
-    if (!result.ok || !result.manifest) { setImportError(result.error || 'Manifest invalide.'); return }
-    const compatibility = checkAddonCompatibility(result.manifest, { zailonVersion: ZAILON_CURRENT_VERSION, addonApiVersion: ADDON_API_VERSION, installedIds: addons.map(item => item.manifest.id) })
-    if (!compatibility.ok) { setImportError(compatibility.reasons.join(' ')); return }
-    const outcome = importAddonManifest(result.manifest)
-    if (!outcome.ok) { setImportError(outcome.error || 'Import impossible.'); return }
-    setImporting(false)
   }
 
   return <div className="h-full overflow-y-auto p-5 sm:p-7">
@@ -280,14 +264,7 @@ export function AddonsView() {
       onClose={() => setRemoving(undefined)}
       onConfirm={() => { const plan = uninstallAddon(removing.entry.id); if (plan.dependents.length === 0) setRemoving(undefined) }}
     />}
-    {importing && <div className="fixed inset-0 z-[260] flex items-center justify-center bg-black/70 p-5 backdrop-blur-sm" onMouseDown={event => { if (event.target === event.currentTarget) setImporting(false) }}>
-      <section className="w-full max-w-lg rounded-2xl border border-white/[0.1] bg-[#111414] p-5 shadow-2xl">
-        <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="font-display text-base font-bold text-white">Importer un add-on</h2><p className="mt-1 text-[11px] text-white/42">Collez le manifest JSON d'un add-on communautaire (.zailon-addon). Les permissions seront affichées avant l'installation.</p></div><button type="button" onClick={() => setImporting(false)} aria-label="Fermer" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><X size={15} /></button></div>
-        <textarea value={importText} onChange={event => setImportText(event.target.value)} placeholder={'{ "schema": 1, "id": "community.author.example", ... }'} rows={9} className="mt-3 w-full resize-none rounded-lg border border-white/[0.08] bg-black/25 p-3 font-mono text-[11px] leading-relaxed text-white/70 outline-none focus:border-gold/30" spellCheck={false} />
-        {importError && <p className="mt-2 rounded-lg border border-red-300/18 bg-red-300/[0.04] px-3 py-2 text-[11px] text-red-200/70">{importError}</p>}
-        <footer className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setImporting(false)} className="px-3 py-2 text-[11px] text-white/45">Annuler</button><button type="button" onClick={runImport} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><Import size={13} />Valider et installer</button></footer>
-      </section>
-    </div>}
+    {importing && <AddonImportDialog onClose={() => setImporting(false)} />}
   </div>
 }
 

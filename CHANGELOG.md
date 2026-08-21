@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.155.0] - 2026-08-21
+
 ### Fixed
 
 - **Carte NTE — « Loader Aurora » expliqué et actionnable** : le bloc affichait

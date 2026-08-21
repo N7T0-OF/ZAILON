@@ -90,6 +90,11 @@ test('socle NTE : état Steam, création validée AuroraMods et validation des m
     assert.ok(rust.includes(command), `commande native ${command}`)
     assert.ok(rust.includes(`            ${command},`), `${command} enregistrée dans invoke_handler`)
   }
+  // Régressions CI native : l'attribut #[tauri::command] doit précéder la
+  // commande (jamais un helper pur) — un déplacement cassait generate_handler!
+  // (E0425 `__cmd__nte_validate_mods` + wrapper invalide sur `&Path`).
+  assert.ok(rust.includes('#[tauri::command]\nfn nte_validate_mods'), 'attribut command sur nte_validate_mods')
+  assert.ok(!/\#\[tauri::command\]\n\/\/\/ État d'un ensemble/.test(rust), 'aucun attribut command sur le helper nte_mod_set_status')
   // Message « Ouvrir Steam » qui remplace le crash IPC (spec §20).
   assert.ok(rust.includes('Cannot create IPC pipe to Steam client process'))
 

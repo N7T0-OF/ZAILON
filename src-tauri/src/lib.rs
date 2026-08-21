@@ -6669,11 +6669,6 @@ struct NteModsValidation {
     incomplete: Vec<NteModSetStatus>,
 }
 
-/// Validation des ensembles de mods NTE (spec §5, §10) : un mod = UN dossier
-/// contenant .pak/.utoc/.ucas — chaque fichier n'est JAMAIS un mod à part. La
-/// validation signale les ensembles incomplets (ex. .pak sans .ucas, ou .utoc
-/// orphelin) avant lancement, sans jamais modifier les fichiers.
-#[tauri::command]
 /// État d'un ensemble .pak/.utoc/.ucas pour UN dossier de mod (membre de
 /// groupe inclus) — spec §5, §10, §25.
 fn nte_mod_set_status(path: &Path, file_name: &str) -> NteModSetStatus {
@@ -6710,6 +6705,11 @@ fn nte_mod_set_status(path: &Path, file_name: &str) -> NteModSetStatus {
     }
 }
 
+/// Validation des ensembles de mods NTE (spec §5, §10) : un mod = UN dossier
+/// contenant .pak/.utoc/.ucas — chaque fichier n'est JAMAIS un mod à part. La
+/// validation signale les ensembles incomplets (ex. .pak sans .ucas, ou .utoc
+/// orphelin) avant lancement, sans jamais modifier les fichiers.
+#[tauri::command]
 fn nte_validate_mods(mods_path: String) -> Result<NteModsValidation, String> {
     let folder = PathBuf::from(&mods_path);
     if !folder.is_dir() {

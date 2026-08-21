@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "official.zailon.performance",
+  "name": "Performance+",
+  "version": "1.0.0",
+  "author": "ZAILON",
+  "description": "Applique réellement la priorité du processus du jeu (normale / supérieure / haute) au lancement, selon le mode Performance choisi. Sans cet add-on, la priorité reste une valeur affichée, jamais appliquée à l'OS.",
+  "category": "utilities",
+  "entrypoint": "module/index.ts",
+  "minZailonVersion": "1.78.0",
+  "minAddonApiVersion": "1",
+  "permissions": [
+    "game.read",
+    "process.read",
+    "process.launch",
+    "settings"
+  ],
+  "supportedPlatforms": ["windows", "linux", "macos"],
+  "capabilities": ["performance.plus"],
+  "slots": [
+    "Game.Configuration"
+  ],
+  "events": []
+}

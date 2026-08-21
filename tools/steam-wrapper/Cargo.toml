@@ -1,0 +1,13 @@
+[package]
+name = "steam-wrapper"
+version = "0.1.0"
+edition = "2021"
+description = "Steam-safe launcher wrapper — strips injected arguments before starting the real game/mod launcher."
+license = "MIT"
+
+# Aucune dépendance : binaire unique, portable, compilable avec un toolchain
+# Rust standard (rustc + cargo, pas besoin de .NET). WinExe : aucune console.
+[profile.release]
+opt-level = "s"
+strip = true
+lto = true

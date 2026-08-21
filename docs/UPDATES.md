@@ -46,3 +46,23 @@ The release workflow marks such tags as prereleases automatically.
 The updater creates a local snapshot before downloading, retains three recent
 snapshots, and writes the update audit log locally. The application never sends
 game paths, mod files or update logs to a ZAILON server.
+
+## « Nouveautés » après mise à jour
+
+La fenêtre « Nouveautés » s'affiche **une seule fois par version**, que la mise
+à jour vienne de l'updater interne **ou** d'un installeur téléchargé
+manuellement. Au démarrage, ZAILON compare la version installée (`appVersion`)
+à la dernière version dont les notes ont été vues
+(`lastSeenReleaseNotesVersion`) :
+
+- `appVersion > lastSeenReleaseNotesVersion` → récupère le corps de la release
+  GitHub correspondante (`fetch_release_notes`, sans clé API) et l'affiche ;
+- en cas d'échec réseau (hors-ligne, rate-limit, release absente), la fenêtre
+  s'ouvre quand même avec un repli « Voir sur GitHub » — jamais de blocage ;
+- première installation (aucune version vue) → pas de fenêtre ;
+- fermeture → `lastSeenReleaseNotesVersion = appVersion`, donc plus
+  d'affichage pour cette version.
+
+La préférence « Ne plus afficher automatiquement les nouveautés » coupe
+entièrement ce mécanisme. La logique de décision est pure et testée
+(`src/lib/releaseNotes.ts`, `test-release-notes.ts`).

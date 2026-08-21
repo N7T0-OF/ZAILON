@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "auditedRoot": "G:\\2_Logiciel\\MOD ORGANIZER",
+  "approved": [],
+  "decision": "No MO2 binary, source file, theme, icon, translation, or user asset is required in the ZAILON repository. Runtime migration reads user-selected data without redistributing MO2."
+}

@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "official.zailon.visual-profiles",
+  "name": "Visual Profiles",
+  "version": "1.0.0",
+  "author": "ZAILON",
+  "description": "Profils visuels par jeu : luminosité, contraste, saturation, gamma et restauration automatique en fin de session. Fournit l'onglet Visuels, le panneau rapide et le diagnostic visuel.",
+  "category": "visual",
+  "entrypoint": "module/index.ts",
+  "minZailonVersion": "1.78.0",
+  "minAddonApiVersion": "1",
+  "permissions": [
+    "game.read",
+    "display.profiles"
+  ],
+  "supportedPlatforms": ["windows"],
+  "capabilities": ["visual.profiles"],
+  "slots": [
+    "GameConfiguration.Visual",
+    "QuickPanel.Visual",
+    "GameDiagnostics.Visual"
+  ],
+  "events": ["OnGameSelected", "OnGameStarted", "OnGameStopped"]
+}

@@ -1,12 +1,108 @@
-export type ViewType = 'home' | 'games' | 'explore' | 'downloads' | 'tools' | 'news' | 'settings'
+export type ViewType = 'home' | 'games' | 'explore' | 'downloads' | 'visuals' | 'news' | 'settings' | 'addons' | 'frosty' | 'statistics'
+
+/** Session de jeu TERMINÉE, persistée (spec « Accueil modulaire » §34-52,
+ * §99-100) : la source de vérité des statistiques. Les noms de jeu/profil sont
+ * des SNAPSHOTS — l'UI résout le nom actuel, le snapshot sert de secours si le
+ * jeu/profil a été renommé ou supprimé (§99-100). */
+export interface TrackedSession {
+  id: string
+  gameId: string
+  gameName: string
+  profileId: string
+  profileName: string
+  /** Installation utilisée (snapshot, spec §16, §64) — distingue les stats
+   * « FiveM — Drift » sans fusionner les durées. */
+  installationId?: string
+  installationName?: string
+  startedAt: number
+  endedAt: number
+  /** Durée RÉELLE comptabilisée en minutes (checkpoints inclus). */
+  durationMin: number
+  /** D'où vient le lancement : zailon / external / recovered (§36). */
+  source: string
+  /** Session récupérée après un crash/fermeture sans fin propre (§45). */
+  recovered?: boolean
+}
+
+/** Session EN COURS suivie pour les statistiques (spec §34-45) : checkpoint
+ * toutes les ~5 min ; persistée pour récupérer raisonnablement une session
+ * interrompue par un crash/redémarrage de ZAILON au prochain démarrage. */
+export interface ActiveTrackedSession {
+  gameId: string
+  profileId: string
+  /** Installation cible de la session en cours (spec §16, §64). */
+  installationId?: string
+  installationName?: string
+  startedAt: number
+  checkpointAt?: number
+}
 export type Platform = 'gamebanana' | 'nexus' | 'curseforge' | 'ayakamods'
 export type UpdateChannel = 'stable' | 'beta'
+export type DownloadRetention = 'startup' | '1d' | '7d' | 'never'
+export type ModRuntimePathType = 'loader' | 'bypass' | 'plugins' | 'scripts' | 'custom'
+export type BackgroundMediaType = 'auto' | 'image' | 'video' | 'youtube'
+
+/** Configuration de fond multimédia par jeu (spec Accueil multimédia §11, §46, §53). */
+export interface GameBackgroundMedia {
+  type: BackgroundMediaType
+  /** URL YouTube fournie par l'utilisateur (spec §1) — jamais injectée telle quelle. */
+  youtubeUrl?: string
+  /** VideoId extrait — ce qui est réellement utilisé par le lecteur (spec §2). */
+  youtubeVideoId?: string
+  /** Timestamp de début (spec §36). */
+  startSeconds?: number
+  /** Timestamp de fin (spec §36). */
+  endSeconds?: number
+  /** Chemin vidéo locale alternatif (sinon resources.videoPath). */
+  localPath?: string
+  /** Surcharge audio spécifique au jeu (spec §11). */
+  mutedOverride?: boolean
+  volumeOverride?: number
+}
+
+export interface GameRuntimePath {
+  name: string
+  path: string
+  type: ModRuntimePathType
+}
+
+export interface GamePreset {
+  id: string
+  name: string
+  /** Profil de mods référencé par ce preset. */
+  profileId: string
+  /** Profil d'entrée (clavier) à associer, si défini. */
+  keyboardProfileId?: string
+  /** Profil visuel associé (association au lancement), si défini. */
+  visualProfileId?: string
+  /** Arguments de lancement complémentaires (réglage, application en Phase 6). */
+  launchArgs?: string
+  createdAt: number
+  updatedAt: number
+}
 export type TextSize = 'small' | 'normal' | 'large' | 'very-large'
 export type UiDensity = 'compact' | 'comfortable'
-export type LiquidGlassMode = 'off' | 'light' | 'normal' | 'intense' | 'custom'
+/** Mode d'animation global (spec « Library Polish » §11) :
+ * `auto` suit le réglage système « Réduire les animations ». */
+export type MotionMode = 'auto' | 'enabled' | 'reduced'
 export type ExploreColumns = '2' | '3'
 export type ModCategorySource = 'detected' | 'metadata' | 'user'
 export type ModCategoryConfidence = 'high' | 'medium' | 'low'
+
+/** Signature de processus final apprise (spec NTE §7 / #36) : enregistrée quand
+ * le vrai exe d'un jeu est détecté avec forte confiance, réutilisée au lancement
+ * suivant pour une détection instantanée — même si l'exécutable change après une
+ * mise à jour. Cache par installation, format versionné. */
+export interface GameProcessSignature {
+  /** Nom de l'exécutable final (ex. HT-Win64-Shipping.exe). */
+  filename: string
+  /** Chemin relatif sous l'installation. */
+  relativePath?: string
+  /** Éditeur / signature du processus, si disponible. */
+  publisher?: string
+  seenAt: number
+  schemaVersion: 1
+}
 
 export interface ModCategoryTag {
   id: string
@@ -16,24 +112,37 @@ export interface ModCategoryTag {
   userLocked?: boolean
 }
 
-export interface LiquidGlassSettings {
-  opacity: number
-  blur: number
-  darkTint: number
-  saturation: number
-  border: number
-  reflection: number
-  shadow: number
-  animations: boolean
-  reduceWhenUnfocused: boolean
-  preferNative: boolean
+export type GameTab = 'overview' | 'mods' | 'profiles' | 'downloads' | 'files' | 'conflicts' | 'visuals' | 'backups' | 'appearance' | 'settings' | 'commands' | 'configuration' | 'diagnostic'
+export type GameKeyboardLayout = 'qwerty' | 'azerty' | 'qwertz' | 'custom'
+export type GameInputActivation = 'while-playing' | 'on-launch'
+
+export interface GameKeyMapping {
+  /** Touche physique pressée (ex. 'Z'). */
+  physical: string
+  /** Touche envoyée au jeu (ex. 'W'). */
+  gameKey: string
 }
-export type GameTab = 'overview' | 'mods' | 'profiles' | 'downloads' | 'conflicts' | 'tools' | 'backups' | 'appearance' | 'settings'
+
+export interface GameInputProfile {
+  id: string
+  gameId: string
+  /** Profil de mods cible ; absent = jeu entier. Priorité : profil mods > jeu > défaut. */
+  profileId?: string
+  name: string
+  layout: GameKeyboardLayout
+  mapping: GameKeyMapping[]
+  enabled: boolean
+  activationMode: GameInputActivation
+  /** Restaurer les touches du bureau à la fermeture du jeu. */
+  restoreOnExit: boolean
+  createdAt: number
+  updatedAt: number
+}
 export type LoaderType = 'GIMI' | 'ZZMI' | 'SRMI' | 'WWMI' | 'EFMI' | 'UE5' | 'BepInEx' | 'ASI' | 'CLEO' | 'REF' | 'MelonLoader' | 'DLL' | 'Archive' | 'Folder' | 'Manual'
 
 export type MatchConfidence = 'exact' | 'high' | 'medium' | 'low' | 'unknown'
 export type ModUpdateStatus = 'unknown' | 'checking' | 'up-to-date' | 'available' | 'downloaded' | 'manual' | 'error'
-export type ModDeploymentStatus = 'imported' | 'stored' | 'validated' | 'enabled' | 'deployed' | 'runtime-visible' | 'loaded-by-game' | 'failed' | 'unknown'
+export type ModDeploymentStatus = 'downloaded' | 'imported' | 'stored' | 'validated' | 'enabled' | 'deployment-pending' | 'deployed' | 'runtime-visible' | 'loaded-by-game' | 'warning' | 'failed' | 'unknown'
 
 export interface ExternalModReference {
   provider: Exclude<Platform, 'ayakamods'>
@@ -85,13 +194,56 @@ export interface Mod {
   categoryTags?: ModCategoryTag[]
   /** Independent logical clone. Content stays immutable until a profile overlay is written. */
   basePackageId?: string
+  /** Groupe Aurora (spec §25) : empreinte du dossier groupe parent (mods membres). */
+  groupId?: string
+  /** Nom du groupe Aurora sans préfixe `AU GRP - ` (badge sur la carte membre). */
+  groupName?: string
+  /** Entrée groupe Aurora (`AU GRP - <nom>`) — unité activable (spec §25). */
+  isGroup?: boolean
+  /** Dossier AuroraMods où un paquet staged NTE a été déployé (spec §9) — le
+   * toggle cible ce dossier (.pak ↔ .pak.disabled). */
+  deployedPath?: string
 }
 
 export interface ProfileModState {
   enabled: boolean
   priority: number
   note?: string
+  /** Immutable package directory selected by this profile. */
+  packageId?: string
+  /** Provider or content-derived version identifier selected by this profile. */
   versionId?: string
+  providerFileId?: string
+  contentHash?: string
+  sourceProvider?: string
+}
+
+export interface ModSeparator {
+  name: string
+  priority: number
+}
+
+export interface HiddenFileRule {
+  modId: string
+  path: string
+  sourceConvention?: string
+}
+
+export interface ManagedExecutable {
+  id: string
+  name: string
+  path: string
+  source: string
+  enabled: boolean
+}
+
+/** État ReShade d'un profil ZAILON (spec §35-36) : le runtime est partagé par
+ * installation de jeu, le preset et l'activation sont propres au profil. */
+export interface ReShadeProfileState {
+  enabled: boolean
+  presetId?: string
+  shaderDependencies: string[]
+  versionLock?: boolean
 }
 
 export interface Profile {
@@ -109,11 +261,22 @@ export interface Profile {
   description?: string
   color?: string
   locked?: boolean
+  /** Verrouille les frameworks du profil (spec « Last Known Good » §42) :
+   * empêche le remplacement silencieux / l'auto-update des loaders — les mods
+   * utilisateur peuvent continuer à évoluer. */
+  lockFrameworks?: boolean
+  stableSince?: number
+  lastSuccessfulLaunch?: number
   isDefault?: boolean
+  /** Installation physique utilisée par ce profil (spec §8-10, §60-64).
+   * Absent → installation « Principal » (ou première disponible). */
+  installationId?: string
   launchArgs?: string
   runtime?: string
   conflictRules?: Array<{ path: string; winnerModId: string }>
   installOptions?: Record<string, string | boolean | number>
+  modSeparators?: ModSeparator[]
+  hiddenFileRules?: HiddenFileRule[]
   clonedFromProfileId?: string
   templateId?: string
   temporary?: boolean
@@ -124,6 +287,19 @@ export interface Profile {
   overwritePath?: string
   generatedPath?: string
   deploymentPath?: string
+  installHistory?: Array<{ name: string; action: 'added' | 'updated'; at: number }>
+  collectionState?: 'Preparing' | 'Downloading' | 'Installing' | 'NeedsAttention' | 'Ready' | 'Incomplete' | 'Failed' | 'Cancelled' | 'Paused'
+  collectionMetadata?: {
+    installId: string
+    collectionId: number
+    slug: string
+    installedRevisionId?: number
+    latestKnownRevisionId: number
+    sourceGameDomain: string
+    selections: string[]
+    localOverrides: string[]
+  }
+  reshade?: ReShadeProfileState
 }
 
 export type BulkOperationKind = 'copy' | 'move' | 'delete' | 'enable' | 'disable' | 'tag'
@@ -150,14 +326,6 @@ export interface ProfileIntegrity {
   files: string[]
 }
 
-export interface WindowEffectsDiagnostic {
-  backend: 'WindowsNative' | 'MacOSNative' | 'LinuxCompositor' | 'SimulatedCss' | 'Opaque'
-  nativeAvailable: boolean
-  active: boolean
-  dynamicBackdropVerified: boolean
-  reason: string
-}
-
 export interface UiNotification {
   id: string
   key: string
@@ -175,6 +343,7 @@ export interface GameResources {
   iconPath?: string
   backgroundPath?: string
   bannerPath?: string
+  heroPath?: string
   videoPath?: string
   coverPositionX?: number
   coverPositionY?: number
@@ -190,17 +359,59 @@ export interface GameResources {
   bannerFit?: 'cover' | 'contain'
 }
 
+/**
+ * Installation physique d'un jeu (spec « Profils multi-installation » §6-16,
+ * §60-64 — générique, pas spécifique FiveM). Un jeu = UNE carte Bibliothèque,
+ * plusieurs installations possibles ; chaque profil référence celle qu'il
+ * utilise (`Profile.installationId`). Le changement de profil bascule
+ * automatiquement exécutable / racine / dossier mods / tracking (§10).
+ */
+export interface GameInstallation {
+  id: string
+  gameId: string
+  /** Nom court lisible : « Principal », « Drift », « Visual », « Beta »… (§61). */
+  name: string
+  executablePath?: string
+  rootPath?: string
+  modsPath?: string
+  bypassPath?: string
+  platform?: 'steam' | 'epic' | 'gog' | 'standalone'
+  launchArgs?: string
+  createdAt?: number
+}
+
 export interface Game {
   id: string
   name: string
+  /** Nom d'affichage choisi par l'utilisateur (spec « Renommer un jeu ») :
+   * purement cosmétique — jamais utilisé pour l'identité technique (`id`),
+   * la détection, les mods, profils, add-ons, stats ou raccourcis. */
+  displayName?: string
   shortName?: string
   icon?: string
   backgroundArt?: string
   execPath?: string
   modsPath?: string
+  bypassPath?: string
+  runtimePaths?: GameRuntimePath[]
+  presets?: GamePreset[]
   installedMods: Mod[]
   profiles: Profile[]
+  /** Installations physiques (spec §6-16) — au moins « Principal » dès qu'un
+   * exécutable est connu. Les champs legacy `execPath`/`installDirectory`
+   * restent la racine pour les jeux sans installations (fallback). */
+  installations?: GameInstallation[]
   totalPlaytime: number
+  /** Temps de jeu importé (minutes) depuis Steam/Epic (spec « Temps Steam/Epic »
+   * §3) — JAMAIS fusionné avec le suivi ZAILON : affiché séparément
+   * (« Temps total : X · Suivi ZAILON : Y · Steam : Z »). */
+  importedPlaytimeMin?: number
+  /** Source du temps importé (`steam` | `epic` | `gog`) — `undefined` = aucun. */
+  externalPlaytimeSource?: 'steam' | 'epic' | 'gog'
+  /** Temps Steam (heures) fourni par l'add-on Steam Advanced (spec §96) —
+   * JAMAIS fusionné avec le suivi ZAILON : affiché séparément (« Suivi ZAILON :
+   * X · Steam : Y »). */
+  steamPlaytimeHours?: number
   lastPlayed?: number
   platform?: 'steam' | 'epic' | 'gog' | 'standalone'
   detected?: boolean
@@ -221,6 +432,121 @@ export interface Game {
   favorite?: boolean
   hidden?: boolean
   categories?: string[]
+  managedExecutables?: ManagedExecutable[]
+  /** Disposition virtuelle du jeu (clavier), jamais appliquée à Windows. */
+  keyboardLayout?: GameKeyboardLayout
+  /** Profils d'entrée par jeu / profil de mods. */
+  keyboardProfiles?: GameInputProfile[]
+  /** Derniers tests de déploiement (environnement de test par jeu). */
+  testRuns?: GameTestRun[]
+  /** Comportement de lancement (launcher intermédiaire, chaîne multi-étapes). */
+  launchAdapter?: GameLaunchAdapter
+  /** Fond multimédia de l'Accueil pour ce jeu (spec Accueil multimédia §11). */
+  backgroundMedia?: GameBackgroundMedia
+  /** Groupe de jeux (spec « Groupes de jeux » §1-4, §7) — même « famille de
+   * jeu », environnements indépendants. Purement organisationnel. */
+  groupId?: string
+  /** Clé d'identité stable (spec « Configuration par jeu » §2-4) — dérivée
+   * de plusieurs signaux (provider+AppId, exécutable+chemin, éditeur+nom),
+   * jamais du seul nom d'exécutable. Sert au dédoublonnage à la détection. */
+  identityKey?: string
+}
+
+/** Groupe de jeux (spec « Groupes de jeux » §1-4, §7, §10) : une même famille
+ * de jeu (FiveM, Cyberpunk…) avec plusieurs environnements indépendants.
+ * La suppression d'un groupe ne supprime jamais les jeux ni leurs fichiers. */
+export interface GameGroup {
+  id: string
+  name: string
+  memberGameIds: string[]
+  createdAt: number
+  /** Épinglé en tête de la bibliothèque (spec « Groupes de jeux » §13). */
+  pinned?: boolean
+}
+
+export type LaunchBehavior = 'DirectProcess' | 'LauncherChild' | 'LauncherDetached' | 'SteamLauncher' | 'ExternalLauncher' | 'MultiStage'
+
+export interface GameLaunchAdapter {
+  launchBehavior: LaunchBehavior
+  launcherExecutable?: string
+  /** Launchers intermédiaires connus (ex. `ntegloballauncher.exe` pour NTE) :
+   * un stage launcher valide ne doit jamais bloquer la chaîne ni déclencher
+   * « Chaîne incomplète ». Le launcher n'est PAS le processus final. */
+  launcherExecutableCandidates?: string[]
+  gameExecutableCandidates: string[]
+  reattachWindowSeconds: number
+  endGraceSeconds: number
+  launchChainStages: string[]
+  /** AppID Steam du jeu : preuve de présence supplémentaire (Steam n'est pas le
+   * seul critère, mais il déclenche la recherche du processus final). */
+  steamAppId?: number
+  /** Emplacements profonds connus du processus final sous l'installation (ex.
+   * `Client/WindowsNoEditor/HT/Binaries/Win64` pour NTE) : un processus à cet
+   * emplacement reçoit un score fort — le nom de l'exécutable n'est plus requis. */
+  relativePathPatterns?: string[]
+  /** Motifs de titre de fenêtre (sous-chaîne, insensible à la casse) appris lors
+   * des tests réels — jamais devinés (watcher de fenêtres). */
+  windowTitlePatterns?: string[]
+}
+
+export type GameSessionState = 'Preparing' | 'LauncherStarted' | 'WaitingForElevation' | 'WaitingForGame' | 'GameDetected' | 'GameRunning' | 'GameLost' | 'Reattaching' | 'Ending' | 'Ended' | 'Failed'
+
+export type SessionSource = 'zailon' | 'manual' | 'reattached' | 'recovered' | 'external'
+
+export interface GameLaunchChainStep {
+  at: number
+  stage: string
+  detail?: string
+}
+
+export interface GameSession {
+  id: string
+  gameId: string
+  profileId: string
+  /** Installation cible (spec §16, §64). */
+  installationId?: string
+  installationName?: string
+  launchStrategy: LaunchBehavior
+  launcherProcessIds: number[]
+  gameProcessIds: number[]
+  startedAt: number
+  gameDetectedAt?: number
+  endedAt?: number
+  state: GameSessionState
+  runtimeToolsActive: boolean
+  deploymentActive: boolean
+  inputProfileActive: boolean
+  visualProfileActive: boolean
+  source: SessionSource
+  reattachUntil?: number
+  graceUntil?: number
+  /** Dernière preuve de présence du PROCESSUS FINAL observée (fin de session). */
+  lastSeenAt?: number
+  /** Début de la période PossibleExit — le jeu a disparu, vérification en cours. */
+  possibleExitSince?: number
+  timeline: GameLaunchChainStep[]
+  confidence?: number
+  finalProcess?: string
+  /** Preuves ayant conduit à la présence (GamePresenceEngine) : processus,
+   * chemin d'installation, Steam AppID, fenêtre… */
+  presenceEvidence?: string[]
+}
+
+export interface GameTestRun {
+  id: string
+  at: number
+  profileId: string
+  profileName: string
+  deployable: boolean
+  brokenReferences: number
+  conflicts: number
+  referencedPackages: number
+  virtualFileCount: number
+  frameworkOk: number
+  frameworkTotal: number
+  integrityOk: boolean
+  integrityIssues: string[]
+  diagnostics: string[]
 }
 
 export interface ExplodMod {
@@ -260,6 +586,13 @@ export interface ModImportCandidate {
   id: string
   name: string
   path: string
+  sourcePath: string
+  detectedRoot: string
+  detectedFramework: string
+  relativeGamePaths: string[]
+  strippedSegments: string[]
+  rootConfidence: MatchConfidence
+  rootReason: string
   enabled: boolean
   modType: string
   sizeBytes: number
@@ -316,13 +649,34 @@ export interface DownloadedModResult {
   quarantinePath?: string
 }
 
+export interface RestorePoint {
+  id: string
+  gameId: string
+  label: string
+  source: 'manual' | 'auto'
+  createdAt: number
+  profiles: Array<Pick<Profile, 'id' | 'gameId' | 'name' | 'modStates' | 'playtime' | 'lastPlayed' | 'bypass' | 'createdAt' | 'lastUsed' | 'description' | 'color' | 'locked' | 'stableSince' | 'lastSuccessfulLaunch' | 'isDefault' | 'launchArgs' | 'runtime' | 'conflictRules' | 'installOptions' | 'modSeparators' | 'hiddenFileRules' | 'clonedFromProfileId' | 'templateId' | 'temporary' | 'collectionState' | 'collectionMetadata'>>
+  keyboardProfiles?: GameInputProfile[]
+  keyboardLayout?: GameKeyboardLayout
+  selectedProfileId?: string
+}
+
 export interface ProfileArchiveManifest {
   schemaVersion: 1
   exportedAt: string
   app: 'ZAILON'
   appVersion: string
   exportMode: 'light' | 'complete'
-  game: { name: string; provider?: string; providerGameId?: string }
+  game: {
+    name: string
+    provider?: string
+    providerGameId?: string
+    /** Réglages globaux du jeu transportables (spec partage §44) : QWERTY virtuel,
+     * chaîne de lancement, fond multimédia — jamais de chemins absolus. */
+    keyboardLayout?: GameKeyboardLayout
+    launchAdapter?: GameLaunchAdapter
+    backgroundMedia?: GameBackgroundMedia
+  }
   profile: Omit<Profile, 'mods'>
   mods: Array<Omit<Mod, 'path' | 'files'> & { files?: string[] }>
 }

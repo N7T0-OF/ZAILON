@@ -2,6 +2,14 @@ import { Channel, convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import type { UpdateChannel } from '../types'
 import type { DownloadedModResult, ModImportCandidate, Profile, ProfileArchiveManifest, ProfileIntegrity, SecureImportResult, SensitiveImportAction } from '../types'
+import type {
+  VisualApplyResult,
+  VisualBackendReport,
+  VisualProfile,
+  VisualProfileHistoryItem,
+  VisualRestoreResult,
+  VisualSafetyReport,
+} from '../visual-profiles/domain/types'
 
 export interface ProfilePaths {
   directory: string
@@ -26,6 +34,272 @@ export interface BaseSnapshotResult {
   created: boolean
 }
 
+export interface CitizenFxRead {
+  path: string
+  exists: boolean
+  text: string
+}
+
+export interface CitizenFxWrite {
+  path: string
+  backupPath: string | null
+  bytes: number
+}
+
+export interface FiveMEnvironment {
+  root: string
+  appData: string | null
+  hasCitizenFxIni: boolean
+  folders: { mods: boolean; citizen: boolean; plugins: boolean }
+  gtaVPath: string | null
+}
+
+export interface FiveMModEntry {
+  name: string
+  kind: 'folder' | 'file'
+  sizeBytes: number
+  fileCount: number
+  modifiedAt: number | null
+  relativePath: string
+}
+
+export interface FiveMModsListing {
+  modsPath: string | null
+  fingerprint: string
+  entries: FiveMModEntry[]
+  /** `false` = l'empreinte était identique : le listing complet a été sauté
+   * (réutiliser les entrées en cache). */
+  changed: boolean
+}
+
+export interface FiveMModRemoveResult {
+  removedFiles: number
+  freedBytes: number
+}
+
+export interface FiveMProfileCheck {
+  id: string
+  ok: boolean
+  detail?: string
+}
+
+export interface FiveMProfileVerification {
+  checks: FiveMProfileCheck[]
+}
+
+export interface FiveMProfileExportResult {
+  path: string
+  files: number
+  bytes: number
+}
+
+export interface FiveMPackScanResult {
+  path: string
+  isArchive: boolean
+  files: string[]
+}
+
+export interface FiveMPackApplyResult {
+  installed: number
+  backups: number
+  manifestPath: string
+}
+
+export interface FiveMPackRemoveResult {
+  removed: number
+  restored: number
+  manifestPath: string
+}
+
+export interface FiveMPackManifestRead {
+  exists: boolean
+  name: string | null
+  fileCount: number
+  installedAt: number | null
+}
+
+export interface VortexInstance {
+  exists: boolean
+  instance: string | null
+  version: number | null
+  deploymentPath: string | null
+  modsDir: string | null
+  fileCount: number
+  mods: Array<{ name: string; fileCount: number }>
+}
+
+export interface FrostyInstallation {
+  exists: boolean
+  modsDir: string | null
+  mods: Array<{ name: string; path: string; size: number }>
+  fileCount: number
+  totalBytes: number
+}
+
+export interface UpdateStateCounts {
+  games: number
+  profiles: number
+  mods: number
+}
+
+export interface UpdateIntegrityReport {
+  ok: boolean
+  backupPath: string
+  before: UpdateStateCounts
+  current: UpdateStateCounts
+  issues: string[]
+}
+
+export interface Mo2ProfilePreview {
+  name: string
+  modCount: number
+  enabledCount: number
+  disabledCount: number
+  separatorCount: number
+}
+
+export interface Mo2ExecutablePreview {
+  title: string
+  binaryPresent: boolean
+}
+
+export interface Mo2ImportPreview {
+  root: string
+  version?: string
+  installType: string
+  gameName?: string
+  selectedProfile?: string
+  profiles: Mo2ProfilePreview[]
+  executables: Mo2ExecutablePreview[]
+  installedMods: number
+  downloads: number
+  overwriteFiles: number
+  overwriteBytes: number
+  pluginFiles: number
+  hiddenFiles: number
+  secretKeysDetected: number
+  requiredBytes: number
+  warnings: string[]
+}
+
+export interface Mo2ProfileMapping {
+  sourceName: string
+  targetId: string
+  targetName: string
+}
+
+export interface Mo2ImportOptions {
+  mods: boolean
+  metadata: boolean
+  overwrite: boolean
+  downloads: boolean
+  executables: boolean
+  categories: boolean
+  notes: boolean
+  hiddenFiles: boolean
+}
+
+export interface Mo2ImportRequest {
+  sourcePath: string
+  gameId: string
+  gameName: string
+  profiles: Mo2ProfileMapping[]
+  options: Mo2ImportOptions
+}
+
+export interface Mo2ImportResult {
+  profiles: Profile[]
+  installedPaths: string[]
+  managedExecutables: Array<{ id: string; name: string; path: string; source: string; enabled: boolean }>
+  importedMods: number
+  skippedMods: number
+  copiedDownloads: number
+  overwriteFiles: number
+  reportPath: string
+  snapshotPath: string
+  sourceUnchanged: boolean
+  warnings: string[]
+}
+
+export interface PackageReferenceStatus {
+  profileId: string
+  packageId: string
+  packageDirectory: string
+  exists: boolean
+  manifestExists: boolean
+  filesExist: boolean
+  sourceStillAvailable: boolean
+  normalized: boolean
+  deployable: boolean
+  fileCount: number
+  versionId?: string
+  contentHash?: string
+  expectedVersionId?: string
+  expectedContentHash?: string
+  identityMatches: boolean
+  errors: string[]
+}
+
+export interface FrameworkProviderStatus {
+  frameworkId: string
+  packageId: string
+  files: string[]
+  enabled: boolean
+  runtimeVisible: boolean
+}
+
+export interface VirtualFileMapEntry {
+  gameRelativePath: string
+  packageId: string
+  sourcePhysicalPath: string
+  hash: string
+  size: number
+  overriddenPackageIds: string[]
+  winnerReason: string
+}
+
+export interface ProfileDeploymentAudit {
+  gameId: string
+  profileId: string
+  referencedPackages: number
+  accessiblePackages: number
+  brokenReferences: number
+  manifestedFiles: number
+  virtualFileCount: number
+  conflicts: number
+  deployable: boolean
+  packages: PackageReferenceStatus[]
+  providers: FrameworkProviderStatus[]
+  virtualFiles: VirtualFileMapEntry[]
+  diagnostics: string[]
+}
+
+export interface StagedImportRepairReport {
+  stage_id: string;
+  name: string;
+  repaired: boolean;
+  files_before: number;
+  files_after: number;
+  layout: string;
+  backup_path: string | null;
+  error: string | null;
+}
+
+export interface Mo2DeploymentRepairResult {
+  repairId: string
+  packagesAudited: number
+  packagesRestaged: number
+  manifestsRebuilt: number
+  normalizedFiles: number
+  virtualFileCount: number
+  brokenReferences: number
+  providers: FrameworkProviderStatus[]
+  snapshotPath: string
+  reportPath: string
+  deployable: boolean
+  diagnostics: string[]
+}
+
 export interface NativeMod {
   id: string
   name: string
@@ -39,12 +313,213 @@ export interface NativeMod {
   manifests: string[]
   sourceUrl?: string
   version?: string
+  author?: string
+  icon?: string
+  /** Groupe Aurora (spec §25) : empreinte du dossier groupe parent (mods membres). */
+  groupId?: string
+  /** Nom du groupe Aurora sans préfixe `AU GRP - ` (badge UI, spec §25). */
+  groupName?: string
+  /** Dossier AuroraMods où un paquet staged a été déployé par hardlink/copie
+   * (spec §9) — lu depuis `deployedPath` du manifest du paquet. */
+  deployedPath?: string
   storage: 'staged' | 'game-folder'
   stageId?: string
   profileIds: string[]
   deploymentStatus: 'imported' | 'stored' | 'validated' | 'enabled' | 'deployed' | 'runtime-visible' | 'loaded-by-game' | 'failed' | 'unknown'
   diagnostics: string[]
   quarantinePath?: string
+}
+
+/** Diagnostic d'une installation NTE (fusion Aurora, `nte_game_report`). */
+export interface NteGameReport {
+  valid: boolean
+  version: 'global' | 'cn' | 'tw' | 'unknown'
+  distribution: 'epic' | 'steam' | 'standalone'
+  launcher?: string | null
+  launchArgs: string[]
+  modsPath: string
+  binariesPath: string
+  markers: Array<{ label: string; marker: string; found: boolean }>
+}
+
+/** État Steam pour NTE (spec §20-21) : `launchReady=false` quand la
+ * distribution est Steam et que Steam ne tourne pas — l'erreur IPC du launcher
+ * NTE est anticipée et remplacée par l'action « Ouvrir Steam ». */
+export interface NteSteamStatus {
+  distribution: 'epic' | 'steam' | 'standalone'
+  steamRunning: boolean
+  steamPath?: string | null
+  launchReady: boolean
+  message: string
+}
+
+/** Résultat de la création validée du dossier AuroraMods (spec §4). */
+export interface NteEnsureModsResult {
+  modsPath: string
+  created: boolean
+  validated: boolean
+  reason: string
+}
+
+/** État d'un ensemble de mods NTE (spec §5, §10). */
+export interface NteModSetStatus {
+  name: string
+  enabled: boolean
+  pak: boolean
+  utoc: boolean
+  ucas: boolean
+  complete: boolean
+  missing: string[]
+}
+
+/** Validation complète du dossier Mods NTE. */
+export interface NteModsValidation {
+  modsPath: string
+  total: number
+  completeCount: number
+  incomplete: NteModSetStatus[]
+}
+
+/** Une étape du pipeline de lancement NTE (spec §40). */
+export interface NtePipelineStep {
+  id: string
+  label: string
+  status: 'ok' | 'warning' | 'error'
+  detail: string
+  action: string
+}
+
+/** Pipeline de lancement NTE : chaque étape produit un état vérifiable. */
+/** Résultat d'un déploiement par hardlinks dans AuroraMods (spec §9). */
+export interface NteDeployResult {
+  modPath: string
+  name: string
+  files: string[]
+  linked: number
+  copied: number
+  fallbackUsed: boolean
+}
+
+export interface NteLaunchPipeline {
+  ready: boolean
+  steps: NtePipelineStep[]
+  blockerSummary: string
+}
+
+/** État réel des mods NTE (spec §8, §15, §18) : « ne pas faire semblant » —
+ * installés/activés/complets et loader détecté sont des faits vérifiés ; le
+ * chargement runtime reste NON confirmable (aucune preuve non intrusive sans
+ * hook actif). `enabled` n'est JAMAIS « chargé ». */
+export interface NteModsState {
+  distribution: 'epic' | 'steam' | 'standalone'
+  total: number
+  enabled: number
+  complete: number
+  incomplete: string[]
+  loaderDlls: string[]
+  loaderPresent: boolean
+  runtimeConfirmable: boolean
+}
+
+/** Résultat d'un lancement NTE réel (spec §4-5) : le mécanisme utilisé est
+ * explicite — Steam reçoit l'ordre de lancer NTE (IPC valide), ou le launcher
+ * est exécuté directement (Epic/standalone). Le PID du jeu final est détecté
+ * ensuite par le moteur de présence, jamais affirmé ici. */
+export interface NteLaunchResult {
+  launchedVia: 'steam' | 'epic' | 'direct'
+  appId?: number | null
+  pid?: number | null
+  message: string
+}
+
+/** Source Aurora locale détectée (spec §12) : `Bin/Wrappers/` valide. */
+export interface NteLoaderSource {
+  path: string
+  dlls: string[]
+  appIdMatch: boolean
+}
+
+/** Détection du loader : installé dans le jeu + sources Aurora locales. */
+export interface NteLoaderProbe {
+  installedDlls: string[]
+  installed: boolean
+  sources: NteLoaderSource[]
+}
+
+/** Résultat de l'installation du loader Aurora (spec §12) : les DLL copiées,
+ * celles déjà identiques (skipped), les fichiers d'origine sauvegardés. */
+export interface NteLoaderInstallResult {
+  installed: string[]
+  skipped: string[]
+  backedUp: string[]
+  manifestPath: string
+  source: string
+}
+
+/** Résultat de la désinstallation : DLL retirées + fichiers restaurés. */
+export interface NteLoaderUninstallResult {
+  removed: string[]
+  restored: string[]
+  manifestRemoved: boolean
+  message: string
+}
+
+export interface CyberpunkRepairMove {
+  from: string
+  to: string
+}
+
+export interface CyberpunkRepairItem {
+  stageId: string
+  name: string
+  detectedFramework: string
+  moves: CyberpunkRepairMove[]
+  conflicts: string[]
+  confidence: 'high' | 'medium' | 'low' | string
+}
+
+export interface CyberpunkRepairPreview {
+  gameId: string
+  packagesScanned: number
+  filesAffected: number
+  items: CyberpunkRepairItem[]
+  warnings: string[]
+}
+
+export interface CyberpunkRepairResult {
+  repairId: string
+  snapshotPath: string
+  packagesRepaired: number
+  filesMoved: number
+  diagnostics: string[]
+}
+
+export interface StagedDuplicateGroup {
+  canonicalId: string
+  duplicateIds: string[]
+  name: string
+  reclaimableBytes: number
+}
+
+export interface StagedDuplicatePreview {
+  gameId: string
+  packagesScanned: number
+  duplicatePackages: number
+  reclaimableBytes: number
+  groups: StagedDuplicateGroup[]
+}
+
+export interface StagedDedupReplacement {
+  duplicateId: string
+  canonicalId: string
+}
+
+export interface StagedDedupResult {
+  gameId: string
+  removedPackages: number
+  reclaimedBytes: number
+  replacements: StagedDedupReplacement[]
+  warnings: string[]
 }
 
 export interface DetectedGame {
@@ -177,9 +652,174 @@ export interface NexusCatalogMod {
   url: string
 }
 
+export interface NexusPaginationMetadata {
+  page: number
+  pageSize: number
+  totalResults: number
+  totalPages: number
+  loadedResultCount: number
+  providerGameTotalMods?: number
+  providerGameTotalCollections?: number
+  hasPrevious: boolean
+  hasNext: boolean
+  totalIsExact: boolean
+}
+
+export interface NexusCatalogPage {
+  results: NexusCatalogMod[]
+  pagination: NexusPaginationMetadata
+  source: 'nexus-graphql-v2' | string
+  fetchedAt: number
+}
+
+export interface NexusModGallery {
+  images: string[]
+  source: string
+  fetchedAt: number
+}
+
+export interface NexusAccountCapabilities {
+  authenticated: boolean
+  membershipTier: 'premium' | 'free' | 'unknown' | string
+  supportsDirectDownloads?: boolean
+  supportsAutomaticCollectionDownloads?: boolean
+  downloadRateLimit?: string
+  apiHourlyRemaining?: number
+  apiHourlyLimit?: number
+  apiDailyRemaining?: number
+  apiDailyLimit?: number
+  requiresManualDownloadConfirmation?: boolean
+}
+
+export interface NexusCollectionSummary {
+  id: number
+  slug: string
+  name: string
+  summary: string
+  description: string
+  author: string
+  game: string
+  gameDomain: string
+  tileImage: string
+  headerImage: string
+  endorsements: number
+  totalDownloads: number
+  uniqueDownloads: number
+  updatedAt?: number
+  adult: boolean
+  collectionSchemaId?: number
+  recommendedManager: string
+  compatibility: 'partial' | 'unsupported' | 'unknown' | string
+  latestRevisionId?: number
+  latestRevisionNumber?: number
+  modCount: number
+  totalSize: number
+  gameVersions: string[]
+  providerGameCollectionCount?: number
+  url: string
+}
+
+export interface NexusCollectionPage {
+  results: NexusCollectionSummary[]
+  pagination: NexusPaginationMetadata
+  source: 'nexus-graphql-v2-collections' | string
+  fetchedAt: number
+}
+
+export interface NexusCollectionEntry {
+  collectionEntryId: string
+  nexusGameDomain: string
+  modId: number
+  fileId: number
+  expectedVersion: string
+  displayName: string
+  fileName: string
+  author: string
+  required: boolean
+  installOrder: number
+  priority: number
+  updatePolicy: string
+  expectedSize?: number
+  virusScanStatus: string
+  sourceUrl: string
+  status: 'Ready' | 'Queued' | 'WaitingForUser' | 'NxmReceived' | 'Downloaded' | 'Installed' | 'Unavailable' | string
+  localPath?: string
+}
+
+export interface NexusExternalRequirement {
+  id: number
+  name: string
+  author: string
+  required: boolean
+  resourceType: string
+  resourceUrl?: string
+  fileExpression: string
+}
+
+export interface NexusCollectionDetail {
+  collection: NexusCollectionSummary
+  revisionId: number
+  revisionNumber: number
+  revisionStatus: string
+  collectionSchemaVersion: string
+  modCount: number
+  totalSize: number
+  assetsSizeBytes: number
+  temporaryBytes: number
+  installationInfo: string
+  adult: boolean
+  gameVersions: string[]
+  entries: NexusCollectionEntry[]
+  externalRequirements: NexusExternalRequirement[]
+  unsupportedInstructions: string[]
+  warnings: string[]
+}
+
+export interface CollectionInstallPlan {
+  schemaVersion: number
+  installId: string
+  collectionId: number
+  collectionSlug: string
+  collectionName: string
+  revisionId: number
+  revisionNumber: number
+  gameId: string
+  gameDomain: string
+  profileId: string
+  profileName: string
+  profileState: string
+  entries: NexusCollectionEntry[]
+  externalRequirements: NexusExternalRequirement[]
+  downloadBytes: number
+  temporaryBytes: number
+  finalAdditionalBytes: number
+  accountCapabilities: NexusAccountCapabilities
+  warnings: string[]
+  unsupportedInstructions: string[]
+  createdAt: number
+  updatedAt: number
+  openNextRequiredPage: boolean
+  automaticExecution: boolean
+}
+
+export interface PreparedCollectionInstall {
+  plan: CollectionInstallPlan
+  profile: Profile
+  profilePaths: ProfilePaths
+  planPath: string
+}
+
+export interface CollectionStagingResult {
+  plan: CollectionInstallPlan
+  profile: Profile
+  installedPaths: string[]
+  warnings: string[]
+}
+
 export interface ArtworkCandidate {
   id: string
-  provider: 'steam'
+  /** Identifiant du fournisseur qui a produit l'image (ex. `steam`, `steamgriddb`). */
+  provider: string
   sourceLabel: string
   gameName: string
   kind: GameResourceKind
@@ -204,29 +844,66 @@ export interface BackgroundTaskSnapshot {
 
 export type BackgroundTaskEvent = { event: 'Progress'; data: { task: BackgroundTaskSnapshot } }
 
-export interface DiscordPresenceConfig {
-  enabled: boolean
-  clientId: string
-  largeImageKey?: string
-  showProfile: boolean
-  showModCount: boolean
-  showElapsed: boolean
+/** Événements du pipeline d'installation d'add-on (spec §14-15). */
+export type AddonInstallEvent =
+  | { event: 'Started'; data: { total: number } }
+  | { event: 'Progress'; data: { received: number } }
+  | { event: 'Finished'; data: Record<string, never> }
+
+/** Analyse d'une source d'addon (spec §2, §6) — jamais exécutée, jamais
+ * installée : l'aperçu précède la décision. Les compteurs PAK/UTOC/UCAS
+ * guident la détection automatique de type (PAK mod, etc.). */
+export interface AddonExportResult {
+  entryCount: number
+  totalBytes: number
+  outputPath: string
 }
 
-export interface DiscordConnectionStatus {
-  connected: boolean
-  message: string
+export interface AddonAnalyzeResult {
+  /** 'zip' | 'folder' */
+  kind: 'zip' | 'folder'
+  /** Contenu brut de manifest.json (racine) si trouvé. */
+  manifestText?: string | null
+  entryCount: number
+  totalSize: number
+  pakCount: number
+  utocCount: number
+  ucasCount: number
+  hasIcon: boolean
+  hasReadme: boolean
+  hasLicense: boolean
+  /** Problèmes de sécurité ou de structure (Zip Slip, symlinks, archives
+   * imbriquées, limites) — affichés avant installation. */
+  issues: string[]
+}
+
+/** Résultat du test bac à sable d'un addon (spec §15) — installation
+ * temporaire, vérification réelle des fichiers, désinstallation, propreté. */
+export interface AddonTestReport {
+  analysis: AddonAnalyzeResult
+  installOk: boolean
+  installedCount: number
+  expectedCount: number
+  manifestInstalled: boolean
+  uninstallOk: boolean
+  residueFree: boolean
+  issues: string[]
 }
 
 export interface LaunchGameResult {
   pid: number
-  discordConnected: boolean
-  discordMessage: string
   deploymentBackend: string
   deployedFiles: number
   conflictsResolved: number
   deploymentStatus: string
   diagnostics: string[]
+}
+
+export interface DeploymentProgressEvent {
+  phase: string
+  current: number
+  total: number
+  message: string
 }
 
 export interface GameProcessEvent {
@@ -236,6 +913,95 @@ export interface GameProcessEvent {
   profileId: string
   exitCode?: number
   cleanupError?: string
+}
+
+export interface GameProcessDetectedEvent {
+  gameId: string
+  gameName: string
+  processName: string
+  processPath?: string
+  confidence?: number
+  profileId?: string
+}
+
+export interface GamePresenceRequest {
+  gameId: string
+  installRoot?: string
+  launcherExecutable?: string
+  /** Launchers intermédiaires connus (ex. `ntegloballauncher.exe` pour NTE) :
+   * stage valide (+15) mais jamais le processus final. */
+  launcherExecutableCandidates?: string[]
+  gameExecutableCandidates: string[]
+  reattachContext: boolean
+  /** Signatures apprises (spec NTE §7 / #36) : nom + chemin relatif du
+   * processus final confirmé lors d'un lancement précédent. */
+  learnedSignatures?: LearnedProcessSignature[]
+  /** Steam indique que l'AppID du jeu est « En cours » (registre RunningAppID,
+   * spec UAC §5-6) → +20 au score. Preuve indépendante du chemin : fonctionne
+   * même quand un processus élevé refuse de révéler son chemin. */
+  steamRunning?: boolean
+  /** Emplacements profonds connus du processus final sous l'installation (ex.
+   * `Client/WindowsNoEditor/HT/Binaries/Win64` pour NTE) → +50 : le nom de
+   * l'exécutable n'est plus requis (spec UAC §6). */
+  gamePathPatterns?: string[]
+}
+
+/** Signature de processus apprise par installation (cache versionné). */
+export interface LearnedProcessSignature {
+  filename: string
+  relativePath?: string
+  publisher?: string
+}
+
+export interface GamePresence {
+  gameId: string
+  pid: number
+  processName: string
+  processPath: string
+  score: number
+  matchedExecutable?: string
+  /** Vrai si le processus est un launcher intermédiaire connu (jamais le jeu
+   * final). Utilisé pour la fin de session : un launcher encore ouvert ne doit
+   * pas maintenir « En cours » (spec RuntimeSessionV3 §2). */
+  isLauncherProcess?: boolean
+}
+
+/** État réel de la fenêtre du panneau rapide (spec Quick Panel §22, §50) —
+ * jamais une fausse activation : chaque champ est interrogé côté natif. */
+export interface QuickPanelStatus {
+  created: boolean
+  /** Le WebView du panneau est initialisé (plus jamais de fenêtre blanche). */
+  ready: boolean
+  visible: boolean
+  focused: boolean
+  alwaysOnTop: boolean
+  width: number
+  height: number
+  position?: [number, number]
+}
+
+export interface SteamRunningState {
+  steam_running: boolean
+  running_app_ids: number[]
+}
+
+export interface GameWindowRequest {
+  gameId: string
+  installRoot?: string
+  gameExecutableCandidates: string[]
+  titlePatterns: string[]
+  reattachContext: boolean
+}
+
+export interface GameWindowMatch {
+  gameId: string
+  pid: number
+  title: string
+  className: string
+  score: number
+  /** Vrai si la fenêtre du jeu est au premier plan (priorité multi-sessions). */
+  foreground: boolean
+  matchedTitlePattern?: string
 }
 
 export type UpdateDownloadEvent =
@@ -250,9 +1016,129 @@ const desktopOnly = <T>(command: string, args?: Record<string, unknown>) => {
   return invoke<T>(command, args)
 }
 
+/** Résultat de la résolution YouTube → fichier local (spec « Fix vidéo YouTube »).
+ * `cached` : fichier MP4 local produit ; `ytdlp_missing` : yt-dlp absent (repli
+ * lecteur embarqué) ; `failed` : échec de téléchargement. */
+/** Résultat de création d'un raccourci bureau (spec « Fix raccourci ») :
+ * chemin réel, mode effectif (`zailon` = via ZAILON — chaîne conservée ;
+ * `direct` = cible l'exécutable du jeu) et vérification post-création. */
+export interface ShortcutCreationResult {
+  path: string
+  mode: 'zailon' | 'direct'
+  verified: boolean
+  message?: string
+}
+
+export interface ResolvedBackgroundVideo {
+  status: 'cached' | 'ytdlp_missing' | 'failed'
+  videoPath?: string
+  thumbnailPath?: string
+  sizeBytes?: number
+  message?: string
+}
+
+export interface CachedBackgroundMediaEntry {
+  videoId: string
+  videoPath: string
+  thumbnailPath?: string
+  sizeBytes: number
+  cachedAt: number
+}
+
 export const native = {
   isDesktop: () => isTauri(),
+  /** Active/désactive le démarrage avec le système (spec §37-42, §116) :
+   * `discreet` = lancer en arrière-plan (`--background`, fenêtre cachée). */
+  setAutostart: (enabled: boolean, discreet: boolean) =>
+    desktopOnly<boolean>('set_autostart', { enabled, discreet }),
+  /** L'instance courante a-t-elle été lancée avec `--background` ? */
+  backgroundMode: () => desktopOnly<boolean>('background_mode'),
+  /** Bulle système « ✓ Suivi par ZAILON » (spec §120) — mode discret uniquement
+   * (le toast in-app est invisible dans une fenêtre cachée). */
+  notifySessionStarted: (gameName: string) =>
+    desktopOnly<void>('notify_session_started', { gameName }),
+  /** Tooltip de la zone de notification (spec §119) : « ZAILON — <jeu> »
+   * pendant une session suivie, « ZAILON » sinon. */
+  setTraySession: (label: string) => desktopOnly<void>('set_tray_session', { label }),
+
+  visualProfiles: {
+    backendReport: () => desktopOnly<VisualBackendReport>('visual_backend_report'),
+    list: () => desktopOnly<VisualProfile[]>('list_visual_profiles'),
+    save: (profile: VisualProfile) => desktopOnly<string>('save_visual_profile', { profile }),
+    delete: (profileId: string) => desktopOnly<void>('delete_visual_profile', { profileId }),
+    history: (profileId: string) => desktopOnly<VisualProfileHistoryItem[]>('visual_profile_history', { profileId }),
+    restoreVersion: (profileId: string, fileName: string) =>
+      desktopOnly<VisualProfile>('restore_visual_profile_version', { profileId, fileName }),
+    readVersion: (profileId: string, fileName: string) =>
+      desktopOnly<VisualProfile>('read_visual_profile_version', { profileId, fileName }),
+    deleteVersion: (profileId: string, fileName: string) =>
+      desktopOnly<void>('delete_visual_profile_version', { profileId, fileName }),
+    export: (profileId: string, destination: string) =>
+      desktopOnly<string>('export_visual_profile', { profileId, destination }),
+    import: (source: string) => desktopOnly<VisualProfile>('import_visual_profile', { source }),
+    apply: (profileId: string, monitorId?: string) =>
+      desktopOnly<VisualApplyResult>('apply_visual_profile', { profileId, monitorId }),
+    preview: (profile: VisualProfile, monitorId?: string) =>
+      desktopOnly<VisualApplyResult>('preview_visual_profile', { profile, monitorId }),
+    confirm: (confirmationToken: string) =>
+      desktopOnly<void>('confirm_visual_profile', { confirmationToken }),
+    restore: (monitorId?: string) =>
+      desktopOnly<VisualRestoreResult>('restore_visual_state', { monitorId }),
+    setAssociation: (gameId: string, zailonProfileId: string | undefined, visualProfileId: string | undefined) =>
+      desktopOnly<void>('set_visual_profile_association', { gameId, zailonProfileId, visualProfileId }),
+    association: (gameId: string, zailonProfileId?: string) =>
+      desktopOnly<string | null>('visual_profile_association', { gameId, zailonProfileId }),
+    shortcutAction: (action: 'restore' | 'toggle' | 'previous' | 'next') =>
+      desktopOnly<string>('visual_shortcut_action', { action }),
+    safetyReport: (gameId: string, gameName: string, gameRoot: string | undefined, backendId: string) =>
+      desktopOnly<VisualSafetyReport>('visual_safety_report', { gameId, gameName, gameRoot, backendId }),
+    openWindowsSettings: (kind: 'display' | 'hdr' | 'night-light' | 'accessibility' | 'color-management') =>
+      desktopOnly<void>('open_visual_windows_settings', { kind }),
+  },
   scanMods: (modsPath: string) => desktopOnly<NativeMod[]>('scan_mods', { modsPath }),
+  /** Empreinte LÉGÈRE du dossier Mods (métadonnées uniquement) — cache mods intelligent (spec §37-38). */
+  modsFolderFingerprint: (modsPath: string) => desktopOnly<string>('mods_folder_fingerprint', { modsPath }),
+  // Add-ons (spec §14-15, §65) : téléchargement HTTPS + SHA-256 + installation
+  // atomique avec rollback — jamais d'écrasement direct.
+  addonDownload: (url: string, destPath: string, onProgress: (received: number, total: number) => void) => {
+    if (!isTauri()) return Promise.reject(new Error('Add-on download requires the ZAILON desktop app.'))
+    const channel = new Channel<AddonInstallEvent>()
+    channel.onmessage = event => {
+      if (event.event === 'Started') onProgress(0, event.data.total)
+      else if (event.event === 'Progress') onProgress(event.data.received, 0)
+    }
+    return invoke<void>('addon_download', { url, destPath, onEvent: channel })
+  },
+  addonVerifySha256: (path: string, expected: string) => desktopOnly<boolean>('addon_verify_sha256', { path, expected }),
+  addonInstallStaged: (archivePath: string, installDir: string) => desktopOnly<void>('addon_install_staged', { archivePath, installDir }),
+  /** Analyse une source d'addon (ZIP `.zailon-addon` ou dossier) SANS l'installer
+   * ni exécuter quoi que ce soit : manifest, fichiers, compteurs PAK/UTOC/UCAS,
+   * taille et problèmes de sécurité — l'aperçu précède toujours l'installation. */
+  addonAnalyze: (sourcePath: string) =>
+    desktopOnly<AddonAnalyzeResult>('addon_analyze', { sourcePath }),
+  /** Installe un addon depuis un DOSSIER : copie en staging → swap atomique →
+   * rollback (mêmes gardes que l'archive : symlinks refusés, chemins validés,
+   * limites). `manifest.json` à la racine exigé. */
+  addonInstallFolder: (sourceDir: string, installDir: string) =>
+    desktopOnly<void>('addon_install_folder', { sourceDir, installDir }),
+  /** Exporte un addon en `.zip` (spec §5, §16) : le `manifest.json` fourni
+   * (généré par le créateur) est TOUJOURS embarqué à la racine, l'arbre du
+   * dossier suit. Entrées triées → sortie déterministe (SHA-256 stable). */
+  addonExportZip: (sourceDir: string, outputZip: string, manifestJson: string) =>
+    desktopOnly<AddonExportResult>('addon_export_zip', { sourceDir, outputZip, manifestJson }),
+  /** Teste un addon dans un BAC À SABLE (spec §15) : installation temporaire
+   * dans `addons/.test/`, vérification des fichiers réellement écrits,
+   * désinstallation, contrôle des résidus. Aucun code exécuté, aucun effet
+   * sur les addons réels — le rapport décide « prêt à être partagé ». */
+  addonTestRun: (sourceDir: string) =>
+    desktopOnly<AddonTestReport>('addon_test_run', { sourceDir }),
+  addonInstallDir: () => desktopOnly<string>('addon_install_dir'),
+  /** Pousse la liste des add-ons activés (installés ET activés) au gate natif —
+   * sans l'add-on, aucun service natif (providers, Nexus, artwork)
+   * ne démarre (spec Add-ons §74). */
+  setEnabledAddons: (addons: string[]) => desktopOnly<void>('set_enabled_addons', { addons }),
+  /** Vérifie la signature Ed25519 (base64) du SHA-256 d'un fichier (spec §14). */
+  addonVerifySignature: (filePath: string, signature: string, publicKey: string) => desktopOnly<boolean>('addon_verify_signature', { filePath, signature, publicKey }),
   listStagedMods: (gameId: string) => desktopOnly<NativeMod[]>('list_staged_mods', { gameId }),
   scanModImport: (paths: string[], gameName: string) => desktopOnly<ModImportCandidate[]>('scan_mod_import', { paths, gameName }),
   scanModImportBackground: (taskId: string, paths: string[], gameName: string, onProgress: (task: BackgroundTaskSnapshot) => void) => {
@@ -263,16 +1149,155 @@ export const native = {
   },
   toggleMod: (modPath: string, modsRoot: string, enable: boolean) => desktopOnly<string>('toggle_mod', { modPath, modsRoot, enable }),
   deleteMod: (modPath: string, modsRoot: string) => desktopOnly<void>('delete_mod', { modPath, modsRoot }),
+  // ── NTE (Neverness to Everness) — fusion Aurora ────────────────────────────
+  /** Scan du dossier Mods NTE au layout Aurora (un dossier = un mod, mod.json,
+   * état `.pak.disabled`, staging `.aurora-installing-*` ignoré). */
+  scanNteMods: (modsPath: string) => desktopOnly<NativeMod[]>('scan_nte_mods', { modsPath }),
+  /** Activation/désactivation NTE : renommage `.pak` ↔ `.pak.disabled` dans le
+   * dossier du mod (transactionnel) — le mécanisme réel du moteur Aurora. */
+  toggleNteMod: (modPath: string, enable: boolean) => desktopOnly<string>('toggle_nte_mod', { modPath, enable }),
+  /** Diagnostic d'une installation NTE (version, distribution, marqueurs). */
+  nteGameReport: (installDir: string, platform?: string | null) =>
+    desktopOnly<NteGameReport>('nte_game_report', { installDir, platform: platform || null }),
+  /** État Steam pour NTE (spec §20-21) : la distribution Steam avec Steam
+   * absent est un état identifiable « Ouvrir Steam », jamais un crash IPC. */
+  nteSteamCheck: (installDir: string, platform?: string | null) =>
+    desktopOnly<NteSteamStatus>('nte_steam_check', { installDir, platform: platform || null }),
+  /** Ouvre le client Steam (spec §20 : action « Ouvrir Steam »). */
+  openSteam: () => desktopOnly<void>('open_steam', {}),
+  /** Crée le dossier AuroraMods APRÈS validation du chemin NTE (spec §4). */
+  nteEnsureModsDir: (installDir: string) =>
+    desktopOnly<NteEnsureModsResult>('nte_ensure_mods_dir', { installDir }),
+  /** Validation des ensembles de mods (spec §5, §10) : un mod = un dossier
+   * .pak/.utoc/.ucas ; signale les ensembles incomplets sans toucher aux
+   * fichiers. */
+  nteValidateMods: (modsPath: string) =>
+    desktopOnly<NteModsValidation>('nte_validate_mods', { modsPath }),
+  /** Pipeline de lancement NTE (spec §15, §40) : chaque étape produit un état
+   * vérifiable (installation, provider/Steam, dossier mods, mods, loader
+   * Everlight) — jamais un faux « NTE lancé ». */
+  nteLaunchPipeline: (installDir: string, platform: string | null, modsPath: string) =>
+    desktopOnly<NteLaunchPipeline>('nte_launch_pipeline', { installDir, platform, modsPath }),
+  /** État réel des mods NTE (spec §8/§15/§18) : installés, activés, complets
+   * et loader détecté (DLL wrapper Aurora dans les binaires du jeu) — jamais
+   * un faux « chargé » (runtimeConfirmable est toujours faux). */
+  nteModsState: (installDir: string, platform: string | null, modsPath: string) =>
+    desktopOnly<NteModsState>('nte_mods_state', { installDir, platform, modsPath }),
+  /** Lance réellement NTE selon la distribution (spec §4-5) : Steam →
+   * steam://rungameid/4508340 (Steam devient le parent, IPC du launcher
+   * valide) ; Epic → launcher direct avec les args d'auth ; standalone →
+   * launcher direct. */
+  nteLaunchGame: (installDir: string, platform: string | null, launcherPath: string | null) =>
+    desktopOnly<NteLaunchResult>('nte_launch_game', { installDir, platform, launcherPath }),
+  /** Détecte un loader déjà présent + les sources Aurora locales (spec §12) —
+   * jamais un téléchargement, toujours une détection. */
+  nteLoaderProbe: (installDir: string) =>
+    desktopOnly<NteLoaderProbe>('nte_loader_probe', { installDir }),
+  /** Installe le loader Aurora depuis une source LOCALE (spec §12) : copie
+   * les DLL wrapper vers le Win64 du jeu avec sauvegarde, manifest sha256 et
+   * rollback — transactionnel, refuse de réinstaller par-dessus un loader
+   * déjà géré par ZAILON. */
+  nteLoaderInstall: (installDir: string, sourceDir: string) =>
+    desktopOnly<NteLoaderInstallResult>('nte_loader_install', { installDir, sourceDir }),
+  /** Désinstalle le loader géré par ZAILON : retire les DLL, restaure les
+   * fichiers d'origine, supprime le manifest. Sans manifest ZAILON, les DLL
+   * présentes ne sont JAMAIS supprimées (message honnête). */
+  nteLoaderUninstall: (installDir: string) =>
+    desktopOnly<NteLoaderUninstallResult>('nte_loader_uninstall', { installDir }),
+  /** Staging par hardlinks NTE (spec §9) : déploie un paquet staged vers
+   * AuroraMods en LIANT les .pak/.utoc/.ucas (repli copie si le système de
+   * fichiers refuse le lien). Transactionnel, écrit mod.json + deployedPath. */
+  nteDeployMod: (sourceDir: string, modsPath: string) =>
+    desktopOnly<NteDeployResult>('nte_deploy_mod', { sourceDir, modsPath }),
   deleteStagedMod: (gameId: string, stageId: string) => desktopOnly<void>('delete_staged_mod', { gameId, stageId }),
+  previewStagedDuplicates: (gameId: string) =>
+    desktopOnly<StagedDuplicatePreview>('preview_staged_duplicates', { gameId }),
+  deduplicateStagedMods: (gameId: string) =>
+    desktopOnly<StagedDedupResult>('deduplicate_staged_mods', { gameId }),
+  previewCyberpunkStructureRepair: (gameId: string) =>
+    desktopOnly<CyberpunkRepairPreview>('preview_cyberpunk_structure_repair', { gameId }),
+  applyCyberpunkStructureRepair: (gameId: string, stageIds: string[]) =>
+    desktopOnly<CyberpunkRepairResult>('apply_cyberpunk_structure_repair', { gameId, stageIds }),
+  rollbackCyberpunkStructureRepair: (gameId: string, repairId: string) =>
+    desktopOnly<CyberpunkRepairResult>('rollback_cyberpunk_structure_repair', { gameId, repairId }),
+  previewMo2Import: (sourcePath: string) =>
+    desktopOnly<Mo2ImportPreview>('preview_mo2_import', { sourcePath }),
+  importMo2Instance: (taskId: string, request: Mo2ImportRequest) =>
+    desktopOnly<Mo2ImportResult>('import_mo2_instance', { taskId, request }),
+  auditProfileDeployment: (gameId: string, profileId: string, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, gameRoot?: string) =>
+    desktopOnly<ProfileDeploymentAudit>('audit_profile_deployment', { gameId, profileId, enabledModIds, conflictRules, gameRoot }),
+  repairMo2ProfileDeployment: (gameId: string, profileId: string, sourcePath: string, gameName: string, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, gameRoot?: string) =>
+    desktopOnly<Mo2DeploymentRepairResult>('repair_mo2_profile_deployment', { gameId, profileId, sourcePath, gameName, enabledModIds, conflictRules, gameRoot }),
+  repairStagedImports: (gameId: string, gameName: string, stageIds: string[]) =>
+    desktopOnly<StagedImportRepairReport[]>('repair_staged_imports', { gameId, gameName, stageIds }),
   syncProfileState: (gameId: string, profile: Profile) => desktopOnly<ProfilePaths>('sync_profile_state', { gameId, profileId: profile.id, profile }),
   applyProfileTransaction: (gameId: string, operationId: string, beforeProfiles: Profile[], afterProfiles: Profile[]) =>
     desktopOnly<ProfileTransactionResult>('apply_profile_transaction', { gameId, operationId, beforeProfiles, afterProfiles }),
   profileIntegrity: (gameId: string, profileId: string) => desktopOnly<ProfileIntegrity>('profile_integrity', { gameId, profileId }),
   trashProfileState: (gameId: string, profileId: string) => desktopOnly<string>('trash_profile_state', { gameId, profileId }),
   initializeFiveMBase: (gameId: string, installDirectory: string) => desktopOnly<BaseSnapshotResult>('initialize_fivem_base', { gameId, installDirectory }),
-  launchGame: (execPath: string, gameId: string, gameName: string, gameRoot: string, profileId: string, profileName: string, activeMods: number, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, discord?: DiscordPresenceConfig) =>
-    desktopOnly<LaunchGameResult>('launch_game', { execPath, gameId, gameName, gameRoot, profileId, profileName, activeMods, enabledModIds, conflictRules, discord }),
-  testDiscordConnection: (clientId: string) => desktopOnly<DiscordConnectionStatus>('test_discord_connection', { clientId }),
+  readCitizenFx: (citizenfxPath: string) => desktopOnly<CitizenFxRead>('read_citizenfx', { citizenfxPath }),
+  writeCitizenFx: (citizenfxPath: string, text: string) => desktopOnly<CitizenFxWrite>('write_citizenfx', { citizenfxPath, text }),
+  detectFiveMEnvironment: (installDirectory: string) => desktopOnly<FiveMEnvironment>('detect_fivem_environment', { installDirectory }),
+  /** Contenu RÉEL de `FiveM.app/mods` + empreinte stable (spec « FiveM
+   * Profiles » §1-2, §11-12) — jamais de système virtuel d'activation. */
+  listFiveMMods: (installDirectory: string, knownFingerprint?: string) => desktopOnly<FiveMModsListing>('list_fivem_mods', { installDirectory, knownFingerprint }),
+  /** Suppression SÉCURISÉE d'un élément de premier niveau de FiveM.app/mods. */
+  removeFiveMMod: (installDirectory: string, relativePath: string) => desktopOnly<FiveMModRemoveResult>('remove_fivem_mod', { installDirectory, relativePath }),
+  /** Vérification d'intégrité du profil FiveM (spec §20) : racine, FiveM.app,
+   * CitizenFX.ini (+ IVPath), mods/, plugins/, ReShade. Jamais d'écriture. */
+  verifyFiveMProfile: (installDirectory: string) => desktopOnly<FiveMProfileVerification>('verify_fivem_profile', { installDirectory }),
+  /** Export intelligent d'un profil FiveM (spec §7, §19) : manifest + mods/ +
+   * plugins/ + citizenfx.ini + ReShade, sans FiveM.exe ni cache/logs. */
+  exportFiveMProfile: (installDirectory: string, destination: string, gameName: string) =>
+    desktopOnly<FiveMProfileExportResult>('export_fivem_profile', { installDirectory, destination, gameName }),
+  fivemPackScan: (selectedPath: string) => desktopOnly<FiveMPackScanResult>('fivem_pack_scan', { selectedPath }),
+  fivemPackApply: (archivePath: string, targetDir: string, manifestJson: string) =>
+    desktopOnly<FiveMPackApplyResult>('fivem_pack_apply', { archivePath, targetDir, manifestJson }),
+  fivemPackRemove: (targetDir: string) => desktopOnly<FiveMPackRemoveResult>('fivem_pack_remove', { targetDir }),
+  fivemPackManifest: (targetDir: string) => desktopOnly<FiveMPackManifestRead>('fivem_pack_manifest', { targetDir }),
+  detectVortexInstance: (gameRoot: string) => desktopOnly<VortexInstance>('detect_vortex_instance', { gameRoot }),
+  detectFrostyInstallation: (extraPaths: string[]) => desktopOnly<FrostyInstallation>('frosty_detect_installation', { extraPaths }),
+  setGameProcessPriority: (pid: number, priority: string) => desktopOnly<void>('set_game_process_priority', { pid, priority }),
+  scanGamePresence: (requests: GamePresenceRequest[]) => desktopOnly<GamePresence[]>('scan_game_presence', { requests }),
+  /** Présence Steam (clé de registre RunningAppID, lecture seule) : preuve
+   * supplémentaire du GamePresenceEngine — Steam n'est jamais la seule source. */
+  steamRunningState: (appIds: number[]) => desktopOnly<SteamRunningState>('steam_running_state', { appIds }),
+  /** Watcher de fenêtres : la fenêtre principale du jeu est une preuve de
+   * présence indépendante de l'arbre des processus (survit aux launchers,
+   * UAC et relances). */
+  scanGameWindows: (requests: GameWindowRequest[]) => desktopOnly<GameWindowMatch[]>('scan_game_windows', { requests }),
+  /** Plein écran exclusif : vrai si la fenêtre au premier plan a commuté le
+   * mode d'affichage (le Quick Panel ne peut pas s'afficher au-dessus).
+   * Heuristique documentée — un exclusif à la résolution du bureau n'est pas
+   * détectable par cette seule preuve. */
+  exclusiveFullscreenActive: () => desktopOnly<boolean>('exclusive_fullscreen_active', {}),
+  /** Quick Game Panel : fenêtre native ZAILON pendant le jeu (jamais une
+   * injection). Ouverte au raccourci, fermée à la perte de focus. */
+  quickPanel: {
+    open: () => desktopOnly<void>('open_quick_panel', {}),
+    close: () => desktopOnly<void>('close_quick_panel', {}),
+    /** Masque sans détruire la fenêtre (spec §5) — bouton × du panneau. */
+    hide: () => desktopOnly<void>('hide_quick_panel', {}),
+    toggle: () => desktopOnly<boolean>('toggle_quick_panel', {}),
+    /** État réel de la fenêtre (spec §22, §50) : créée, visible, focus,
+     * always-on-top, taille, position — jamais une fausse activation. */
+    status: () => desktopOnly<QuickPanelStatus>('quick_panel_status', {}),
+  },
+
+  launchGame: (execPath: string, gameId: string, gameName: string, gameRoot: string, profileId: string, profileName: string, activeMods: number, enabledModIds: string[], conflictRules: Array<{ path: string; winnerModId: string }>, launcherBased: boolean, onProgress: (event: DeploymentProgressEvent) => void) => {
+    if (!isTauri()) return Promise.reject(new Error('Le lancement est uniquement disponible dans l’application ZAILON.'))
+    const channel = new Channel<DeploymentProgressEvent>()
+    channel.onmessage = onProgress
+    return invoke<LaunchGameResult>('launch_game', { execPath, gameId, gameName, gameRoot, profileId, profileName, activeMods, enabledModIds, conflictRules, launcherBased, onEvent: channel })
+  },
+  /** Restaure tout déploiement temporaire restant d'un jeu (fin de session
+   * explicite). Pour un jeu lancé via un launcher intermédiaire, le déploiement
+   * reste actif après la fermeture du launcher — il est restauré ici, à la fin
+   * réelle de la session, et au plus tard par la récupération du lancement
+   * suivant. Retourne le nombre de sessions restaurées. */
+  restoreDeploymentSession: (gameId: string, gameRoot: string) =>
+    desktopOnly<number>('restore_deployment_session', { gameId, gameRoot }),
   guessModsPath: (execPath: string) => desktopOnly<string>('guess_mods_path', { execPath }),
   scanSteamGames: (steamPath: string | undefined, onEvent: (event: SteamScanEvent) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Steam detection is only available in the ZAILON desktop app.'))
@@ -280,6 +1305,9 @@ export const native = {
     channel.onmessage = onEvent
     return invoke<SteamScan>('scan_steam_games', { steamPath, onEvent: channel })
   },
+  /** Temps de jeu Steam (minutes) par AppID, lu depuis localconfig.vdf (spec
+   * « Temps Steam/Epic » §3). Lecture seule — jamais d'écriture dans Steam. */
+  steamPlaytime: (steamPath?: string) => desktopOnly<Record<string, number>>('steam_playtime', { steamPath }),
   scanLibrary: (mode: 'quick' | 'full', onEvent: (event: DiscoveryScanEvent) => void) => {
     if (!isTauri()) return Promise.reject(new Error('La détection locale est uniquement disponible dans l’application ZAILON.'))
     const channel = new Channel<DiscoveryScanEvent>()
@@ -312,39 +1340,119 @@ export const native = {
   testProviderConnection: (provider: 'nexus' | 'curseforge') =>
     desktopOnly<ProviderConnectionStatus>('test_provider_connection', { provider }),
   nexusCatalogGames: () => desktopOnly<NexusCatalogGame[]>('nexus_catalog_games'),
-  nexusCatalogMods: (gameDomain: string, feed: 'recent' | 'updated' | 'trending' | 'popular' | 'downloaded') =>
-    desktopOnly<NexusCatalogMod[]>('nexus_catalog_mods', { gameDomain, feed }),
+  nexusAccountCapabilities: () => desktopOnly<NexusAccountCapabilities>('nexus_account_capabilities'),
+  nexusCatalogMods: (gameDomain: string, query: string, sort: 'recent' | 'updated' | 'popular' | 'downloaded', page: number, pageSize: number, includeAdult: boolean) =>
+    desktopOnly<NexusCatalogPage>('nexus_catalog_mods', { gameDomain, query, sort, page, pageSize, includeAdult }),
+  nexusModGallery: (gameDomain: string, modId: number) =>
+    desktopOnly<NexusModGallery>('nexus_mod_gallery', { gameDomain, modId }),
+  nexusCatalogCollections: (gameDomain: string, query: string, sort: 'recent' | 'updated' | 'popular' | 'downloaded', page: number, pageSize: number, includeAdult: boolean) =>
+    desktopOnly<NexusCollectionPage>('nexus_catalog_collections', { gameDomain, query, sort, page, pageSize, includeAdult }),
+  nexusCollectionDetail: (gameDomain: string, slug: string, revision: number | undefined, includeAdult: boolean) =>
+    desktopOnly<NexusCollectionDetail>('nexus_collection_detail', { gameDomain, slug, revision, includeAdult }),
+  prepareNexusCollectionInstall: (gameId: string, installId: string, profile: Profile, gameDomain: string, slug: string, revision: number | undefined, includeAdult: boolean) =>
+    desktopOnly<PreparedCollectionInstall>('prepare_nexus_collection_install', { gameId, installId, profile, gameDomain, slug, revision, includeAdult }),
+  listCollectionInstallPlans: (gameId: string) =>
+    desktopOnly<CollectionInstallPlan[]>('list_collection_install_plans', { gameId }),
+  updateCollectionInstall: (gameId: string, installId: string, action: 'pause' | 'resume' | 'cancel') =>
+    desktopOnly<CollectionInstallPlan>('update_collection_install', { gameId, installId, action }),
+  startCollectionInstall: (gameId: string, installId: string) =>
+    desktopOnly<CollectionInstallPlan>('start_collection_install', { gameId, installId }),
+  installCollectionDownloads: (gameId: string, installId: string, gameName: string) =>
+    desktopOnly<CollectionStagingResult>('install_collection_downloads', { gameId, installId, gameName }),
   setNxmAssociation: (enabled: boolean) => desktopOnly<boolean>('set_nxm_association', { enabled }),
   nxmAssociationStatus: () => desktopOnly<boolean>('nxm_association_status'),
   pendingExternalInstalls: () => desktopOnly<NxmRequest[]>('pending_external_installs'),
   consumeExternalInstall: (requestId: string) => desktopOnly<void>('consume_external_install', { requestId }),
   pendingShortcutLaunches: () => desktopOnly<ShortcutLaunchRequest[]>('pending_shortcut_launches'),
   consumeShortcutLaunch: (rawUrl: string) => desktopOnly<void>('consume_shortcut_launch', { rawUrl }),
-  createDesktopShortcut: (gameId: string, profileId: string, gameName: string, iconPath?: string) =>
-    desktopOnly<string>('create_desktop_shortcut', { gameId, profileId, gameName, iconPath }),
+  /** Crée un raccourci bureau .lnk/.desktop/.webloc qui lance ZAILON avec l'URI
+   * zailon:// (profil, mods, session, clavier, visuel conservés). L'icône est
+   * résolue côté natif : personnalisée (ico/exe/dll/png) → exécutable du jeu
+   * (icône native) → icône ZAILON en dernier recours. */
+  createDesktopShortcut: (gameId: string, profileId: string, gameName: string, options?: { iconPath?: string; execPath?: string; mode?: 'zailon' | 'direct'; launchArgs?: string }) =>
+    desktopOnly<ShortcutCreationResult>('create_desktop_shortcut', {
+      gameId, profileId, gameName,
+      mode: options?.mode ?? 'zailon',
+      iconPath: options?.iconPath,
+      execPath: options?.execPath,
+      launchArgs: options?.launchArgs,
+    }),
   storeGameResource: (gameId: string, kind: GameResourceKind, sourcePath: string) =>
     desktopOnly<string>('store_game_resource', { gameId, kind, sourcePath }),
   cacheRemoteGameResource: (gameId: string, kind: Exclude<GameResourceKind, 'video'>, sourceUrl: string) =>
     desktopOnly<string>('cache_remote_game_resource', { gameId, kind, sourceUrl }),
-  searchGameArtwork: (gameName: string, provider: string | undefined, providerGameId: string | undefined, kind: Exclude<GameResourceKind, 'video'>) =>
-    desktopOnly<ArtworkCandidate[]>('search_game_artwork', { gameName, provider, providerGameId, kind }),
+  resolveYoutubeVideo: (url: string, videoId: string) =>
+    desktopOnly<ResolvedBackgroundVideo>('resolve_youtube_video', { url, videoId }),
+  /** Inventaire RÉEL du cache des fonds vidéo (spec « Gestion du cache »). */
+  listCachedBackgroundMedia: () => desktopOnly<CachedBackgroundMediaEntry[]>('list_cached_background_media'),
+  /** Supprime une vidéo + sa vignette du cache (identifiant sanitisé). */
+  removeCachedBackgroundMedia: (videoId: string) => desktopOnly<boolean>('remove_cached_background_media', { videoId }),
+  /** Vide le cache des fonds vidéo, retourne le nombre de fichiers supprimés. */
+  clearCachedBackgroundMedia: () => desktopOnly<number>('clear_cached_background_media'),
+  /** Recherche multi-source : Steam officiel toujours, + chaque fournisseur
+   * dont une clé est fournie dans `apiKeys` (ex. `steamgriddb`). Les résultats
+   * sont fusionnés et dédupliqués côté natif dans une seule liste. */
+  searchGameArtwork: (gameName: string, provider: string | undefined, providerGameId: string | undefined, kind: Exclude<GameResourceKind, 'video'>, apiKeys?: Record<string, string>) =>
+    desktopOnly<ArtworkCandidate[]>('search_game_artwork', { gameName, provider, providerGameId, kind, apiKeys }),
+  /** Teste la connexion d'un fournisseur d'illustrations (SteamGridDB : clé ;
+   * IGDB : Client ID + Secret Twitch ; GameBanana : API publique).
+   * Retourne un message lisible ; rejette en cas de connexion invalide. */
+  testArtworkProvider: (provider: 'steamgriddb' | 'igdb' | 'gamebanana', apiKeys: Record<string, string>) =>
+    desktopOnly<string>('test_artwork_provider', { provider, apiKeys }),
   removeGameResource: (gameId: string, resourcePath: string) =>
     desktopOnly<void>('remove_game_resource', { gameId, resourcePath }),
+  /** §10 « Nettoyage automatique » : supprime les fichiers d'artwork orphelins
+   * (non référencés par le store) dans `games/<id>/resources/`. Référentiel
+   * vide → ne supprime jamais rien. Fichiers modifiés depuis < 1 h ignorés. */
+  cleanupOrphanedGameResources: (referencedPaths: string[]) =>
+    desktopOnly<{ removed: number; freedBytes: number }>('cleanup_orphaned_game_resources', { referencedPaths }),
   openPath: (path: string) => desktopOnly<void>('open_path', { path }),
   openExternalUrl: (url: string) => desktopOnly<void>('open_external_url', { url }),
   prepareUpdateBackup: (snapshot: string, currentVersion: string, targetVersion: string) =>
     desktopOnly<string>('prepare_update_backup', { snapshot, currentVersion, targetVersion }),
+  verifyUpdateState: (snapshot: string, currentVersion: string) =>
+    desktopOnly<UpdateIntegrityReport>('verify_update_state', { snapshot, currentVersion }),
   recordUpdateEvent: (event: string, version: string, message?: string) =>
     desktopOnly<void>('record_update_event', { event, version, message }),
   openUpdateLog: () => desktopOnly<void>('open_update_log'),
   checkForUpdate: (channel: UpdateChannel) =>
     desktopOnly<UpdateMetadata | null>('check_for_update', { channel }),
+  fetchReleaseNotes: (version: string) =>
+    desktopOnly<string | null>('fetch_release_notes', { version }),
   installUpdate: (onEvent: (event: UpdateDownloadEvent) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Updates are only available in the ZAILON desktop app.'))
     const channel = new Channel<UpdateDownloadEvent>()
     channel.onmessage = onEvent
     return invoke<void>('install_update', { onEvent: channel })
   },
+  /** Enregistre une archive `.zailon-frosty-project` (spec Frosty Editor §108). */
+  saveFrostyProjectArchive: async (bytes: Uint8Array, defaultName: string): Promise<boolean> => {
+    if (!isTauri()) return false
+    const selected = await save({
+      title: 'Exporter le projet Frosty',
+      defaultPath: `${defaultName.replace(/[^a-z0-9_-]+/gi, '-')}.zailon-frosty-project`,
+      filters: [{ name: 'Projet Frosty ZAILON', extensions: ['zailon-frosty-project'] }],
+    })
+    if (typeof selected !== 'string') return false
+    await invoke('save_project_archive', { path: selected, bytes: Array.from(bytes) })
+    return true
+  },
+  /** Détecte le runtime Frosty officiel (jamais bundle — licence). */
+  detectFrostyRuntime: (gamePath: string, extraPaths: string[]) =>
+    desktopOnly<{ path: string; exe: string; size: number } | null>('frosty_detect_runtime', { gamePath, extraPaths }),
+  /** Inventaire réel des données du jeu (index réelle, spec §16). */
+  scanFrostyGameData: (gamePath: string) =>
+    desktopOnly<Array<{ path: string; size: number; modified: number }>>('frosty_scan_game_data', { gamePath }),
+  /** Lit un fichier catalogue `.cat` du jeu (borné à 64 Mo, chemin validé). */
+  readFrostyCatFile: (gamePath: string, relativePath: string) =>
+    desktopOnly<number[]>('frosty_read_cat_file', { gamePath, relativePath }),
+  /** Démarre le runtime officiel en Worker isolé (§76-78). */
+  frostyWorkerStart: (runtimePath: string) => desktopOnly<number>('frosty_worker_start', { runtimePath }),
+  /** État du Worker natif (running + RAM). */
+  frostyWorkerStatus: (pid: number) =>
+    desktopOnly<{ running: boolean; memoryMb: number | null }>('frosty_worker_status', { pid }),
+  /** Arrête le Worker (§79-81). */
+  frostyWorkerStop: (pid: number) => desktopOnly<void>('frosty_worker_stop', { pid }),
 }
 
 export async function pickExecutable() {
@@ -360,6 +1468,26 @@ export async function pickExecutable() {
 export async function pickFolder(title = 'Select the mods folder') {
   if (!isTauri()) return null
   const selected = await open({ title, directory: true, multiple: false })
+  return typeof selected === 'string' ? selected : null
+}
+
+export async function saveAddonArchive(defaultName: string) {
+  if (!isTauri()) return null
+  const selected = await save({
+    title: 'Exporter l’addon en ZIP',
+    defaultPath: defaultName,
+    filters: [{ name: 'Addon ZAILON', extensions: ['zip'] }],
+  })
+  return typeof selected === 'string' ? selected : null
+}
+
+export async function pickAddonFile() {
+  if (!isTauri()) return null
+  const selected = await open({
+    title: 'Sélectionnez un addon (ZIP ou .zailon-addon)',
+    multiple: false,
+    filters: [{ name: 'Addon ZAILON', extensions: ['zip', 'zailon-addon'] }],
+  })
   return typeof selected === 'string' ? selected : null
 }
 
@@ -379,12 +1507,32 @@ export async function pickProfileArchive() {
   return typeof selected === 'string' ? selected : null
 }
 
+export async function pickPackFile() {
+  if (!isTauri()) return null
+  const selected = await open({
+    title: 'Importer un pack graphique FiveM',
+    multiple: false,
+    filters: [{ name: 'Archives', extensions: ['zip', 'rar', '7z'] }],
+  })
+  return typeof selected === 'string' ? selected : null
+}
+
 export async function saveProfileArchive(defaultName: string) {
   if (!isTauri()) return null
   const selected = await save({
     title: 'Exporter le profil ZAILON',
     defaultPath: `${defaultName.replace(/[^a-z0-9_-]+/gi, '-')}.zailon-profile`,
     filters: [{ name: 'Profil ZAILON', extensions: ['zailon-profile'] }],
+  })
+  return typeof selected === 'string' ? selected : null
+}
+
+export async function saveFiveMProfileArchive(defaultName: string) {
+  if (!isTauri()) return null
+  const selected = await save({
+    title: 'Exporter le profil FiveM',
+    defaultPath: `${defaultName.replace(/[^a-z0-9_-]+/gi, '-')}.zailon-fivem-profile`,
+    filters: [{ name: 'Profil FiveM ZAILON', extensions: ['zailon-fivem-profile'] }],
   })
   return typeof selected === 'string' ? selected : null
 }

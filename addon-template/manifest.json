@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "community.example.myaddon",
+  "name": "My Addon",
+  "version": "1.0.0",
+  "author": "Your Name",
+  "description": "Décrivez ici ce que fait votre add-on, en une phrase.",
+  "category": "utilities",
+  "entrypoint": "module/index.ts",
+  "minZailonVersion": "1.71.0",
+  "minAddonApiVersion": "1",
+  "permissions": ["game.read", "mods.read", "ui.extend"],
+  "supportedPlatforms": ["windows", "linux", "macos"],
+  "events": ["OnGameSelected", "OnGameStarted", "OnGameStopped"]
+}

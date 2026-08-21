@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from collections import deque
 
+
+import os
+
+# rustc colore ses erreurs (`\x1b[91merror:`) — le pattern `startswith("error:")`
+# ne matcherait pas. On retire les codes ANSI AVANT de tester les motifs.
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 command = [
     "cargo",
@@ -11,8 +18,14 @@ command = [
     "--manifest-path",
     "src-tauri/Cargo.toml",
     "--lib",
-]
-tail: deque[str] = deque(maxlen=80)
+] + sys.argv[1:]
+tail: deque[str] = deque(maxlen=40)
+# Les erreurs rustc (E0599…) sont imprimées AVANT les warnings : le tail ne
+# garde que la fin. On capture aussi les lignes `error[` avec leur contexte
+# (lignes suivantes) — l'annotation GitHub est tronquée ~4 Ko par ligne.
+error_context: list[str] = []
+if os.environ.get("CI_DIAG_FULL_LOG"):
+    tail = deque(maxlen=200)
 
 process = subprocess.Popen(
     command,
@@ -24,9 +37,22 @@ process = subprocess.Popen(
 )
 
 assert process.stdout is not None
+context_remaining = 0
 for line in process.stdout:
     print(line, end="", flush=True)
     tail.append(line)
+    clean = ANSI_RE.sub("", line)
+    if (
+        "error[" in clean
+        or clean.startswith("error:")
+        or "panicked at" in clean
+        or "test result: FAILED" in clean
+    ):
+        error_context.append(line)
+        context_remaining = 25
+    elif context_remaining > 0:
+        error_context.append(line)
+        context_remaining -= 1
 
 exit_code = process.wait()
 if exit_code:
@@ -37,8 +63,16 @@ if exit_code:
         .replace("\n", "%0A")
     )
     print(
-        f"::error title=Native Rust tests failed::{escaped[-60000:]}",
+        f"::error title=Native Rust tests failed (tail)::{escaped[-60000:]}",
         flush=True,
     )
+    if error_context:
+        errors_escaped = (
+            "".join(error_context).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        )
+        print(
+            f"::error title=Native Rust tests failed (errors)::{errors_escaped[-60000:]}",
+            flush=True,
+        )
 
 sys.exit(exit_code)

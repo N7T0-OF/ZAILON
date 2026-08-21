@@ -191,6 +191,14 @@ select {
 .zailon-switch {
   transition: background-color 140ms ease;
 }
+
+/* Le switch garde SA hauteur intrinsèque (50×28 / 38×22) : la règle globale
+ * `button:not([aria-label]) { min-height: var(--zailon-control-height) }`
+ * étirait les switchs sans aria-label à 38 px — « conteneur plus haut que
+ * le rond ». Règle non-couches (bat @layer base), zone tactile inchangée. */
+button.zailon-switch {
+  min-height: 0;
+}
 @media (prefers-reduced-motion: reduce) {
   .zailon-switch,
   .zailon-switch-thumb {

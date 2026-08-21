@@ -47,6 +47,22 @@
   la racine). 100 % hors ligne : créer → tester → exporter → partager →
   importer, sans compte ni serveur.
 
+### Fixed
+
+- **Boutons d'activation — conteneur jamais plus haut que le rond** : la règle
+  globale `button:not([aria-label]) { min-height: var(--zailon-control-height) }`
+  étirait les switchs **sans** `aria-label` à 38 px (rond de 18 px) — d'où le
+  « conteneur beaucoup plus haut que le bouton circulaire », et une taille
+  incohérente selon que la page fournissait ou non un aria-label. Le switch
+  (`button.zailon-switch`) est désormais exempté (`min-height: 0`) et garde sa
+  hauteur intrinsèque. Dimensions centralisées dans le composant unique
+  `ZailonSwitch` : **50×28 / rond 22** (normal) et **38×22 / rond 16**
+  (compact) — hauteur = rond + 3 px de marge, rond parfaitement centré
+  verticalement, même proportion partout. L'unique toggle inline restant
+  (Visual Profiles → « Raccourcis d'urgence », `h-5 w-9` maison) est
+  remplacé par `ZailonSwitch` : plus aucune implémentation parallèle
+  d'activation dans l'application.
+
 ## [1.153.0] - 2026-08-21
 
 > **Refonte NTE/Aurora — gestionnaire de mods complet** : l'erreur Steam devient

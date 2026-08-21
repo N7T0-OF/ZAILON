@@ -1,5 +1,6 @@
 import { AlertTriangle, BookOpenCheck, Check, Copy, Download, Gauge, GitCompareArrows, Heart, History, Monitor, Play, RotateCcw, Save, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react'
 import { ZailonInfoPopover } from '../../components/UI/ZailonInfoPopover'
+import { ZailonSwitch } from '../../components/UI/ZailonSwitch'
 import { PageSkeleton, Skeleton, SkeletonIndicators } from '../../components/UI/Skeleton'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { native } from '../../lib/native'
@@ -440,7 +441,7 @@ function CompareVersionDialog({ profileName, updatedAt, versionSettings, current
 function ShortcutSettings({ value, onChange }: { value: VisualShortcutConfig; onChange: (value: VisualShortcutConfig) => void }) {
   const fields: Array<[keyof Omit<VisualShortcutConfig, 'enabled'>, string]> = [['restore', 'Restauration immédiate'], ['toggle', 'Activer / désactiver'], ['previous', 'Profil précédent'], ['next', 'Profil suivant']]
   return <section className="rounded-2xl border border-white/[0.07] bg-white/[0.012] p-4">
-    <div className="flex items-center gap-2"><SlidersHorizontal size={15} className="text-gold" /><h2 className="text-sm font-bold text-white/78">Raccourcis d’urgence</h2><button type="button" onClick={() => onChange({ ...value, enabled: !value.enabled })} className={`ml-auto h-5 w-9 rounded-full p-0.5 transition-colors ${value.enabled ? 'bg-gold' : 'bg-white/15'}`} aria-pressed={value.enabled}><span className={`block h-4 w-4 rounded-full bg-[#101313] transition-transform ${value.enabled ? 'translate-x-4' : ''}`} /></button></div>
+    <div className="flex items-center gap-2"><SlidersHorizontal size={15} className="text-gold" /><h2 className="text-sm font-bold text-white/78">Raccourcis d’urgence</h2><ZailonSwitch className="ml-auto" size="compact" checked={value.enabled} onChange={next => onChange({ ...value, enabled: next })} aria-label="Raccourcis d’urgence" /></div>
     <div className="mt-3 space-y-2">{fields.map(([key, label]) => <label key={key} className="flex items-center gap-2 text-[11px] text-white/42"><span className="flex-1">{label}</span><input value={value[key]} disabled={!value.enabled} onChange={event => onChange({ ...value, [key]: event.target.value })} className="w-36 rounded-lg border border-white/[0.08] bg-black/20 px-2 py-1.5 font-mono text-[11px] text-white/62 outline-none disabled:opacity-30" /></label>)}</div>
   </section>
 }

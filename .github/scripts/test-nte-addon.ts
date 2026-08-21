@@ -131,6 +131,43 @@ test('socle NTE : état Steam, création validée AuroraMods et validation des m
   assert.ok(read('src/components/UI/ModCard.tsx').includes('mod.thumbnail'), 'vignette affichée dans ModCard')
 })
 
+test('groupes de mods Aurora (spec §25) : entrée groupe + membres, toggle bulk, validation', () => {
+  const rust = read('src-tauri/src/lib.rs')
+  const native = read('src/lib/native.ts')
+  const store = read('src/store/useStore.ts')
+  const types = read('src/types/index.ts')
+  const gamesView = read('src/components/Views/GamesView.tsx')
+
+  // Scan natif : un dossier `AU GRP - <nom>` devient une entrée groupe + des
+  // membres individuels avec métadonnées groupe (jamais un mod fusionné).
+  assert.ok(rust.includes('NTE_GROUP_PREFIX'), 'préfixe de groupe Aurora déclaré')
+  assert.ok(rust.includes('nte_is_group_name'), 'détection d\'un dossier groupe')
+  assert.ok(rust.includes('nte_group_mod'), 'entrée groupe construite par le scan')
+  assert.ok(rust.includes('scan_nte_group_members'), 'membres de groupe scannés individuellement')
+  assert.ok(rust.includes('group_id: Option<String>'), 'champ group_id du NativeMod natif')
+  assert.ok(rust.includes('group_name: Option<String>'), 'champ group_name du NativeMod natif')
+  assert.ok(rust.includes('"NteGroup"'), 'type d\'entrée groupe (mod_type)')
+
+  // Validation : le conteneur n'est pas un mod — les membres sont validés.
+  assert.ok(rust.includes('nte_mod_set_status'), 'validation d\'un ensemble de mod extraite (membres inclus)')
+
+  // Types TS + propagation store.
+  assert.ok(native.includes('groupId?: string'), 'champ groupId du type NativeMod TS')
+  assert.ok(native.includes('groupName?: string'), 'champ groupName du type NativeMod TS')
+  assert.ok(types.includes('isGroup?: boolean'), 'champ isGroup du type Mod')
+  assert.ok(types.includes('groupId?: string'), 'champ groupId du type Mod')
+  assert.ok(types.includes('groupName?: string'), 'champ groupName du type Mod')
+  assert.ok(store.includes('isGroup: mod.modType === \'NteGroup\''), 'propagation isGroup dans nativeModToMod')
+  assert.ok(store.includes('groupId: mod.groupId ?? undefined'), 'propagation groupId dans nativeModToMod')
+
+  // UI : carte groupe (toggle = bulk sur les membres) + badge groupe sur les cartes membres.
+  assert.ok(gamesView.includes('NteGroupCard'), 'carte groupe importée dans la liste des mods')
+  assert.ok(gamesView.includes('mod.isGroup'), 'branchement entrée groupe dans le rendu')
+  assert.ok(gamesView.includes('bulkSetEnabled(members.map(member => member.id), !mod.enabled)'), 'toggle du groupe = bulk sur les membres')
+  assert.ok(read('src/components/UI/ModCard.tsx').includes('mod.groupName'), 'badge groupe sur la carte membre')
+  assert.ok(read('src/components/UI/NteGroupCard.tsx').includes('ZailonSwitch'), 'carte groupe avec interrupteur d\'activation')
+})
+
 test('pipeline de lancement NTE : détection du loader Everlight jamais téléchargé (spec §11-14, §35)', () => {
   const rust = read('src-tauri/src/lib.rs')
   assert.ok(rust.includes('version.dll'), 'DLL d\'injection Everlight version.dll')

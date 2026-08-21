@@ -63,6 +63,11 @@ struct NativeMod {
     /// Icône du mod (chemin local ou URL, spec §7) — vide pour les mods sans
     /// mod.json ni fichier icon.png/preview.png.
     icon: Option<String>,
+    /// Groupe Aurora (spec §25) : empreinte du dossier groupe parent pour les
+    /// mods membres, empreinte du groupe lui-même pour l'entrée groupe.
+    group_id: Option<String>,
+    /// Nom du groupe Aurora sans préfixe `AU GRP - ` (badge UI, spec §25).
+    group_name: Option<String>,
     storage: String,
     stage_id: Option<String>,
     profile_ids: Vec<String>,
@@ -4451,6 +4456,8 @@ fn inspect_native_mod(path: &Path) -> NativeMod {
         version,
         author: None,
         icon: None,
+        group_id: None,
+        group_name: None,
         storage: "game-folder".into(),
         stage_id: None,
         profile_ids: Vec::new(),
@@ -6305,6 +6312,7 @@ const NTE_EPIC_SDK: &str = "NTEGlobal/EOSSDK-Win64-Shipping.dll";
 const NTE_EPIC_AUTH_ARGS: &[&str] = &["-AUTH_PASSWORD=1234", "-AUTH_TYPE=exchangecode"];
 const NTE_STAGING_PREFIX: &str = ".aurora-installing-";
 const NTE_DISABLED_SUFFIX: &str = ".disabled";
+const NTE_GROUP_PREFIX: &str = "AU GRP - ";
 
 fn nte_is_mod_file(name: &str) -> bool {
     Path::new(name)
@@ -6331,6 +6339,17 @@ fn nte_is_pak_file(name: &str) -> bool {
 /// Nom d'affichage Aurora : sans le suffixe `_P` (convention des mods NTE).
 fn nte_display_name(name: &str) -> String {
     name.strip_suffix("_P").unwrap_or(name).to_string()
+}
+
+/// Un dossier `AU GRP - <nom>` est un groupe Aurora : un conteneur de mods qui
+/// apparaît comme une unité activable (spec §25).
+fn nte_is_group_name(name: &str) -> bool {
+    name.starts_with(NTE_GROUP_PREFIX)
+}
+
+/// Nom d'affichage d'un groupe Aurora (préfixe `AU GRP - ` retiré).
+fn nte_group_name(name: &str) -> String {
+    nte_display_name(name.strip_prefix(NTE_GROUP_PREFIX).unwrap_or(name))
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -6655,6 +6674,42 @@ struct NteModsValidation {
 /// validation signale les ensembles incomplets (ex. .pak sans .ucas, ou .utoc
 /// orphelin) avant lancement, sans jamais modifier les fichiers.
 #[tauri::command]
+/// État d'un ensemble .pak/.utoc/.ucas pour UN dossier de mod (membre de
+/// groupe inclus) — spec §5, §10, §25.
+fn nte_mod_set_status(path: &Path, file_name: &str) -> NteModSetStatus {
+    let files = mod_files(path);
+    let has = |extension: &str| {
+        files.iter().any(|file| {
+            let lower = file.to_ascii_lowercase();
+            lower.ends_with(&format!(".{extension}"))
+                || lower.ends_with(&format!(".{extension}.disabled"))
+        })
+    };
+    let pak = has("pak");
+    let utoc = has("utoc");
+    let ucas = has("ucas");
+    let mut missing = Vec::new();
+    if !pak {
+        missing.push("pak".to_string());
+    }
+    if utoc && !ucas {
+        missing.push("ucas".to_string());
+    }
+    if ucas && !utoc {
+        missing.push("utoc".to_string());
+    }
+    let enabled = !files.iter().any(|file| nte_is_disabled_mod_file(file));
+    NteModSetStatus {
+        name: nte_display_name(file_name),
+        enabled,
+        pak,
+        utoc,
+        ucas,
+        complete: missing.is_empty(),
+        missing,
+    }
+}
+
 fn nte_validate_mods(mods_path: String) -> Result<NteModsValidation, String> {
     let folder = PathBuf::from(&mods_path);
     if !folder.is_dir() {
@@ -6680,41 +6735,42 @@ fn nte_validate_mods(mods_path: String) -> Result<NteModsValidation, String> {
         {
             continue;
         }
-        let files = mod_files(&path);
-        let has = |extension: &str| {
-            files.iter().any(|file| {
-                let lower = file.to_ascii_lowercase();
-                lower.ends_with(&format!(".{extension}"))
-                    || lower.ends_with(&format!(".{extension}.disabled"))
-            })
-        };
-        let pak = has("pak");
-        let utoc = has("utoc");
-        let ucas = has("ucas");
-        let mut missing = Vec::new();
-        if !pak {
-            missing.push("pak".to_string());
-        }
-        if utoc && !ucas {
-            missing.push("ucas".to_string());
-        }
-        if ucas && !utoc {
-            missing.push("utoc".to_string());
-        }
-        let enabled = !files.iter().any(|file| nte_is_disabled_mod_file(file));
-        total += 1;
-        if missing.is_empty() {
-            complete_count += 1;
+        // Groupe Aurora (spec §25) : le conteneur n'est PAS un mod — chaque
+        // membre est validé individuellement pour ne jamais laisser un
+        // ensemble incomplet caché dans un groupe (spec §10).
+        if nte_is_group_name(&file_name) {
+            for member in fs::read_dir(&path)
+                .map_err(to_error)?
+                .filter_map(Result::ok)
+            {
+                let member_path = member.path();
+                let member_name = member_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if !member_path.is_dir()
+                    || member_name.starts_with('.')
+                    || member_name.starts_with(NTE_STAGING_PREFIX)
+                {
+                    continue;
+                }
+                total += 1;
+                let status = nte_mod_set_status(&member_path, &member_name);
+                if status.complete {
+                    complete_count += 1;
+                } else {
+                    incomplete.push(status);
+                }
+            }
         } else {
-            incomplete.push(NteModSetStatus {
-                name: nte_display_name(&file_name),
-                enabled,
-                pak,
-                utoc,
-                ucas,
-                complete: false,
-                missing,
-            });
+            total += 1;
+            let status = nte_mod_set_status(&path, &file_name);
+            if status.complete {
+                complete_count += 1;
+            } else {
+                incomplete.push(status);
+            }
         }
     }
     incomplete.sort_by(|left, right| left.name.cmp(&right.name));
@@ -7074,7 +7130,11 @@ fn nte_resolve_mod_icon(
 
 /// Un mod NTE au layout Aurora : un sous-dossier de AuroraMods contenant des
 /// .pak/.utoc/.ucas. Activé = aucun fichier `.pak.disabled` dans l'arbre.
-fn inspect_nte_mod_folder(folder: &Path) -> NativeMod {
+fn inspect_nte_mod_folder(
+    folder: &Path,
+    group_id: Option<String>,
+    group_name: Option<String>,
+) -> NativeMod {
     let files = mod_files(folder);
     let enabled = !files.iter().any(|file| nte_is_disabled_mod_file(file));
     let folder_name = folder
@@ -7123,6 +7183,8 @@ fn inspect_nte_mod_folder(folder: &Path) -> NativeMod {
         version,
         author,
         icon,
+        group_id,
+        group_name,
         storage: "game-folder".into(),
         stage_id: None,
         profile_ids: Vec::new(),
@@ -7134,7 +7196,11 @@ fn inspect_nte_mod_folder(folder: &Path) -> NativeMod {
 
 /// Un .pak/.utoc/.ucas LÂCHE à la racine de AuroraMods (layout non-Aurora mais
 /// toléré) : chaque fichier est un mod autonome.
-fn inspect_nte_loose_mod(file: &Path) -> NativeMod {
+fn inspect_nte_loose_mod(
+    file: &Path,
+    group_id: Option<String>,
+    group_name: Option<String>,
+) -> NativeMod {
     let file_name = file
         .file_name()
         .and_then(|name| name.to_str())
@@ -7165,6 +7231,80 @@ fn inspect_nte_loose_mod(file: &Path) -> NativeMod {
         version: None,
         author: None,
         icon: None,
+        group_id,
+        group_name,
+        storage: "game-folder".into(),
+        stage_id: None,
+        profile_ids: Vec::new(),
+        deployment_status: "unknown".into(),
+        diagnostics: Vec::new(),
+        quarantine_path: None,
+    }
+}
+
+/// Membres d'un groupe Aurora (spec §25) : chaque sous-dossier du groupe est
+/// un mod membre (métadonnées groupe attachées) ; les .pak lâches à la racine
+/// du groupe sont aussi des membres lâches.
+fn scan_nte_group_members(group: &Path, group_id: String, group_name: String) -> Vec<NativeMod> {
+    let mut members = Vec::new();
+    for entry in fs::read_dir(group)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+        if file_name.starts_with('.') || file_name.starts_with(NTE_STAGING_PREFIX) {
+            continue;
+        }
+        if path.is_dir() {
+            members.push(inspect_nte_mod_folder(
+                &path,
+                Some(group_id.clone()),
+                Some(group_name.clone()),
+            ));
+        } else if nte_is_mod_file(&file_name) || nte_is_disabled_mod_file(&file_name) {
+            members.push(inspect_nte_loose_mod(
+                &path,
+                Some(group_id.clone()),
+                Some(group_name.clone()),
+            ));
+        }
+    }
+    members
+}
+
+/// Entrée liste d'un groupe Aurora (spec §25) : unité activable dont l'état =
+/// tous les membres activés. Le toggle du groupe bascule chaque membre
+/// (bulk côté frontend) ; le scan reste la seule source de vérité.
+fn nte_group_mod(
+    group: &Path,
+    group_name: String,
+    group_id: String,
+    members: &[NativeMod],
+) -> NativeMod {
+    NativeMod {
+        id: group_id.clone(),
+        name: group_name.clone(),
+        path: group.to_string_lossy().to_string(),
+        enabled: !members.is_empty() && members.iter().all(|member| member.enabled),
+        mod_type: "NteGroup".into(),
+        size_bytes: members.iter().map(|member| member.size_bytes).sum(),
+        files: mod_files(group),
+        fingerprint: group_id.clone(),
+        framework: "Unreal Pak".into(),
+        manifests: Vec::new(),
+        source_url: None,
+        version: None,
+        author: None,
+        icon: None,
+        group_id: Some(group_id),
+        group_name: Some(group_name),
         storage: "game-folder".into(),
         stage_id: None,
         profile_ids: Vec::new(),
@@ -7175,7 +7315,8 @@ fn inspect_nte_loose_mod(file: &Path) -> NativeMod {
 }
 
 /// Scan du dossier Mods NTE au layout Aurora (un dossier = un mod, mod.json
-/// lu, état `.pak.disabled`, staging `.aurora-installing-*` ignoré).
+/// lu, état `.pak.disabled`, staging `.aurora-installing-*` ignoré, groupes
+/// `AU GRP - <nom>` éclatés en entrée groupe + membres, spec §25).
 #[tauri::command]
 fn scan_nte_mods(mods_path: String) -> Result<Vec<NativeMod>, String> {
     let folder = PathBuf::from(mods_path);
@@ -7197,9 +7338,17 @@ fn scan_nte_mods(mods_path: String) -> Result<Vec<NativeMod>, String> {
             continue;
         }
         if path.is_dir() {
-            mods.push(inspect_nte_mod_folder(&path));
+            if nte_is_group_name(&file_name) {
+                let group_id = fingerprint_path(&path);
+                let group_name = nte_group_name(&file_name);
+                let members = scan_nte_group_members(&path, group_id.clone(), group_name.clone());
+                mods.push(nte_group_mod(&path, group_name, group_id, &members));
+                mods.extend(members);
+            } else {
+                mods.push(inspect_nte_mod_folder(&path, None, None));
+            }
         } else if nte_is_mod_file(&file_name) || nte_is_disabled_mod_file(&file_name) {
-            mods.push(inspect_nte_loose_mod(&path));
+            mods.push(inspect_nte_loose_mod(&path, None, None));
         }
     }
     mods.sort_by(|left, right| {
@@ -10486,6 +10635,8 @@ fn staged_native_mod(stage_directory: &Path) -> Result<NativeMod, String> {
         version: text("version").or(inspected.version),
         author: text("author").or(inspected.author),
         icon: text("icon").or(inspected.icon),
+        group_id: None,
+        group_name: None,
         storage: "staged".into(),
         stage_id: Some(stage_id),
         profile_ids: manifest
@@ -19774,6 +19925,116 @@ mod tests {
         let loose = by_name("LooseMod");
         assert!(loose.enabled);
         assert_eq!(loose.mod_type, "UE5");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    #[test]
+    fn scan_nte_mods_splits_groups_into_entry_and_members() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-groups-{}", unix_timestamp()));
+        let mods = root.join("AuroraMods");
+        let group = mods.join("AU GRP - Graphics");
+        fs::create_dir_all(group.join("Reshade_P")).unwrap();
+        fs::write(group.join("Reshade_P").join("Reshade.pak"), b"a").unwrap();
+        fs::write(
+            group.join("Reshade_P").join("mod.json"),
+            br#"{"name":"ReShade Cinematic","version":"2.1.0"}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(group.join("Bloom")).unwrap();
+        fs::write(group.join("Bloom").join("Bloom.pak.disabled"), b"b").unwrap();
+        fs::write(group.join("LooseMember.pak"), b"c").unwrap();
+
+        let scanned = scan_nte_mods(mods.to_string_lossy().to_string()).unwrap();
+
+        // L'entrée groupe : nom sans préfixe, type NteGroup, désactivée car un
+        // membre est désactivé.
+        let group_mod = scanned
+            .iter()
+            .find(|mod_| mod_.mod_type == "NteGroup")
+            .unwrap();
+        assert_eq!(group_mod.name, "Graphics");
+        assert_eq!(group_mod.group_name.as_deref(), Some("Graphics"));
+        assert!(!group_mod.enabled);
+
+        // Les membres : mod.json lu, métadonnées groupe attachées (spec §25).
+        let reshade = scanned
+            .iter()
+            .find(|mod_| mod_.name == "ReShade Cinematic")
+            .unwrap();
+        assert!(reshade.enabled);
+        assert_eq!(reshade.group_name.as_deref(), Some("Graphics"));
+        assert_eq!(reshade.group_id.as_deref(), Some(group_mod.id.as_str()));
+        assert_eq!(reshade.mod_type, "Folder");
+
+        let bloom = scanned.iter().find(|mod_| mod_.name == "Bloom").unwrap();
+        assert!(!bloom.enabled);
+        assert_eq!(bloom.group_id.as_deref(), Some(group_mod.id.as_str()));
+
+        let loose = scanned
+            .iter()
+            .find(|mod_| mod_.name == "LooseMember")
+            .unwrap();
+        assert_eq!(loose.group_id.as_deref(), Some(group_mod.id.as_str()));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn nte_validate_mods_validates_group_members_not_container() {
+        let root =
+            std::env::temp_dir().join(format!("zailon-nte-validate-group-{}", unix_timestamp()));
+        let mods = root.join("AuroraMods");
+        fs::create_dir_all(mods.join("AU GRP - FX").join("OkMod")).unwrap();
+        fs::write(mods.join("AU GRP - FX").join("OkMod").join("Ok.pak"), b"a").unwrap();
+        fs::write(mods.join("AU GRP - FX").join("OkMod").join("Ok.utoc"), b"b").unwrap();
+        fs::write(mods.join("AU GRP - FX").join("OkMod").join("Ok.ucas"), b"c").unwrap();
+        fs::create_dir_all(mods.join("AU GRP - FX").join("Broken")).unwrap();
+        fs::write(
+            mods.join("AU GRP - FX").join("Broken").join("Broken.pak"),
+            b"d",
+        )
+        .unwrap();
+        fs::write(
+            mods.join("AU GRP - FX").join("Broken").join("Broken.utoc"),
+            b"e",
+        )
+        .unwrap();
+
+        let validation = nte_validate_mods(mods.to_string_lossy().to_string()).unwrap();
+        // Le conteneur n'est pas compté : 2 membres validés, 1 incomplet.
+        assert_eq!(validation.total, 2);
+        assert_eq!(validation.complete_count, 1);
+        assert_eq!(validation.incomplete.len(), 1);
+        assert_eq!(validation.incomplete[0].name, "Broken");
+        assert!(validation.incomplete[0]
+            .missing
+            .contains(&"ucas".to_string()));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn toggle_nte_mod_on_group_toggles_all_members_recursively() {
+        let root =
+            std::env::temp_dir().join(format!("zailon-nte-toggle-group-{}", unix_timestamp()));
+        let mods = root.join("AuroraMods");
+        let group = mods.join("AU GRP - Weapons");
+        fs::create_dir_all(group.join("Sword")).unwrap();
+        fs::write(group.join("Sword").join("Sword.pak"), b"a").unwrap();
+        fs::create_dir_all(group.join("Gun")).unwrap();
+        fs::write(group.join("Gun").join("Gun.pak"), b"b").unwrap();
+
+        // Désactiver le GROUPE : chaque .pak membre est renommé (récursif).
+        toggle_nte_mod(group.to_string_lossy().to_string(), false).unwrap();
+        assert!(group.join("Sword").join("Sword.pak.disabled").exists());
+        assert!(group.join("Gun").join("Gun.pak.disabled").exists());
+
+        // Réactiver : tous les membres reviennent.
+        toggle_nte_mod(group.to_string_lossy().to_string(), true).unwrap();
+        assert!(group.join("Sword").join("Sword.pak").exists());
+        assert!(group.join("Gun").join("Gun.pak").exists());
 
         fs::remove_dir_all(&root).unwrap();
     }

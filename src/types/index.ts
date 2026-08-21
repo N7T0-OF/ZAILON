@@ -194,6 +194,12 @@ export interface Mod {
   categoryTags?: ModCategoryTag[]
   /** Independent logical clone. Content stays immutable until a profile overlay is written. */
   basePackageId?: string
+  /** Groupe Aurora (spec §25) : empreinte du dossier groupe parent (mods membres). */
+  groupId?: string
+  /** Nom du groupe Aurora sans préfixe `AU GRP - ` (badge sur la carte membre). */
+  groupName?: string
+  /** Entrée groupe Aurora (`AU GRP - <nom>`) — unité activable (spec §25). */
+  isGroup?: boolean
 }
 
 export interface ProfileModState {

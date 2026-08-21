@@ -53,6 +53,13 @@
   puis `custom image url` distante (`nte_resolve_mod_icon`). L'icône est
   propagée (`NativeMod.icon` → `Mod.thumbnail`) et affichée comme vignette
   dans la liste des mods (fichier local via `convertFileSrc`, URL directe).
+- **Groupes de mods Aurora** (§25) : un dossier `AU GRP - <nom>` n'est plus
+  scanné comme un mod fusionné — le scan émet une entrée **groupe** (carte
+  dédiée, état = tous les membres activés) + chaque **membre** individuel
+  (métadonnées `groupId`/`groupName`, badge sur la carte). Le toggle du
+  groupe bascule tous ses membres (`bulkSetEnabled`), et la validation des
+  ensembles `.pak`/`.utoc`/`.ucas` traverse les groupes — un membre incomplet
+  n'est jamais caché (spec §10).
 
 ## [1.152.0] - 2026-08-20
 

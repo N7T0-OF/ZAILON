@@ -53,6 +53,7 @@ export function ModCard({ mod, onToggle, onDelete, onMoveUp, onMoveDown, onNoteC
               {mod.source === 'local' ? 'local' : mod.source}
             </span>
           )}
+          {mod.groupName && !mod.isGroup && <span title={`Groupe Aurora : ${mod.groupName}`} className="rounded-full border border-amber-200/20 bg-amber-200/[0.05] px-1.5 py-0.5 text-[10px] text-amber-100/55">{mod.groupName}</span>}
           {(mod.categoryTags || []).slice(0, 2).map(tag => <span key={tag.id} title={`${tag.source} · confiance ${tag.confidence}`} className="rounded-full border border-white/[0.07] bg-white/[0.025] px-1.5 py-0.5 text-[11px] text-white/38">{tag.label}</span>)}
           {(mod.categoryTags?.length || 0) > 2 && <span className="text-[11px] text-white/28">+{(mod.categoryTags?.length || 0) - 2}</span>}
         </div>

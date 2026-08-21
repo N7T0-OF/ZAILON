@@ -103,6 +103,10 @@ const nativeModToMod = (mod: NativeMod, previous?: Mod, priority = 0): Mod => wi
   author: mod.author ?? previous?.author,
   sourceUrl: mod.sourceUrl ?? previous?.sourceUrl,
   thumbnail: mod.icon ?? previous?.thumbnail,
+  // Groupe Aurora (spec §25) : métadonnées propagées du scan natif.
+  groupId: mod.groupId ?? undefined,
+  groupName: mod.groupName ?? undefined,
+  isGroup: mod.modType === 'NteGroup',
   storage: mod.storage,
   stageId: mod.stageId,
   profileIds: mod.profileIds,

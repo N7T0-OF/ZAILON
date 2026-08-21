@@ -315,6 +315,10 @@ export interface NativeMod {
   version?: string
   author?: string
   icon?: string
+  /** Groupe Aurora (spec §25) : empreinte du dossier groupe parent (mods membres). */
+  groupId?: string
+  /** Nom du groupe Aurora sans préfixe `AU GRP - ` (badge UI, spec §25). */
+  groupName?: string
   storage: 'staged' | 'game-folder'
   stageId?: string
   profileIds: string[]

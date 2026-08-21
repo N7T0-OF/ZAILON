@@ -7069,6 +7069,7 @@ const NTE_LOADER_DLLS: &[&str] = &["version.dll", "dsound.dll", "dwmapi.dll"];
 const NTE_LOADER_AURORA_WRAPPERS_REL: &str = "Bin/Wrappers";
 /// Manifest du loader géré par ZAILON, relatif au Win64 du jeu :
 /// `.zailon-loader/manifest.json` (+ `backup/` pour les fichiers d'origine).
+const NTE_LOADER_DIR_REL: &str = ".zailon-loader";
 const NTE_LOADER_MANIFEST_REL: &str = ".zailon-loader/manifest.json";
 const NTE_LOADER_BACKUP_REL: &str = ".zailon-loader/backup";
 
@@ -7685,9 +7686,9 @@ fn nte_loader_install(
                 .to_string(),
         );
     }
-    let manifest_dir = binaries.join(".zailon-loader");
-    let backup_dir = manifest_dir.join("backup");
-    let manifest_path = manifest_dir.join("manifest.json");
+    let manifest_dir = binaries.join(NTE_LOADER_DIR_REL);
+    let backup_dir = binaries.join(NTE_LOADER_BACKUP_REL);
+    let manifest_path = binaries.join(NTE_LOADER_MANIFEST_REL);
     if manifest_path.exists() {
         return Err(
             "Un loader est déjà géré par ZAILON (manifest présent). Désinstallez d'abord (« Désinstaller le loader »), puis réinstallez."
@@ -7807,9 +7808,9 @@ struct NteLoaderUninstallResult {
 fn nte_loader_uninstall(install_dir: String) -> Result<NteLoaderUninstallResult, String> {
     let root = PathBuf::from(&install_dir);
     let binaries = root.join(NTE_CLIENT_WIN64);
-    let manifest_dir = binaries.join(".zailon-loader");
-    let backup_dir = manifest_dir.join("backup");
-    let manifest_path = manifest_dir.join("manifest.json");
+    let manifest_dir = binaries.join(NTE_LOADER_DIR_REL);
+    let backup_dir = binaries.join(NTE_LOADER_BACKUP_REL);
+    let manifest_path = binaries.join(NTE_LOADER_MANIFEST_REL);
     if !manifest_path.exists() {
         let present = NTE_LOADER_DLLS
             .iter()
@@ -18589,12 +18590,24 @@ fn addon_analyze_zip(path: &Path, bytes: &[u8]) -> Result<AddonAnalyzeResult, St
         return Err("L'archive contient trop d'entrées.".into());
     }
     for index in 0..zip.len() {
-        let entry = zip.by_index(index).map_err(to_error)?;
-        if entry.is_dir() {
-            continue;
-        }
-        let name = entry.name().to_string();
-        let relative = match entry.enclosed_name() {
+        // L'entrée est libérée avant toute relécture (le second `by_index` du
+        // manifest ci-dessous ne peut pas emprunter `zip` pendant qu'une
+        // `ZipFile` vit encore — E0499 sinon).
+        let (name, relative, size, is_symlink) = {
+            let entry = zip.by_index(index).map_err(to_error)?;
+            if entry.is_dir() {
+                continue;
+            }
+            let name = entry.name().to_string();
+            let relative = entry.enclosed_name();
+            (
+                name,
+                relative,
+                entry.size(),
+                archive_is_symlink(entry.unix_mode()),
+            )
+        };
+        let relative = match relative {
             Some(relative) => relative,
             None => {
                 result
@@ -18609,13 +18622,13 @@ fn addon_analyze_zip(path: &Path, bytes: &[u8]) -> Result<AddonAnalyzeResult, St
                 .push(format!("Chemin non sûr dans l'archive : {name}"));
             continue;
         }
-        if archive_is_symlink(entry.unix_mode()) {
+        if is_symlink {
             result
                 .issues
                 .push(format!("Lien symbolique refusé : {name}"));
             continue;
         }
-        result.total_size = result.total_size.saturating_add(entry.size());
+        result.total_size = result.total_size.saturating_add(size);
         if result.total_size > MAX_ADDON_ANALYZE_BYTES {
             result
                 .issues

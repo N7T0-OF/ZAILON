@@ -319,6 +319,9 @@ export interface NativeMod {
   groupId?: string
   /** Nom du groupe Aurora sans préfixe `AU GRP - ` (badge UI, spec §25). */
   groupName?: string
+  /** Dossier AuroraMods où un paquet staged a été déployé par hardlink/copie
+   * (spec §9) — lu depuis `deployedPath` du manifest du paquet. */
+  deployedPath?: string
   storage: 'staged' | 'game-folder'
   stageId?: string
   profileIds: string[]
@@ -387,6 +390,16 @@ export interface NtePipelineStep {
 }
 
 /** Pipeline de lancement NTE : chaque étape produit un état vérifiable. */
+/** Résultat d'un déploiement par hardlinks dans AuroraMods (spec §9). */
+export interface NteDeployResult {
+  modPath: string
+  name: string
+  files: string[]
+  linked: number
+  copied: number
+  fallbackUsed: boolean
+}
+
 export interface NteLaunchPipeline {
   ready: boolean
   steps: NtePipelineStep[]
@@ -1046,6 +1059,11 @@ export const native = {
    * Everlight) — jamais un faux « NTE lancé ». */
   nteLaunchPipeline: (installDir: string, platform: string | null, modsPath: string) =>
     desktopOnly<NteLaunchPipeline>('nte_launch_pipeline', { installDir, platform, modsPath }),
+  /** Staging par hardlinks NTE (spec §9) : déploie un paquet staged vers
+   * AuroraMods en LIANT les .pak/.utoc/.ucas (repli copie si le système de
+   * fichiers refuse le lien). Transactionnel, écrit mod.json + deployedPath. */
+  nteDeployMod: (sourceDir: string, modsPath: string) =>
+    desktopOnly<NteDeployResult>('nte_deploy_mod', { sourceDir, modsPath }),
   deleteStagedMod: (gameId: string, stageId: string) => desktopOnly<void>('delete_staged_mod', { gameId, stageId }),
   previewStagedDuplicates: (gameId: string) =>
     desktopOnly<StagedDuplicatePreview>('preview_staged_duplicates', { gameId }),

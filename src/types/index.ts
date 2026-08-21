@@ -200,6 +200,9 @@ export interface Mod {
   groupName?: string
   /** Entrée groupe Aurora (`AU GRP - <nom>`) — unité activable (spec §25). */
   isGroup?: boolean
+  /** Dossier AuroraMods où un paquet staged NTE a été déployé (spec §9) — le
+   * toggle cible ce dossier (.pak ↔ .pak.disabled). */
+  deployedPath?: string
 }
 
 export interface ProfileModState {

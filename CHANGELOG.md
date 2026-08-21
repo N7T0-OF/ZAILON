@@ -60,6 +60,17 @@
   groupe bascule tous ses membres (`bulkSetEnabled`), et la validation des
   ensembles `.pak`/`.utoc`/`.ucas` traverse les groupes — un membre incomplet
   n'est jamais caché (spec §10).
+- **Staging par hardlinks** (§9) : un mod NTE importé est déployé DANS
+  AuroraMods (layout Aurora, un dossier = un mod) en **liant** les
+  `.pak`/`.utoc`/`.ucas` depuis le store au lieu de les copier (`nte_deploy_mod`
+  + `nte_link_or_copy`, repli en copie si le système de fichiers refuse le
+  lien — volume différent, FAT32/exFAT, privilèges). Zéro duplication de
+  données, déploiement quasi instantané ; transactionnel (le dossier créé est
+  retiré en cas d'échec). Un `mod.json` dérivé du manifest (nom/version/auteur/
+  lien de support) est écrit dans le dossier déployé, et le manifest du paquet
+  enregistre `deployedPath` + `deploymentBackend: Hardlink`. Le toggle d'un
+  mod staged déployé cible désormais le dossier AuroraMods (`.pak` ↔
+  `.pak.disabled`) — jamais le store.
 
 ## [1.152.0] - 2026-08-20
 

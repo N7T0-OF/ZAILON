@@ -68,6 +68,9 @@ struct NativeMod {
     group_id: Option<String>,
     /// Nom du groupe Aurora sans préfixe `AU GRP - ` (badge UI, spec §25).
     group_name: Option<String>,
+    /// Dossier AuroraMods où un paquet staged a été déployé par hardlink/copie
+    /// (spec §9) — lu depuis `deployedPath` du manifest du paquet.
+    deployed_path: Option<String>,
     storage: String,
     stage_id: Option<String>,
     profile_ids: Vec<String>,
@@ -4458,6 +4461,7 @@ fn inspect_native_mod(path: &Path) -> NativeMod {
         icon: None,
         group_id: None,
         group_name: None,
+        deployed_path: None,
         storage: "game-folder".into(),
         stage_id: None,
         profile_ids: Vec::new(),
@@ -6782,6 +6786,242 @@ fn nte_validate_mods(mods_path: String) -> Result<NteModsValidation, String> {
     })
 }
 
+// ── NTE : staging par hardlinks (spec §9) ────────────────────────────────────
+// Déployer un mod staged vers AuroraMods ne COPIE pas les .pak/.utoc/.ucas :
+// un lien dur partage les données avec le store (zéro duplication, quasi
+// instantané). Si le système de fichiers refuse le lien (volume différent,
+// FAT32/exFAT, privilèges), on retombe sur une copie. Le toggle NTE (renommage
+// `.pak` ↔ `.pak.disabled`) fonctionne sur un lien dur : il ne modifie que
+// l'entrée du dossier AuroraMods, jamais le contenu du store.
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteDeployResult {
+    /// Dossier mod créé dans AuroraMods (`<mods_path>/<nom>`).
+    mod_path: String,
+    name: String,
+    /// Fichiers .pak/.utoc/.ucas déployés (noms dans le dossier du mod).
+    files: Vec<String>,
+    /// Nombre de liens durs créés.
+    linked: usize,
+    /// Nombre de copies de repli.
+    copied: usize,
+    /// Vrai si au moins un lien dur a échoué (repli copie utilisé).
+    fallback_used: bool,
+}
+
+/// Crée un lien dur ; en cas d'échec (volume différent, FS sans hardlink,
+/// privilèges), repli en copie. Retourne `true` si le lien dur a été créé.
+fn nte_link_or_copy(source: &Path, destination: &Path) -> Result<bool, String> {
+    match fs::hard_link(source, destination) {
+        Ok(()) => Ok(true),
+        Err(_) => {
+            fs::copy(source, destination).map_err(|error| {
+                format!(
+                    "Le lien dur a échoué et la copie de repli aussi ({} → {}): {error}",
+                    source.display(),
+                    destination.display()
+                )
+            })?;
+            Ok(false)
+        }
+    }
+}
+
+/// Écrit un `mod.json` Aurora dans le dossier déployé à partir du manifest du
+/// paquet staged (nom, version, auteur, lien de support) — le scan NTE le lit
+/// (clés insensibles à la casse, spec §7). Silencieux si le manifest manque.
+fn nte_write_deploy_manifest(stage_root: &Path, destination: &Path) {
+    let Ok(raw) = fs::read_to_string(stage_root.join("manifest.json")) else {
+        return;
+    };
+    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return;
+    };
+    let text = |key: &str| {
+        manifest
+            .get(key)
+            .and_then(|value| value.as_str())
+            .map(ToOwned::to_owned)
+    };
+    let mut mod_json = serde_json::Map::new();
+    if let Some(name) = text("name") {
+        mod_json.insert("name".into(), serde_json::Value::String(name));
+    }
+    if let Some(version) = text("version") {
+        mod_json.insert("version".into(), serde_json::Value::String(version));
+    }
+    if let Some(author) = text("author") {
+        mod_json.insert("author".into(), serde_json::Value::String(author));
+    }
+    if let Some(support) = text("sourceUrl") {
+        let mut optionals = serde_json::Map::new();
+        optionals.insert("support link".into(), serde_json::Value::String(support));
+        mod_json.insert("optionals".into(), serde_json::Value::Object(optionals));
+    }
+    if !mod_json.is_empty() {
+        let _ = fs::write(
+            destination.join(NTE_MOD_JSON),
+            serde_json::to_vec_pretty(&serde_json::Value::Object(mod_json)).unwrap_or_default(),
+        );
+    }
+}
+
+/// Déploie un mod staged vers AuroraMods (spec §9) : `<mods_path>/<nom>/`
+/// (un dossier = un mod, layout Aurora) contenant les .pak/.utoc/.ucas LIÉS
+/// (repli copie), un `mod.json` dérivé du manifest, et le manifest du paquet
+/// enrichi (`deployedPath` + `deploymentBackend: "Hardlink"`). Transactionnel :
+/// le dossier créé est retiré si une étape échoue. `source_dir` accepte la
+/// racine du paquet staged ou son dossier `content/`.
+#[tauri::command]
+fn nte_deploy_mod(source_dir: String, mods_path: String) -> Result<NteDeployResult, String> {
+    let original = PathBuf::from(&source_dir);
+    if !original.is_dir() {
+        return Err("La source du mod est introuvable.".into());
+    }
+    // Racine du paquet staged → son contenu réel ; on garde la racine pour le
+    // manifest (mod.json dérivé + enregistrement du deployedPath).
+    let mut source = original.clone();
+    let stage_root =
+        if original.join("content").is_dir() && original.join("manifest.json").is_file() {
+            source = original.join("content");
+            Some(original)
+        } else {
+            None
+        };
+    let mods_path = PathBuf::from(&mods_path);
+    if !mods_path.is_dir() {
+        return Err("Le dossier AuroraMods n'existe pas.".into());
+    }
+
+    // Collecte récursive des .pak/.utoc/.ucas (jamais les .disabled).
+    let mut pak_files: Vec<PathBuf> = Vec::new();
+    for entry in WalkDir::new(&source)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_str().unwrap_or_default().to_string();
+        if nte_is_mod_file(&name) && !nte_is_disabled_mod_file(&name) {
+            pak_files.push(entry.path().to_path_buf());
+        }
+    }
+    if pak_files.is_empty() {
+        return Err("Aucun fichier .pak/.utoc/.ucas dans la source.".into());
+    }
+    pak_files.sort();
+
+    // Nom du dossier mod : le stem du .pak principal s'il est unique, sinon le
+    // nom du dossier source (un dossier = un mod, layout Aurora).
+    let pak_stems: Vec<String> = pak_files
+        .iter()
+        .filter(|path| {
+            nte_is_pak_file(
+                &path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default(),
+            )
+        })
+        .map(|path| {
+            path.file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        })
+        .collect();
+    let mut distinct = pak_stems.clone();
+    distinct.dedup();
+    let name = if distinct.len() == 1 {
+        distinct.remove(0)
+    } else {
+        source
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    if name.is_empty() || name.starts_with('.') || name.starts_with(NTE_STAGING_PREFIX) {
+        return Err("Nom de mod invalide pour AuroraMods.".into());
+    }
+
+    let destination = mods_path.join(&name);
+    if destination.exists() {
+        return Err(format!(
+            "Le dossier « {name} » existe déjà dans AuroraMods. Supprimez-le ou importez-le en tant que dossier séparé."
+        ));
+    }
+    fs::create_dir_all(&destination).map_err(to_error)?;
+
+    let mut linked = 0usize;
+    let mut copied = 0usize;
+    let mut fallback_used = false;
+    let mut files = Vec::new();
+    let result = (|| {
+        for file in &pak_files {
+            let file_name = file
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_string();
+            let target = destination.join(&file_name);
+            if target.exists() {
+                return Err(format!(
+                    "Collision de nom dans AuroraMods : « {file_name} » existe déjà."
+                ));
+            }
+            if nte_link_or_copy(file, &target)? {
+                linked += 1;
+            } else {
+                copied += 1;
+                fallback_used = true;
+            }
+            files.push(file_name);
+        }
+        nte_write_deploy_manifest(stage_root.as_deref().unwrap_or(&source), &destination);
+        Ok(()) as Result<(), String>
+    })();
+    if let Err(error) = result {
+        let _ = fs::remove_dir_all(&destination);
+        return Err(error);
+    }
+
+    // Enregistre le chemin déployé dans le manifest du paquet staged (lu par
+    // `staged_native_mod` → `deployedPath` → toggle NTE du bon dossier).
+    let stage_manifest = stage_root.map(|root| root.join("manifest.json"));
+    if let Some(manifest_path) = stage_manifest.filter(|path| path.is_file()) {
+        if let Ok(raw) = fs::read(&manifest_path) {
+            if let Ok(mut manifest) = serde_json::from_slice::<serde_json::Value>(&raw) {
+                if let Some(object) = manifest.as_object_mut() {
+                    object.insert(
+                        "deployedPath".into(),
+                        serde_json::Value::String(destination.to_string_lossy().into_owned()),
+                    );
+                    object.insert(
+                        "deploymentBackend".into(),
+                        serde_json::Value::String("Hardlink".into()),
+                    );
+                    let _ = fs::write(
+                        &manifest_path,
+                        serde_json::to_vec_pretty(&manifest).unwrap_or_default(),
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(NteDeployResult {
+        mod_path: destination.to_string_lossy().into_owned(),
+        name,
+        files,
+        linked,
+        copied,
+        fallback_used,
+    })
+}
+
 // ── NTE : pipeline de lancement vérifiable (spec §15, §40) ──────────────────
 // Chaque étape produit un état (ok/warning/error) + une action suggérée —
 // jamais un faux « NTE lancé » : si un mod ne charge pas, on sait QUELLE étape
@@ -7185,6 +7425,7 @@ fn inspect_nte_mod_folder(
         icon,
         group_id,
         group_name,
+        deployed_path: None,
         storage: "game-folder".into(),
         stage_id: None,
         profile_ids: Vec::new(),
@@ -7233,6 +7474,7 @@ fn inspect_nte_loose_mod(
         icon: None,
         group_id,
         group_name,
+        deployed_path: None,
         storage: "game-folder".into(),
         stage_id: None,
         profile_ids: Vec::new(),
@@ -7305,6 +7547,7 @@ fn nte_group_mod(
         icon: None,
         group_id: Some(group_id),
         group_name: Some(group_name),
+        deployed_path: None,
         storage: "game-folder".into(),
         stage_id: None,
         profile_ids: Vec::new(),
@@ -10637,6 +10880,7 @@ fn staged_native_mod(stage_directory: &Path) -> Result<NativeMod, String> {
         icon: text("icon").or(inspected.icon),
         group_id: None,
         group_name: None,
+        deployed_path: text("deployedPath"),
         storage: "staged".into(),
         stage_id: Some(stage_id),
         profile_ids: manifest
@@ -20040,6 +20284,117 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn nte_deploy_mod_creates_aurora_folder_with_hardlinks() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-deploy-{}", unix_timestamp()));
+        let stage = root.join("stage");
+        let content = stage.join("content");
+        fs::create_dir_all(&content).unwrap();
+        fs::write(
+            stage.join("manifest.json"),
+            br#"{"name":"Dress Up","version":"1.0.0","author":"N7"}"#,
+        )
+        .unwrap();
+        fs::write(content.join("DressUp_P.pak"), b"pak-data").unwrap();
+        fs::write(content.join("DressUp_P.utoc"), b"utoc-data").unwrap();
+        fs::write(content.join("DressUp_P.ucas"), b"ucas-data").unwrap();
+        let mods = root.join("AuroraMods");
+        fs::create_dir_all(&mods).unwrap();
+
+        let result = nte_deploy_mod(
+            stage.to_string_lossy().to_string(),
+            mods.to_string_lossy().to_string(),
+        )
+        .unwrap();
+        assert_eq!(result.name, "DressUp_P");
+        assert!(result.mod_path.ends_with("DressUp_P"));
+        assert_eq!(result.linked, 3);
+        assert_eq!(result.copied, 0);
+        assert!(!result.fallback_used);
+        assert_eq!(result.files.len(), 3);
+
+        // Layout Aurora : un dossier = un mod, fichiers .pak/.utoc/.ucas dedans.
+        let deployed = mods.join("DressUp_P");
+        assert!(deployed.join("DressUp_P.pak").is_file());
+        assert!(deployed.join("DressUp_P.utoc").is_file());
+        assert!(deployed.join("DressUp_P.ucas").is_file());
+
+        // mod.json dérivé du manifest (lu par le scan NTE, spec §7).
+        let mod_json = serde_json::from_slice::<serde_json::Value>(
+            &fs::read(deployed.join(NTE_MOD_JSON)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(mod_json["name"], "Dress Up");
+        assert_eq!(mod_json["version"], "1.0.0");
+        assert_eq!(mod_json["author"], "N7");
+
+        // Lien dur réel : modifier la source change le fichier déployé (les
+        // données sont partagées, pas copiées).
+        fs::write(content.join("DressUp_P.pak"), b"pak-data-2").unwrap();
+        assert_eq!(
+            fs::read(deployed.join("DressUp_P.pak")).unwrap(),
+            b"pak-data-2"
+        );
+
+        // Le manifest staged enregistre le chemin déployé (toggle NTE cible le
+        // bon dossier).
+        let manifest = serde_json::from_slice::<serde_json::Value>(
+            &fs::read(stage.join("manifest.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            manifest["deployedPath"],
+            serde_json::json!(deployed.to_string_lossy())
+        );
+        assert_eq!(manifest["deploymentBackend"], "Hardlink");
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn nte_link_or_copy_falls_back_to_copy_when_hardlink_fails() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-link-{}", unix_timestamp()));
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("source.pak");
+        fs::write(&source, b"content").unwrap();
+        // La destination existe déjà : fs::hard_link échoue (EEXIST) mais la
+        // copie de repli réussit (fs::copy écrase) → repli en copie.
+        let destination = root.join("target.pak");
+        fs::write(&destination, b"old").unwrap();
+
+        let linked = nte_link_or_copy(&source, &destination).unwrap();
+        assert!(!linked, "le lien dur a échoué → repli en copie attendu");
+        assert_eq!(fs::read(&destination).unwrap(), b"content");
+
+        // Cas nominal : destination libre → lien dur.
+        let free = root.join("free.pak");
+        assert!(nte_link_or_copy(&source, &free).unwrap());
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn nte_deploy_mod_refuses_existing_folder_transactionally() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-deploy-tx-{}", unix_timestamp()));
+        let content = root.join("content");
+        fs::create_dir_all(&content).unwrap();
+        fs::write(content.join("Mod.pak"), b"data").unwrap();
+        let mods = root.join("AuroraMods");
+        fs::create_dir_all(mods.join("Mod")).unwrap();
+
+        let error = nte_deploy_mod(
+            content.to_string_lossy().to_string(),
+            mods.to_string_lossy().to_string(),
+        )
+        .unwrap_err();
+        assert!(error.contains("existe déjà"), "{error}");
+        // Aucun dégât : le dossier préexistant est intact.
+        assert!(mods.join("Mod").is_dir());
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn toggle_nte_mod_renames_pak_transactionally() {
         let root = std::env::temp_dir().join(format!("zailon-nte-toggle-{}", unix_timestamp()));
         let mods = root.join("AuroraMods");
@@ -20564,6 +20919,7 @@ pub fn run() {
             nte_ensure_mods_dir,
             nte_validate_mods,
             nte_launch_pipeline,
+            nte_deploy_mod,
             list_staged_mods,
             scan_mod_import,
             scan_mod_import_background,

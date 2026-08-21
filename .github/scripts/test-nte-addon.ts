@@ -173,6 +173,39 @@ test('groupes de mods Aurora (spec §25) : entrée groupe + membres, toggle bulk
   assert.ok(read('src/components/UI/NteGroupCard.tsx').includes('ZailonSwitch'), 'carte groupe avec interrupteur d\'activation')
 })
 
+test('staging par hardlinks NTE (spec §9) : liens .pak → AuroraMods, repli copie, toggle déployé', () => {
+  const rust = read('src-tauri/src/lib.rs')
+  const native = read('src/lib/native.ts')
+  const store = read('src/store/useStore.ts')
+  const types = read('src/types/index.ts')
+  const gamesView = read('src/components/Views/GamesView.tsx')
+
+  // Backend natif : lien dur + repli copie + déploiement transactionnel.
+  assert.ok(rust.includes('fn nte_link_or_copy'), 'lien dur avec repli copie (spec §9)')
+  assert.ok(rust.includes('fs::hard_link'), 'création réelle d\'un lien dur')
+  assert.ok(rust.includes('fn nte_deploy_mod'), 'commande de déploiement AuroraMods')
+  assert.ok(rust.includes('nte_deploy_mod,'), 'nte_deploy_mod enregistrée dans invoke_handler')
+  assert.ok(rust.includes('NTE_MOD_JSON'), 'mod.json écrit dans le dossier déployé (spec §7)')
+  assert.ok(rust.includes('"deployedPath"'), 'chemin déployé enregistré dans le manifest staged')
+  assert.ok(rust.includes('"Hardlink"'), 'backend Hardlink déclaré dans le manifest')
+
+  // Types + bindings frontend.
+  assert.ok(native.includes('nteDeployMod'), 'binding natif nteDeployMod')
+  assert.ok(native.includes('NteDeployResult'), 'type NteDeployResult')
+  assert.ok(native.includes('deployedPath?: string'), 'champ deployedPath du NativeMod TS')
+  assert.ok(types.includes('deployedPath?: string'), 'champ deployedPath du type Mod')
+  assert.ok(store.includes('deployedPath: mod.deployedPath ?? undefined'), 'propagation deployedPath dans nativeModToMod')
+
+  // Toggle NTE : un mod staged DÉPLOYÉ se toggle sur le dossier AuroraMods.
+  assert.ok(store.includes('deployedNteTarget'), 'toggle cible le dossier déployé (spec §9)')
+  assert.ok(store.includes('native.toggleNteMod(deployedNteTarget'), 'renommage .pak ↔ .pak.disabled sur le dossier déployé')
+
+  // Import NTE : déploiement par hardlinks après staging (jamais le chemin
+  // générique au lancement, qui ne connaît pas le layout AuroraMods).
+  assert.ok(gamesView.includes('nteImport'), 'détection NTE dans le dialogue d\'import')
+  assert.ok(gamesView.includes('native.nteDeployMod(installedPath, destination)'), 'déploiement par hardlinks après import (spec §9)')
+})
+
 test('pipeline de lancement NTE : détection du loader Everlight jamais téléchargé (spec §11-14, §35)', () => {
   const rust = read('src-tauri/src/lib.rs')
   assert.ok(rust.includes('version.dll'), 'DLL d\'injection Everlight version.dll')

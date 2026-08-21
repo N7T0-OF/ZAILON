@@ -107,6 +107,8 @@ const nativeModToMod = (mod: NativeMod, previous?: Mod, priority = 0): Mod => wi
   groupId: mod.groupId ?? undefined,
   groupName: mod.groupName ?? undefined,
   isGroup: mod.modType === 'NteGroup',
+  // Staging par hardlinks (spec §9) : dossier AuroraMods déployé (toggle NTE).
+  deployedPath: mod.deployedPath ?? undefined,
   storage: mod.storage,
   stageId: mod.stageId,
   profileIds: mod.profileIds,
@@ -1978,9 +1980,15 @@ export const useStore = create<Store>()(persist((set, get) => ({
       // toggle générique `DISABLED_*` rendrait le mod invisible/inactif
       // différemment et casserait le layout Aurora.
       const nte = isNteGame({ execPath: game.execPath, gameName: game.name, nteAllowed: nteModsAllowed(addonCapabilities(get().addons)) })
+      // Spec §9 : un mod NTE staged mais DÉPLOYÉ dans AuroraMods (hardlinks)
+      // se toggle sur le dossier déployé (.pak ↔ .pak.disabled) — jamais sur
+      // le store (le renommage n'aurait aucun effet pour le moteur).
+      const deployedNteTarget = nte && mod.storage === 'staged' && mod.deployedPath ? mod.deployedPath : undefined
       const path = mod.storage !== 'staged' && mod.path
         ? (nte ? await native.toggleNteMod(mod.path, !mod.enabled) : await native.toggleMod(mod.path, game.modsPath || '', !mod.enabled))
-        : undefined
+        : deployedNteTarget
+          ? await native.toggleNteMod(deployedNteTarget, !mod.enabled)
+          : undefined
       set(state => ({ games: state.games.map(item => item.id !== game.id ? item : {
         ...item,
         installedMods: item.installedMods.map(current => current.id === modId ? { ...current, path: path ?? current.path } : current),

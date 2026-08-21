@@ -17,7 +17,8 @@ import { animationsReducedDuringGame, effectivePerformance } from '../../lib/per
 import { pickPrioritySession } from '../../lib/sessionPriority'
 import { useWorkspaceCache } from '../../lib/workspaceCache'
 import { formatElapsedDuration, formatTime, timeAgo } from '../../utils'
-import { addonCapabilities, cyberpunkToolsAllowed, fiveMProfilesAllowed, frostyImportAllowed, hasCapability, mo2ImportAllowed, vortexImportAllowed } from '../../lib/addonGating'
+import { addonCapabilities, cyberpunkToolsAllowed, fiveMProfilesAllowed, frostyImportAllowed, hasCapability, mo2ImportAllowed, nteModsAllowed, vortexImportAllowed } from '../../lib/addonGating'
+import { isNteGame } from '../../lib/nte'
 import { GroupLibraryGrid } from '../GroupLibraryGrid'
 import { groupMembers, groupTotalPlaytime, pinnedGroupsFirst } from '../../lib/gameGroups'
 import { FiveMReShadeDialog } from '../FiveMReShadeDialog'
@@ -1112,6 +1113,11 @@ function ModImportDialog({ gameId, profileId, gameName, destination, onClose, on
   const autoReduce = useStore(state => state.taskAutoReduceImports)
   const upsertBackgroundTask = useStore(state => state.upsertBackgroundTask)
   const registerImportedStages = useStore(state => state.registerImportedStages)
+  const addons = useStore(state => state.addons)
+  const importGame = useStore(state => state.games.find(item => item.id === gameId))
+  // Spec §9 : un import pour un jeu NTE est déployé DANS AuroraMods par
+  // hardlinks (layout Aurora) — pas via le déploiement générique au lancement.
+  const nteImport = Boolean(importGame && isNteGame({ execPath: importGame.execPath, gameName: importGame.name, nteAllowed: nteModsAllowed(addonCapabilities(addons)) }))
   const [candidates, setCandidates] = useState<ModImportCandidate[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
@@ -1184,6 +1190,14 @@ function ModImportDialog({ gameId, profileId, gameName, destination, onClose, on
         if (autoReduce && nextTask.status === 'running' && nextTask.processed > 0 && !reduceTimer.current) reduceTimer.current = window.setTimeout(onClose, 1_500)
       })
       await registerImportedStages(gameId, profileId, result.installedPaths, deployNow)
+      // Spec §9 : staging par hardlinks — les .pak/.utoc/.ucas importés pour
+      // NTE sont LIÉS (repli copie) depuis le store vers AuroraMods, chaque
+      // dossier = un mod (layout Aurora), mod.json dérivé du manifest.
+      if (nteImport && deployNow && destination) {
+        for (const installedPath of result.installedPaths) {
+          await native.nteDeployMod(installedPath, destination)
+        }
+      }
       if (result.status === 'CompletedWithWarnings') setError(`Import terminé avec avertissement : ${result.sensitiveFiles.length} fichier(s) sensible(s) traité(s). Aucun n’a été exécuté.`)
       onImported()
       onClose()

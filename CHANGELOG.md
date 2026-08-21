@@ -2,11 +2,14 @@
 
 ## [Unreleased]
 
-> **Refonte NTE/Aurora — socle pipeline** : l'erreur Steam « Cannot create
-> IPC pipe to Steam client process » devient un état identifiable (« Ouvrir
-> Steam »), le dossier AuroraMods n'est créé qu'après validation du chemin,
-> et les mods sont validés comme ensembles `.pak`/`.utoc`/`.ucas` avant
-> lancement.
+## [1.153.0] - 2026-08-21
+
+> **Refonte NTE/Aurora — gestionnaire de mods complet** : l'erreur Steam devient
+> un état identifiable (« Ouvrir Steam »), le lancement passe par un pipeline
+> vérifiable avec bouton Lancer intelligent (jamais de faux « NTE lancé »), et
+> les mods gagnent icônes (`mod.json`), groupes Aurora (`AU GRP`) et staging
+> par hardlinks (zéro duplication) — le tout validé par une CI native dont le
+> diagnostic des erreurs rustc a été fiabilisé.
 
 ### Added
 
@@ -71,6 +74,20 @@
   enregistre `deployedPath` + `deploymentBackend: Hardlink`. Le toggle d'un
   mod staged déployé cible désormais le dossier AuroraMods (`.pak` ↔
   `.pak.disabled`) — jamais le store.
+
+### Fixed
+
+- **Régression d'enregistrement des commandes Tauri** : le refactor de la
+  validation NTE avait déplacé `#[tauri::command]` de `nte_validate_mods` vers
+  le helper pur `nte_mod_set_status` — le build natif échouait
+  (`generate_handler!` ne trouvait plus la commande). Attribut remis sur la
+  commande, avec assertions de régression dans le test de câblage.
+- **Diagnostic CI natif** : les erreurs rustc colorées (`\x1b[91merror:`) ne
+  correspondaient pas aux motifs du script de capture — les échecs de
+  compilation restaient invisibles dans les annotations GitHub. Le script
+  retire désormais les codes ANSI et capture aussi les panics de tests ; une
+  erreur E0599 dans un test NTE (variable shadowée) a ainsi été révélée et
+  corrigée.
 
 ## [1.152.0] - 2026-08-20
 

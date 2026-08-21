@@ -6314,6 +6314,10 @@ const NTE_MODS_RELATIVE: &str = "Client/WindowsNoEditor/HT/Content/Paks/AuroraMo
 const NTE_PAKS_MARKER: &str = "Client/WindowsNoEditor/HT/Content/Paks";
 const NTE_EPIC_SDK: &str = "NTEGlobal/EOSSDK-Win64-Shipping.dll";
 const NTE_EPIC_AUTH_ARGS: &[&str] = &["-AUTH_PASSWORD=1234", "-AUTH_TYPE=exchangecode"];
+/// AppID Steam de Neverness to Everness — vérifié dans le code source d'Aurora
+/// (`crates/shared/src/classes/steam.rs` : `STEAM_APP_ID`). Jamais deviné :
+/// c'est l'identifiant que Steam utilise pour lancer NTEGlobalLauncher.exe.
+const NTE_STEAM_APP_ID: u32 = 4508340;
 const NTE_STAGING_PREFIX: &str = ".aurora-installing-";
 const NTE_DISABLED_SUFFIX: &str = ".disabled";
 const NTE_GROUP_PREFIX: &str = "AU GRP - ";
@@ -7055,7 +7059,12 @@ struct NteLaunchPipeline {
 /// présence indique que le moteur chargera les .pak d'AuroraMods. ZAILON ne
 /// télécharge JAMAIS ces fichiers — il détecte un loader déjà installé par
 /// l'utilisateur (spec §11-14, §35).
-const NTE_LOADER_DLLS: &[&str] = &["version.dll", "dsound.dll"];
+/// DLL wrapper du mécanisme de chargement RÉEL d'Aurora (vérifié dans le code
+/// source : `Bin/Wrappers/` copiées dans le Win64 du jeu AVANT lancement, le
+/// jeu les charge nativement → hook → PAK d'AuroraMods). La présence d'au
+/// moins une de ces DLL dans les binaires est la PREUVE qu'un loader est
+/// installé — sans elle, les .pak ne chargent pas, point.
+const NTE_LOADER_DLLS: &[&str] = &["version.dll", "dsound.dll", "dwmapi.dll"];
 
 /// Vrai si un des DLL d'injection Everlight est présent dans les binaires.
 fn nte_everlight_loader_present(binaries_path: &Path) -> bool {
@@ -7263,6 +7272,257 @@ fn nte_launch_pipeline(
         &incomplete_names,
         everlight_present,
     ))
+}
+
+// ── NTE : état réel des mods (spec §8, §15, §18) ────────────────────────────
+// Règle « ne pas faire semblant » : un mod n'est PAS « actif » parce que son
+// fichier existe dans AuroraMods. L'état distingue ce qui est VÉRIFIÉ
+// (installé, activé, structure complète, loader présent) de ce qui ne l'est
+// PAS (chargement runtime — aucune preuve non intrusive sans hook actif).
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteModsState {
+    /// Distribution effective (epic/steam/standalone).
+    distribution: String,
+    /// Nombre total de mods (membres de groupes comptés individuellement).
+    total: usize,
+    /// Mods ACTIVÉS (aucun `.pak.disabled` dans l'arbre) — jamais « chargés ».
+    enabled: usize,
+    /// Ensembles .pak/.utoc/.ucas structurellement complets.
+    complete: usize,
+    /// Noms des ensembles incomplets.
+    incomplete: Vec<String>,
+    /// DLL wrapper Aurora présentes dans les binaires du jeu (version.dll /
+    /// dsound.dll / dwmapi.dll — le mécanisme de hook réel, spec §12).
+    loader_dlls: Vec<String>,
+    /// Vrai si AU MOINS une DLL wrapper Aurora est présente dans le Win64.
+    loader_present: bool,
+    /// Le chargement runtime des .pak ne peut PAS être confirmé sans hook
+    /// actif : toujours faux ici — l'UI affiche « non confirmable ».
+    runtime_confirmable: bool,
+}
+
+/// État réel des mods NTE (spec §8/§15/§18) : installés, activés, complets et
+/// loader détecté — jamais un faux « chargé ». Réutilise le scan (activations)
+/// et la validation (ensembles complets) existants, plus la détection des DLL
+/// wrapper Aurora dans les binaires du jeu (le mécanisme réel, pas une théorie).
+#[tauri::command]
+fn nte_mods_state(
+    install_dir: String,
+    platform: Option<String>,
+    mods_path: String,
+) -> Result<NteModsState, String> {
+    let root = PathBuf::from(&install_dir);
+    let distribution = if platform.as_deref() == Some("epic") {
+        "epic"
+    } else if platform.as_deref() == Some("steam") {
+        "steam"
+    } else if root.join(NTE_EPIC_SDK).is_file() {
+        "epic"
+    } else {
+        "standalone"
+    };
+
+    let mods_folder = PathBuf::from(&mods_path);
+    let (total, complete, incomplete) = if mods_folder.is_dir() {
+        let validation = nte_validate_mods(mods_path.clone())?;
+        (
+            validation.total,
+            validation.complete_count,
+            validation
+                .incomplete
+                .into_iter()
+                .map(|mod_| mod_.name)
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        (0, 0, Vec::new())
+    };
+    let enabled = if mods_folder.is_dir() {
+        scan_nte_mods(mods_path.clone())?
+            .into_iter()
+            .filter(|mod_| mod_.mod_type != "NteGroup" && mod_.enabled)
+            .count()
+    } else {
+        0
+    };
+
+    let binaries_path = root.join(NTE_CLIENT_WIN64);
+    let loader_dlls = NTE_LOADER_DLLS
+        .iter()
+        .filter(|name| binaries_path.join(name).is_file())
+        .map(|name| (*name).to_string())
+        .collect::<Vec<_>>();
+    let loader_present = !loader_dlls.is_empty();
+
+    Ok(NteModsState {
+        distribution: distribution.to_string(),
+        total,
+        enabled,
+        complete,
+        incomplete,
+        loader_dlls,
+        loader_present,
+        runtime_confirmable: false,
+    })
+}
+
+// ── NTE : lancement réel (spec §4-5) ────────────────────────────────────────
+// La distribution décide du mécanisme. Steam → passer PAR Steam
+// (steam://rungameid/APPID) : Steam devient le parent et l'IPC du launcher NTE
+// fonctionne — jamais de lancement direct de NTEGlobalLauncher.exe pour une
+// installation Steam (cause racine de « Cannot create IPC pipe »). Epic →
+// launcher direct avec les arguments d'auth. Standalone → launcher direct. Le
+// PID du jeu final est ensuite détecté par le moteur de présence (rattachement
+// de session) — ZAILON ne prétend jamais lancer ce qu'il n'a pas détecté.
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteLaunchStrategy {
+    /// Mécanisme retenu : "steam" | "epic" | "direct".
+    via: String,
+    /// AppID Steam de NTE quand via == "steam".
+    app_id: Option<u32>,
+    /// Message lisible (français).
+    message: String,
+}
+
+/// Décision pure de lancement (testable partout) : distribution + Steam.
+fn nte_launch_strategy(
+    distribution: &str,
+    steam_running: bool,
+    steam_app_id: Option<u32>,
+) -> Result<NteLaunchStrategy, String> {
+    match distribution {
+        "steam" if steam_running => Ok(NteLaunchStrategy {
+            via: "steam".into(),
+            app_id: steam_app_id,
+            message: format!(
+                "Lancement via Steam (steam://rungameid/{}) — Steam lance le launcher NTE avec son IPC valide.",
+                steam_app_id.unwrap_or(0)
+            ),
+        }),
+        "steam" => Err(
+            "Steam non détecté : le launcher NTE afficherait « Cannot create IPC pipe to Steam client process ». Lancez Steam puis relancez."
+                .to_string(),
+        ),
+        "epic" => Ok(NteLaunchStrategy {
+            via: "epic".into(),
+            app_id: None,
+            message: "Lancement direct du launcher avec les arguments d'authentification Epic.".into(),
+        }),
+        _ => Ok(NteLaunchStrategy {
+            via: "direct".into(),
+            app_id: None,
+            message: "Lancement direct du launcher (standalone — aucun prérequis Steam).".into(),
+        }),
+    }
+}
+
+/// Premier launcher NTE présent à la racine (NTEGlobalLauncher d'abord), sinon
+/// le premier de la liste (l'erreur de spawn sera alors explicite).
+fn nte_default_launcher(root: &Path) -> String {
+    NTE_LAUNCHERS
+        .iter()
+        .map(|(exe, _)| root.join(exe))
+        .find(|path| path.is_file())
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|| root.join(NTE_LAUNCHERS[0].0).to_string_lossy().to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NteLaunchResult {
+    /// Mécanisme réellement utilisé : "steam" | "epic" | "direct".
+    launched_via: String,
+    /// AppID Steam de NTE quand le lancement est passé par Steam.
+    app_id: Option<u32>,
+    /// PID du processus lancé (launcher direct Epic/standalone) — None pour
+    /// Steam (le jeu final est détecté par le moteur de présence).
+    pid: Option<u32>,
+    /// Message lisible (français).
+    message: String,
+}
+
+/// Lance réellement NTE selon la stratégie (§4-5). Jamais de téléchargement,
+/// jamais de modification des fichiers du jeu : Steam reçoit l'ordre de lancer
+/// NTE, ou le launcher est exécuté directement (Epic/standalone).
+#[tauri::command]
+fn nte_launch_game(
+    install_dir: String,
+    platform: Option<String>,
+    launcher_path: Option<String>,
+) -> Result<NteLaunchResult, String> {
+    let root = PathBuf::from(&install_dir);
+    let distribution = if platform.as_deref() == Some("epic") {
+        "epic"
+    } else if platform.as_deref() == Some("steam") {
+        "steam"
+    } else if root.join(NTE_EPIC_SDK).is_file() {
+        "epic"
+    } else {
+        "standalone"
+    };
+    let candidates = process_scanner::enumerate_processes();
+    let steam_running = steam_process_present(&candidates);
+    let strategy = nte_launch_strategy(&distribution, steam_running, Some(NTE_STEAM_APP_ID))?;
+
+    match strategy.via.as_str() {
+        "steam" => {
+            let app_id = strategy.app_id.unwrap_or(NTE_STEAM_APP_ID);
+            let uri = format!("steam://rungameid/{app_id}");
+            let spawned = if let Some(steam_exe) = find_steam_executable() {
+                Command::new(&steam_exe)
+                    .arg("-applaunch")
+                    .arg(app_id.to_string())
+                    .spawn()
+            } else {
+                #[cfg(target_os = "windows")]
+                {
+                    Command::new("rundll32.exe")
+                        .args(["url.dll,FileProtocolHandler", &uri])
+                        .spawn()
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    Command::new("xdg-open").arg(&uri).spawn()
+                }
+            };
+            spawned.map_err(to_error)?;
+            Ok(NteLaunchResult {
+                launched_via: "steam".into(),
+                app_id: Some(app_id),
+                pid: None,
+                message: format!(
+                    "Steam a reçu le lancement de NTE ({uri}) — le jeu sera détecté automatiquement au démarrage."
+                ),
+            })
+        }
+        "epic" => {
+            let launcher = launcher_path.unwrap_or_else(|| nte_default_launcher(&root));
+            let child = Command::new(&launcher)
+                .args(NTE_EPIC_AUTH_ARGS)
+                .spawn()
+                .map_err(to_error)?;
+            Ok(NteLaunchResult {
+                launched_via: "epic".into(),
+                app_id: None,
+                pid: Some(child.id()),
+                message: "Launcher NTE lancé avec les arguments d'authentification Epic.".into(),
+            })
+        }
+        _ => {
+            let launcher = launcher_path.unwrap_or_else(|| nte_default_launcher(&root));
+            let child = Command::new(&launcher).spawn().map_err(to_error)?;
+            Ok(NteLaunchResult {
+                launched_via: "direct".into(),
+                app_id: None,
+                pid: Some(child.id()),
+                message: "Launcher NTE lancé (standalone).".into(),
+            })
+        }
+    }
 }
 
 /// `mod.json` Aurora : à la racine du mod, sinon un niveau plus bas.
@@ -20438,6 +20698,102 @@ mod tests {
     }
 
     #[test]
+    fn nte_launch_strategy_passes_through_steam_never_direct() {
+        // Steam présent → via Steam (le launcher NTE reçoit son IPC de Steam,
+        // jamais de lancement direct de NTEGlobalLauncher.exe — spec §4).
+        let strategy = nte_launch_strategy("steam", true, Some(NTE_STEAM_APP_ID)).unwrap();
+        assert_eq!(strategy.via, "steam");
+        assert_eq!(strategy.app_id, Some(4508340));
+        assert!(strategy.message.contains("steam://rungameid/4508340"));
+
+        // Steam absent → erreur IPC anticipée, PAS de lancement direct.
+        let error = nte_launch_strategy("steam", false, Some(NTE_STEAM_APP_ID)).unwrap_err();
+        assert!(error.contains("Cannot create IPC pipe to Steam client process"));
+
+        // Epic → launcher direct avec args d'auth.
+        let strategy = nte_launch_strategy("epic", false, None).unwrap();
+        assert_eq!(strategy.via, "epic");
+
+        // Standalone → launcher direct.
+        let strategy = nte_launch_strategy("standalone", false, None).unwrap();
+        assert_eq!(strategy.via, "direct");
+    }
+
+    #[test]
+    fn nte_mods_state_is_honest_about_enabled_vs_loaded() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-state-{}", unix_timestamp()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("NTEGlobalLauncher.exe"), b"x").unwrap();
+        // DLL wrapper Aurora présente (version.dll) → loader installé.
+        let win64 = root.join("Client/WindowsNoEditor/HT/Binaries/Win64");
+        fs::create_dir_all(&win64).unwrap();
+        fs::write(win64.join("version.dll"), b"wrapper").unwrap();
+
+        let mods = root.join(NTE_MODS_RELATIVE);
+        // Mod activé, ensemble complet.
+        let active = mods.join("ActiveMod");
+        fs::create_dir_all(&active).unwrap();
+        fs::write(active.join("ActiveMod.pak"), b"a").unwrap();
+        fs::write(active.join("ActiveMod.utoc"), b"b").unwrap();
+        fs::write(active.join("ActiveMod.ucas"), b"c").unwrap();
+        // Mod désactivé (`.pak.disabled`), ensemble structurellement complet.
+        let disabled = mods.join("DisabledMod");
+        fs::create_dir_all(&disabled).unwrap();
+        fs::write(disabled.join("DisabledMod.pak.disabled"), b"d").unwrap();
+        fs::write(disabled.join("DisabledMod.utoc.disabled"), b"e").unwrap();
+        fs::write(disabled.join("DisabledMod.ucas.disabled"), b"f").unwrap();
+
+        let state = nte_mods_state(
+            root.to_string_lossy().to_string(),
+            Some("steam".to_string()),
+            mods.to_string_lossy().to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(state.distribution, "steam");
+        assert_eq!(state.total, 2);
+        assert_eq!(state.enabled, 1); // activé ≠ chargé
+        assert_eq!(state.complete, 2);
+        assert!(state.incomplete.is_empty());
+        assert!(state.loader_present);
+        assert_eq!(state.loader_dlls, vec!["version.dll".to_string()]);
+        // La règle « ne pas faire semblant » : jamais confirmé sans hook actif.
+        assert!(!state.runtime_confirmable);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn nte_mods_state_detects_missing_loader_and_incomplete_mods() {
+        let root = std::env::temp_dir().join(format!("zailon-nte-state2-{}", unix_timestamp()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("NTEGlobalLauncher.exe"), b"x").unwrap();
+        // AUCUNE DLL wrapper → loader absent (les .pak ne chargeront pas).
+        let mods = root.join(NTE_MODS_RELATIVE);
+        let broken = mods.join("BrokenMod");
+        fs::create_dir_all(&broken).unwrap();
+        fs::write(broken.join("BrokenMod.pak"), b"a").unwrap();
+        fs::write(broken.join("BrokenMod.utoc"), b"b").unwrap();
+
+        let state = nte_mods_state(
+            root.to_string_lossy().to_string(),
+            None,
+            mods.to_string_lossy().to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(state.total, 1);
+        assert_eq!(state.enabled, 1);
+        assert_eq!(state.complete, 0);
+        assert_eq!(state.incomplete, vec!["BrokenMod".to_string()]);
+        assert!(!state.loader_present);
+        assert!(state.loader_dlls.is_empty());
+        assert!(!state.runtime_confirmable);
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn steam_process_present_detects_steam_exe() {
         let candidate = |name: &str| process_scanner::ProcessCandidate {
             pid: 1,
@@ -20918,6 +21274,8 @@ pub fn run() {
             nte_ensure_mods_dir,
             nte_validate_mods,
             nte_launch_pipeline,
+            nte_mods_state,
+            nte_launch_game,
             nte_deploy_mod,
             list_staged_mods,
             scan_mod_import,

@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- **État réel des mods NTE** (`nte_mods_state`) : le diagnostic distingue
+  installé / activé / complet / loader détecté — le chargement runtime reste
+  explicitement **non confirmable** (aucune preuve non intrusive sans hook
+  actif). La règle « ne pas faire semblant » s'applique partout : « activé »
+  ne signifie jamais « chargé » (spec §8, §15, §18).
+- **Détection du loader par son mécanisme réel** : les DLL wrapper Aurora
+  (`version.dll` / `dsound.dll` / `dwmapi.dll`) sont cherchées dans le Win64
+  du jeu — la preuve qu'un loader est installé, pas une théorie (spec §12).
+- **Lancement NTE via Steam** (`nte_launch_game`) : pour une installation
+  Steam, ZAILON ne lance plus jamais `NTEGlobalLauncher.exe` directement —
+  Steam reçoit l'ordre de lancer NTE (`steam://rungameid/4508340`, AppID
+  vérifié dans le source Aurora) et l'IPC du launcher fonctionne. La session
+  démarre « en attente du jeu » et se rattache seule au processus final
+  (moteur de présence) ; Epic reçoit les args d'auth, standalone lance le
+  launcher directement (spec §4-5).
+- **UI honnête** : « mods activés » (jamais « actifs »), bloc « État réel des
+  mods » dans la carte NTE, « 0/0 valides » remplacé par « aucun mod dans
+  AuroraMods », ligne « Chargement runtime : non confirmable » dans le
+  diagnostic partageable.
+
 ## [1.153.0] - 2026-08-21
 
 > **Refonte NTE/Aurora — gestionnaire de mods complet** : l'erreur Steam devient

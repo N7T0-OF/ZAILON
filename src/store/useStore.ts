@@ -729,7 +729,7 @@ export interface Store {
   syncVisualProfiles: () => Promise<void>
   cancelSession: (gameId: string) => void
   applyInputArbiter: () => void
-  beginSession: (gameId: string, profileId: string, source?: SessionSource) => void
+  beginSession: (gameId: string, profileId: string, source?: SessionSource, waitForGame?: boolean) => void
   onGameProcessStopped: (payload: { gameId: string; profileId?: string; cleanupError?: string; processName?: string }) => void
   sessionLauncherExited: (gameId: string, processName?: string) => void
   sessionGameDetected: (gameId: string, processName: string, confidence?: number, evidence?: string[]) => void
@@ -2211,26 +2211,60 @@ export const useStore = create<Store>()(persist((set, get) => ({
         launchProgress: { phase: 'starting', current: 0, total: 0, message: 'Préparation du jeu…' },
         notice: 'Préparation du jeu en arrière-plan…',
       })
-      const result = await native.launchGame(executablePath, game.id, game.name, resolved.rootPath || knownRoot, profile.id, profile.name, enabledMods.length, stagedModIds, profile.conflictRules || [], isLauncherBased(adapterFor(game)), progress => set({ launchProgress: progress }))
-      // Performance+ §40 (feature removal §57) : avec l'add-on, la priorité du
-      // mode du jeu est RÉELLEMENT appliquée au processus. Sans lui, la
-      // priorité reste une valeur affichée, jamais appliquée à l'OS.
-      if (performancePlusAllowed(addonCapabilities(get().addons))) {
-        const priority = launchProcessPriority(get().performanceModes[game.id] ?? 'auto')
-        if (shouldApplyProcessPriority(priority)) {
-          void native.setGameProcessPriority(result.pid, priority).catch(() => undefined)
+      const isNte = isNteGame({ execPath: game.execPath, gameName: game.name, nteAllowed: nteModsAllowed(addonCapabilities(get().addons)) })
+      // Spec « Refonte NTE/Aurora » §4-5 : un jeu NTE est lancé par le backend
+      // NTE RÉEL, jamais par le lancement générique. Steam reçoit l'ordre de
+      // lancer NTE (steam://rungameid/4508340) : Steam devient le parent, l'IPC
+      // du launcher NTE fonctionne — plus d'erreur « Cannot create IPC pipe ».
+      // Epic reçoit les args d'auth, standalone lance le launcher directement.
+      // Le processus final est détecté par le moteur de présence (session
+      // « en attente du jeu », rattachement automatique) — ZAILON ne prétend
+      // jamais que le jeu tourne avant de l'avoir vu.
+      if (isNte) {
+        try {
+          const nteLaunch = await native.nteLaunchGame(resolved.rootPath || knownRoot, game.platform || null, executablePath)
+          if (performancePlusAllowed(addonCapabilities(get().addons)) && nteLaunch.pid) {
+            const priority = launchProcessPriority(get().performanceModes[game.id] ?? 'auto')
+            if (shouldApplyProcessPriority(priority)) {
+              void native.setGameProcessPriority(nteLaunch.pid, priority).catch(() => undefined)
+            }
+          }
+          set(current => ({
+            isLaunching: false,
+            launchProgress: undefined,
+            isPlaying: true,
+            playStartTime: Date.now(),
+            sessionTime: 0,
+            games: current.games.map(item => item.id !== game.id ? item : { ...item, installedMods: item.installedMods.map(mod => enabledMods.some(enabled => enabled.id === mod.id) && mod.storage === 'staged' ? { ...mod, deploymentStatus: 'runtime-visible' } : mod) }),
+            notice: nteLaunch.message,
+          }))
+          get().beginSession(game.id, profile.id, 'zailon', true)
+        } catch (error) {
+          set({ isLaunching: false, launchProgress: undefined, notice: asError(error) })
+          return
         }
+      } else {
+        const result = await native.launchGame(executablePath, game.id, game.name, resolved.rootPath || knownRoot, profile.id, profile.name, enabledMods.length, stagedModIds, profile.conflictRules || [], isLauncherBased(adapterFor(game)), progress => set({ launchProgress: progress }))
+        // Performance+ §40 (feature removal §57) : avec l'add-on, la priorité du
+        // mode du jeu est RÉELLEMENT appliquée au processus. Sans lui, la
+        // priorité reste une valeur affichée, jamais appliquée à l'OS.
+        if (performancePlusAllowed(addonCapabilities(get().addons))) {
+          const priority = launchProcessPriority(get().performanceModes[game.id] ?? 'auto')
+          if (shouldApplyProcessPriority(priority)) {
+            void native.setGameProcessPriority(result.pid, priority).catch(() => undefined)
+          }
+        }
+        set(current => ({
+          isLaunching: false,
+          launchProgress: undefined,
+          isPlaying: true,
+          playStartTime: Date.now(),
+          sessionTime: 0,
+          games: current.games.map(item => item.id !== game.id ? item : { ...item, installedMods: item.installedMods.map(mod => enabledMods.some(enabled => enabled.id === mod.id) && mod.storage === 'staged' ? { ...mod, deploymentStatus: 'runtime-visible' } : mod) }),
+          notice: `${game.name} lancé${options?.withoutMods ? ' sans mods' : ''} (PID ${result.pid}) après vérification de ${result.deployedFiles} fichier(s) via ${result.deploymentBackend}.`,
+        }))
+        get().beginSession(game.id, profile.id)
       }
-      set(current => ({
-        isLaunching: false,
-        launchProgress: undefined,
-        isPlaying: true,
-        playStartTime: Date.now(),
-        sessionTime: 0,
-        games: current.games.map(item => item.id !== game.id ? item : { ...item, installedMods: item.installedMods.map(mod => enabledMods.some(enabled => enabled.id === mod.id) && mod.storage === 'staged' ? { ...mod, deploymentStatus: 'runtime-visible' } : mod) }),
-        notice: `${game.name} lancé${options?.withoutMods ? ' sans mods' : ''} (PID ${result.pid}) après vérification de ${result.deployedFiles} fichier(s) via ${result.deploymentBackend}.`,
-      }))
-      get().beginSession(game.id, profile.id)
     } catch (error) {
       set({ isLaunching: false, launchProgress: undefined, notice: asError(error) })
     }
@@ -2295,7 +2329,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
       set({ activeTrackedSession: { ...activeTrackedSession, checkpointAt: Date.now() } })
     }
   },
-  beginSession: (gameId, profileId, source = 'zailon') => {
+  beginSession: (gameId, profileId, source = 'zailon', waitForGame = false) => {
     const state = get()
     const game = state.games.find(item => item.id === gameId)
     if (!game) return
@@ -2315,13 +2349,18 @@ export const useStore = create<Store>()(persist((set, get) => ({
       launcherProcessIds: [],
       gameProcessIds: [],
       startedAt: now,
-      state: 'LauncherStarted',
+      // Lancement NTE via Steam : aucun PID enfant à suivre — la session
+      // démarre « en attente du jeu » et se rattache seule au processus final
+      // (moteur de présence) ; le watchdog la termine si le jeu ne démarre
+      // jamais (prolongée tant que Steam confirme l'AppID).
+      state: waitForGame ? 'WaitingForGame' : 'LauncherStarted',
+      reattachUntil: waitForGame ? now + adapter.reattachWindowSeconds * 1000 : undefined,
       runtimeToolsActive: false,
       deploymentActive: true,
       inputProfileActive: false,
       visualProfileActive: false,
       source,
-      timeline: [{ at: now, stage: 'GameLaunchRequested', detail: adapter.launchBehavior }],
+      timeline: [{ at: now, stage: waitForGame ? 'WaitingForGame' : 'GameLaunchRequested', detail: waitForGame ? 'Lancement via Steam — en attente du processus final (rattachement automatique)' : adapter.launchBehavior }],
     }
     set(current => ({
       gameSessions: [session, ...current.gameSessions.filter(item => item.gameId !== gameId || item.state === 'Ended' || item.state === 'Failed')],

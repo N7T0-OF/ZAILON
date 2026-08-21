@@ -406,6 +406,32 @@ export interface NteLaunchPipeline {
   blockerSummary: string
 }
 
+/** État réel des mods NTE (spec §8, §15, §18) : « ne pas faire semblant » —
+ * installés/activés/complets et loader détecté sont des faits vérifiés ; le
+ * chargement runtime reste NON confirmable (aucune preuve non intrusive sans
+ * hook actif). `enabled` n'est JAMAIS « chargé ». */
+export interface NteModsState {
+  distribution: 'epic' | 'steam' | 'standalone'
+  total: number
+  enabled: number
+  complete: number
+  incomplete: string[]
+  loaderDlls: string[]
+  loaderPresent: boolean
+  runtimeConfirmable: boolean
+}
+
+/** Résultat d'un lancement NTE réel (spec §4-5) : le mécanisme utilisé est
+ * explicite — Steam reçoit l'ordre de lancer NTE (IPC valide), ou le launcher
+ * est exécuté directement (Epic/standalone). Le PID du jeu final est détecté
+ * ensuite par le moteur de présence, jamais affirmé ici. */
+export interface NteLaunchResult {
+  launchedVia: 'steam' | 'epic' | 'direct'
+  appId?: number | null
+  pid?: number | null
+  message: string
+}
+
 export interface CyberpunkRepairMove {
   from: string
   to: string
@@ -1059,6 +1085,17 @@ export const native = {
    * Everlight) — jamais un faux « NTE lancé ». */
   nteLaunchPipeline: (installDir: string, platform: string | null, modsPath: string) =>
     desktopOnly<NteLaunchPipeline>('nte_launch_pipeline', { installDir, platform, modsPath }),
+  /** État réel des mods NTE (spec §8/§15/§18) : installés, activés, complets
+   * et loader détecté (DLL wrapper Aurora dans les binaires du jeu) — jamais
+   * un faux « chargé » (runtimeConfirmable est toujours faux). */
+  nteModsState: (installDir: string, platform: string | null, modsPath: string) =>
+    desktopOnly<NteModsState>('nte_mods_state', { installDir, platform, modsPath }),
+  /** Lance réellement NTE selon la distribution (spec §4-5) : Steam →
+   * steam://rungameid/4508340 (Steam devient le parent, IPC du launcher
+   * valide) ; Epic → launcher direct avec les args d'auth ; standalone →
+   * launcher direct. */
+  nteLaunchGame: (installDir: string, platform: string | null, launcherPath: string | null) =>
+    desktopOnly<NteLaunchResult>('nte_launch_game', { installDir, platform, launcherPath }),
   /** Staging par hardlinks NTE (spec §9) : déploie un paquet staged vers
    * AuroraMods en LIANT les .pak/.utoc/.ucas (repli copie si le système de
    * fichiers refuse le lien). Transactionnel, écrit mod.json + deployedPath. */

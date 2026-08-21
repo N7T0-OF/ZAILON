@@ -26,7 +26,7 @@ import {
   type ZailonPerformancePolicies,
   type ZailonPriorityPolicy,
 } from '../../lib/performanceProfiles'
-import { native, pickExecutable, pickFolder, type NteGameReport, type NteLaunchPipeline, type NteModsValidation, type NteSteamStatus, type ShortcutCreationResult } from '../../lib/native'
+import { native, pickExecutable, pickFolder, type NteGameReport, type NteLaunchPipeline, type NteModsState, type NteModsValidation, type NteSteamStatus, type ShortcutCreationResult } from '../../lib/native'
 import { shortcutPlanFor } from '../../lib/shortcuts'
 import { resolveGameInstallation, shortPathName } from '../../lib/installations'
 import { ProfileShareDialog } from '../UI/ProfileShareDialog'
@@ -890,6 +890,10 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
   // état (installation, provider/Steam, dossier mods, mods, loader Everlight).
   const [pipeline, setPipeline] = useState<NteLaunchPipeline | null>(null)
   const [pipelineBusy, setPipelineBusy] = useState(false)
+  // Spec §8, §15, §18 (« ne pas faire semblant ») : état réel des mods —
+  // installés/activés/complets + loader détecté (DLL wrapper Aurora dans les
+  // binaires du jeu). Le chargement runtime reste toujours NON confirmable.
+  const [modsState, setModsState] = useState<NteModsState | null>(null)
   const [open, setOpen] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(`zailon:config-open:${game.id}`) || 'null') as string[] | null
@@ -938,6 +942,21 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
       setBusy(false)
     }
   }
+
+  // État réel des mods : rafraîchi à chaque changement du dossier AuroraMods
+  // (load, création du dossier, bascule « Utiliser AuroraMods »).
+  useEffect(() => {
+    if (!report?.modsPath || !native.isDesktop()) {
+      setModsState(null)
+      return
+    }
+    let cancelled = false
+    void native.nteModsState(installRoot, game.platform || null, report.modsPath)
+      .then(state => { if (!cancelled) setModsState(state) })
+      .catch(() => { if (!cancelled) setModsState(null) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report?.modsPath, installRoot, game.platform])
 
   const runValidation = async () => {
     if (!report?.modsPath || !native.isDesktop()) return
@@ -997,7 +1016,9 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
       ...(report?.markers ?? []).map(marker => `${marker.found ? '✓' : '✗'} ${marker.label} — ${marker.marker}`),
       `Steam : ${steam ? (steam.launchReady ? 'prêt ✓' : 'non détecté ✗') : '—'}`,
       ...(steam?.steamPath ? [`Chemin Steam : ${steam.steamPath}`] : []),
-      ...(validation ? [`Mods : ${validation.completeCount}/${validation.total} valides`, ...validation.incomplete.map(mod => `  ✗ ${mod.name} — manquant : ${mod.missing.join(', ')}`)] : []),
+      ...(validation ? [`Mods : ${validation.total === 0 ? 'aucun mod dans AuroraMods' : `${validation.completeCount}/${validation.total} valides`}`, ...validation.incomplete.map(mod => `  ✗ ${mod.name} — manquant : ${mod.missing.join(', ')}`)] : []),
+      // Spec §8/§15/§18 : jamais « copié dans le dossier » = « chargé ».
+      ...(modsState ? [`État : ${modsState.total} installé(s) · ${modsState.enabled} activé(s) · ${modsState.complete} complet(s)${modsState.incomplete.length ? ` · ${modsState.incomplete.length} incomplet(s)` : ''}`, `Loader : ${modsState.loaderPresent ? `wrapper Aurora détecté (${modsState.loaderDlls.join(', ')})` : 'aucun wrapper Aurora dans les binaires — les .pak ne chargeront pas'}`, 'Chargement runtime : NON CONFIRMABLE (aucune preuve non intrusive sans hook actif au lancement)'] : []),
       ...(pipeline ? [`Pipeline : ${pipeline.ready ? 'prêt ✓' : `bloqué ✗ — ${pipeline.blockerSummary}`}`, ...pipeline.steps.map(step => `  ${step.status === 'ok' ? '✓' : step.status === 'error' ? '✗' : '⚠'} ${step.label} — ${step.detail}${step.action ? ` → ${step.action}` : ''}`)] : []),
     ]
     return lines.join('\n')
@@ -1072,6 +1093,23 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
               {step.action && <span className="text-gold/75">→ {step.action}</span>}
             </p>
           ))}
+        </div>
+      )}
+
+      {/* Spec §8, §15, §18 : état RÉEL des mods — installés/activés/complets
+          sont des faits vérifiés ; le chargement runtime est explicitement
+          NON CONFIRMABLE (jamais déduit de la présence des fichiers). */}
+      {modsState && (
+        <div className="mt-2 space-y-1.5 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2">
+          <p className="flex items-center gap-2 text-[11px] font-semibold text-white/68"><Layers3 size={13} className="shrink-0 text-white/40" />État réel des mods</p>
+          <p className="pl-5 text-[11px] text-white/55">{modsState.total} installé(s) · {modsState.enabled} activé(s) · {modsState.complete} complet(s){modsState.incomplete.length ? ` · ${modsState.incomplete.length} incomplet(s) : ${modsState.incomplete.join(', ')}` : ''}</p>
+          <p className={`flex items-center gap-2 pl-5 text-[11px] ${modsState.loaderPresent ? 'text-emerald-100/70' : 'text-amber-100/75'}`}>
+            {modsState.loaderPresent ? <CheckCircle2 size={13} className="shrink-0 text-emerald-300/80" /> : <AlertTriangle size={13} className="shrink-0 text-amber-300/90" />}
+            {modsState.loaderPresent
+              ? `Loader : wrapper Aurora détecté dans les binaires (${modsState.loaderDlls.join(', ')}) — les .pak peuvent être chargés.`
+              : 'Loader : aucun wrapper Aurora (version.dll/dsound.dll/dwmapi.dll) dans les binaires — les .pak ne chargeront pas sans lui.'}
+          </p>
+          <p className="pl-5 text-[11px] text-white/45">Chargement runtime : non confirmable — la preuve nécessite un hook actif au lancement, jamais déduite de la présence des fichiers.</p>
         </div>
       )}
 

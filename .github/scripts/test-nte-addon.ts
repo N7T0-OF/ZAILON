@@ -136,6 +136,45 @@ test('socle NTE : état Steam, création validée AuroraMods et validation des m
   assert.ok(read('src/components/UI/ModCard.tsx').includes('mod.thumbnail'), 'vignette affichée dans ModCard')
 })
 
+test('état réel des mods + lancement via Steam (spec §4-5, §8, §18) : jamais « actif » = « chargé »', () => {
+  const rust = read('src-tauri/src/lib.rs')
+  const native = read('src/lib/native.ts')
+  const panel = read('src/components/Views/GameConfigurationPanel.tsx')
+  const store = read('src/store/useStore.ts')
+  const gamesView = read('src/components/Views/GamesView.tsx')
+
+  // Backend natif : l'état réel distingue installé/activé/complet/loader du
+  // chargement runtime (toujours NON confirmable) — la règle §18.
+  for (const command of ['nte_mods_state', 'nte_launch_game']) {
+    assert.ok(rust.includes(command), `commande native ${command}`)
+    assert.ok(rust.includes(`            ${command},`), `${command} enregistrée dans invoke_handler`)
+  }
+  assert.ok(rust.includes('NTE_STEAM_APP_ID: u32 = 4508340'), 'AppID NTE 4508340 (vérifié dans le source Aurora, jamais deviné)')
+  assert.ok(rust.includes('steam://rungameid'), 'lancement via le protocole Steam (IPC du launcher valide)')
+  assert.ok(rust.includes('Cannot create IPC pipe to Steam client process'), 'erreur IPC anticipée dans la stratégie de lancement')
+  assert.ok(rust.includes('runtime_confirmable: false'), 'chargement runtime jamais confirmé sans hook actif (spec §8, §18)')
+  assert.ok(rust.includes('"dwmapi.dll"'), 'wrapper dwmapi.dll ajouté à la détection du loader (mécanisme réel Aurora)')
+
+  // Bindings frontend.
+  assert.ok(native.includes('nteModsState'), 'binding natif nteModsState')
+  assert.ok(native.includes('nteLaunchGame'), 'binding natif nteLaunchGame')
+  assert.ok(native.includes('runtimeConfirmable: boolean'), 'type NteModsState avec runtimeConfirmable')
+
+  // Store : un jeu NTE est lancé par le backend NTE réel, jamais par le
+  // lancement générique ; la session démarre « en attente du jeu » (le
+  // moteur de présence rattache le processus final).
+  assert.ok(store.includes('native.nteLaunchGame('), 'lancement NTE via nteLaunchGame dans le store')
+  assert.ok(store.includes("'zailon', true)"), 'session « en attente du jeu » après un lancement NTE')
+  assert.ok(store.includes("state: waitForGame ? 'WaitingForGame' : 'LauncherStarted'"), 'état initial WaitingForGame pour les lancements sans PID enfant')
+
+  // UI : « activé » ≠ « chargé » — wording honnête partout.
+  assert.ok(gamesView.includes('mods activés'), 'badge « mods activés » (jamais « actifs »)')
+  assert.ok(panel.includes('État réel des mods'), 'bloc « État réel des mods » dans la carte NTE')
+  assert.ok(panel.includes('Chargement runtime : non confirmable'), 'preuve runtime explicitement non confirmable')
+  assert.ok(panel.includes('wrapper Aurora'), 'loader décrit par son mécanisme réel (DLL wrapper)')
+  assert.ok(panel.includes('aucun mod dans AuroraMods'), '« 0/0 valides » remplacé par un message honnête')
+})
+
 test('groupes de mods Aurora (spec §25) : entrée groupe + membres, toggle bulk, validation', () => {
   const rust = read('src-tauri/src/lib.rs')
   const native = read('src/lib/native.ts')

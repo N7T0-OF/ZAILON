@@ -205,6 +205,18 @@ test('loader Aurora (spec §12) : installation réelle depuis une source locale,
   assert.ok(panel.includes('native.nteLoaderInstall(installRoot, source)'), 'installation réelle depuis la source Aurora')
   assert.ok(panel.includes('Bin/Wrappers'), 'source décrite par son mécanisme réel')
   assert.ok(panel.includes('jamais téléchargé'), 'principe « jamais téléchargé » affiché dans l\'UI')
+
+  // UX « quoi faire » (le bloc expliquait le quoi sans le comment) : le loader
+  // est expliqué en une phrase, les étapes sont données quand rien n'est
+  // détecté, le dossier est choisissable, le dépôt officiel est accessible,
+  // et le probe tourne à l'ouverture (état réel, pas un avertissement par défaut).
+  assert.ok(panel.includes('nécessaire pour charger les .pak'), 'titre clair : loader nécessaire pour charger les .pak')
+  assert.ok(panel.includes('3 DLL wrapper'), 'le loader expliqué simplement (version/dsound/dwmapi)')
+  assert.ok(panel.includes('Choisir un dossier Aurora'), 'bouton « Choisir un dossier Aurora… » quand aucune source détectée')
+  assert.ok(panel.includes('Bin/Wrappers'), 'le dossier attendu est précisé (Bin/Wrappers)')
+  assert.ok(panel.includes('github.com/Daturaxoxo/Aurora'), 'lien vers le dépôt officiel Aurora quand rien n\'est détecté')
+  assert.ok(panel.includes('chooseLoaderSource'), 'choix du dossier Aurora câblé')
+  assert.ok(panel.includes('void refreshLoader()'), 'probe du loader lancé à l\'ouverture de la carte (état réel)')
 })
 
 test('groupes de mods Aurora (spec §25) : entrée groupe + membres, toggle bulk, validation', () => {

@@ -1,4 +1,4 @@
-import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, FileArchive, FolderOpen, Gamepad2, HardDrive, History, Keyboard, Layers3, Loader2, MonitorDown, Package, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Snowflake, Trash2, Upload, Wand2, Wrench } from 'lucide-react'
+import { AlertTriangle, Archive, Bookmark, CheckCircle2, ChevronDown, Copy, ExternalLink, FileArchive, FolderOpen, Gamepad2, HardDrive, History, Keyboard, Layers3, Loader2, MonitorDown, Package, Play, Plus, RefreshCw, Rocket, Settings2, ShieldCheck, Snowflake, Trash2, Upload, Wand2, Wrench } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
@@ -996,6 +996,12 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
     }
   }
 
+  const chooseLoaderSource = async () => {
+    if (!installRoot || !native.isDesktop()) return
+    const source = (await pickFolder('Choisissez la racine d’Aurora — le dossier qui contient le sous-dossier Bin/Wrappers')) ?? undefined
+    if (source) await installLoader(source)
+  }
+
   const uninstallLoader = async () => {
     if (!installRoot || !native.isDesktop()) return
     if (!window.confirm('Désinstaller le loader Aurora ? Les fichiers d’origine seront restaurés depuis les sauvegardes.')) return
@@ -1047,7 +1053,13 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
   }
 
   useEffect(() => {
-    if (open || tested) void load()
+    if (open || tested) {
+      void load()
+      // Le probe du loader tourne à l'ouverture : le bloc affiche l'état RÉEL
+      // (installé / source Aurora détectée / rien trouvé), pas un avertissement
+      // par défaut avant même d'avoir vérifié (spec §12, §18).
+      void refreshLoader()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, game.id, installRoot, game.platform])
 
@@ -1169,23 +1181,45 @@ function NteConfigCard({ game, profile }: { game: Game; profile: Profile }) {
       {/* Spec §12 : le loader s'installe RÉELLEMENT — depuis une source Aurora
           locale (détectée ou choisie), avec sauvegarde des originaux, manifest
           sha256 et rollback. Jamais de téléchargement : ZAILON n'installe que
-          ce que l'utilisateur possède déjà (§12, §16). */}
+          ce que l'utilisateur possède déjà (§12, §16). Le bloc explique AUSSI
+          quoi faire — le « quoi » sans le « comment » laissait l'utilisateur
+          perdu devant « Aucun loader dans le jeu ». */}
       <div className="mt-2 space-y-1.5 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2">
         <div className="flex items-center justify-between gap-2">
-          <p className="flex items-center gap-2 text-[11px] font-semibold text-white/68"><ShieldCheck size={13} className="shrink-0 text-white/40" />Loader Aurora (installé localement)</p>
-          <button type="button" onClick={() => void refreshLoader()} disabled={loaderBusy} title="Détecter les installations Aurora sur ce système" className="rounded-md border border-white/[0.07] p-1 text-white/40 hover:bg-white/[0.06] hover:text-gold disabled:opacity-40"><RefreshCw size={12} className={loaderBusy ? 'animate-spin' : ''} /></button>
+          <p className="flex items-center gap-2 text-[11px] font-semibold text-white/68"><ShieldCheck size={13} className="shrink-0 text-white/40" />Loader Aurora — nécessaire pour charger les .pak</p>
+          <button type="button" onClick={() => void refreshLoader()} disabled={loaderBusy} title="Re-détecter les installations Aurora sur ce système" className="rounded-md border border-white/[0.07] p-1 text-white/40 hover:bg-white/[0.06] hover:text-gold disabled:opacity-40"><RefreshCw size={12} className={loaderBusy ? 'animate-spin' : ''} /></button>
         </div>
-        {loaderProbe?.installed
-          ? <p className="pl-5 text-[11px] text-emerald-100/75">Présent dans le jeu : {loaderProbe.installedDlls.join(', ')} — les .pak peuvent être chargés.</p>
-          : <p className="pl-5 text-[11px] text-amber-100/75">Aucun loader dans le jeu — les .pak ne chargeront pas tant que les DLL wrapper ne sont pas installées.</p>}
-        {loaderProbe && loaderProbe.sources.length > 0 && (
-          <p className="pl-5 text-[11px] text-white/45">Source Aurora détectée : {loaderProbe.sources[0].path} ({loaderProbe.sources[0].dlls.join(', ')}){loaderProbe.sources[0].appIdMatch ? ' · AppID NTE confirmé' : ''}.</p>
+
+        {/* Ce que c'est, en une phrase simple — jamais de jargon sans explication. */}
+        <p className="pl-5 text-[11px] leading-relaxed text-white/48">
+          Le loader Aurora = 3 DLL wrapper (<code className="font-mono text-white/60">version.dll</code>, <code className="font-mono text-white/60">dsound.dll</code>, <code className="font-mono text-white/60">dwmapi.dll</code>) copiées dans le dossier Win64 du jeu. Le jeu les charge au démarrage et active alors vos .pak d'AuroraMods — sans elles, vos mods sont présents mais jamais chargés.
+        </p>
+
+        {loaderProbe?.installed ? (
+          <p className="pl-5 text-[11px] text-emerald-100/75">Présent dans le jeu : {loaderProbe.installedDlls.join(', ')} — les .pak peuvent être chargés.</p>
+        ) : loaderProbe && loaderProbe.sources.length > 0 ? (
+          <p className="pl-5 text-[11px] text-white/45">Installation Aurora détectée : <span className="font-mono text-white/60">{loaderProbe.sources[0].path}</span> ({loaderProbe.sources[0].dlls.join(', ')}){loaderProbe.sources[0].appIdMatch ? ' · AppID NTE confirmé' : ''}. Cliquez « Installer le loader » pour copier les DLL dans le jeu (originaux sauvegardés).</p>
+        ) : (
+          <div className="space-y-1 pl-5">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-100/85"><AlertTriangle size={12} className="shrink-0 text-amber-300/90" />Aucun loader dans le jeu — les .pak ne chargeront pas.</p>
+            {loaderProbe && <p className="text-[11px] leading-relaxed text-white/48">Aucune installation Aurora détectée sur ce PC. Il vous faut le dossier d'Aurora (celui qui contient <code className="font-mono text-white/60">Bin/Wrappers/</code>) — ZAILON ne télécharge jamais de binaire lui-même :</p>}
+            <ol className="list-decimal space-y-0.5 pl-4 text-[11px] leading-relaxed text-white/48">
+              <li><span>Téléchargez Aurora depuis son dépôt officiel (bouton ci-dessous) et décompressez-le où vous voulez.</span></li>
+              <li><span>Cliquez « Choisir un dossier Aurora… » et sélectionnez la racine (le dossier qui contient <code className="font-mono text-white/60">Bin/Wrappers</code>).</span></li>
+              <li><span>Les 3 DLL sont copiées dans le jeu avec sauvegarde des originaux — « Désinstaller » les restaure.</span></li>
+            </ol>
+            <button type="button" onClick={() => void native.openExternalUrl('https://github.com/Daturaxoxo/Aurora')} className="flex items-center gap-1.5 pt-0.5 text-[11px] font-semibold text-gold hover:underline"><ExternalLink size={11} />Ouvrir le dépôt officiel Aurora</button>
+          </div>
         )}
+
         {loaderResult && <p className="pl-5 text-[11px] text-white/55">{loaderResult}</p>}
         <div className="flex flex-wrap items-center gap-2 pl-5">
-          <button type="button" onClick={() => void installLoader()} disabled={loaderBusy} className="rounded-lg bg-gold px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90 disabled:cursor-not-allowed disabled:opacity-40">Installer le loader</button>
-          {loaderProbe?.installed && (
+          {loaderProbe?.installed ? (
             <button type="button" onClick={() => void uninstallLoader()} disabled={loaderBusy} className="rounded-lg border border-red-300/15 px-3 py-1.5 text-[11px] text-red-200/70 hover:bg-red-300/[0.05] disabled:cursor-not-allowed disabled:opacity-40">Désinstaller le loader</button>
+          ) : loaderProbe && loaderProbe.sources.length > 0 ? (
+            <button type="button" onClick={() => void installLoader()} disabled={loaderBusy} className="rounded-lg bg-gold px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90 disabled:cursor-not-allowed disabled:opacity-40">Installer le loader</button>
+          ) : (
+            <button type="button" onClick={() => void chooseLoaderSource()} disabled={loaderBusy} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-1.5 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90 disabled:cursor-not-allowed disabled:opacity-40"><FolderOpen size={12} />Choisir un dossier Aurora…</button>
           )}
           <span className="text-[10px] text-white/32">Source : Aurora locale ou dossier choisi — jamais téléchargé.</span>
         </div>

@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Carte NTE — « Loader Aurora » expliqué et actionnable** : le bloc affichait
+  « Aucun loader dans le jeu — les .pak ne chargeront pas » sans dire quoi
+  faire. Désormais il explique le mécanisme en une phrase (3 DLL wrapper
+  `version.dll`/`dsound.dll`/`dwmapi.dll` copiées dans le Win64 du jeu, le
+  jeu les charge et active les .pak d'AuroraMods), détecte les installations
+  Aurora **à l'ouverture** (le probe tournait seulement au clic), et donne des
+  étapes concrètes quand rien n'est trouvé : télécharger Aurora depuis son
+  dépôt officiel (bouton lien), choisir le dossier racine (celui qui contient
+  `Bin/Wrappers`) via « Choisir un dossier Aurora… », installation avec
+  sauvegarde des originaux. ZAILON ne télécharge jamais de binaire lui-même.
+
 ## [1.154.0] - 2026-08-21
 
 > **Add-ons — l'écosystème local complet, 100 % hors ligne** : « Ajouter un

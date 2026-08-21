@@ -39,6 +39,13 @@
   / limites) et affiche un aperçu avant décision ; `addon_install_folder`
   installe un dossier avec staging → swap atomique → rollback (mêmes gardes
   que l'archive). Aucun code contenu dans un addon n'est exécuté.
+- **Créateur d'addon + export ZIP** (spec §5, §14, §16) : formulaire (nom,
+  auteur, version, ID suggéré auto, catégorie, permissions, jeux, dossier de
+  fichiers) qui génère un manifest TOUJOURS valide (validé avant affichage),
+  puis exporte `<id>-<version>.zip` — le même fichier que l'importeur
+  accepte. Sortie déterministe (entrées triées, manifest fourni embarqué à
+  la racine). 100 % hors ligne : créer → tester → exporter → partager →
+  importer, sans compte ni serveur.
 
 ## [1.153.0] - 2026-08-21
 

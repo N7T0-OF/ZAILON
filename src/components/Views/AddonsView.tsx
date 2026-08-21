@@ -24,6 +24,7 @@ import {
 import { ADDON_INSTALL_INITIAL_STATE, addonInstallReducer, addonSignaturePolicy, addonStorageReport, describeAddonDownloadError, fetchAddonCatalog, hasAddonSignature, hasRealSha256, mirrorAddonUrl, type CatalogFetchResult } from '../../lib/addonsInstall'
 import { native } from '../../lib/native'
 import { useStore } from '../../store/useStore'
+import { AddonCreateDialog } from '../UI/AddonCreateDialog'
 import { AddonImportDialog } from '../UI/AddonImportDialog'
 import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
 import { ZailonSwitch } from '../UI/ZailonSwitch'
@@ -125,6 +126,7 @@ export function AddonsView() {
   const [syncing, setSyncing] = useState(false)
   const [confirming, setConfirming] = useState<CatalogRow>()
   const [importing, setImporting] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [removing, setRemoving] = useState<CatalogRow>()
 
   // Ouverture d'Add-ons : cache frais (6 h) sinon réseau (spec §45 — jamais
@@ -200,8 +202,9 @@ export function AddonsView() {
         <p className="mt-1 flex items-center gap-1.5 text-xs text-white/42">Ajoutez uniquement les fonctions dont vous avez besoin.<ZailonInfoPopover text="Optionnel, chargé à la demande, fonctionne hors ligne et isolé — aucun compte ni marketplace. Un add-on non installé n'apparaît nulle part et ne tourne pas. Un add-on défectueux ne bloque jamais ZAILON." /></p>
       </div>
       <div className="flex items-center gap-2">
-        <button type="button" onClick={() => void native.openExternalUrl(ADDON_DOCS_URL)} title="Créer un add-on — documentation développeur" aria-label="Créer un add-on" className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.09] text-white/62 hover:bg-white/[0.05] hover:text-white"><BookOpen size={14} /></button>
+        <button type="button" onClick={() => void native.openExternalUrl(ADDON_DOCS_URL)} title="Documentation développeur" aria-label="Documentation développeur" className="flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.09] text-white/62 hover:bg-white/[0.05] hover:text-white"><BookOpen size={14} /></button>
         <button type="button" onClick={() => void syncCatalog(true)} disabled={syncing} title="Actualiser le catalogue officiel" className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold disabled:opacity-40"><RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />Catalogue</button>
+        <button type="button" onClick={() => setCreating(true)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold"><Wand2 size={13} />Créer un addon</button>
         <button type="button" onClick={startImport} className="flex items-center gap-1.5 rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] font-semibold text-white/70 hover:border-gold/30 hover:text-gold"><Import size={13} />Importer un add-on</button>
       </div>
     </header>
@@ -265,6 +268,7 @@ export function AddonsView() {
       onConfirm={() => { const plan = uninstallAddon(removing.entry.id); if (plan.dependents.length === 0) setRemoving(undefined) }}
     />}
     {importing && <AddonImportDialog onClose={() => setImporting(false)} />}
+    {creating && <AddonCreateDialog onClose={() => setCreating(false)} />}
   </div>
 }
 

@@ -853,6 +853,12 @@ export type AddonInstallEvent =
 /** Analyse d'une source d'addon (spec §2, §6) — jamais exécutée, jamais
  * installée : l'aperçu précède la décision. Les compteurs PAK/UTOC/UCAS
  * guident la détection automatique de type (PAK mod, etc.). */
+export interface AddonExportResult {
+  entryCount: number
+  totalBytes: number
+  outputPath: string
+}
+
 export interface AddonAnalyzeResult {
   /** 'zip' | 'folder' */
   kind: 'zip' | 'folder'
@@ -1102,6 +1108,11 @@ export const native = {
    * limites). `manifest.json` à la racine exigé. */
   addonInstallFolder: (sourceDir: string, installDir: string) =>
     desktopOnly<void>('addon_install_folder', { sourceDir, installDir }),
+  /** Exporte un addon en `.zip` (spec §5, §16) : le `manifest.json` fourni
+   * (généré par le créateur) est TOUJOURS embarqué à la racine, l'arbre du
+   * dossier suit. Entrées triées → sortie déterministe (SHA-256 stable). */
+  addonExportZip: (sourceDir: string, outputZip: string, manifestJson: string) =>
+    desktopOnly<AddonExportResult>('addon_export_zip', { sourceDir, outputZip, manifestJson }),
   addonInstallDir: () => desktopOnly<string>('addon_install_dir'),
   /** Pousse la liste des add-ons activés (installés ET activés) au gate natif —
    * sans l'add-on, aucun service natif (providers, Nexus, artwork)
@@ -1438,6 +1449,16 @@ export async function pickExecutable() {
 export async function pickFolder(title = 'Select the mods folder') {
   if (!isTauri()) return null
   const selected = await open({ title, directory: true, multiple: false })
+  return typeof selected === 'string' ? selected : null
+}
+
+export async function saveAddonArchive(defaultName: string) {
+  if (!isTauri()) return null
+  const selected = await save({
+    title: 'Exporter l’addon en ZIP',
+    defaultPath: defaultName,
+    filters: [{ name: 'Addon ZAILON', extensions: ['zip'] }],
+  })
   return typeof selected === 'string' ? selected : null
 }
 

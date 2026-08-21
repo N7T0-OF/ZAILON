@@ -42,12 +42,14 @@ import {
   resolveAddonDownloadUrl,
   shouldEnterSafeMode,
   validateAddonEvents,
+  validateAddonManifest,
   verifyAddonHash,
   ZAILON_CURRENT_VERSION,
   type AddonCatalogEntry,
   type CrashGuardStorage,
   type ZailonAddonManifest,
 } from '../../src/lib/addons.ts'
+import { buildAddonManifest, suggestAddonId, suggestedExportName } from '../../src/lib/addonCreator.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (relative: string) => readFileSync(join(root, relative), 'utf-8')
@@ -366,4 +368,45 @@ test('importeur d’addons (refonte) : analyse native, drop zone, aperçu, insta
   // AddonsView : l’ancien modal texte est remplacé par le nouvel importeur.
   assert.ok(view.includes('AddonImportDialog'), 'dialog d’import câblé dans AddonsView')
   assert.ok(!view.includes('runImport'), 'l’ancien import « coller uniquement » est retiré')
+})
+
+test('créateur d’addon : manifest toujours valide, ID suggéré, export ZIP', () => {
+  // Logique pure : l'ID suggéré est TOUJOURS un ID valide, et le manifest
+  // généré passe TOUJOURS validateAddonManifest — le créateur ne peut pas
+  // produire un manifest invalide (spec §14).
+  const id = suggestAddonId('Aurora PAK Loader', 'Daturaxoxo')
+  assert.ok(validateAddonManifest({}).ok === false)
+  assert.ok(/^[a-z0-9][a-z0-9-]*[a-z0-9](\.[a-z0-9][a-z0-9-]*[a-z0-9])+$/.test(id), `ID suggéré valide : ${id}`)
+  assert.ok(id.startsWith('community.'), 'ID préfixé community.')
+
+  const manifest = buildAddonManifest({
+    id: suggestAddonId('Mon Mod PAK', 'Test'),
+    name: 'Mon Mod PAK',
+    author: 'Test',
+    version: '1.2.0',
+    description: 'Un mod PAK',
+    category: 'modding',
+    permissions: ['game.read', 'mods.write'],
+    games: ['neverness-to-everness'],
+  })
+  const validation = validateAddonManifest(JSON.parse(JSON.stringify(manifest)) as unknown)
+  assert.ok(validation.ok, 'manifest généré valide')
+  assert.equal(validation.manifest?.supportedGames?.[0], 'neverness-to-everness')
+  assert.ok(suggestedExportName(manifest.id, manifest.version).endsWith('.zip'))
+
+  // Câblage : bindings natifs + dialog + bouton.
+  const rust = read('src-tauri/src/lib.rs')
+  const native = read('src/lib/native.ts')
+  const dialog = read('src/components/UI/AddonCreateDialog.tsx')
+  const view = read('src/components/Views/AddonsView.tsx')
+  assert.ok(rust.includes('addon_export_zip') && rust.includes('            addon_export_zip,'), 'addon_export_zip enregistrée dans invoke_handler')
+  assert.ok(rust.includes('manifest fourni') && rust.includes('manifest.json'), 'export embarque le manifest généré à la racine')
+  assert.ok(native.includes('addonExportZip'), 'binding natif addonExportZip')
+  assert.ok(native.includes('saveAddonArchive'), 'dialogue d’enregistrement du ZIP')
+  assert.ok(dialog.includes('Créer un addon'), 'dialog « Créer un addon »')
+  assert.ok(dialog.includes('buildAddonManifest'), 'génération du manifest dans le dialog')
+  assert.ok(dialog.includes('addonExportZip(sourcePath, destination'), 'export ZIP câblé')
+  assert.ok(dialog.includes('100 % hors ligne'), 'création 100 % hors ligne affichée')
+  assert.ok(view.includes('Créer un addon'), 'bouton « Créer un addon » dans AddonsView')
+  assert.ok(view.includes('AddonCreateDialog'), 'dialog créateur câblé dans AddonsView')
 })

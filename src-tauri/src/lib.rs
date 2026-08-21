@@ -18817,6 +18817,103 @@ fn addon_install_folder(source_dir: String, install_dir: String) -> Result<(), S
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AddonExportResult {
+    entry_count: usize,
+    total_bytes: u64,
+    output_path: String,
+}
+
+/// Exporte un addon en `.zip` (spec §5, §16) : `manifest.json` (fourni par le
+/// créateur, TOUJOURS écrasé par le manifest généré) à la racine + tout
+/// l'arbre du dossier source. Mêmes gardes que l'import (chemins validés,
+/// symlinks refusés, limites). Sortie déterministe par entrées triées — le
+/// même dossier produit le même ZIP (SHA-256 stable, spec §16).
+#[tauri::command]
+fn addon_export_zip(
+    source_dir: String,
+    output_zip: String,
+    manifest_json: String,
+) -> Result<AddonExportResult, String> {
+    let source = PathBuf::from(&source_dir);
+    let output = PathBuf::from(&output_zip);
+    if !source.is_dir() {
+        return Err("Le dossier source n'existe pas.".into());
+    }
+    // Le manifest fourni doit être un JSON objet (jamais un texte arbitraire).
+    let manifest_value: serde_json::Value = serde_json::from_str(&manifest_json)
+        .map_err(|error| format!("Manifest JSON invalide : {error}"))?;
+    if !manifest_value.is_object() {
+        return Err("Le manifest doit être un objet JSON.".into());
+    }
+    if let Some(parent_dir) = output.parent() {
+        fs::create_dir_all(parent_dir).map_err(to_error)?;
+    }
+    let file = fs::File::create(&output).map_err(to_error)?;
+    let mut writer = zip::ZipWriter::new(file);
+    let mut entry_count = 0usize;
+    let mut total_bytes = 0u64;
+
+    // 1. manifest.json fourni (écrase tout manifest existant à la racine).
+    writer
+        .start_file("manifest.json", zip_options())
+        .map_err(to_error)?;
+    let manifest_bytes = serde_json::to_vec_pretty(&manifest_value).map_err(to_error)?;
+    total_bytes = total_bytes.saturating_add(manifest_bytes.len() as u64);
+    writer.write_all(&manifest_bytes).map_err(to_error)?;
+    entry_count += 1;
+
+    // 2. Tous les fichiers du dossier (sauf le manifest.json racine, déjà écrit).
+    let mut files = Vec::new();
+    for entry in WalkDir::new(&source)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if entry.file_type().is_symlink() {
+            return Err(format!(
+                "Lien symbolique refusé à l'export : {}",
+                entry.path().display()
+            ));
+        }
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let relative = entry
+            .path()
+            .strip_prefix(&source)
+            .map_err(to_error)?
+            .to_path_buf();
+        if relative == Path::new("manifest.json") {
+            continue;
+        }
+        validate_archive_relative(&relative)?;
+        files.push((relative, entry.path().to_path_buf()));
+    }
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    for (relative, physical) in &files {
+        if entry_count >= MAX_ADDON_ANALYZE_ENTRIES {
+            return Err("Trop de fichiers (limite 100 000).".into());
+        }
+        let zip_name = relative.to_string_lossy().replace('\\', "/");
+        writer
+            .start_file(zip_name, zip_options())
+            .map_err(to_error)?;
+        let mut input = fs::File::open(physical).map_err(to_error)?;
+        let copied = copy(&mut input, &mut writer).map_err(to_error)?;
+        total_bytes = total_bytes.saturating_add(copied);
+        entry_count += 1;
+    }
+    writer.finish().map_err(to_error)?;
+
+    Ok(AddonExportResult {
+        entry_count,
+        total_bytes,
+        output_path: output.to_string_lossy().to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -20268,6 +20365,58 @@ mod tests {
                 .to_string_lossy()
                 .starts_with(".zailon-addon-staging")
         }));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn addon_export_zip_embeds_generated_manifest_and_files() {
+        let dir = std::env::temp_dir().join(format!("zailon-addon-export-{}", unix_timestamp()));
+        let source = dir.join("MonAddon");
+        fs::create_dir_all(source.join("files")).unwrap();
+        // Un manifest EXISTANT (ancien) doit être écrasé par le manifest fourni.
+        fs::write(source.join("manifest.json"), "{\"id\":\"old\"}").unwrap();
+        fs::write(source.join("files/Mod.pak"), b"pak-data").unwrap();
+        fs::write(source.join("icon.png"), b"png-data").unwrap();
+        let output = dir.join("community.test.monaddon-1.0.0.zip");
+
+        let manifest = serde_json::json!({
+            "schema": 1,
+            "id": "community.test.monaddon",
+            "name": "Mon Addon",
+            "version": "1.0.0",
+            "author": "Test",
+            "category": "modding",
+            "permissions": ["game.read"],
+            "minZailonVersion": "1.153.0",
+        });
+        let result = addon_export_zip(
+            source.to_string_lossy().to_string(),
+            output.to_string_lossy().to_string(),
+            serde_json::to_string(&manifest).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(result.entry_count, 3); // manifest.json + files/Mod.pak + icon.png
+        assert_eq!(
+            result.total_bytes,
+            8 + 8 + manifest.to_string().len() as u64
+        );
+
+        // Relire le ZIP : manifest fourni (pas l'ancien) + fichiers présents.
+        let file = fs::File::open(&output).unwrap();
+        let mut zip = zip::ZipArchive::new(file).unwrap();
+        let mut names = Vec::new();
+        for index in 0..zip.len() {
+            names.push(zip.by_index(index).unwrap().name().to_string());
+        }
+        assert!(names.contains(&"manifest.json".to_string()));
+        assert!(names.contains(&"files/Mod.pak".to_string()));
+        let mut manifest_entry = zip.by_name("manifest.json").unwrap();
+        let mut text = String::new();
+        use std::io::Read;
+        manifest_entry.read_to_string(&mut text).unwrap();
+        assert!(text.contains("community.test.monaddon"));
+        assert!(!text.contains("\"old\""));
 
         fs::remove_dir_all(&dir).unwrap();
     }
@@ -22284,6 +22433,7 @@ pub fn run() {
             addon_install_staged,
             addon_analyze,
             addon_install_folder,
+            addon_export_zip,
             addon_install_dir,
             save_project_archive,
             frosty_detect_runtime,

@@ -20397,10 +20397,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.entry_count, 3); // manifest.json + files/Mod.pak + icon.png
-        assert_eq!(
-            result.total_bytes,
-            8 + 8 + manifest.to_string().len() as u64
-        );
+        let pretty_len = serde_json::to_vec_pretty(&manifest).unwrap().len() as u64;
+        assert_eq!(result.total_bytes, 8 + 8 + pretty_len);
 
         // Relire le ZIP : manifest fourni (pas l'ancien) + fichiers présents.
         let file = fs::File::open(&output).unwrap();

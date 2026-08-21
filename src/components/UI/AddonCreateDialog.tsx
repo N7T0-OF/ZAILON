@@ -1,9 +1,10 @@
-import { CheckCircle2, FileArchive, FolderOpen, Import, Loader2, RefreshCw, Wand2, X } from 'lucide-react'
+import { CheckCircle2, FileArchive, FlaskConical, FolderOpen, Import, Loader2, RefreshCw, Wand2, X, XCircle } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { ADDON_CATEGORY_LABELS, ADDON_PERMISSIONS, validateAddonManifest, type AddonCategory, type AddonPermission } from '../../lib/addons'
+import { ADDON_CATEGORY_LABELS, ADDON_PERMISSIONS, checkAddonCompatibility, validateAddonManifest, type AddonCategory, type AddonPermission } from '../../lib/addons'
+import { addonTestVerdict, type AddonTestVerdict } from '../../lib/addonTest'
 import { buildAddonManifest, suggestAddonId, suggestedExportName } from '../../lib/addonCreator'
-import { native, pickFolder, saveAddonArchive, type AddonAnalyzeResult } from '../../lib/native'
+import { native, pickFolder, saveAddonArchive, type AddonAnalyzeResult, type AddonTestReport } from '../../lib/native'
 
 /**
  * Créateur d'addon (spec « Refonte — système addons » §14) : le développeur
@@ -36,6 +37,9 @@ export function AddonCreateDialog({ onClose }: Props) {
   const [dragActive, setDragActive] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [exported, setExported] = useState<string | null>(null)
+  const [testReport, setTestReport] = useState<AddonTestReport | null>(null)
+  const [testVerdict, setTestVerdict] = useState<AddonTestVerdict | null>(null)
+  const [testBusy, setTestBusy] = useState(false)
 
   // Suggestion d'ID tant que l'utilisateur ne l'a pas éditée.
   useEffect(() => {
@@ -121,6 +125,32 @@ export function AddonCreateDialog({ onClose }: Props) {
     }
   }
 
+  const runTest = async () => {
+    if (!manifest || !sourcePath || !analysis || !manifestValid) return
+    setTestBusy(true)
+    setError(null)
+    setTestReport(null)
+    setTestVerdict(null)
+    try {
+      const platform = navigator.userAgent.includes('Win') ? 'windows' : navigator.userAgent.includes('Mac') ? 'macos' : 'linux'
+      const compat = checkAddonCompatibility(manifest, { platform, installedIds: [] })
+      const report = await native.addonTestRun(sourcePath)
+      setTestReport(report)
+      setTestVerdict(addonTestVerdict({
+        manifestOk: manifestValid,
+        analysisIssues: analysis.issues,
+        entryCount: analysis.entryCount,
+        compatOk: compat.ok,
+        compatReasons: compat.reasons,
+        report,
+      }))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setTestBusy(false)
+    }
+  }
+
   const togglePermission = (permission: AddonPermission) => {
     setPermissions(current => current.includes(permission)
       ? current.filter(item => item !== permission)
@@ -193,17 +223,46 @@ export function AddonCreateDialog({ onClose }: Props) {
           </div>
         </div>
 
-        {busy && <p className="mt-3 flex items-center gap-2 text-[11px] text-white/55"><Loader2 size={13} className="animate-spin text-gold" />Analyse / export…</p>}
+        {busy && !testBusy && <p className="mt-3 flex items-center gap-2 text-[11px] text-white/55"><Loader2 size={13} className="animate-spin text-gold" />Analyse / export…</p>}
+        {testBusy && <p className="mt-3 flex items-center gap-2 text-[11px] text-white/55"><Loader2 size={13} className="animate-spin text-gold" />Test en cours — installation temporaire dans le bac à sable, aucun fichier réel touché…</p>}
         {error && <p className="mt-3 rounded-lg border border-red-300/18 bg-red-300/[0.04] px-3 py-2 text-[11px] text-red-200/70">{error}</p>}
         {exported && <p className="mt-3 flex items-start gap-2 rounded-lg border border-emerald-300/18 bg-emerald-300/[0.04] px-3 py-2 text-[11px] text-emerald-100/80"><CheckCircle2 size={13} className="mt-0.5 shrink-0 text-emerald-300/90" />{exported}</p>}
 
         {manifest && manifestValid && (
           <div className="mt-3 rounded-xl border border-white/[0.07] bg-black/15 p-3">
             <div className="flex items-center justify-between gap-2">
-              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-100/85"><CheckCircle2 size={13} className="text-emerald-300/90" />Manifest valide — prêt à exporter</p>
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-100/85"><CheckCircle2 size={13} className="text-emerald-300/90" />Manifest valide — prêt à tester / exporter</p>
               <p className="font-mono text-[10px] text-white/35">{suggestedExportName(manifest.id, manifest.version)}</p>
             </div>
             <pre className="mt-2 max-h-40 overflow-y-auto rounded-lg bg-black/30 p-3 font-mono text-[10px] leading-relaxed text-white/50 thin-scroll">{JSON.stringify(manifest, null, 2)}</pre>
+          </div>
+        )}
+
+        {testVerdict && (
+          <div className={`mt-3 rounded-xl border p-3 ${testVerdict.ready ? 'border-emerald-300/25 bg-emerald-300/[0.04]' : 'border-amber-300/25 bg-amber-300/[0.04]'}`}>
+            <p className={`flex items-center gap-1.5 text-[11px] font-semibold ${testVerdict.ready ? 'text-emerald-100/90' : 'text-amber-100/85'}`}>
+              {testVerdict.ready ? <CheckCircle2 size={13} className="text-emerald-300/90" /> : <XCircle size={13} className="text-amber-300/80" />}
+              {testVerdict.summary}
+            </p>
+            <div className="mt-2 grid gap-1 sm:grid-cols-2">
+              {testVerdict.checks.map(check => (
+                <p key={check.id} className="flex items-center gap-1.5 text-[10px] text-white/55">
+                  {check.ok ? <CheckCircle2 size={11} className="shrink-0 text-emerald-300/80" /> : <XCircle size={11} className="shrink-0 text-red-300/80" />}
+                  <span className="font-semibold text-white/70">{check.label}</span>
+                  {!check.ok && check.detail && <span className="min-w-0 truncate text-white/38" title={check.detail}>— {check.detail}</span>}
+                </p>
+              ))}
+            </div>
+            {testReport && testReport.analysis.entryCount > 0 && (
+              <p className="mt-2 text-[10px] text-white/38">Vérification réelle : {testReport.installedCount}/{testReport.expectedCount} fichier(s) installé(s) puis retiré(s) — manifest {testReport.manifestInstalled ? 'présent' : 'absent'} · {testReport.analysis.pakCount} .pak · {testReport.analysis.utocCount} .utoc · {testReport.analysis.ucasCount} .ucas</p>
+            )}
+            {testVerdict.failed.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {testVerdict.failed.map((issue, index) => (
+                  <li key={index} className="flex items-start gap-1.5 text-[10px] leading-relaxed text-amber-100/65"><XCircle size={11} className="mt-0.5 shrink-0 text-amber-300/70" /><span>{issue}</span></li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 
@@ -211,7 +270,8 @@ export function AddonCreateDialog({ onClose }: Props) {
           <p className="flex items-center gap-1.5 text-[10px] text-white/32"><Wand2 size={11} className="text-gold/60" />Créer → tester → exporter → partager → importer.</p>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="px-3 py-2 text-[11px] text-white/45">Annuler</button>
-            <button type="button" onClick={() => void exportZip()} disabled={!manifestValid || !sourcePath || busy} title={!sourcePath ? 'Choisissez d’abord le dossier des fichiers' : manifestValid ? 'Exporter l’addon en .zip' : 'Remplissez le formulaire'} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90 disabled:cursor-not-allowed disabled:opacity-40"><FileArchive size={13} />Exporter addon .zip</button>
+            <button type="button" onClick={() => void runTest()} disabled={!manifestValid || !sourcePath || !analysis || busy || testBusy} title={!sourcePath ? 'Choisissez d’abord le dossier des fichiers' : manifestValid ? 'Tester l’addon dans un bac à sable (install → vérif → désinstall)' : 'Remplissez le formulaire'} className="flex items-center gap-1.5 rounded-lg border border-white/[0.1] px-3 py-2 text-[11px] font-semibold text-white/65 hover:border-gold/25 hover:text-gold disabled:cursor-not-allowed disabled:opacity-40"><FlaskConical size={13} />Tester l'addon</button>
+            <button type="button" onClick={() => void exportZip()} disabled={!manifestValid || !sourcePath || busy || testBusy} title={!sourcePath ? 'Choisissez d’abord le dossier des fichiers' : manifestValid ? 'Exporter l’addon en .zip' : 'Remplissez le formulaire'} className="flex items-center gap-1.5 rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] hover:bg-gold/90 disabled:cursor-not-allowed disabled:opacity-40"><FileArchive size={13} />Exporter addon .zip</button>
           </div>
         </footer>
       </section>

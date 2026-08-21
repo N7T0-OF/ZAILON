@@ -50,6 +50,7 @@ import {
   type ZailonAddonManifest,
 } from '../../src/lib/addons.ts'
 import { buildAddonManifest, suggestAddonId, suggestedExportName } from '../../src/lib/addonCreator.ts'
+import { addonTestVerdict } from '../../src/lib/addonTest.ts'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (relative: string) => readFileSync(join(root, relative), 'utf-8')
@@ -409,4 +410,116 @@ test('créateur d’addon : manifest toujours valide, ID suggéré, export ZIP',
   assert.ok(dialog.includes('100 % hors ligne'), 'création 100 % hors ligne affichée')
   assert.ok(view.includes('Créer un addon'), 'bouton « Créer un addon » dans AddonsView')
   assert.ok(view.includes('AddonCreateDialog'), 'dialog créateur câblé dans AddonsView')
+})
+
+test('addonTestVerdict : tout vert → « prêt à être partagé » (spec §15)', () => {
+  const verdict = addonTestVerdict({
+    manifestOk: true,
+    analysisIssues: [],
+    entryCount: 3,
+    compatOk: true,
+    compatReasons: [],
+    report: {
+      installOk: true,
+      installedCount: 3,
+      expectedCount: 3,
+      manifestInstalled: true,
+      uninstallOk: true,
+      residueFree: true,
+      issues: [],
+    },
+  })
+  assert.ok(verdict.ready, 'addon prêt à être partagé')
+  assert.equal(verdict.checks.length, 7, 'les 7 contrôles sont évalués')
+  assert.equal(verdict.summary, 'Addon prêt à être partagé.')
+  assert.deepEqual(verdict.failed, [])
+})
+
+test('addonTestVerdict : un contrôle en échec casse le verdict — jamais « prêt »', () => {
+  const verdict = addonTestVerdict({
+    manifestOk: true,
+    analysisIssues: ['Archive imbriquée détectée (refusée) : evil.zip'],
+    entryCount: 2,
+    compatOk: true,
+    compatReasons: [],
+    report: {
+      installOk: false,
+      installedCount: 0,
+      expectedCount: 2,
+      manifestInstalled: false,
+      uninstallOk: false,
+      residueFree: true,
+      issues: ['Archive imbriquée détectée (refusée) : evil.zip'],
+    },
+  })
+  assert.equal(verdict.ready, false, 'structure dangereuse → jamais « prêt »')
+  assert.ok(verdict.summary.includes('contrôle(s) à corriger'))
+  const structure = verdict.checks.find(check => check.id === 'structure')
+  assert.ok(structure && !structure.ok)
+  const install = verdict.checks.find(check => check.id === 'install')
+  assert.ok(install && !install.ok, 'rien installé')
+  // Les raisons d'échec sont dédupliquées et jamais masquées.
+  assert.equal(verdict.failed.length, 1)
+})
+
+test('addonTestVerdict : compteurs installés ≠ analysés → échec Fichiers avec détail', () => {
+  const verdict = addonTestVerdict({
+    manifestOk: true,
+    analysisIssues: [],
+    entryCount: 4,
+    compatOk: true,
+    compatReasons: [],
+    report: {
+      installOk: true,
+      installedCount: 2,
+      expectedCount: 4,
+      manifestInstalled: true,
+      uninstallOk: true,
+      residueFree: true,
+      issues: ['Fichiers installés (2) ≠ fichiers analysés (4) — vérifiez le dossier source.'],
+    },
+  })
+  assert.equal(verdict.ready, false)
+  const files = verdict.checks.find(check => check.id === 'files')
+  assert.ok(files && !files.ok)
+  assert.ok(files?.detail?.includes('2') && files.detail.includes('4'))
+  assert.equal(verdict.checks.find(check => check.id === 'uninstall')?.ok, true)
+})
+
+test('addonTestVerdict : compatibilité refusée rapportée (plateforme non supportée)', () => {
+  const verdict = addonTestVerdict({
+    manifestOk: true,
+    analysisIssues: [],
+    entryCount: 1,
+    compatOk: false,
+    compatReasons: ['Non pris en charge sur linux (support : windows).'],
+    report: {
+      installOk: true,
+      installedCount: 1,
+      expectedCount: 1,
+      manifestInstalled: true,
+      uninstallOk: true,
+      residueFree: true,
+      issues: [],
+    },
+  })
+  assert.equal(verdict.ready, false)
+  const compat = verdict.checks.find(check => check.id === 'compatibility')
+  assert.ok(compat && !compat.ok)
+  assert.ok(verdict.failed.includes('Non pris en charge sur linux (support : windows).'))
+})
+
+test('« Tester l’addon » câblé de bout en bout (spec §15)', () => {
+  const rust = read('src-tauri/src/lib.rs')
+  const native = read('src/lib/native.ts')
+  const dialog = read('src/components/UI/AddonCreateDialog.tsx')
+  assert.ok(rust.includes('fn addon_test_run') && rust.includes('            addon_test_run,'), 'addon_test_run enregistrée dans invoke_handler')
+  assert.ok(rust.includes('bac à sable') && rust.includes('.test'), 'bac à sable addons/.test')
+  assert.ok(rust.includes('addon_test_run_in'), 'corps pur testable sans AppHandle')
+  assert.ok(native.includes('addonTestRun'), 'binding natif addonTestRun')
+  assert.ok(dialog.includes('Tester l’addon') || dialog.includes("Tester l'addon"), 'bouton « Tester l’addon » dans le dialog')
+  assert.ok(dialog.includes('addonTestRun(sourcePath)'), 'test bac à sable câblé')
+  assert.ok(dialog.includes('addonTestVerdict'), 'verdict §15 calculé dans le dialog')
+  assert.ok(dialog.includes('testVerdict.summary'), 'résumé du verdict affiché dans le dialog')
+  assert.ok(read('src/lib/addonTest.ts').includes('Addon prêt à être partagé'), 'verdict « prêt à être partagé » défini dans la lib pure')
 })

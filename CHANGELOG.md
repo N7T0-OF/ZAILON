@@ -46,6 +46,17 @@
   accepte. Sortie déterministe (entrées triées, manifest fourni embarqué à
   la racine). 100 % hors ligne : créer → tester → exporter → partager →
   importer, sans compte ni serveur.
+- **« Tester mon addon »** (spec §15) : bouton dans le créateur qui valide un
+  addon de bout en bout — Manifest ✓, Structure ✓ (Zip Slip / archives
+  imbriquées refusées AVANT toute installation), Fichiers ✓ (compteurs
+  réellement vérifiés sur disque), Compatibilité ✓ (plateforme actuelle),
+  Installation ✓, Désinstallation ✓ et Rollback/propreté ✓ (aucun résidu de
+  staging/backup). `addon_test_run` installe l'addon dans un **bac à sable**
+  (`addons/.test/`, namespace `addon-test-*` nettoyé, bacs orphelins balayés)
+  puis le retire — aucun fichier réel touché, aucun code exécuté. Le verdict
+  (`addonTestVerdict`, pur et testé) affiche les 7 contrôles ✓/✗ avec les
+  raisons d'échec dédupliquées et ne conclut « Addon prêt à être partagé »
+  que si tout passe.
 
 ### Fixed
 

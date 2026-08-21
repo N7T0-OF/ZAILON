@@ -877,6 +877,19 @@ export interface AddonAnalyzeResult {
   issues: string[]
 }
 
+/** Résultat du test bac à sable d'un addon (spec §15) — installation
+ * temporaire, vérification réelle des fichiers, désinstallation, propreté. */
+export interface AddonTestReport {
+  analysis: AddonAnalyzeResult
+  installOk: boolean
+  installedCount: number
+  expectedCount: number
+  manifestInstalled: boolean
+  uninstallOk: boolean
+  residueFree: boolean
+  issues: string[]
+}
+
 export interface LaunchGameResult {
   pid: number
   deploymentBackend: string
@@ -1113,6 +1126,12 @@ export const native = {
    * dossier suit. Entrées triées → sortie déterministe (SHA-256 stable). */
   addonExportZip: (sourceDir: string, outputZip: string, manifestJson: string) =>
     desktopOnly<AddonExportResult>('addon_export_zip', { sourceDir, outputZip, manifestJson }),
+  /** Teste un addon dans un BAC À SABLE (spec §15) : installation temporaire
+   * dans `addons/.test/`, vérification des fichiers réellement écrits,
+   * désinstallation, contrôle des résidus. Aucun code exécuté, aucun effet
+   * sur les addons réels — le rapport décide « prêt à être partagé ». */
+  addonTestRun: (sourceDir: string) =>
+    desktopOnly<AddonTestReport>('addon_test_run', { sourceDir }),
   addonInstallDir: () => desktopOnly<string>('addon_install_dir'),
   /** Pousse la liste des add-ons activés (installés ET activés) au gate natif —
    * sans l'add-on, aucun service natif (providers, Nexus, artwork)

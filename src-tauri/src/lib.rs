@@ -18914,6 +18914,154 @@ fn addon_export_zip(
     })
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AddonTestReport {
+    /// Analyse de la source (structure, fichiers, compteurs PAK/UTOC/UCAS).
+    analysis: AddonAnalyzeResult,
+    /// Installation dans le bac à sable réussie.
+    install_ok: bool,
+    /// Fichiers effectivement présents après installation (vérifiés sur disque).
+    installed_count: usize,
+    /// Nombre de fichiers attendu d'après l'analyse.
+    expected_count: usize,
+    /// `manifest.json` présent après installation dans le bac à sable.
+    manifest_installed: bool,
+    /// Désinstallation (bac à sable retiré) réussie.
+    uninstall_ok: bool,
+    /// Aucun résidu de staging/backup laissé (propreté transactionnelle).
+    residue_free: bool,
+    /// Contrôles en échec (affichés dans le rapport, jamais masqués).
+    issues: Vec<String>,
+}
+
+/// Teste un addon dans un BAC À SABLE (spec « Refonte — système addons »
+/// §15) : analyse → installation TEMPORAIRE → vérification des fichiers
+/// réellement écrits → désinstallation → contrôle des résidus (aucun
+/// staging/backup laissé). Aucun code exécuté, aucun effet sur les addons
+/// réels — le rapport décide « prêt à être partagé ».
+///
+/// Corps pur (`base` = dossier des bacs à sable) — testable sans AppHandle.
+fn addon_test_run_in(base: &Path, source_dir: &str) -> Result<AddonTestReport, String> {
+    let source = PathBuf::from(source_dir);
+    if !source.is_dir() {
+        return Err("Le dossier source n'existe pas.".into());
+    }
+    if !source.join("manifest.json").is_file() {
+        return Err("Le dossier source ne contient pas manifest.json à sa racine.".into());
+    }
+    let analysis = addon_analyze_folder(&source)?;
+    let mut issues = analysis.issues.clone();
+    let mut report = AddonTestReport {
+        analysis,
+        install_ok: false,
+        installed_count: 0,
+        expected_count: 0,
+        manifest_installed: false,
+        uninstall_ok: false,
+        residue_free: true,
+        issues: Vec::new(),
+    };
+    report.expected_count = report.analysis.entry_count;
+
+    // Structure invalide (Zip Slip, archives imbriquées…) : le test s'arrête
+    // avant toute installation — un addon dangereux n'est jamais « prêt ».
+    if !issues.is_empty() {
+        report.issues = issues;
+        return Ok(report);
+    }
+
+    fs::create_dir_all(base).map_err(to_error)?;
+    // Nettoie d'éventuels bacs à sable orphelins d'un test interrompu (notre
+    // propre espace de noms `addon-test-*` uniquement — jamais autre chose).
+    if let Ok(entries) = fs::read_dir(base) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("addon-test-") && entry.path().is_dir() {
+                let _ = fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+    let token = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_nanos())
+        .unwrap_or(0);
+    let sandbox = base.join(format!("addon-test-{token}"));
+
+    if let Err(error) = addon_install_folder(
+        source_dir.to_string(),
+        sandbox.to_string_lossy().to_string(),
+    ) {
+        report.issues.push(format!(
+            "Installation dans le bac à sable impossible : {error}"
+        ));
+        let _ = fs::remove_dir_all(&sandbox);
+        let _ = fs::remove_dir(base);
+        return Ok(report);
+    }
+    report.install_ok = true;
+
+    // Vérification réelle : les fichiers attendus sont-ils sur le disque ?
+    let mut installed_count = 0usize;
+    for entry in WalkDir::new(&sandbox)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if entry.file_type().is_file() {
+            installed_count += 1;
+        }
+    }
+    report.installed_count = installed_count;
+    report.manifest_installed = sandbox.join("manifest.json").is_file();
+    if installed_count != report.expected_count {
+        issues.push(format!(
+            "Fichiers installés ({installed_count}) ≠ fichiers analysés ({}) — vérifiez le dossier source.",
+            report.expected_count
+        ));
+    }
+    if !report.manifest_installed {
+        issues.push("manifest.json absent après installation.".into());
+    }
+
+    // Désinstallation : le bac à sable doit disparaître entièrement.
+    match fs::remove_dir_all(&sandbox) {
+        Ok(()) => report.uninstall_ok = true,
+        Err(error) => issues.push(format!(
+            "Désinstallation du bac à sable impossible : {error}"
+        )),
+    }
+    // Résidus transactionnels : aucun staging/backup ne doit survivre.
+    let mut leftovers = Vec::new();
+    if let Ok(entries) = fs::read_dir(base) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with(".zailon-addon-staging-")
+                || name.starts_with(".zailon-addon-backup-")
+            {
+                leftovers.push(name);
+            }
+        }
+    }
+    if !leftovers.is_empty() {
+        report.residue_free = false;
+        issues.push(format!(
+            "Résidus transactionnels laissés : {}",
+            leftovers.join(", ")
+        ));
+    }
+    let _ = fs::remove_dir(base);
+    report.issues = issues;
+    Ok(report)
+}
+
+/// Commande Tauri : teste un addon dans `addons/.test/` (bac à sable local).
+#[tauri::command]
+fn addon_test_run(app: AppHandle, source_dir: String) -> Result<AddonTestReport, String> {
+    let root = update_data_root(&app)?;
+    addon_test_run_in(&root.join("addons").join(".test"), &source_dir)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -20365,6 +20513,87 @@ mod tests {
                 .to_string_lossy()
                 .starts_with(".zailon-addon-staging")
         }));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn addon_test_run_installs_verifies_and_uninstalls_in_sandbox() {
+        let dir = std::env::temp_dir().join(format!("zailon-addon-test-{}", unix_timestamp()));
+        let source = dir.join("MonAddon");
+        fs::create_dir_all(source.join("files")).unwrap();
+        fs::write(
+            source.join("manifest.json"),
+            "{\"id\":\"community.test.monaddon\",\"name\":\"Mon Addon\",\"version\":\"1.0.0\"}",
+        )
+        .unwrap();
+        fs::write(source.join("files/Mod.pak"), b"pak-data").unwrap();
+        fs::write(source.join("icon.png"), b"png-data").unwrap();
+        let base = dir.join("sandbox");
+
+        let report = addon_test_run_in(&base, &source.to_string_lossy()).unwrap();
+
+        // Structure + compteurs analysés.
+        assert_eq!(report.analysis.entry_count, 3);
+        assert_eq!(report.analysis.pak_count, 1);
+        assert!(report.analysis.has_icon);
+        assert!(report.analysis.issues.is_empty());
+        // Installation réelle + vérification disque.
+        assert!(report.install_ok);
+        assert_eq!(report.installed_count, report.expected_count);
+        assert_eq!(report.installed_count, 3);
+        assert!(report.manifest_installed);
+        // Désinstallation + propreté transactionnelle.
+        assert!(report.uninstall_ok);
+        assert!(report.residue_free);
+        assert!(report.issues.is_empty());
+        // Le bac à sable a entièrement disparu (base retirée si vide).
+        assert!(!base.exists() || base.read_dir().unwrap().next().is_none());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn addon_test_run_rejects_unsafe_structure_without_installing() {
+        let dir =
+            std::env::temp_dir().join(format!("zailon-addon-test-unsafe-{}", unix_timestamp()));
+        let source = dir.join("Risky");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            source.join("manifest.json"),
+            "{\"id\":\"community.test.risky\",\"name\":\"Risky\",\"version\":\"1.0.0\"}",
+        )
+        .unwrap();
+        // Archive imbriquée : problème de structure BLoquant (jamais installée).
+        fs::write(source.join("evil.zip"), b"nested").unwrap();
+        let base = dir.join("sandbox");
+
+        let report = addon_test_run_in(&base, &source.to_string_lossy()).unwrap();
+
+        assert!(!report.install_ok);
+        assert!(!report.uninstall_ok);
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.contains("Archive imbriquée")));
+        // Aucun bac à sable créé, aucune installation.
+        assert!(!base.exists());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn addon_test_run_missing_manifest_is_rejected() {
+        let dir =
+            std::env::temp_dir().join(format!("zailon-addon-test-nomanifest-{}", unix_timestamp()));
+        let source = dir.join("NoManifest");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("data.txt"), b"x").unwrap();
+        let base = dir.join("sandbox");
+
+        let error = addon_test_run_in(&base, &source.to_string_lossy()).unwrap_err();
+        assert!(error.contains("manifest.json"));
+        assert!(!base.exists());
 
         fs::remove_dir_all(&dir).unwrap();
     }
@@ -22433,6 +22662,7 @@ pub fn run() {
             addon_install_folder,
             addon_export_zip,
             addon_install_dir,
+            addon_test_run,
             save_project_archive,
             frosty_detect_runtime,
             frosty_read_cat_file,

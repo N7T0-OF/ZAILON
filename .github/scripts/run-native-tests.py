@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from collections import deque
 
 
 import os
+
+# rustc colore ses erreurs (`\x1b[91merror:`) — le pattern `startswith("error:")`
+# ne matcherait pas. On retire les codes ANSI AVANT de tester les motifs.
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 command = [
     "cargo",
@@ -36,7 +41,13 @@ context_remaining = 0
 for line in process.stdout:
     print(line, end="", flush=True)
     tail.append(line)
-    if "error[" in line or line.startswith("error:"):
+    clean = ANSI_RE.sub("", line)
+    if (
+        "error[" in clean
+        or clean.startswith("error:")
+        or "panicked at" in clean
+        or "test result: FAILED" in clean
+    ):
         error_context.append(line)
         context_remaining = 25
     elif context_remaining > 0:

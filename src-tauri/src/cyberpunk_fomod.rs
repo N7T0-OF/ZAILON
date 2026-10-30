@@ -241,7 +241,10 @@ fn parse_xml(text: &str) -> Result<XmlElement, String> {
                     let attribute =
                         attribute.map_err(|error| format!("FOMOD XML attribute: {error}"))?;
                     let key = xml_name(attribute.key.as_ref());
-                    if attributes.keys().any(|existing: &String| existing == &key) {
+                    if attributes
+                        .keys()
+                        .any(|existing: &String| existing.eq_ignore_ascii_case(&key))
+                    {
                         return Err(format!(
                             "FOMOD XML has ambiguous duplicate attribute `{key}`."
                         ));
@@ -273,7 +276,10 @@ fn parse_xml(text: &str) -> Result<XmlElement, String> {
                     let attribute =
                         attribute.map_err(|error| format!("FOMOD XML attribute: {error}"))?;
                     let key = xml_name(attribute.key.as_ref());
-                    if attributes.keys().any(|existing: &String| existing == &key) {
+                    if attributes
+                        .keys()
+                        .any(|existing: &String| existing.eq_ignore_ascii_case(&key))
+                    {
                         return Err(format!(
                             "FOMOD XML has ambiguous duplicate attribute `{key}`."
                         ));
@@ -1025,6 +1031,18 @@ fn inspect_unsupported_features(
         add_warning(
             warnings,
             "Une option FOMOD ne déclare pas explicitement son type.".to_string(),
+        );
+    }
+    if root.descendants("plugin").iter().any(|plugin| {
+        option_kind(plugin).eq_ignore_ascii_case("CouldBeUsable")
+            || plugin
+                .child("typeDescriptor")
+                .is_some_and(|descriptor| descriptor.child("dependencyType").is_some())
+    }) {
+        add_warning(
+            warnings,
+            "Un type de sélection FOMOD dépendant de l’état ou d’une condition est présent."
+                .to_string(),
         );
     }
     if root.descendants("plugin").iter().any(|plugin| {

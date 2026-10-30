@@ -6024,7 +6024,7 @@ fn is_zip_archive_file(path: &Path) -> bool {
     if !path.is_file() {
         return false;
     }
-    File::open(path)
+    fs::File::open(path)
         .ok()
         .and_then(|file| zip::ZipArchive::new(file).ok())
         .is_some()
@@ -6089,7 +6089,7 @@ fn archive_file_has_fomod_module_config(path: &Path) -> Result<bool, String> {
     if !path.is_file() {
         return Ok(false);
     }
-    let file = File::open(path).map_err(to_error)?;
+    let file = fs::File::open(path).map_err(to_error)?;
     match zip::ZipArchive::new(file) {
         Ok(mut archive) => zip_has_fomod_module_config(&mut archive),
         Err(_) => Ok(false),
@@ -6100,7 +6100,7 @@ fn archive_file_has_fomod_or_is_uninspectable(path: &Path) -> Result<bool, Strin
     if !path.is_file() {
         return Ok(false);
     }
-    let file = File::open(path).map_err(to_error)?;
+    let file = fs::File::open(path).map_err(to_error)?;
     match zip::ZipArchive::new(file) {
         Ok(mut archive) => zip_has_fomod_module_config(&mut archive),
         Err(_) => Ok(path

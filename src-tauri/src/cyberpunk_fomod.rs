@@ -116,7 +116,7 @@ impl XmlElement {
     fn attribute(&self, name: &str) -> Option<&str> {
         self.attributes
             .iter()
-            .find(|(key, _)| key == name)
+            .find(|(key, _)| key.as_str() == name)
             .map(|(_, value)| value.as_str())
     }
 
@@ -1480,7 +1480,7 @@ fn build_plan(
     let required_resolved = required_files
         .iter()
         .map(|rule| resolve_rule(rule, entries, &prefix, &config_dir, lookup));
-    let mut required_targets = HashSet::new();
+    let mut required_targets: HashSet<String> = HashSet::new();
     'required_collisions: for resolved in required_resolved {
         match resolved {
             Ok(files) => {
@@ -1557,12 +1557,12 @@ fn build_plan(
             for required in &required_targets {
                 collision_checks += 1;
                 if collision_checks > MAX_COLLISION_CHECKS {
-                    add_warning(warnings, "Le FOMOD dépasse la limite d’analyse des collisions; le plan est bloqué plutôt que partiellement vérifié.".to_string());
+                    add_warning(&mut warnings, "Le FOMOD dépasse la limite d’analyse des collisions; le plan est bloqué plutôt que partiellement vérifié.".to_string());
                     break 'collision_check;
                 }
                 if destinations_overlap(&target, required) {
                     add_warning(
-                        warnings,
+                        &mut warnings,
                         format!(
                             "L’option FOMOD `{}` chevauche un fichier obligatoire à `{target}`.",
                             left_option.name
@@ -1579,7 +1579,7 @@ fn build_plan(
             }
             collision_checks += 1;
             if collision_checks > MAX_COLLISION_CHECKS {
-                add_warning(warnings, "Le FOMOD dépasse la limite d’analyse des collisions; le plan est bloqué plutôt que partiellement vérifié.".to_string());
+                add_warning(&mut warnings, "Le FOMOD dépasse la limite d’analyse des collisions; le plan est bloqué plutôt que partiellement vérifié.".to_string());
                 break 'collision_check;
             }
             if left_index != right_index
@@ -1601,7 +1601,7 @@ fn build_plan(
                 for right in right_files.iter().skip(right_start) {
                     collision_checks += 1;
                     if collision_checks > MAX_COLLISION_CHECKS {
-                        add_warning(warnings, "Le FOMOD dépasse la limite d’analyse des collisions; le plan est bloqué plutôt que partiellement vérifié.".to_string());
+                        add_warning(&mut warnings, "Le FOMOD dépasse la limite d’analyse des collisions; le plan est bloqué plutôt que partiellement vérifié.".to_string());
                         break 'collision_check;
                     }
                     let right_target =
@@ -1613,7 +1613,7 @@ fn build_plan(
                     if destinations_overlap(&target, &right_target)
                         && (!same_target || ambiguous_overwrite)
                     {
-                        add_warning(warnings, format!("Collision FOMOD ambiguë à `{target}` entre options pouvant être sélectionnées ensemble."));
+                        add_warning(&mut warnings, format!("Collision FOMOD ambiguë à `{target}` entre options pouvant être sélectionnées ensemble."));
                     }
                 }
             }
@@ -1852,11 +1852,14 @@ fn resolve_rule(
                 rule.source
             ));
         }
-        matches.into_iter().next().unwrap_or(source_path)
+        matches
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| source_path.clone())
     } else {
         find_member(&source_path, prefix, config_dir, lookup)?
             .map(|index| entries[index].path.clone())
-            .unwrap_or(source_path)
+            .unwrap_or_else(|| source_path.clone())
     };
     let source_key = archive_path_key(&resolved_source);
     let members = if rule.folder {
@@ -2853,10 +2856,11 @@ mod tests {
         let red = plan.steps[0].groups[0].options[1].id.clone();
         let blue = plan.steps[0].groups[0].options[0].id.clone();
         assert!(validate_selection(&plan, &[blue.clone(), blue]).is_err());
-        assert!(
-            validate_selection(&plan, &[red, plan.steps[0].groups[1].options[0].id.clone()])
-                .is_ok()
-        );
+        assert!(validate_selection(
+            &plan,
+            &[red.clone(), plan.steps[0].groups[1].options[0].id.clone()]
+        )
+        .is_ok());
         assert!(
             validate_selection(&plan, &[red, plan.steps[0].groups[0].options[0].id.clone()])
                 .is_err()

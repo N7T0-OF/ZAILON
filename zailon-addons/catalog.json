@@ -1,0 +1,423 @@
+{
+  "schema": 2,
+  "catalogSchemaVersion": 2,
+  "updatedAt": "2026-08-20",
+  "addons": [
+    {
+      "id": "official.zailon.frosty",
+      "name": "Frosty Support",
+      "version": "1.0.0",
+      "category": "game-support",
+      "description": "Compatibilité Frosty : détection du runtime officiel, scan des données du jeu, Worker natif isolé et parsing des catalogues .cat pour les jeux Frostbite supportés.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "game.read",
+        "game.files.write",
+        "mods.read",
+        "mods.write",
+        "network",
+        "process.launch",
+        "game.launch"
+      ],
+      "package": "packages/frosty/official.zailon.frosty-v1.0.0.zailon-addon",
+      "sha256": "2aa93b378e4169178457629167c70dab165209567a9471e846df82bb0dd8fa2c",
+      "downloadSize": 7694,
+      "installedSize": 19235,
+      "platforms": [
+        "windows"
+      ],
+      "minAddonApiVersion": "1"
+    },
+    {
+      "id": "official.zailon.frosty-editor",
+      "name": "Frosty Editor",
+      "version": "1.0.0",
+      "category": "modding",
+      "description": "Édition avancée des jeux Frostbite : Asset Browser, éditeur EBX avec validation, Plugin Manager, projets exportables, Bulk Export et build de mods. Nécessite Frosty Support.",
+      "minZailonVersion": "1.79.0",
+      "permissions": [
+        "game.read",
+        "game.files.write",
+        "mods.read",
+        "mods.write",
+        "network",
+        "process.launch",
+        "game.launch",
+        "ui.extend",
+        "filesystem.external"
+      ],
+      "dependencies": [
+        "official.zailon.frosty"
+      ],
+      "package": "packages/frosty-editor/official.zailon.frosty-editor-v1.0.0.zailon-addon",
+      "sha256": "fc1e96293505f89691d55b33a6da4226730efb246c31d16ab18df20639b8ce42",
+      "downloadSize": 7350,
+      "installedSize": 18375,
+      "platforms": [
+        "windows"
+      ],
+      "minAddonApiVersion": "1"
+    },
+    {
+      "id": "official.zailon.reshade",
+      "name": "ReShade Manager",
+      "version": "1.0.0",
+      "category": "visual",
+      "description": "Gestion ReShade par jeu : détection d'installation, ajout aux jeux compatibles et configuration depuis la page du jeu. Sans cet add-on, aucune section ReShade n'apparaît dans la configuration.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "game.read",
+        "game.files.write",
+        "mods.read",
+        "network",
+        "settings",
+        "ui.extend"
+      ],
+      "package": "packages/reshade/official.zailon.reshade-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "a745ac8f4f6cc6eb6b9e52eafe780ffa609014688ce48ae2e9899ee8da04b2ad",
+      "downloadSize": 4516,
+      "installedSize": 11290,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
+    },
+    {
+      "id": "official.zailon.provider.nexus",
+      "name": "Nexus Provider",
+      "version": "1.0.0",
+      "category": "sources",
+      "description": "Source Explorer Nexus Mods : recherche, galerie, pagination, états de mise à jour et téléchargement — clé API personnelle en coffre système et liens nxm://. Sans cet add-on, Nexus n'existe ni dans Explorer ni dans les Paramètres.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "network",
+        "game.read",
+        "mods.write",
+        "settings"
+      ],
+      "package": "packages/nexus/official.zailon.provider.nexus-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "76a1a3c2ef832366050edec911f149485bdb94ec5aea82e53f0851ae332a72b2",
+      "downloadSize": 6576,
+      "installedSize": 16440,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
+    },
+    {
+      "id": "official.zailon.provider.gamebanana",
+      "name": "GameBanana Provider",
+      "version": "1.0.0",
+      "category": "sources",
+      "description": "Source Explorer GameBanana : recherche de jeux et de mods, galerie avec pagination, images, états d'installation et téléchargement. Sans cet add-on, GameBanana n'existe pas dans Explorer — zéro requête distante.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "network",
+        "game.read",
+        "mods.write"
+      ],
+      "package": "packages/gamebanana/official.zailon.provider.gamebanana-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "6d15e5d4a04e6a72d27b770af8f6b9d49a835da97bfd5bf47441ff94f0ae8ddb",
+      "downloadSize": 6309,
+      "installedSize": 15773,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
+    },
+    {
+      "id": "official.zailon.provider.curseforge",
+      "name": "CurseForge Provider",
+      "version": "1.0.0",
+      "category": "sources",
+      "description": "Source Explorer CurseForge : recherche, détails et téléchargement — clé API partenaire en coffre système (jamais embarquée dans le package). Sans cet add-on, CurseForge n'existe ni dans Explorer ni dans les Paramètres.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "network",
+        "game.read",
+        "mods.write",
+        "settings"
+      ],
+      "package": "packages/curseforge/official.zailon.provider.curseforge-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "59244b6fe07fb0d153fed7f151d0feae7cec9fb4871e0f07ea4936e8c298b73a",
+      "downloadSize": 6579,
+      "installedSize": 16448,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
+    },
+    {
+      "id": "official.zailon.game.cyberpunk",
+      "name": "Cyberpunk Advanced",
+      "version": "1.0.0",
+      "category": "game-support",
+      "description": "Outils avancés Cyberpunk 2077 : réparation de structure des paquets, réparation du déploiement MO2 et réparation RED4ext. Sans cet add-on, aucun outil de réparation Cyberpunk n'apparaît — le lancement de base reste dans le Core.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "game.read",
+        "game.files.write",
+        "mods.read",
+        "mods.write",
+        "process.read"
+      ],
+      "package": "packages/cyberpunk/official.zailon.game.cyberpunk-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "86b2259634f6957f07bcb88044f3fe8d353b4b69378489ecc904ab45a0fdbd48",
+      "downloadSize": 6460,
+      "installedSize": 16150,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
+    },
+    {
+      "id": "official.zailon.game.nte",
+      "name": "NTE Support",
+      "version": "1.20.0",
+      "category": "game-support",
+      "description": "Support du mod loader de Neverness to Everness : backend PAK (.pak/.utoc/.ucas), dossier AuroraMods, activation réelle .pak ↔ .pak.disabled, métadonnées mod.json, détection de version (Global/CN/TW) et de distribution (Epic/Steam/Standalone). Sans cet add-on, aucun jeu n'est classé NTE PAK — la détection de processus au lancement reste dans le Core.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "game.read",
+        "game.launch",
+        "process.read",
+        "mods.read",
+        "mods.write"
+      ],
+      "package": "packages/nte/official.zailon.game.nte-v1.20.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "5cd0edfd7d1449957460b8698327bb31e3d5878f0c5c5e6381230fffb6473a81",
+      "downloadSize": 9205,
+      "installedSize": 23013,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
+    },
+    {
+      "id": "official.zailon.game.fivem",
+      "name": "FiveM Profiles",
+      "version": "1.0.0",
+      "category": "game-support",
+      "description": "Traitement FiveM client : base neutre initialisée à l'import, bannière adaptateur dans la liste de mods (plugins client uniquement). Sans cet add-on, un jeu FiveM s'importe comme n'importe quel jeu — l'adaptateur de lancement reste dans le Core.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "game.read",
+        "game.files.write",
+        "mods.read",
+        "mods.write",
+        "settings"
+      ],
+      "package": "packages/fivem/official.zailon.game.fivem-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "8c64f29c67b33cee5ddf8a647bd2a048012e373924434b4029b1def77a540232",
+      "downloadSize": 4921,
+      "installedSize": 12303,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
+    },
+    {
+      "id": "official.zailon.importer.mo2",
+      "name": "MO2 Importer",
+      "version": "1.0.0",
+      "category": "utilities",
+      "description": "Import depuis Mod Organizer 2 : lecture de l'instance (mods, profils, ordre, overwrite), création des profils ZAILON correspondants et staging des paquets. Sans cet add-on, aucun import MO2 n'existe.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "game.read",
+        "game.files.read",
+        "mods.read",
+        "mods.write",
+        "profile.write",
+        "filesystem.external"
+      ],
+      "package": "packages/mo2/official.zailon.importer.mo2-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "136134153064949b937e8a5c3b3ff132ef5b61af7dcebafea515de63d4d864ac",
+      "downloadSize": 4622,
+      "installedSize": 11555,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
+    },
+    {
+      "id": "official.zailon.importer.vortex",
+      "name": "Vortex Importer",
+      "version": "1.0.0",
+      "category": "utilities",
+      "description": "Import du déploiement Vortex : lecture de vortex.deployment.json (mods actifs, fichiers déployés, dossier de staging) et création d'un profil ZAILON en références — aucune copie, aucun lien recréé. Sans cet add-on, aucun import Vortex n'existe.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "game.read",
+        "game.files.read",
+        "mods.read",
+        "mods.write",
+        "profile.write",
+        "filesystem.external"
+      ],
+      "package": "packages/vortex/official.zailon.importer.vortex-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "14121c693ba2a87db1cdf254fe6b1c56d62df975c1981e8fb66a368f7d3fa7a9",
+      "downloadSize": 5217,
+      "installedSize": 13043,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
+    },
+    {
+      "id": "official.zailon.importer.frosty",
+      "name": "Frosty Importer",
+      "version": "1.0.0",
+      "category": "utilities",
+      "description": "Import d'une installation Frosty existante : détection du dossier de mods .fbmod (Frosty Mod Manager) et création d'un profil ZAILON en références — aucune copie, aucun lien recréé. Sans cet add-on, aucun import Frosty n'existe.",
+      "minZailonVersion": "1.69.0",
+      "permissions": [
+        "game.read",
+        "game.files.read",
+        "mods.read",
+        "profile.write"
+      ],
+      "dependencies": [
+        "official.zailon.frosty"
+      ],
+      "package": "packages/frosty/official.zailon.importer.frosty-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "1832defbadca4e38d7a18bcacb671efad9170a3d59d7ec1f521b86eb1e81b64e",
+      "downloadSize": 5410,
+      "installedSize": 13525,
+      "platforms": [
+        "windows"
+      ]
+    },
+    {
+      "id": "official.zailon.steam-advanced",
+      "name": "Steam Advanced",
+      "version": "1.0.0",
+      "category": "utilities",
+      "description": "Détection et import avancés de la bibliothèque Steam : scan des jeux installés, import en un clic et association. Sans cet add-on, aucun bouton de détection Steam ni dialogue de scan n'existe.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "game.read",
+        "process.read",
+        "network",
+        "game.launch"
+      ],
+      "package": "packages/steam-advanced/official.zailon.steam-advanced-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "8c9a4f8369b2ba4842b15c0f9a28ccf237ebc9f5725e7ba2f566fc4914737fac",
+      "downloadSize": 4587,
+      "installedSize": 11468,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
+    },
+    {
+      "id": "official.zailon.artwork",
+      "name": "Artwork+",
+      "version": "1.0.0",
+      "category": "appearance",
+      "description": "Illustrations automatiques pour les jeux : sources SteamGridDB, IGDB et GameBanana, recherche automatique et personnalisation des images. Sans cet add-on, aucune source d'illustrations ni configuration n'apparaît.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "network",
+        "settings"
+      ],
+      "package": "packages/artwork/official.zailon.artwork-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "510c5fe40a8da43a8fbd71b13202ba4fea4cb285a9904805535290e1ca959b36",
+      "downloadSize": 4578,
+      "installedSize": 11445,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
+    },
+    {
+      "id": "official.zailon.themes",
+      "name": "Theme Packs",
+      "version": "1.0.0",
+      "category": "appearance",
+      "description": "Packs de thèmes : presets complets appliqués d'un clic (couleur d'accent, densité, taille de texte, animations). Sans cet add-on, aucun pack de thème n'apparaît dans les Paramètres.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "ui.extend",
+        "settings"
+      ],
+      "package": "packages/themes/official.zailon.themes-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "837cce561dc7ba0dc2b8f1092a833b2d29f4761a847cbaf67940870bb349fe17",
+      "downloadSize": 4655,
+      "installedSize": 11638,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
+    },
+    {
+      "id": "official.zailon.performance",
+      "name": "Performance+",
+      "version": "1.0.0",
+      "category": "utilities",
+      "description": "Applique réellement la priorité du processus du jeu (normale / supérieure / haute) au lancement, selon le mode Performance choisi. Sans cet add-on, la priorité reste une valeur affichée, jamais appliquée à l'OS.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "game.read",
+        "process.read",
+        "process.launch",
+        "settings"
+      ],
+      "package": "packages/performance/official.zailon.performance-v1.0.0.zailon-addon",
+      "minAddonApiVersion": "1",
+      "sha256": "c4f005fe216da419f3dbf39995d6fca28b941edecff69dc26d6ef237309f9886",
+      "downloadSize": 5144,
+      "installedSize": 12860,
+      "platforms": [
+        "windows",
+        "linux",
+        "macos"
+      ]
+    },
+    {
+      "id": "official.zailon.visual-profiles",
+      "package": "packages/visual-profiles/official.zailon.visual-profiles-v1.0.0.zailon-addon",
+      "name": "Visual Profiles",
+      "version": "1.0.0",
+      "category": "visual",
+      "description": "Profils visuels par jeu : luminosité, contraste, saturation, gamma et restauration automatique en fin de session. Fournit l'onglet Visuels, le panneau rapide et le diagnostic visuel.",
+      "minZailonVersion": "1.78.0",
+      "permissions": [
+        "game.read",
+        "display.profiles"
+      ],
+      "minAddonApiVersion": "1",
+      "sha256": "12115e42bdf62bc344aec47a521b1ed7f2ce98d08510ce0285e6aafe6450cfac",
+      "downloadSize": 6884,
+      "installedSize": 17210,
+      "platforms": [
+        "windows"
+      ]
+    }
+  ]
+}

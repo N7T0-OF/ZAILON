@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "official.zailon.frosty-editor",
+  "name": "Frosty Editor",
+  "version": "1.0.0",
+  "author": "ZAILON",
+  "description": "Édition avancée des jeux Frostbite : Asset Browser, éditeur EBX avec validation, Plugin Manager, projets exportables, Bulk Export et build de mods. Nécessite Frosty Support.",
+  "category": "modding",
+  "entrypoint": "module/index.ts",
+  "minZailonVersion": "1.79.0",
+  "minAddonApiVersion": "1",
+  "permissions": [
+    "game.read",
+    "game.files.write",
+    "mods.read",
+    "mods.write",
+    "network",
+    "process.launch",
+    "game.launch",
+    "ui.extend",
+    "filesystem.external"
+  ],
+  "supportedPlatforms": ["windows"],
+  "capabilities": ["frosty.editor"],
+  "dependencies": ["official.zailon.frosty"],
+  "events": ["OnGameSelected", "OnGameLaunching", "OnGameStarted", "OnGameStopped"]
+}

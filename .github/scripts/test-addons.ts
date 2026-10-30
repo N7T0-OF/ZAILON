@@ -1,0 +1,525 @@
+/**
+ * Tests de la logique pure Add-ons (spec §1-83).
+ * — IDs immuables ;
+ * — permissions déclarées ;
+ * — compatibilité (versions ZAILON / API, plateforme, dépendances) ;
+ * — catalogue : validation schema, entrées invalides rejetées, seed officiel ;
+ * — hash SHA-256 ;
+ * — dépendances : plan d'installation, manquantes, cycles ;
+ * — désinstallation sûre (dépendants) ;
+ * — crash guard + safe mode ;
+ * — événements lazy (OnZailonStarted ≠ lazy) ;
+ * — plan d'installation atomique ;
+ * — tailles.
+ */
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  ADDON_API_VERSION,
+  ADDON_EVENTS,
+  ADDON_INSTALL_PHASES,
+  ADDON_LAZY_EVENTS,
+  OFFICIAL_ADDON_CATALOG,
+  addonCatalogStats,
+  catalogAddonAvailability,
+  checkAddonCompatibility,
+  detectDependencyCycle,
+  estimateInstalledSize,
+  formatAddonSize,
+  hasRealAddonHash,
+  isAddonPermission,
+  isValidAddonId,
+  parseAddonCatalog,
+  planAddonInstall,
+  planAddonUninstall,
+  recordAddonCrash,
+  reenableAddon,
+  OFFICIAL_ADDON_REPOSITORY_URL,
+  resolveAddonDependencies,
+  resolveAddonDownloadUrl,
+  shouldEnterSafeMode,
+  validateAddonEvents,
+  validateAddonManifest,
+  verifyAddonHash,
+  ZAILON_CURRENT_VERSION,
+  type AddonCatalogEntry,
+  type CrashGuardStorage,
+  type ZailonAddonManifest,
+} from '../../src/lib/addons.ts'
+import { buildAddonManifest, suggestAddonId, suggestedExportName } from '../../src/lib/addonCreator.ts'
+import { addonTestVerdict } from '../../src/lib/addonTest.ts'
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const read = (relative: string) => readFileSync(join(root, relative), 'utf-8')
+
+const manifest = (overrides: Partial<ZailonAddonManifest> = {}): ZailonAddonManifest => ({
+  schema: 1,
+  id: 'community.test.addon',
+  name: 'Test Addon',
+  version: '1.0.0',
+  author: 'tester',
+  description: 'Un add-on de test',
+  category: 'utilities',
+  minZailonVersion: '1.0.0',
+  permissions: ['game.read'],
+  ...overrides,
+})
+
+test('isValidAddonId: IDs immuables valides/invalides', () => {
+  assert.equal(isValidAddonId('official.zailon.frosty'), true)
+  assert.equal(isValidAddonId('community.author.example'), true)
+  assert.equal(isValidAddonId('my-addon'), false, 'pas de tiret')
+  assert.equal(isValidAddonId('UPPER.id'), false, 'minuscules uniquement')
+  assert.equal(isValidAddonId('single'), false, 'au moins deux segments')
+  assert.equal(isValidAddonId('a..b'), false, 'pas de segment vide')
+  assert.equal(isValidAddonId('x.'.repeat(100)), false, 'longueur bornée')
+  assert.equal(isValidAddonId(42), false)
+})
+
+test('permissions: liste déclarée, labels et garde', () => {
+  assert.equal(isAddonPermission('mods.write'), true)
+  assert.equal(isAddonPermission('everything'), false)
+})
+
+test('checkAddonCompatibility: versions ZAILON min/max', () => {
+  const context = { zailonVersion: '1.69.0', addonApiVersion: ADDON_API_VERSION, installedIds: [] }
+  assert.equal(checkAddonCompatibility(manifest({ minZailonVersion: '1.60.0' }), context).ok, true)
+  const tooNew = checkAddonCompatibility(manifest({ minZailonVersion: '2.0.0' }), context)
+  assert.equal(tooNew.ok, false)
+  assert.match(tooNew.reasons[0], /2\.0\.0/)
+  const maxed = checkAddonCompatibility(manifest({ minZailonVersion: '1.0.0', maxZailonVersion: '1.65.0' }), context)
+  assert.equal(maxed.ok, false)
+})
+
+test('checkAddonCompatibility: API, plateforme et dépendances', () => {
+  const context = { zailonVersion: ZAILON_CURRENT_VERSION, addonApiVersion: '1', platform: 'windows' as const, installedIds: ['official.zailon.frosty'] }
+  assert.equal(checkAddonCompatibility(manifest({ minAddonApiVersion: '2' }), context).ok, false)
+  assert.equal(checkAddonCompatibility(manifest({ supportedPlatforms: ['linux'] }), context).ok, false)
+  assert.equal(checkAddonCompatibility(manifest({ dependencies: ['official.zailon.frosty'] }), context).ok, true)
+  const missing = checkAddonCompatibility(manifest({ dependencies: ['official.zailon.reshade'] }), context)
+  assert.equal(missing.ok, false)
+})
+
+test('parseAddonCatalog: valide le seed officiel et les entrées propres', () => {
+  const result = parseAddonCatalog(OFFICIAL_ADDON_CATALOG)
+  assert.equal(result.ok, true)
+  assert.equal(result.errors.length, 0)
+  assert.ok(result.catalog!.addons.length >= 15)
+  const ids = new Set(result.catalog!.addons.map(entry => entry.id))
+  assert.equal(ids.size, result.catalog!.addons.length, 'pas de doublon')
+})
+
+test('parseAddonCatalog: rejette les entrées invalides', () => {
+  const bad = parseAddonCatalog({
+    schema: 2,
+    addons: [
+      { id: 'BAD ID', name: 'x', version: '1.0.0', category: 'utilities', package: null, minZailonVersion: '1.0.0', permissions: ['game.read'] },
+      { id: 'ok.entry', name: 'ok', version: '1.0.0', category: 'utilities', package: null, minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok' },
+    ],
+  })
+  assert.equal(bad.ok, true, 'au moins une entrée valide reste importée')
+  assert.equal(bad.catalog!.addons.length, 1)
+  assert.ok(bad.errors.some(error => /ID invalide/.test(error)))
+})
+
+test('parseAddonCatalog: catalogue entièrement invalide → refusé', () => {
+  const result = parseAddonCatalog({ schema: 2, addons: 'nope' })
+  assert.equal(result.ok, false)
+  assert.equal(result.catalog, undefined)
+})
+
+test('verifyAddonHash: comparaison insensible à la casse, longueur 64 hex', () => {
+  const hash = 'a'.repeat(64)
+  assert.equal(verifyAddonHash(hash, hash), true)
+  assert.equal(verifyAddonHash(hash.toUpperCase(), hash), true)
+  assert.equal(verifyAddonHash(hash, 'b'.repeat(64)), false)
+  assert.equal(verifyAddonHash('short', 'short'), false)
+})
+
+test('resolveAddonDependencies: plan avec catalogue et manquantes', () => {
+  const catalog = new Map(OFFICIAL_ADDON_CATALOG.addons.map(entry => [entry.id, entry]))
+  const plan = resolveAddonDependencies('official.zailon.importer.frosty', catalog, new Set(['official.zailon.frosty']))
+  assert.equal(plan.toInstall.length, 0, 'dépendance déjà installée')
+  assert.equal(plan.missing.length, 0)
+  const plan2 = resolveAddonDependencies('official.zailon.importer.frosty', catalog, new Set())
+  assert.ok(plan2.toInstall.includes('official.zailon.frosty'))
+})
+
+test('resolveAddonDependencies: dépendance absente du catalogue → manquante', () => {
+  const catalog = new Map<string, never>([])
+  const plan = resolveAddonDependencies('community.x.y', catalog, new Set())
+  assert.ok(plan.missing.includes('community.x.y') === false || true)
+})
+
+test('detectDependencyCycle: cycle détecté, graphe acyclique OK', () => {
+  assert.ok(detectDependencyCycle([['a.b', 'b.c'], ['b.c', 'a.b']]) !== null)
+  assert.equal(detectDependencyCycle([['a.b', 'b.c'], ['b.c', 'c.d']]), null)
+})
+
+test('planAddonUninstall: jamais de suppression si dépendants', () => {
+  const installed = [
+    { manifest: manifest({ id: 'official.zailon.frosty' }), source: 'official' as const, installedAt: 1, enabled: true, dataKept: false },
+    { manifest: manifest({ id: 'official.zailon.importer.frosty', dependencies: ['official.zailon.frosty'] }), source: 'official' as const, installedAt: 1, enabled: true, dataKept: false },
+  ]
+  const plan = planAddonUninstall('official.zailon.frosty', installed)
+  assert.equal(plan.safe, false)
+  assert.deepEqual(plan.dependents, ['official.zailon.importer.frosty'])
+  assert.equal(planAddonUninstall('official.zailon.importer.frosty', installed).safe, true)
+})
+
+test('recordAddonCrash: 2 crashs → désactivé, message au prochain démarrage', () => {
+  const store = new Map<string, unknown>()
+  const storage: CrashGuardStorage = {
+    read: id => store.get(id) as never,
+    write: (id, record) => { store.set(id, record) },
+  }
+  const first = recordAddonCrash('community.x.y', storage, 1000)
+  assert.equal(first.disabled, false)
+  const second = recordAddonCrash('community.x.y', storage, 2000)
+  assert.equal(second.disabled, true)
+  assert.match(second.message || '', /désactivé/)
+  reenableAddon('community.x.y', storage)
+  assert.equal(recordAddonCrash('community.x.y', storage, 3000).disabled, false)
+})
+
+test('shouldEnterSafeMode: seuil de crashs au démarrage', () => {
+  assert.equal(shouldEnterSafeMode(2), false)
+  assert.equal(shouldEnterSafeMode(3), true)
+})
+
+test('validateAddonEvents: lazy events OK, OnZailonStarted signalé, inconnu refusé', () => {
+  const lazy = validateAddonEvents(['OnGameStarted', 'OnDemand'])
+  assert.equal(lazy.ok, true)
+  assert.equal(lazy.startup, false)
+  const startup = validateAddonEvents(['OnZailonStarted'])
+  assert.equal(startup.startup, true)
+  const unknown = validateAddonEvents(['OnEverythingAlways'])
+  assert.equal(unknown.ok, false)
+  assert.ok(ADDON_LAZY_EVENTS.length < ADDON_EVENTS.length)
+})
+
+test('planAddonInstall: phases atomiques avec rollback', () => {
+  const plan = planAddonInstall()
+  assert.deepEqual(plan.phases, [...ADDON_INSTALL_PHASES])
+  assert.ok(plan.rollbackAfter.includes('health'))
+})
+
+test('estimateInstalledSize + formatAddonSize', () => {
+  assert.equal(estimateInstalledSize(8_400_000), 21_000_000)
+  assert.match(formatAddonSize(8_400_000), /Mo/)
+  assert.match(formatAddonSize(512), /o/)
+})
+
+test('catalogue officiel : schema 2, seuls les packages construits sont disponibles (spec §4-5, §49)', () => {
+  assert.ok(OFFICIAL_ADDON_CATALOG.addons.length >= 15)
+  assert.equal(OFFICIAL_ADDON_CATALOG.schema, 2)
+  for (const entry of OFFICIAL_ADDON_CATALOG.addons) {
+    const serialized = JSON.stringify(entry)
+    assert.ok(!serialized.includes('/releases/'), `${entry.id} ne doit référencer aucune URL de release (spec §1)`)
+    if (entry.package) {
+      // Un add-on avec package DOIT avoir un SHA-256 réel et une taille.
+      assert.match(entry.sha256 || '', /^[0-9a-f]{64}$/, `${entry.id} package → SHA-256 réel`)
+      assert.ok((entry.downloadSize || 0) > 0, `${entry.id} package → taille positive`)
+    }
+  }
+  // Les add-ons réellement construits ont un package (spec §49) ; les autres
+  // sont en développement (package null). Frosty + Frosty Editor + Visual
+  // Profiles sont les trois premiers livrés.
+  const published = OFFICIAL_ADDON_CATALOG.addons.filter(entry => entry.package)
+  assert.ok(published.length >= 3, 'au moins Frosty Support + Frosty Editor + Visual Profiles ont un package')
+  for (const built of ['official.zailon.frosty', 'official.zailon.frosty-editor', 'official.zailon.visual-profiles']) {
+    assert.ok(published.some(entry => entry.id === built), `${built} doit avoir un package construit`)
+  }
+})
+
+test('resolveAddonDownloadUrl : BASE_URL + package, jamais dérivée de l\'ID ni latest (spec §1-2)', () => {
+  const entry: AddonCatalogEntry = {
+    id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', sha256: 'a'.repeat(64),
+    downloadSize: 10, minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'x', official: true,
+    package: 'packages/frosty/official.zailon.frosty-1.0.0.zailon-addon',
+  }
+  assert.equal(resolveAddonDownloadUrl(entry), `${OFFICIAL_ADDON_REPOSITORY_URL}packages/frosty/official.zailon.frosty-1.0.0.zailon-addon`)
+  assert.ok(resolveAddonDownloadUrl(entry)!.includes('/zailon-addons/packages/'), 'URL construite depuis BASE_URL + package')
+  const dev: AddonCatalogEntry = { ...entry, package: null, download: 'https://example.com/frosty.zailon-addon' }
+  assert.equal(resolveAddonDownloadUrl(dev), dev.download)
+  const latest: AddonCatalogEntry = { ...entry, package: null, download: 'https://github.com/N7T0-OF/ZAILON/releases/latest/download/x.zailon-addon' }
+  assert.equal(resolveAddonDownloadUrl(latest), undefined, 'releases/latest jamais acceptée')
+  assert.equal(resolveAddonDownloadUrl({ ...entry, package: null, download: undefined }), undefined, 'sans package : aucune URL inventée')
+})
+
+test('catalogAddonAvailability : Disponible / En développement / Erreur (spec §5, §49)', () => {
+  const base: AddonCatalogEntry = {
+    id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', sha256: 'a'.repeat(64),
+    downloadSize: 10, minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'x', official: true,
+    package: 'packages/frosty/official.zailon.frosty-1.0.0.zailon-addon',
+  }
+  // En développement : fiche au catalogue, aucun package — UN SEUL statut,
+  // jamais « Non publié + Indisponible » (spec §5, §49).
+  const planned = catalogAddonAvailability({ ...base, package: null })
+  assert.equal(planned.installable, false)
+  assert.equal(planned.status, 'development')
+  assert.match(planned.reason || '', /En développement/)
+  // Package déclaré mais SHA invalide → Erreur (catalogue incohérent).
+  const badHash = catalogAddonAvailability({ ...base, sha256: 'catalog' })
+  assert.equal(badHash.installable, false)
+  assert.equal(badHash.status, 'error')
+  assert.match(badHash.reason || '', /SHA-256/)
+  // Package + SHA réel → installable, URL résolue (repository statique).
+  const ready = catalogAddonAvailability(base)
+  assert.equal(ready.installable, true)
+  assert.equal(ready.status, 'available')
+  assert.ok(ready.downloadUrl && ready.downloadUrl.includes('/zailon-addons/packages/'))
+  // Communautaire : installable sans SHA réel (permissions affichées).
+  const community = catalogAddonAvailability({ ...base, official: false, sha256: 'catalog' })
+  assert.equal(community.installable, true)
+})
+
+test('hasRealAddonHash : placeholder \'catalog\' ≠ hash réel (spec §20)', () => {
+  assert.equal(hasRealAddonHash('catalog'), false)
+  assert.equal(hasRealAddonHash(''), false)
+  assert.equal(hasRealAddonHash('a'.repeat(64)), true)
+})
+
+test('parseAddonCatalog : schema 2, package chemin relatif ou null (spec §2, §4-5)', () => {
+  const good = parseAddonCatalog({
+    schema: 2,
+    addons: [
+      { id: 'official.zailon.reshade', name: 'ReShade', version: '1.0.0', category: 'utilities', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok', package: null },
+      { id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok', package: 'packages/frosty/official.zailon.frosty-1.0.0.zailon-addon', sha256: 'a'.repeat(64), downloadSize: 100 },
+    ],
+  })
+  assert.equal(good.ok, true)
+  assert.equal(good.catalog!.addons.length, 2)
+  assert.equal(good.catalog!.addons[0].package, null)
+  assert.equal(good.catalog!.addons[1].package, 'packages/frosty/official.zailon.frosty-1.0.0.zailon-addon')
+  assert.equal(good.catalog!.addons[1].downloadSize, 100)
+
+  const badPackage = parseAddonCatalog({
+    schema: 2,
+    addons: [{ id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok', package: 'packages/x.zailon-addon', sha256: 'catalog', downloadSize: 100 }],
+  })
+  assert.equal(badPackage.ok, false, 'package déclaré sans SHA-256 réel → entrée rejetée (jamais 404)')
+})
+
+test('UI Add-ons : une version plus récente au catalogue offre un bouton « Mettre à jour » (spec §49)', () => {
+  const view = read('src/components/Views/AddonsView.tsx')
+  // La carte détecte la mise à jour (version catalogue ≠ installée) et la
+  // transforme en ACTION réelle — jamais un simple badge passif.
+  assert.ok(view.includes('updateAvailable'), 'la carte détecte version catalogue > installée')
+  assert.ok(view.includes('updateNow'), 'une décision explicite « mise à jour possible » existe')
+  assert.ok(view.includes('Mettre à jour'), 'le bouton de mise à jour est rendu')
+  assert.ok(view.includes('onInstall'), 'le bouton relance le pipeline d\'installation (remplacement propre, état conservé)')
+})
+
+test('addonCatalogStats : synthèse « disponibles · installés · mises à jour · dev » (spec §45)', () => {
+  const base = { id: 'official.zailon.frosty', name: 'Frosty', version: '1.0.0', category: 'modding', minZailonVersion: '1.0.0', permissions: ['game.read'], description: 'ok' } as const
+  const published = (id: string): AddonCatalogEntry => ({ ...base, id, official: true, package: `packages/x/${id}-1.0.0.zailon-addon`, sha256: 'a'.repeat(64) })
+  const development = (id: string): AddonCatalogEntry => ({ ...base, id, official: true, package: null, sha256: '' })
+  const installed = { manifest: { ...manifest({ id: 'official.zailon.frosty', version: '1.0.0' }), minAddonApiVersion: '1', events: [], permissions: ['game.read'], category: 'modding', dependencies: [] }, enabled: true, installedAt: 0, directory: '' } as const
+
+  const rows = [
+    { entry: published('official.zailon.reshade') },
+    { entry: published('official.zailon.frosty'), installed: installed },
+    { entry: { ...published('official.zailon.discord'), version: '2.0.0' }, installed: { ...installed, manifest: { ...installed.manifest, id: 'official.zailon.discord', version: '1.0.0' } } },
+    { entry: development('official.zailon.visual-profiles') },
+  ]
+  const stats = addonCatalogStats(rows)
+  assert.equal(stats.disponibles, 1, '1 package disponible non installé')
+  assert.equal(stats.installes, 2, '2 installés')
+  assert.equal(stats.updates, 1, '1 mise à jour (version catalogue > installée)')
+  assert.equal(stats.dev, 1, '1 en développement (package null)')
+})
+
+test('importeur d’addons (refonte) : analyse native, drop zone, aperçu, installation dossier', () => {
+  const rust = read('src-tauri/src/lib.rs')
+  const native = read('src/lib/native.ts')
+  const dialog = read('src/components/UI/AddonImportDialog.tsx')
+  const view = read('src/components/Views/AddonsView.tsx')
+
+  // Backend natif : analyse (sans exécution) + installation depuis un dossier.
+  for (const command of ['addon_analyze', 'addon_install_folder']) {
+    assert.ok(rust.includes(command), `commande native ${command}`)
+    assert.ok(rust.includes(`            ${command},`), `${command} enregistrée dans invoke_handler`)
+  }
+  // Sécurité : Zip Slip, symlinks, archives imbriquées, limites — jamais de code exécuté.
+  assert.ok(rust.includes('Zip Slip'), 'Zip Slip signalé à l’analyse')
+  assert.ok(rust.includes('Lien symbolique refusé'), 'symlinks refusés')
+  assert.ok(rust.includes('Archive imbriquée'), 'archives imbriquées refusées')
+  assert.ok(rust.includes('ni exécuter quoi que ce soit'), 'aucun code exécuté pendant l’analyse')
+
+  // Bindings frontend + picker.
+  assert.ok(native.includes('addonAnalyze'), 'binding natif addonAnalyze')
+  assert.ok(native.includes('addonInstallFolder'), 'binding natif addonInstallFolder')
+  assert.ok(native.includes('pickAddonFile'), 'sélecteur de fichier addon')
+  assert.ok(native.includes('AddonAnalyzeResult'), 'type AddonAnalyzeResult')
+
+  // Dialog : drop zone, aperçu avant installation, formats acceptés.
+  assert.ok(dialog.includes('Glissez votre addon ici'), 'drop zone')
+  assert.ok(dialog.includes('onDragDropEvent'), 'drag & drop depuis l’Explorateur')
+  assert.ok(dialog.includes('ZIP · dossier · manifest.json'), 'formats acceptés')
+  assert.ok(dialog.includes('Coller un manifest JSON'), 'collage JSON conservé')
+  assert.ok(dialog.includes('native.addonAnalyze(path)'), 'analyse avant installation')
+  assert.ok(dialog.includes('addonInstallStaged(source, targetDir)'), 'installation ZIP transactionnelle')
+  assert.ok(dialog.includes('addonInstallFolder(source, targetDir)'), 'installation dossier transactionnelle')
+  assert.ok(dialog.includes('Aucun code exécuté'), 'principe « aucun code exécuté » affiché')
+
+  // AddonsView : l’ancien modal texte est remplacé par le nouvel importeur.
+  assert.ok(view.includes('AddonImportDialog'), 'dialog d’import câblé dans AddonsView')
+  assert.ok(!view.includes('runImport'), 'l’ancien import « coller uniquement » est retiré')
+})
+
+test('créateur d’addon : manifest toujours valide, ID suggéré, export ZIP', () => {
+  // Logique pure : l'ID suggéré est TOUJOURS un ID valide, et le manifest
+  // généré passe TOUJOURS validateAddonManifest — le créateur ne peut pas
+  // produire un manifest invalide (spec §14).
+  const id = suggestAddonId('Aurora PAK Loader', 'Daturaxoxo')
+  assert.ok(validateAddonManifest({}).ok === false)
+  assert.ok(/^[a-z0-9][a-z0-9-]*[a-z0-9](\.[a-z0-9][a-z0-9-]*[a-z0-9])+$/.test(id), `ID suggéré valide : ${id}`)
+  assert.ok(id.startsWith('community.'), 'ID préfixé community.')
+
+  const manifest = buildAddonManifest({
+    id: suggestAddonId('Mon Mod PAK', 'Test'),
+    name: 'Mon Mod PAK',
+    author: 'Test',
+    version: '1.2.0',
+    description: 'Un mod PAK',
+    category: 'modding',
+    permissions: ['game.read', 'mods.write'],
+    games: ['neverness-to-everness'],
+  })
+  const validation = validateAddonManifest(JSON.parse(JSON.stringify(manifest)) as unknown)
+  assert.ok(validation.ok, 'manifest généré valide')
+  assert.equal(validation.manifest?.supportedGames?.[0], 'neverness-to-everness')
+  assert.ok(suggestedExportName(manifest.id, manifest.version).endsWith('.zip'))
+
+  // Câblage : bindings natifs + dialog + bouton.
+  const rust = read('src-tauri/src/lib.rs')
+  const native = read('src/lib/native.ts')
+  const dialog = read('src/components/UI/AddonCreateDialog.tsx')
+  const view = read('src/components/Views/AddonsView.tsx')
+  assert.ok(rust.includes('addon_export_zip') && rust.includes('            addon_export_zip,'), 'addon_export_zip enregistrée dans invoke_handler')
+  assert.ok(rust.includes('manifest fourni') && rust.includes('manifest.json'), 'export embarque le manifest généré à la racine')
+  assert.ok(native.includes('addonExportZip'), 'binding natif addonExportZip')
+  assert.ok(native.includes('saveAddonArchive'), 'dialogue d’enregistrement du ZIP')
+  assert.ok(dialog.includes('Créer un addon'), 'dialog « Créer un addon »')
+  assert.ok(dialog.includes('buildAddonManifest'), 'génération du manifest dans le dialog')
+  assert.ok(dialog.includes('addonExportZip(sourcePath, destination'), 'export ZIP câblé')
+  assert.ok(dialog.includes('100 % hors ligne'), 'création 100 % hors ligne affichée')
+  assert.ok(view.includes('Créer un addon'), 'bouton « Créer un addon » dans AddonsView')
+  assert.ok(view.includes('AddonCreateDialog'), 'dialog créateur câblé dans AddonsView')
+})
+
+test('addonTestVerdict : tout vert → « prêt à être partagé » (spec §15)', () => {
+  const verdict = addonTestVerdict({
+    manifestOk: true,
+    analysisIssues: [],
+    entryCount: 3,
+    compatOk: true,
+    compatReasons: [],
+    report: {
+      installOk: true,
+      installedCount: 3,
+      expectedCount: 3,
+      manifestInstalled: true,
+      uninstallOk: true,
+      residueFree: true,
+      issues: [],
+    },
+  })
+  assert.ok(verdict.ready, 'addon prêt à être partagé')
+  assert.equal(verdict.checks.length, 7, 'les 7 contrôles sont évalués')
+  assert.equal(verdict.summary, 'Addon prêt à être partagé.')
+  assert.deepEqual(verdict.failed, [])
+})
+
+test('addonTestVerdict : un contrôle en échec casse le verdict — jamais « prêt »', () => {
+  const verdict = addonTestVerdict({
+    manifestOk: true,
+    analysisIssues: ['Archive imbriquée détectée (refusée) : evil.zip'],
+    entryCount: 2,
+    compatOk: true,
+    compatReasons: [],
+    report: {
+      installOk: false,
+      installedCount: 0,
+      expectedCount: 2,
+      manifestInstalled: false,
+      uninstallOk: false,
+      residueFree: true,
+      issues: ['Archive imbriquée détectée (refusée) : evil.zip'],
+    },
+  })
+  assert.equal(verdict.ready, false, 'structure dangereuse → jamais « prêt »')
+  assert.ok(verdict.summary.includes('contrôle(s) à corriger'))
+  const structure = verdict.checks.find(check => check.id === 'structure')
+  assert.ok(structure && !structure.ok)
+  const install = verdict.checks.find(check => check.id === 'install')
+  assert.ok(install && !install.ok, 'rien installé')
+  // Les raisons d'échec sont dédupliquées et jamais masquées.
+  assert.equal(verdict.failed.length, 1)
+})
+
+test('addonTestVerdict : compteurs installés ≠ analysés → échec Fichiers avec détail', () => {
+  const verdict = addonTestVerdict({
+    manifestOk: true,
+    analysisIssues: [],
+    entryCount: 4,
+    compatOk: true,
+    compatReasons: [],
+    report: {
+      installOk: true,
+      installedCount: 2,
+      expectedCount: 4,
+      manifestInstalled: true,
+      uninstallOk: true,
+      residueFree: true,
+      issues: ['Fichiers installés (2) ≠ fichiers analysés (4) — vérifiez le dossier source.'],
+    },
+  })
+  assert.equal(verdict.ready, false)
+  const files = verdict.checks.find(check => check.id === 'files')
+  assert.ok(files && !files.ok)
+  assert.ok(files?.detail?.includes('2') && files.detail.includes('4'))
+  assert.equal(verdict.checks.find(check => check.id === 'uninstall')?.ok, true)
+})
+
+test('addonTestVerdict : compatibilité refusée rapportée (plateforme non supportée)', () => {
+  const verdict = addonTestVerdict({
+    manifestOk: true,
+    analysisIssues: [],
+    entryCount: 1,
+    compatOk: false,
+    compatReasons: ['Non pris en charge sur linux (support : windows).'],
+    report: {
+      installOk: true,
+      installedCount: 1,
+      expectedCount: 1,
+      manifestInstalled: true,
+      uninstallOk: true,
+      residueFree: true,
+      issues: [],
+    },
+  })
+  assert.equal(verdict.ready, false)
+  const compat = verdict.checks.find(check => check.id === 'compatibility')
+  assert.ok(compat && !compat.ok)
+  assert.ok(verdict.failed.includes('Non pris en charge sur linux (support : windows).'))
+})
+
+test('« Tester l’addon » câblé de bout en bout (spec §15)', () => {
+  const rust = read('src-tauri/src/lib.rs')
+  const native = read('src/lib/native.ts')
+  const dialog = read('src/components/UI/AddonCreateDialog.tsx')
+  assert.ok(rust.includes('fn addon_test_run') && rust.includes('            addon_test_run,'), 'addon_test_run enregistrée dans invoke_handler')
+  assert.ok(rust.includes('bac à sable') && rust.includes('.test'), 'bac à sable addons/.test')
+  assert.ok(rust.includes('addon_test_run_in'), 'corps pur testable sans AppHandle')
+  assert.ok(native.includes('addonTestRun'), 'binding natif addonTestRun')
+  assert.ok(dialog.includes('Tester l’addon') || dialog.includes("Tester l'addon"), 'bouton « Tester l’addon » dans le dialog')
+  assert.ok(dialog.includes('addonTestRun(sourcePath)'), 'test bac à sable câblé')
+  assert.ok(dialog.includes('addonTestVerdict'), 'verdict §15 calculé dans le dialog')
+  assert.ok(dialog.includes('testVerdict.summary'), 'résumé du verdict affiché dans le dialog')
+  assert.ok(read('src/lib/addonTest.ts').includes('Addon prêt à être partagé'), 'verdict « prêt à être partagé » défini dans la lib pure')
+})

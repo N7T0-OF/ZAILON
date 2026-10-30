@@ -1,0 +1,7 @@
+{
+  "name": "My Addon",
+  "description": "Décrivez ici ce que fait votre add-on, en une phrase.",
+  "settings": {
+    "title": "Réglages de l'add-on"
+  }
+}

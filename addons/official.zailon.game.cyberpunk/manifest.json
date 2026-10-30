@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "id": "official.zailon.game.cyberpunk",
+  "name": "Cyberpunk Advanced",
+  "version": "1.0.0",
+  "author": "ZAILON",
+  "description": "Outils avancés Cyberpunk 2077 : réparation de structure des paquets, réparation du déploiement MO2 et réparation RED4ext. Sans cet add-on, aucun outil de réparation Cyberpunk n'apparaît — le lancement de base reste dans le Core.",
+  "category": "game-support",
+  "entrypoint": "module/index.ts",
+  "minZailonVersion": "1.78.0",
+  "minAddonApiVersion": "1",
+  "permissions": [
+    "game.read",
+    "game.files.write",
+    "mods.read",
+    "mods.write",
+    "process.read"
+  ],
+  "supportedPlatforms": ["windows", "linux", "macos"],
+  "capabilities": ["cyberpunk.frameworks"],
+  "slots": [
+    "Game.Tools",
+    "Game.Diagnostic",
+    "Diagnostic.Frameworks"
+  ],
+  "events": []
+}

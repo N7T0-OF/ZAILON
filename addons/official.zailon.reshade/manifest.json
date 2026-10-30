@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "official.zailon.reshade",
+  "name": "ReShade Manager",
+  "version": "1.0.0",
+  "author": "ZAILON",
+  "description": "Gestion ReShade par jeu : détection d'installation, ajout aux jeux compatibles et configuration depuis la page du jeu. Sans cet add-on, aucune section ReShade n'apparaît dans la configuration.",
+  "category": "visual",
+  "entrypoint": "module/index.ts",
+  "minZailonVersion": "1.78.0",
+  "minAddonApiVersion": "1",
+  "permissions": [
+    "game.read",
+    "game.files.write",
+    "mods.read",
+    "network",
+    "settings",
+    "ui.extend"
+  ],
+  "supportedPlatforms": ["windows", "linux", "macos"],
+  "capabilities": ["reshade.manager"],
+  "slots": [
+    "Game.Configuration"
+  ],
+  "events": []
+}

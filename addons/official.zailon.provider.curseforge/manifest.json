@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "official.zailon.provider.curseforge",
+  "name": "CurseForge Provider",
+  "version": "1.0.0",
+  "author": "ZAILON",
+  "description": "Source Explorer CurseForge : recherche, détails et téléchargement — clé API partenaire en coffre système (jamais embarquée dans le package). Sans cet add-on, CurseForge n'existe ni dans Explorer ni dans les Paramètres.",
+  "category": "sources",
+  "entrypoint": "module/index.ts",
+  "minZailonVersion": "1.78.0",
+  "minAddonApiVersion": "1",
+  "permissions": [
+    "network",
+    "game.read",
+    "mods.write",
+    "settings"
+  ],
+  "supportedPlatforms": ["windows", "linux", "macos"],
+  "capabilities": ["provider.curseforge"],
+  "slots": [
+    "Explorer.Provider",
+    "Settings.Integrations",
+    "Settings.Provider.CurseForge"
+  ],
+  "events": []
+}

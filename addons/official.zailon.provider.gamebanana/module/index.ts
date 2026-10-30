@@ -1,0 +1,53 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// module/index.ts — point d'entrée de l'add-on GameBanana Provider
+// (manifest.entrypoint, contrat AddonModule — voir docs/addon-sdk.md)
+//
+// Le module n'est JAMAIS chargé au démarrage de ZAILON (lazy loading, spec
+// Add-ons §19) : il est activé au premier besoin — Explorer est ouvert avec
+// GameBanana sélectionné. Sans cet add-on installé ET activé (capacité
+// `provider.gamebanana`), le provider n'existe pas dans Explorer : aucune
+// entrée de source, aucun effet, aucune requête distante (spec §22-23).
+//
+// Le client GameBanana (recherche, galerie, pagination, téléchargement) vit
+// dans le Core mais n'est appelé QUE par l'UI gated par la capacité — le
+// même modèle que Visual Profiles et Discord Presence (feature removal §57).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Typage minimal du SDK (ZailonAddonApi) — le SDK réel est fourni par ZAILON
+// au runtime. Les permissions du manifest sont vérifiées par la gate à chaque
+// appel de service (spec §11-13).
+interface MinimalApi {
+  apiVersion: string
+  manifest: { id: string; name: string; version: string }
+  log: (message: string) => void
+  events: {
+    on: (event: string, handler: (payload?: unknown) => void) => void
+    off: (event: string, handler: (payload?: unknown) => void) => void
+  }
+  storage: {
+    get: (key: string) => unknown
+    set: (key: string, value: unknown) => void
+    remove?: (key: string) => void
+  }
+}
+
+interface AddonModule {
+  activate: (api: MinimalApi) => void | Promise<void>
+  deactivate?: (api: MinimalApi) => void | Promise<void>
+}
+
+const addon: AddonModule = {
+  async activate(api) {
+    api.log('GameBanana Provider activé — Explorer : recherche, galerie et téléchargements GameBanana disponibles.')
+    // Marqueur pour l'UI/diagnostic : le provider est disponible.
+    api.storage.set('gamebananaAvailable', true)
+  },
+
+  async deactivate(api) {
+    // Le Core ne touche plus au client GameBanana sans la capacité. On retire
+    // le marqueur : Explorer n'affiche plus la source.
+    api?.storage?.remove?.('gamebananaAvailable')
+  },
+}
+
+export default addon

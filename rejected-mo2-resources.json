@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "auditedRoot": "G:\\2_Logiciel\\MOD ORGANIZER",
+  "rejected": [
+    {
+      "sourcePath": "mods/**",
+      "category": "Mod téléchargé",
+      "count": 1607,
+      "reason": "Données personnelles et œuvres tierces ; migration locale uniquement."
+    },
+    {
+      "sourcePath": "downloads/**",
+      "category": "Mod téléchargé",
+      "count": 300,
+      "reason": "Archives tierces et métadonnées fournisseur ; jamais ajoutées au dépôt."
+    },
+    {
+      "sourcePath": "profiles/**",
+      "category": "Configuration utilisateur",
+      "count": 17,
+      "reason": "Activation, ordre et réglages personnels ; conversion locale uniquement."
+    },
+    {
+      "sourcePath": "overwrite/**",
+      "category": "Donnée générée",
+      "count": 568,
+      "reason": "Sorties personnelles ; copie uniquement vers un profil ZAILON après confirmation."
+    },
+    {
+      "sourcePath": "webcache/**",
+      "category": "Élément à ne pas copier",
+      "count": 12,
+      "reason": "Cache susceptible de contenir cookies et sessions."
+    },
+    {
+      "sourcePath": "logs/**",
+      "category": "Donnée générée",
+      "count": 3,
+      "reason": "Journaux susceptibles de contenir des chemins privés."
+    },
+    {
+      "sourcePath": "crashDumps/**",
+      "category": "Donnée générée",
+      "count": 0,
+      "reason": "Dumps potentiellement sensibles."
+    },
+    {
+      "sourcePath": "usvfs_*.dll",
+      "category": "Bibliothèque open source réutilisable",
+      "count": 2,
+      "reason": "GPL-3.0+ avec obligations ; aucun besoin pour l’assistant et aucune copie binaire locale."
+    },
+    {
+      "sourcePath": "usvfs_proxy_*.exe",
+      "category": "Bibliothèque open source réutilisable",
+      "count": 2,
+      "reason": "Composant d’injection non intégré ; construction officielle requise pour une phase future."
+    },
+    {
+      "sourcePath": "plugins/*.dll",
+      "category": "Licence inconnue",
+      "count": 38,
+      "reason": "Licence et provenance non démontrées individuellement par les binaires locaux."
+    },
+    {
+      "sourcePath": "dlls/**",
+      "category": "Bibliothèque tierce",
+      "count": 43,
+      "reason": "Runtime MO2/Qt/Python non nécessaire à ZAILON."
+    },
+    {
+      "sourcePath": "stylesheets/**",
+      "category": "Ressource graphique réutilisable",
+      "count": 342,
+      "reason": "Attribution et licence non démontrées par ressource ; identité ZAILON recréée."
+    },
+    {
+      "sourcePath": "translations/**",
+      "category": "Documentation",
+      "count": 698,
+      "reason": "Textes MO2/Qt non nécessaires ; terminologie ZAILON propre."
+    },
+    {
+      "sourcePath": "ModOrganizer.ini",
+      "category": "Configuration utilisateur",
+      "count": 1,
+      "reason": "Peut contenir chemins et réglages sensibles ; lecture par liste blanche seulement."
+    }
+  ]
+}

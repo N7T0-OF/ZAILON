@@ -73,8 +73,9 @@ On Windows, the desktop Rust build requires the Visual Studio C++ build tools.
 ## Publishing a release
 
 1. Increment the matching versions in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`.
-2. Commit and push the change.
-3. Create and push the matching tag, for example:
+2. Update `CHANGELOG.md`: convert the `[Unreleased]` section into the version with its date and recreate an empty `[Unreleased]` section. The release workflow generates the GitHub Release Notes from this section (see `AGENTS.md` and `docs/RELEASE_POLICY.md`); it refuses to publish a release without notes.
+3. Commit and push the change.
+4. Create and push the matching tag, for example:
 
    ```bash
    git tag v1.0.1

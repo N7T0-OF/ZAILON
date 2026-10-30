@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "id": "official.zailon.game.fivem",
+  "name": "FiveM Profiles",
+  "version": "1.0.0",
+  "author": "ZAILON",
+  "description": "Traitement FiveM client : base neutre initialisée à l'import, bannière adaptateur dans la liste de mods (plugins client uniquement). Sans cet add-on, un jeu FiveM s'importe comme n'importe quel jeu — l'adaptateur de lancement reste dans le Core.",
+  "category": "game-support",
+  "entrypoint": "module/index.ts",
+  "minZailonVersion": "1.78.0",
+  "minAddonApiVersion": "1",
+  "permissions": [
+    "game.read",
+    "game.files.write",
+    "mods.read",
+    "mods.write",
+    "settings"
+  ],
+  "supportedPlatforms": ["windows", "linux", "macos"],
+  "capabilities": ["fivem.profiles"],
+  "slots": [
+    "Game.Mods",
+    "Library.Import"
+  ],
+  "events": []
+}

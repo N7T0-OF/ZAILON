@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     hash::{Hash, Hasher},
-    io::{copy, Cursor, Read, Write},
+    io::{copy, Cursor, Read, Seek, Write},
     path::{Path, PathBuf},
     process::Command,
     sync::{
@@ -22,7 +22,9 @@ use tauri::menu::{Menu, MenuItem};
 #[cfg(desktop)]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
+mod cyberpunk_fomod;
 mod input_backends;
+mod open77;
 mod process_priority;
 mod process_scanner;
 mod quick_panel;
@@ -501,6 +503,8 @@ struct ModImportCandidate {
     warnings: Vec<String>,
     sensitive_files: Vec<SensitiveFileAssessment>,
     recognized_destinations: Vec<String>,
+    fomod: Option<cyberpunk_fomod::FomodArchivePlan>,
+    import_blocked_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -4493,7 +4497,7 @@ fn is_probable_mod_root(path: &Path) -> bool {
             )
         );
     }
-    if !metadata_files(path).is_empty() {
+    if directory_has_direct_fomod_module_config(path) || !metadata_files(path).is_empty() {
         return true;
     }
     WalkDir::new(path)
@@ -4795,6 +4799,22 @@ fn import_candidate_roots(path: &Path) -> Vec<PathBuf> {
     if path.is_file() {
         return vec![path.to_path_buf()];
     }
+    if directory_has_direct_fomod_module_config(path) {
+        return vec![path.to_path_buf()];
+    }
+
+    // Keep each extracted FOMOD as one blocked candidate. Do not let the
+    // Cyberpunk layout scanner split its payload into importable fragments.
+    let fomod_roots = WalkDir::new(path)
+        .max_depth(10)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_dir())
+        .map(|entry| entry.into_path())
+        .filter(|directory| directory_has_direct_fomod_module_config(directory))
+        .collect::<Vec<_>>();
+
     let cyberpunk_locations = [
         "archive/pc/mod",
         "r6/scripts",
@@ -4806,13 +4826,13 @@ fn import_candidate_roots(path: &Path) -> Vec<PathBuf> {
         "tools",
         "engine",
     ];
-    let mut specialized = Vec::new();
+    let mut candidates = Vec::new();
     for location in cyberpunk_locations {
         let Some(directory) = case_insensitive_relative(path, location) else {
             continue;
         };
         if let Ok(entries) = fs::read_dir(directory) {
-            specialized.extend(
+            candidates.extend(
                 entries
                     .filter_map(Result::ok)
                     .map(|entry| entry.path())
@@ -4829,17 +4849,47 @@ fn import_candidate_roots(path: &Path) -> Vec<PathBuf> {
             );
         }
     }
+
+    // A collection folder can mix a FOMOD with ordinary sibling mods. When a
+    // FOMOD is present, inspect those siblings too; skip wrapper directories
+    // that merely contain a deeper FOMOD so they do not duplicate its payload.
+    if !fomod_roots.is_empty() {
+        candidates.extend(
+            fs::read_dir(path)
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|entry| {
+                    is_probable_mod_root(entry)
+                        && !fomod_roots
+                            .iter()
+                            .any(|fomod_root| fomod_root == entry || fomod_root.starts_with(entry))
+                }),
+        );
+        candidates.extend(fomod_roots.iter().cloned());
+    }
+
     let mut seen = HashSet::new();
-    specialized.retain(|candidate| {
+    candidates.retain(|candidate| {
+        // Discard only descendants, not the FOMOD root itself. The root must
+        // remain visible so the UI can explain why the generic import is blocked.
+        if fomod_roots
+            .iter()
+            .any(|fomod_root| candidate != fomod_root && candidate.starts_with(fomod_root))
+        {
+            return false;
+        }
         let key = candidate
             .to_string_lossy()
             .replace('\\', "/")
             .to_ascii_lowercase();
         seen.insert(key)
     });
-    if !specialized.is_empty() {
-        return specialized;
+    if !candidates.is_empty() {
+        return candidates;
     }
+
     let direct = fs::read_dir(path)
         .into_iter()
         .flatten()
@@ -5956,6 +6006,207 @@ fn mods_folder_fingerprint(mods_path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn analyze_cyberpunk_fomod(
+    archive_path: String,
+) -> Result<cyberpunk_fomod::FomodArchivePlan, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        cyberpunk_fomod::analyze_archive(Path::new(&archive_path))
+    })
+    .await
+    .map_err(|_| "The Cyberpunk FOMOD analysis stopped unexpectedly.".to_string())?
+}
+
+fn is_cyberpunk_game_name(game_name: &str) -> bool {
+    game_name.to_ascii_lowercase().contains("cyberpunk")
+}
+
+fn is_zip_archive_file(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    File::open(path)
+        .ok()
+        .and_then(|file| zip::ZipArchive::new(file).ok())
+        .is_some()
+}
+
+fn is_cyberpunk_zip_source(path: &Path, game_name: &str) -> bool {
+    is_cyberpunk_game_name(game_name)
+        && path.is_file()
+        && (path
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+            || is_zip_archive_file(path))
+}
+
+fn analyze_cyberpunk_zip_candidate(
+    path: &Path,
+) -> (Option<cyberpunk_fomod::FomodArchivePlan>, Option<String>) {
+    match cyberpunk_fomod::analyze_if_fomod(path) {
+        Ok(plan) => (plan, None),
+        Err(error) => (
+            None,
+            Some(format!(
+                "Cette archive Cyberpunk n’a pas pu être inspectée sans risque : {error}"
+            )),
+        ),
+    }
+}
+
+fn is_fomod_module_config_path(name: &str) -> bool {
+    let normalized = name.replace('\\', "/");
+    let mut components = normalized
+        .rsplit('/')
+        .filter(|component| !component.is_empty());
+    let Some(file_name) = components.next() else {
+        return false;
+    };
+    let Some(parent) = components.next() else {
+        return false;
+    };
+    file_name.eq_ignore_ascii_case("ModuleConfig.xml") && parent.eq_ignore_ascii_case("fomod")
+}
+
+fn zip_has_fomod_module_config<R: Read + Seek>(
+    archive: &mut zip::ZipArchive<R>,
+) -> Result<bool, String> {
+    if archive.len() > 100_000 {
+        return Err("FOMOD archive contains too many entries.".into());
+    }
+    for index in 0..archive.len() {
+        let entry = archive
+            .by_index(index)
+            .map_err(|error| format!("Cannot inspect ZIP entry: {error}"))?;
+        let name = entry.name().replace('\\', "/");
+        if !entry.is_dir() && is_fomod_module_config_path(&name) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn archive_file_has_fomod_module_config(path: &Path) -> Result<bool, String> {
+    if !path.is_file() {
+        return Ok(false);
+    }
+    let file = File::open(path).map_err(to_error)?;
+    match zip::ZipArchive::new(file) {
+        Ok(mut archive) => zip_has_fomod_module_config(&mut archive),
+        Err(_) => Ok(false),
+    }
+}
+
+fn archive_file_has_fomod_or_is_uninspectable(path: &Path) -> Result<bool, String> {
+    if !path.is_file() {
+        return Ok(false);
+    }
+    let file = File::open(path).map_err(to_error)?;
+    match zip::ZipArchive::new(file) {
+        Ok(mut archive) => zip_has_fomod_module_config(&mut archive),
+        Err(_) => Ok(path
+            .extension()
+            .is_some_and(|value| value.eq_ignore_ascii_case("zip"))),
+    }
+}
+
+fn has_extracted_fomod_module_config(root: &Path) -> Result<bool, String> {
+    if !root.is_dir() {
+        return Ok(false);
+    }
+    let root = fs::canonicalize(root).map_err(to_error)?;
+    let mut visited = 0usize;
+    for entry in WalkDir::new(root).follow_links(false).into_iter() {
+        let entry =
+            entry.map_err(|error| format!("Cannot safely inspect import folder: {error}"))?;
+        visited += 1;
+        if visited > 100_000 {
+            return Err("Import folder is too large to rule out an extracted FOMOD safely.".into());
+        }
+        let path = entry.path();
+        if path.file_name().is_some_and(|name| {
+            name.to_string_lossy()
+                .eq_ignore_ascii_case("ModuleConfig.xml")
+        }) && path
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("fomod"))
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn has_extracted_fomod_context(path: &Path) -> Result<bool, String> {
+    let path = fs::canonicalize(path).map_err(to_error)?;
+    if path.is_dir() && has_extracted_fomod_module_config(&path)? {
+        return Ok(true);
+    }
+    let start = if path.is_dir() {
+        Some(path.as_path())
+    } else {
+        path.parent()
+    };
+    if let Some(start) = start {
+        for ancestor in start.ancestors() {
+            if case_insensitive_relative(ancestor, "fomod/ModuleConfig.xml")
+                .is_some_and(|config| config.is_file())
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn directory_has_direct_fomod_module_config(root: &Path) -> bool {
+    case_insensitive_relative(root, "fomod/ModuleConfig.xml").is_some_and(|config| config.is_file())
+}
+
+fn generic_import_block_reason(source: &Path, game_name: &str) -> Result<Option<String>, String> {
+    if has_extracted_fomod_context(source)? {
+        return Ok(Some(if is_cyberpunk_game_name(game_name) {
+            "Cette source appartient à un dossier FOMOD extrait (ou à l’un de ses sous-dossiers) : l’import générique est bloqué. Sélectionnez le ZIP d’origine via « ZIP / FOMOD » pour choisir les options."
+        } else {
+            "Cette source appartient à un dossier FOMOD extrait (ou à l’un de ses sous-dossiers) : l’import générique est bloqué afin de ne pas ignorer les options FOMOD."
+        }.into()));
+    }
+    if source.is_file() && archive_file_has_fomod_or_is_uninspectable(source)? {
+        return Ok(Some(if is_cyberpunk_game_name(game_name) {
+            "Cette archive contient un FOMOD : utilisez l’assistant « ZIP / FOMOD » de Cyberpunk au lieu de l’import générique."
+        } else {
+            "Cette archive contient un FOMOD ; l’import générique risquerait d’ignorer ses options et est bloqué."
+        }.into()));
+    }
+    if is_cyberpunk_zip_source(source, game_name) {
+        return Ok(Some("Les archives ZIP Cyberpunk ne sont jamais importées comme des fichiers. Utilisez l’assistant FOMOD ou extrayez une archive sans FOMOD pour sélectionner son contenu.".into()));
+    }
+    Ok(None)
+}
+
+fn validate_generic_mod_import_source(source: &Path, game_name: &str) -> Result<(), String> {
+    let source = fs::canonicalize(source).map_err(to_error)?;
+    if !source.exists() {
+        return Err("One of the selected import sources no longer exists.".into());
+    }
+    if let Some(reason) = generic_import_block_reason(&source, game_name)? {
+        return Err(reason);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn validate_mod_import_sources(paths: Vec<String>, game_name: String) -> Result<(), String> {
+    if paths.is_empty() {
+        return Err("Select at least one mod.".into());
+    }
+    for path in paths {
+        validate_generic_mod_import_source(Path::new(&path), &game_name)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn scan_mod_import(
     paths: Vec<String>,
     game_name: String,
@@ -5970,7 +6221,63 @@ fn scan_mod_import(
         if !path.exists() {
             continue;
         }
-        for root in import_candidate_roots(&path) {
+        if is_cyberpunk_zip_source(&path, &game_name) {
+            let canonical = fs::canonicalize(&path).map_err(to_error)?;
+            if !unique.insert(canonical.clone()) {
+                continue;
+            }
+            let inspected = inspect_native_mod(&canonical);
+            let (fomod, inspection_warning) = analyze_cyberpunk_zip_candidate(&canonical);
+            let root_detection = detect_candidate_root(&canonical);
+            let detected_framework =
+                detect_cyberpunk_framework(&root_detection.detected_root, &inspected.files);
+            let mut warnings = fomod
+                .as_ref()
+                .map(|plan| plan.warnings.clone())
+                .unwrap_or_default();
+            if let Some(warning) = inspection_warning {
+                warnings.push(warning);
+            } else if fomod.is_none() {
+                warnings.push("Archive ZIP Cyberpunk sans `fomod/ModuleConfig.xml` : sélectionnez son dossier de contenu après extraction ; l’archive ne sera pas importée comme un fichier.".into());
+            }
+            candidates.push(ModImportCandidate {
+                id: inspected.id.clone(),
+                name: fomod.as_ref().map(|plan| plan.name.clone()).unwrap_or(inspected.name),
+                path: canonical.to_string_lossy().to_string(),
+                source_path: canonical.to_string_lossy().to_string(),
+                detected_root: root_detection.detected_root.to_string_lossy().to_string(),
+                detected_framework,
+                relative_game_paths: root_detection.relative_game_paths,
+                stripped_segments: root_detection.stripped_segments,
+                root_confidence: root_detection.confidence.clone(),
+                root_reason: root_detection.reason,
+                enabled: false,
+                mod_type: "Archive".into(),
+                size_bytes: inspected.size_bytes,
+                files: inspected.files,
+                fingerprint: inspected.fingerprint,
+                framework: inspected.framework,
+                manifests: inspected.manifests,
+                source_url: inspected.source_url,
+                version: inspected.version,
+                confidence: root_detection.confidence,
+                warnings,
+                sensitive_files: Vec::new(),
+                recognized_destinations: Vec::new(),
+                fomod,
+                import_blocked_reason: Some("Une archive ZIP Cyberpunk ne passe pas par l’import générique. Configurez son FOMOD ou extrayez une archive sans FOMOD pour choisir son contenu.".into()),
+            });
+            continue;
+        }
+        let canonical_selected = fs::canonicalize(&path).map_err(to_error)?;
+        let candidate_roots = if canonical_selected.is_dir()
+            && directory_has_direct_fomod_module_config(&canonical_selected)
+        {
+            vec![canonical_selected]
+        } else {
+            import_candidate_roots(&path)
+        };
+        for root in candidate_roots {
             let canonical = fs::canonicalize(&root).map_err(to_error)?;
             if !unique.insert(canonical.clone()) {
                 continue;
@@ -5984,6 +6291,12 @@ fn scan_mod_import(
                 || !inspected.manifests.is_empty();
             let mut warnings = Vec::new();
             let sensitive_files = assess_sensitive_files(&canonical, &game_name)?;
+            let import_blocked_reason = generic_import_block_reason(&canonical, &game_name)?;
+            let fomod = if is_cyberpunk_zip_source(&canonical, &game_name) {
+                cyberpunk_fomod::analyze_if_fomod(&canonical)?
+            } else {
+                None
+            };
             let mut destinations = root_detection.relative_game_paths.clone();
             if destinations.is_empty() {
                 destinations = recognized_destinations(&inspected.files);
@@ -5991,10 +6304,25 @@ fn scan_mod_import(
             if inspected.source_url.is_none() {
                 warnings.push("Aucune source exacte détectée : aucune mise à jour automatique ne sera autorisée.".into());
             }
-            if inspected.framework == "Generic" {
+            if inspected.framework == "Generic" && fomod.is_none() {
                 warnings.push(format!(
                     "Structure générique pour {game_name} : vérifiez la destination avant import."
                 ));
+            }
+            if canonical.is_file()
+                && canonical
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+                && fomod.is_none()
+                && game_name.to_ascii_lowercase().contains("cyberpunk")
+            {
+                warnings.push("Archive ZIP reconnue, mais sans FOMOD pris en charge : l’archive ne sera pas installée comme un simple fichier. Importez un dossier extrait.".into());
+            }
+            if let Some(plan) = &fomod {
+                warnings.extend(plan.warnings.iter().cloned());
+            }
+            if let Some(reason) = &import_blocked_reason {
+                warnings.push(reason.clone());
             }
             if !sensitive_files.is_empty() {
                 warnings.push(format!(
@@ -6002,9 +6330,13 @@ fn scan_mod_import(
                     sensitive_files.len()
                 ));
             }
+            let candidate_name = fomod
+                .as_ref()
+                .map(|plan| plan.name.clone())
+                .unwrap_or_else(|| inspected.name.clone());
             candidates.push(ModImportCandidate {
                 id: inspected.id.clone(),
-                name: inspected.name,
+                name: candidate_name,
                 path: inspected.path.clone(),
                 source_path: inspected.path,
                 detected_root: root_detection.detected_root.to_string_lossy().to_string(),
@@ -6030,6 +6362,8 @@ fn scan_mod_import(
                 warnings,
                 sensitive_files,
                 recognized_destinations: destinations,
+                fomod,
+                import_blocked_reason,
             });
         }
     }
@@ -6061,7 +6395,16 @@ fn scan_mod_import_background_impl(
         }
         let path = PathBuf::from(selected);
         if path.exists() {
-            for root in import_candidate_roots(&path) {
+            let canonical_selected = fs::canonicalize(&path).map_err(to_error)?;
+            let candidate_roots = if is_cyberpunk_zip_source(&canonical_selected, &game_name)
+                || (canonical_selected.is_dir()
+                    && directory_has_direct_fomod_module_config(&canonical_selected))
+            {
+                vec![canonical_selected]
+            } else {
+                import_candidate_roots(&canonical_selected)
+            };
+            for root in candidate_roots {
                 let canonical = fs::canonicalize(&root).map_err(to_error)?;
                 if unique.insert(canonical.clone()) {
                     roots.push(canonical);
@@ -6097,6 +6440,63 @@ fn scan_mod_import_background_impl(
         if cancel.load(Ordering::Relaxed) {
             return Err("TASK_CANCELLED".into());
         }
+        if is_cyberpunk_zip_source(&canonical, &game_name) {
+            let inspected = inspect_native_mod(&canonical);
+            let (fomod, inspection_warning) = analyze_cyberpunk_zip_candidate(&canonical);
+            let root_detection = detect_candidate_root(&canonical);
+            let detected_framework =
+                detect_cyberpunk_framework(&root_detection.detected_root, &inspected.files);
+            let mut warnings = fomod
+                .as_ref()
+                .map(|plan| plan.warnings.clone())
+                .unwrap_or_default();
+            if let Some(warning) = inspection_warning {
+                warnings.push(warning);
+            } else if fomod.is_none() {
+                warnings.push("Archive ZIP Cyberpunk sans `fomod/ModuleConfig.xml` : sélectionnez son dossier de contenu après extraction ; l’archive ne sera pas importée comme un fichier.".into());
+            }
+            let name = fomod
+                .as_ref()
+                .map(|plan| plan.name.clone())
+                .unwrap_or_else(|| inspected.name.clone());
+            candidates.push(ModImportCandidate {
+                id: inspected.id.clone(),
+                name: name.clone(),
+                path: canonical.to_string_lossy().to_string(),
+                source_path: canonical.to_string_lossy().to_string(),
+                detected_root: root_detection.detected_root.to_string_lossy().to_string(),
+                detected_framework,
+                relative_game_paths: root_detection.relative_game_paths,
+                stripped_segments: root_detection.stripped_segments,
+                root_confidence: root_detection.confidence.clone(),
+                root_reason: root_detection.reason,
+                enabled: false,
+                mod_type: "Archive".into(),
+                size_bytes: inspected.size_bytes,
+                files: inspected.files,
+                fingerprint: inspected.fingerprint,
+                framework: inspected.framework,
+                manifests: inspected.manifests,
+                source_url: inspected.source_url,
+                version: inspected.version,
+                confidence: root_detection.confidence,
+                warnings,
+                sensitive_files: Vec::new(),
+                recognized_destinations: Vec::new(),
+                fomod,
+                import_blocked_reason: Some("Une archive ZIP Cyberpunk ne passe pas par l’import générique. Configurez son FOMOD ou extrayez une archive sans FOMOD pour choisir son contenu.".into()),
+            });
+            report_background_task(
+                app,
+                registry,
+                Some(channel),
+                task_id,
+                index as u64 + 1,
+                total,
+                format!("Analyse de {name} ({}/{total})", index + 1),
+            );
+            continue;
+        }
         let inspected = inspect_native_mod(&canonical);
         let root_detection = detect_candidate_root(&canonical);
         let detected_framework =
@@ -6106,6 +6506,7 @@ fn scan_mod_import_background_impl(
             || !inspected.manifests.is_empty();
         let mut warnings = Vec::new();
         let sensitive_files = assess_sensitive_files(&canonical, &game_name)?;
+        let import_blocked_reason = generic_import_block_reason(&canonical, &game_name)?;
         let mut destinations = root_detection.relative_game_paths.clone();
         if destinations.is_empty() {
             destinations = recognized_destinations(&inspected.files);
@@ -6121,6 +6522,9 @@ fn scan_mod_import_background_impl(
                 "Structure générique pour {game_name} : vérifiez la destination avant import."
             ));
         }
+        if let Some(reason) = &import_blocked_reason {
+            warnings.push(reason.clone());
+        }
         if !sensitive_files.is_empty() {
             warnings.push(format!(
                 "{} fichier(s) sensible(s) détecté(s) : une décision sera demandée avant import.",
@@ -6130,7 +6534,7 @@ fn scan_mod_import_background_impl(
         let name = inspected.name.clone();
         candidates.push(ModImportCandidate {
             id: inspected.id.clone(),
-            name: inspected.name,
+            name: name.clone(),
             path: inspected.path.clone(),
             source_path: inspected.path,
             detected_root: root_detection.detected_root.to_string_lossy().to_string(),
@@ -6156,6 +6560,8 @@ fn scan_mod_import_background_impl(
             warnings,
             sensitive_files,
             recognized_destinations: destinations,
+            fomod: None,
+            import_blocked_reason,
         });
         report_background_task(
             app,
@@ -9893,6 +10299,12 @@ fn validate_archive_relative(path: &Path) -> Result<(), String> {
 }
 
 fn copy_tree(source: &Path, destination: &Path) -> Result<(), String> {
+    if has_extracted_fomod_context(source)? {
+        return Err("Une source appartenant à un dossier FOMOD extrait ne peut pas passer par l’import générique ; sélectionnez l’archive ZIP originale pour choisir les options.".into());
+    }
+    if source.is_file() && archive_file_has_fomod_or_is_uninspectable(source)? {
+        return Err("Une archive FOMOD ou illisible ne peut pas passer par l’import générique ; utilisez l’assistant FOMOD ou inspectez l’archive avant import.".into());
+    }
     if source.is_file() {
         if forbidden_archive_file(source) {
             return Err("Sensitive files must use ZAILON's secure import flow.".into());
@@ -9945,6 +10357,29 @@ fn unique_destination(directory: &Path, name: &str) -> PathBuf {
         .unwrap_or_else(|| directory.join(format!("{safe}-{}", unix_timestamp())))
 }
 
+struct DirectoryCleanupGuard {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl DirectoryCleanupGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn preserve(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for DirectoryCleanupGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
 #[tauri::command]
 fn import_mod_candidates(paths: Vec<String>, destination: String) -> Result<Vec<String>, String> {
     if paths.is_empty() {
@@ -9956,7 +10391,8 @@ fn import_mod_candidates(paths: Vec<String>, destination: String) -> Result<Vec<
     if stage.exists() {
         return Err("An import staging directory already exists.".into());
     }
-    fs::create_dir_all(&stage).map_err(to_error)?;
+    fs::create_dir(&stage).map_err(to_error)?;
+    let _stage_cleanup = DirectoryCleanupGuard::new(stage.clone());
     let result = (|| {
         let mut staged = Vec::new();
         for source in paths {
@@ -9987,7 +10423,6 @@ fn import_mod_candidates(paths: Vec<String>, destination: String) -> Result<Vec<
         }
         Ok(installed)
     })();
-    let _ = fs::remove_dir_all(&stage);
     result
 }
 
@@ -9998,6 +10433,12 @@ fn copy_tree_cancellable(
 ) -> Result<(), String> {
     if cancel.load(Ordering::Relaxed) {
         return Err("TASK_CANCELLED".into());
+    }
+    if has_extracted_fomod_context(source)? {
+        return Err("Une source appartenant à un dossier FOMOD extrait ne peut pas passer par l’import générique ; l’archive d’origine est nécessaire pour choisir ses options.".into());
+    }
+    if source.is_file() && archive_file_has_fomod_or_is_uninspectable(source)? {
+        return Err("Une archive FOMOD ou ZIP illisible ne peut pas passer par l’import générique ; inspectez l’archive avant import.".into());
     }
     if source.is_file() {
         if let Some(parent) = destination.parent() {
@@ -10144,6 +10585,12 @@ fn copy_tree_cancellable_secure(
     if cancel.load(Ordering::Relaxed) {
         return Err("TASK_CANCELLED".into());
     }
+    if has_extracted_fomod_context(source)? {
+        return Err("Une source appartenant à un dossier FOMOD extrait ne peut pas passer par l’import générique ; sélectionnez le ZIP original pour choisir les options.".into());
+    }
+    if source.is_file() && archive_file_has_fomod_or_is_uninspectable(source)? {
+        return Err("Une archive FOMOD ou illisible ne peut pas passer par l’import générique ; inspectez l’archive avant de choisir le flux d’import.".into());
+    }
     if source.is_file() {
         return copy_sensitive_aware_file(source, destination, context);
     }
@@ -10259,6 +10706,7 @@ fn stage_content(
     cancel: &AtomicBool,
     security: &mut SensitiveImportContext,
 ) -> Result<(String, Vec<String>), String> {
+    validate_generic_mod_import_source(source, game_name)?;
     let lower_game = game_name.to_ascii_lowercase();
     let cyberpunk = lower_game.contains("cyberpunk");
     let fivem_client = lower_game.contains("fivem");
@@ -13746,6 +14194,369 @@ fn repair_mo2_profile_deployment(
     })
 }
 
+fn import_cyberpunk_fomod_with_staging(
+    app: &AppHandle,
+    registry: &BackgroundTaskRegistry,
+    channel: Option<&Channel<BackgroundTaskEvent>>,
+    task_id: &str,
+    game_id: &str,
+    profile_ids: &[String],
+    archive_path: &Path,
+    game_name: &str,
+    destination: &str,
+    deploy_now: bool,
+    expected_archive_fingerprint: &str,
+    selected_ids: &[String],
+    cancel: &AtomicBool,
+) -> Result<SecureImportResult, String> {
+    if !game_name.to_ascii_lowercase().contains("cyberpunk") {
+        return Err("FOMOD Cyberpunk import is only available for Cyberpunk 2077.".into());
+    }
+    let game_id = safe_game_id(game_id)?;
+    let archive_path = fs::canonicalize(archive_path).map_err(to_error)?;
+    if !archive_path.is_file()
+        || (!archive_path
+            .extension()
+            .is_some_and(|value| value.eq_ignore_ascii_case("zip"))
+            && !is_zip_archive_file(&archive_path))
+    {
+        return Err("Select a ZIP archive containing a FOMOD installer.".into());
+    }
+    if destination.trim().is_empty() {
+        return Err("Configure the Cyberpunk game destination before importing.".into());
+    }
+    if !archive_file_has_fomod_module_config(&archive_path)? {
+        return Err(
+            "Cette archive ne contient plus de FOMOD reconnu ; relancez l’analyse avant l’import."
+                .into(),
+        );
+    }
+    if cancel.load(Ordering::Relaxed) {
+        return Err("TASK_CANCELLED".into());
+    }
+
+    let plan = cyberpunk_fomod::analyze_archive(&archive_path)?;
+    if expected_archive_fingerprint.is_empty()
+        || !plan
+            .archive_fingerprint
+            .eq_ignore_ascii_case(expected_archive_fingerprint)
+    {
+        return Err("L’archive FOMOD a changé depuis son aperçu ; relancez l’analyse avant de choisir les options.".into());
+    }
+    let archive_fingerprint = plan.archive_fingerprint.clone();
+    let mut canonical_ids = selected_ids.to_vec();
+    canonical_ids.sort();
+    cyberpunk_fomod::validate_selection(&plan, &canonical_ids)?;
+    let selection_fingerprint = format!("{}:{}", archive_fingerprint, canonical_ids.join("|"));
+    let mut selection_hasher = Sha256::new();
+    selection_hasher.update(selection_fingerprint.as_bytes());
+    let package_fingerprint = format!("{:x}", selection_hasher.finalize());
+    let staging_root = staged_mods_root(app, game_id)?;
+    fs::create_dir_all(&staging_root).map_err(to_error)?;
+    if let Some(existing_stage) = staged_package_by_fingerprint(&staging_root, &package_fingerprint)
+    {
+        let existing_manifest_path = existing_stage.join("manifest.json");
+        let existing_manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&existing_manifest_path).map_err(to_error)?)
+                .map_err(to_error)?;
+        let fomod_metadata = existing_manifest
+            .get("fomod")
+            .ok_or_else(|| "Le paquet portant cette empreinte n’est pas un paquet FOMOD vérifié ; aucun profil n’a été modifié.".to_string())?;
+        let mut existing_selected_ids = fomod_metadata
+            .get("selectedOptionIds")
+            .and_then(|value| value.as_array())
+            .ok_or_else(|| {
+                "Le manifeste FOMOD existant ne contient pas sa sélection vérifiable.".to_string()
+            })?
+            .iter()
+            .map(|value| {
+                value.as_str().map(ToOwned::to_owned).ok_or_else(|| {
+                    "Le manifeste FOMOD contient un identifiant invalide.".to_string()
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        existing_selected_ids.sort();
+        existing_selected_ids.dedup();
+        if existing_manifest
+            .get("fingerprint")
+            .and_then(|value| value.as_str())
+            != Some(package_fingerprint.as_str())
+            || fomod_metadata
+                .get("supportStatus")
+                .and_then(|value| value.as_str())
+                != Some("supported")
+            || fomod_metadata
+                .get("archiveFingerprint")
+                .and_then(|value| value.as_str())
+                != Some(archive_fingerprint.as_str())
+            || existing_selected_ids != canonical_ids
+        {
+            return Err("Le manifeste du paquet FOMOD existant ne correspond pas à cette sélection vérifiée.".into());
+        }
+        for profile_id in profile_ids {
+            attach_staged_package_to_profile(&existing_stage, profile_id)?;
+        }
+        if deploy_now {
+            let mut manifest = existing_manifest;
+            manifest["deploymentStatus"] = serde_json::json!("enabled");
+            manifest["lastReusedAt"] = serde_json::json!(unix_timestamp());
+            write_json_atomic(&existing_manifest_path, &manifest)?;
+        }
+        package_manifest_entries(&existing_stage, game_id, true)?;
+        return Ok(SecureImportResult {
+            installed_paths: vec![existing_stage.to_string_lossy().to_string()],
+            status: "Completed".into(),
+            warnings: vec![format!(
+                "{} · sélection FOMOD identique déjà staged, paquet réutilisé.",
+                plan.name
+            )],
+            sensitive_files: Vec::new(),
+            quarantine_paths: Vec::new(),
+        });
+    }
+
+    let stage_directory = unique_destination(&staging_root, &package_fingerprint);
+    fs::create_dir(&stage_directory).map_err(to_error)?;
+    let mut stage_cleanup = DirectoryCleanupGuard::new(stage_directory.clone());
+    let stage_id = stage_directory
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "Invalid staged FOMOD package identifier.".to_string())?
+        .to_string();
+    let quarantine_parent = update_data_root(app)?.join("quarantine");
+    fs::create_dir_all(&quarantine_parent).map_err(to_error)?;
+    let quarantine_root = unique_destination(&quarantine_parent, &format!("{task_id}-{stage_id}"));
+    fs::create_dir(&quarantine_root).map_err(to_error)?;
+    let mut quarantine_cleanup = DirectoryCleanupGuard::new(quarantine_root.clone());
+    let staged_content = stage_directory.join("content");
+    let selected_root = stage_directory.join(".fomod-selected-files");
+    let mut warnings = plan.warnings.clone();
+    let mut security = SensitiveImportContext {
+        action: "quarantine".into(),
+        game_name: game_name.to_string(),
+        framework_providers: HashSet::new(),
+        content_root: staged_content.clone(),
+        inactive_root: stage_directory.join("inactive-sensitive"),
+        quarantine_root,
+        assessments: Vec::new(),
+        quarantine_paths: Vec::new(),
+    };
+
+    let result = (|| {
+        let targets = cyberpunk_fomod::materialize_selected(
+            &archive_path,
+            &plan,
+            &canonical_ids,
+            &selected_root,
+        )?;
+        if cancel.load(Ordering::Relaxed) {
+            return Err("TASK_CANCELLED".into());
+        }
+        fs::create_dir_all(&staged_content).map_err(to_error)?;
+        report_background_task(
+            app,
+            registry,
+            channel,
+            task_id,
+            0,
+            targets.len() as u64,
+            format!(
+                "FOMOD {} · {} fichier(s) sélectionné(s), staging Cyberpunk…",
+                plan.name,
+                targets.len()
+            ),
+        );
+        let (layout, mut diagnostics) = stage_content(
+            &selected_root,
+            &staged_content,
+            game_name,
+            cancel,
+            &mut security,
+        )?;
+        let _ = fs::remove_dir_all(&selected_root);
+        if cancel.load(Ordering::Relaxed) {
+            return Err("TASK_CANCELLED".into());
+        }
+        if !security.assessments.is_empty() {
+            diagnostics.push(format!(
+                "{} fichier(s) sensible(s) évalué(s), jamais exécuté(s).",
+                security.assessments.len()
+            ));
+        }
+        let content_inspection = inspect_native_mod(&staged_content);
+        let explicit_framework =
+            detect_cyberpunk_framework(&staged_content, &content_inspection.files);
+        let status = if deploy_now { "enabled" } else { "stored" };
+        let selected_labels = plan
+            .steps
+            .iter()
+            .flat_map(|step| &step.groups)
+            .flat_map(|group| &group.options)
+            .filter(|option| canonical_ids.contains(&option.id))
+            .map(|option| serde_json::json!({ "id": option.id, "name": option.name }))
+            .collect::<Vec<_>>();
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "id": stage_id,
+            "name": plan.name,
+            "fingerprint": package_fingerprint,
+            "sourceFingerprint": archive_fingerprint,
+            "sourcePath": archive_path.to_string_lossy(),
+            "sourceFiles": [archive_path.file_name().and_then(|value| value.to_str()).unwrap_or("archive.zip")],
+            "framework": if explicit_framework == "Unknown" { "Cyberpunk 2077" } else { explicit_framework.as_str() },
+            "version": plan.version,
+            "sourceUrl": null,
+            "profiles": profile_ids,
+            "contentFiles": content_inspection.files,
+            "layout": layout,
+            "diagnostics": diagnostics,
+            "sensitiveFiles": security.assessments,
+            "quarantinePaths": security.quarantine_paths,
+            "quarantineRoot": if security.quarantine_paths.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(security.quarantine_root.to_string_lossy().to_string()) },
+            "sensitiveDecision": "quarantine",
+            "automaticExecution": false,
+            "stagedAt": unix_timestamp(),
+            "deploymentBackend": "TemporaryCopy",
+            "deploymentStatus": status,
+            "fomod": {
+                "schemaVersion": 1,
+                "archiveFingerprint": archive_fingerprint,
+                "selectedOptionIds": canonical_ids,
+                "selectedOptions": selected_labels,
+                "supportStatus": plan.support_status,
+                "warnings": plan.warnings,
+                "archiveFileName": archive_path.file_name().and_then(|value| value.to_str()).unwrap_or("archive.zip"),
+            }
+        });
+        write_json_atomic(&stage_directory.join("manifest.json"), &manifest)?;
+        write_sensitive_import_records(&security, &stage_directory, &archive_path)?;
+        package_manifest_entries(&stage_directory, game_id, true)?;
+        Ok::<(), String>(())
+    })();
+
+    let _ = fs::remove_dir_all(&selected_root);
+    if let Err(error) = result {
+        let _ = fs::remove_dir_all(&stage_directory);
+        let _ = fs::remove_dir_all(&security.quarantine_root);
+        return Err(error);
+    }
+    let sensitive_files = security.assessments.clone();
+    let quarantine_paths = security.quarantine_paths.clone();
+    if !quarantine_paths.is_empty() {
+        quarantine_cleanup.preserve();
+    }
+    stage_cleanup.preserve();
+    if !sensitive_files.is_empty() {
+        warnings.push(format!(
+            "{} fichier(s) sensible(s) isolé(s) ou contrôlé(s) ; aucun n’a été exécuté.",
+            sensitive_files.len()
+        ));
+    }
+    Ok(SecureImportResult {
+        installed_paths: vec![stage_directory.to_string_lossy().to_string()],
+        status: if sensitive_files.is_empty() {
+            "Completed"
+        } else {
+            "CompletedWithWarnings"
+        }
+        .into(),
+        warnings,
+        sensitive_files,
+        quarantine_paths,
+    })
+}
+
+#[tauri::command]
+async fn import_cyberpunk_fomod_background(
+    app: AppHandle,
+    state: State<'_, BackgroundTaskRegistry>,
+    task_id: String,
+    game_id: String,
+    profile_id: String,
+    archive_path: String,
+    game_name: String,
+    destination: String,
+    deploy_now: bool,
+    expected_archive_fingerprint: String,
+    selected_option_ids: Vec<String>,
+    on_event: Channel<BackgroundTaskEvent>,
+) -> Result<SecureImportResult, String> {
+    let registry = state.inner().clone();
+    let cancel = register_background_task(
+        &app,
+        &registry,
+        task_id.clone(),
+        "mod-import",
+        "Analyse et staging du FOMOD Cyberpunk",
+        1,
+    )?;
+    let worker_app = app.clone();
+    let worker_registry = registry.clone();
+    let worker_task_id = task_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        import_cyberpunk_fomod_with_staging(
+            &worker_app,
+            &worker_registry,
+            Some(&on_event),
+            &worker_task_id,
+            &game_id,
+            &[profile_id],
+            Path::new(&archive_path),
+            &game_name,
+            &destination,
+            deploy_now,
+            &expected_archive_fingerprint,
+            &selected_option_ids,
+            &cancel,
+        )
+    })
+    .await
+    .map_err(|_| "The background FOMOD import stopped unexpectedly.".to_string())?;
+    match &result {
+        Ok(import) => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            if import.status == "CompletedWithWarnings" {
+                "completed_with_warnings"
+            } else {
+                "completed"
+            },
+            format!(
+                "FOMOD Cyberpunk staged dans le store ZAILON : {} paquet(s).",
+                import.installed_paths.len()
+            ),
+            None,
+        ),
+        Err(error) if error == "TASK_CANCELLED" => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            "cancelled",
+            "Import FOMOD annulé ; aucun fichier existant n’a été écrasé.".into(),
+            None,
+        ),
+        Err(error) => finish_background_task(
+            &app,
+            &registry,
+            None,
+            &task_id,
+            "failed",
+            "Échec du staging FOMOD ; le paquet temporaire a été retiré.".into(),
+            Some(error.clone()),
+        ),
+    }
+    result.map_err(|error| {
+        if error == "TASK_CANCELLED" {
+            "Import FOMOD annulé.".into()
+        } else {
+            error
+        }
+    })
+}
+
 fn import_mods_with_staging(
     app: &AppHandle,
     registry: &BackgroundTaskRegistry,
@@ -13778,6 +14589,7 @@ fn import_mods_with_staging(
         if !source.exists() {
             return Err("One of the selected import sources no longer exists.".into());
         }
+        validate_generic_mod_import_source(&source, game_name)?;
         let inspected = inspect_native_mod(&source);
         if let Some(existing_stage) =
             staged_package_by_fingerprint(&staging_root, &inspected.fingerprint)
@@ -13830,11 +14642,19 @@ fn import_mods_with_staging(
             continue;
         }
         let stage_directory = unique_destination(&staging_root, &inspected.id);
+        fs::create_dir(&stage_directory).map_err(to_error)?;
+        let mut stage_cleanup = DirectoryCleanupGuard::new(stage_directory.clone());
         let stage_id = stage_directory
             .file_name()
             .and_then(|value| value.to_str())
             .ok_or_else(|| "Invalid stored mod identifier.".to_string())?
             .to_string();
+        let quarantine_parent = update_data_root(app)?.join("quarantine");
+        fs::create_dir_all(&quarantine_parent).map_err(to_error)?;
+        let quarantine_root =
+            unique_destination(&quarantine_parent, &format!("{task_id}-{stage_id}"));
+        fs::create_dir(&quarantine_root).map_err(to_error)?;
+        let mut quarantine_cleanup = DirectoryCleanupGuard::new(quarantine_root.clone());
         let staged_content = stage_directory.join("content");
         fs::create_dir_all(&staged_content).map_err(to_error)?;
         let mut security = SensitiveImportContext {
@@ -13843,9 +14663,7 @@ fn import_mods_with_staging(
             framework_providers: HashSet::new(),
             content_root: staged_content.clone(),
             inactive_root: stage_directory.join("inactive-sensitive"),
-            quarantine_root: update_data_root(app)?
-                .join("quarantine")
-                .join(format!("{task_id}-{stage_id}")),
+            quarantine_root,
             assessments: Vec::new(),
             quarantine_paths: Vec::new(),
         };
@@ -13908,6 +14726,7 @@ fn import_mods_with_staging(
             "schemaVersion": 2,
             "id": stage_id,
             "name": inspected.name.clone(),
+            "sourcePath": source.to_string_lossy(),
             "fingerprint": inspected.fingerprint.clone(),
             "sourceFingerprint": inspected.fingerprint.clone(),
             "framework": if explicit_framework == "Unknown" { inspected.framework.clone() } else { explicit_framework },
@@ -13939,10 +14758,12 @@ fn import_mods_with_staging(
             return Err(error);
         }
         if let Err(error) = package_manifest_entries(&stage_directory, game_id, true) {
-            let _ = fs::remove_dir_all(&stage_directory);
-            let _ = fs::remove_dir_all(&security.quarantine_root);
             return Err(error);
         }
+        if !security.quarantine_paths.is_empty() {
+            quarantine_cleanup.preserve();
+        }
+        stage_cleanup.preserve();
         installed.push(stage_directory.to_string_lossy().to_string());
         all_sensitive_files.extend(security.assessments.clone());
         all_quarantine_paths.extend(security.quarantine_paths.clone());
@@ -16272,7 +17093,10 @@ fn update_collection_install(
     Ok(plan)
 }
 
-fn extract_collection_zip(archive_path: &Path, destination: &Path) -> Result<PathBuf, String> {
+fn extract_collection_zip(
+    archive_path: &Path,
+    destination: &Path,
+) -> Result<(PathBuf, DirectoryCleanupGuard), String> {
     let extension = archive_path
         .extension()
         .and_then(|value| value.to_str())
@@ -16289,9 +17113,15 @@ fn extract_collection_zip(archive_path: &Path, destination: &Path) -> Result<Pat
     if archive.len() > 100_000 {
         return Err("L’archive ZIP contient trop d’entrées.".into());
     }
-    fs::create_dir_all(destination).map_err(to_error)?;
+    if zip_has_fomod_module_config(&mut archive)? {
+        return Err("Cette archive téléchargée contient un FOMOD. L’extraction automatique de la Collection est bloquée afin de préserver le choix de ses options.".into());
+    }
+    fs::create_dir(destination).map_err(to_error)?;
+    let cleanup = DirectoryCleanupGuard::new(destination.to_path_buf());
     const MAX_COLLECTION_EXTRACTED_BYTES: u64 = 32 * 1024 * 1024 * 1024;
     let extraction = (|| -> Result<(), String> {
+        let mut seen_paths = HashMap::<String, bool>::new();
+        let mut paths_with_children = HashSet::new();
         let mut total = 0u64;
         for index in 0..archive.len() {
             let mut entry = archive.by_index(index).map_err(to_error)?;
@@ -16302,11 +17132,50 @@ fn extract_collection_zip(archive_path: &Path, destination: &Path) -> Result<Pat
                 .enclosed_name()
                 .ok_or_else(|| "L’archive ZIP contient un chemin de traversal.".to_string())?;
             validate_archive_relative(&relative)?;
+            let path_key = relative
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/")
+                .to_lowercase();
+            if seen_paths.contains_key(&path_key) {
+                return Err(format!("L’archive ZIP contient des chemins dupliqués sans distinction de casse : {path_key}."));
+            }
+            let mut parent = Path::new(&path_key).parent();
+            while let Some(parent_path) = parent {
+                if parent_path.as_os_str().is_empty() {
+                    break;
+                }
+                if seen_paths.get(&parent_path.to_string_lossy().to_lowercase()) == Some(&false) {
+                    return Err(format!(
+                        "L’archive ZIP emploie un fichier comme parent d’un autre chemin : {}.",
+                        parent_path.display()
+                    ));
+                }
+                parent = parent_path.parent();
+            }
+            if !entry.is_dir() && paths_with_children.contains(&path_key) {
+                return Err(format!(
+                    "L’archive ZIP emploie un fichier comme parent d’un autre chemin : {path_key}."
+                ));
+            }
+            let mut ancestor = Path::new(&path_key).parent();
+            while let Some(parent_path) = ancestor {
+                if parent_path.as_os_str().is_empty() {
+                    break;
+                }
+                paths_with_children.insert(parent_path.to_string_lossy().to_lowercase());
+                ancestor = parent_path.parent();
+            }
+            seen_paths.insert(path_key.clone(), entry.is_dir());
             total = total.saturating_add(entry.size());
             if total > MAX_COLLECTION_EXTRACTED_BYTES {
                 return Err("L’archive ZIP dépasse la limite extraite de 32 Gio.".into());
             }
             let output = destination.join(relative);
+            if !output.starts_with(destination) {
+                return Err("L’archive ZIP échappe au dossier temporaire.".into());
+            }
             if entry.is_dir() {
                 fs::create_dir_all(&output).map_err(to_error)?;
             } else {
@@ -16314,16 +17183,20 @@ fn extract_collection_zip(archive_path: &Path, destination: &Path) -> Result<Pat
                     fs::create_dir_all(parent).map_err(to_error)?;
                 }
                 let mut file = fs::File::create(output).map_err(to_error)?;
-                copy(&mut entry, &mut file).map_err(to_error)?;
+                let copied = copy(&mut entry, &mut file).map_err(to_error)?;
+                if copied != entry.size() {
+                    return Err(format!(
+                        "L’entrée ZIP `{path_key}` a été tronquée pendant l’extraction."
+                    ));
+                }
             }
         }
         Ok(())
     })();
     if let Err(error) = extraction {
-        let _ = fs::remove_dir_all(destination);
         return Err(error);
     }
-    Ok(destination.to_path_buf())
+    Ok((destination.to_path_buf(), cleanup))
 }
 
 fn install_collection_downloads_inner(
@@ -16340,11 +17213,14 @@ fn install_collection_downloads_inner(
     let profile_path = profile_directory(app, game_id, &plan.profile_id)?.join("profile.json");
     let mut profile: serde_json::Value =
         serde_json::from_slice(&fs::read(&profile_path).map_err(to_error)?).map_err(to_error)?;
-    let work_root = plan_path
+    let work_parent = plan_path
         .parent()
         .ok_or_else(|| "Dossier du plan Collection invalide.".to_string())?
         .join("staging-work");
-    fs::create_dir_all(&work_root).map_err(to_error)?;
+    fs::create_dir_all(&work_parent).map_err(to_error)?;
+    let work_root = unique_destination(&work_parent, &format!("{task_id}-{install_id}"));
+    fs::create_dir(&work_root).map_err(to_error)?;
+    let _work_cleanup = DirectoryCleanupGuard::new(work_root.clone());
     let mut installed_paths = Vec::new();
     let mut operation_warnings = Vec::new();
     let installable = plan
@@ -16394,7 +17270,8 @@ fn install_collection_downloads_inner(
             format!("Analyse de {}.", entry.display_name),
         );
         let staged = (|| -> Result<(PathBuf, SecureImportResult), String> {
-            let extracted = extract_collection_zip(&archive_path, &extraction)?;
+            let (extracted, _extraction_cleanup) =
+                extract_collection_zip(&archive_path, &extraction)?;
             let imported = import_mods_with_staging(
                 app,
                 registry,
@@ -16416,7 +17293,6 @@ fn install_collection_downloads_inner(
                 .ok_or_else(|| "Le staging n’a créé aucun paquet.".to_string())?;
             Ok((stage, imported))
         })();
-        let _ = fs::remove_dir_all(&extraction);
         match staged {
             Ok((stage, imported)) => {
                 let stage_id = stage
@@ -16467,8 +17343,6 @@ fn install_collection_downloads_inner(
         write_collection_install_plan(&plan_path, &plan)?;
         let _ = app.emit("collection-install-changed", plan.clone());
     }
-    let _ = fs::remove_dir_all(&work_root);
-
     let required_ready = plan
         .entries
         .iter()
@@ -17777,17 +18651,39 @@ async fn install_mod(
             }
         })
         .unwrap_or("https");
-    let quarantine_root = unique_destination(
-        &update_data_root(&app)?.join("quarantine"),
-        &format!("download-{}", unix_timestamp()),
-    );
-
-    if safe_name.to_ascii_lowercase().ends_with(".zip") {
-        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(to_error)?;
+    let is_named_zip = safe_name.to_ascii_lowercase().ends_with(".zip");
+    let mut maybe_archive = zip::ZipArchive::new(Cursor::new(bytes.clone())).ok();
+    if is_named_zip && maybe_archive.is_none() {
+        return Err("Le fichier annoncé comme ZIP n’est pas une archive lisible ; aucun téléchargement générique n’a été conservé.".into());
+    }
+    if maybe_archive.is_some() {
+        let mut archive = maybe_archive.take().expect("ZIP archive checked");
         if archive.len() > 100_000 {
             return Err("Mod archive contains too many entries.".into());
         }
-        let stage = destination.join(format!(".zailon-download-{}", unix_timestamp()));
+        if zip_has_fomod_module_config(&mut archive)? {
+            return Err(if is_cyberpunk_game_name(&game_name) {
+                "Cette archive téléchargée contient un installateur FOMOD. L’extraction automatique du catalogue est bloquée pour préserver le choix des options ; récupérez le ZIP original depuis sa source puis utilisez ZIP / FOMOD dans l’import Cyberpunk."
+            } else {
+                "Cette archive téléchargée contient un installateur FOMOD. L’extraction automatique du catalogue est bloquée pour ne pas ignorer ses options ; l’import FOMOD n’est actuellement disponible que pour Cyberpunk."
+            }.into());
+        }
+        let quarantine_root = unique_destination(
+            &update_data_root(&app)?.join("quarantine"),
+            &format!("download-{}", unix_timestamp()),
+        );
+        let stage = unique_destination(
+            &destination,
+            &format!(".zailon-download-{}", unix_timestamp()),
+        );
+        fs::create_dir(&stage).map_err(to_error)?;
+        let _stage_cleanup = DirectoryCleanupGuard::new(stage.clone());
+        let quarantine_parent = quarantine_root
+            .parent()
+            .ok_or_else(|| "Invalid quarantine path.".to_string())?;
+        fs::create_dir_all(quarantine_parent).map_err(to_error)?;
+        fs::create_dir(&quarantine_root).map_err(to_error)?;
+        let mut quarantine_cleanup = DirectoryCleanupGuard::new(quarantine_root.clone());
         let extract_root = stage.join(safe_archive_component(
             Path::new(&safe_name)
                 .file_stem()
@@ -17875,11 +18771,9 @@ async fn install_mod(
             Ok(())
         })();
         if let Err(error) = extraction {
-            let _ = fs::remove_dir_all(&stage);
-            let _ = fs::remove_dir_all(&quarantine_root);
             return Err(error);
         }
-        if !sensitive_files.is_empty() {
+        if !quarantine_paths.is_empty() {
             write_json_atomic(
                 &quarantine_root.join("assessment.json"),
                 &serde_json::to_value(&sensitive_files).map_err(to_error)?,
@@ -17905,7 +18799,9 @@ async fn install_mod(
                 .unwrap_or("mod"),
         );
         fs::rename(&extract_root, &final_path).map_err(to_error)?;
-        let _ = fs::remove_dir_all(&stage);
+        if !quarantine_paths.is_empty() {
+            quarantine_cleanup.preserve();
+        }
         let warning_count = sensitive_files
             .iter()
             .filter(|item| item.decision.as_deref() != Some("deployed-by-game-adapter"))
@@ -17931,8 +18827,18 @@ async fn install_mod(
             },
         })
     } else {
+        let quarantine_root = unique_destination(
+            &update_data_root(&app)?.join("quarantine"),
+            &format!("download-{}", unix_timestamp()),
+        );
         if forbidden_archive_file(Path::new(&safe_name)) {
-            fs::create_dir_all(quarantine_root.join("files")).map_err(to_error)?;
+            let quarantine_parent = quarantine_root
+                .parent()
+                .ok_or_else(|| "Invalid quarantine path.".to_string())?;
+            fs::create_dir_all(quarantine_parent).map_err(to_error)?;
+            fs::create_dir(&quarantine_root).map_err(to_error)?;
+            let mut quarantine_cleanup = DirectoryCleanupGuard::new(quarantine_root.clone());
+            fs::create_dir(quarantine_root.join("files")).map_err(to_error)?;
             let target = quarantine_root.join("files").join(&safe_name);
             fs::write(&target, bytes).map_err(to_error)?;
             restrict_quarantine_file(&target)?;
@@ -17955,6 +18861,7 @@ async fn install_mod(
                 &quarantine_root.join("source.json"),
                 &serde_json::json!({ "sourceProvider": source_provider, "sourceHost": parsed.host_str(), "fileName": safe_name, "game": game_name, "automaticExecution": false }),
             )?;
+            quarantine_cleanup.preserve();
             return Ok(DownloadedModResult {
                 path: String::new(),
                 status: "CompletedWithWarnings".into(),
@@ -19082,6 +19989,320 @@ mod tests {
             assessments: Vec::new(),
             quarantine_paths: Vec::new(),
         }
+    }
+
+    #[test]
+    fn directory_cleanup_guard_removes_staging_after_a_failed_transaction() {
+        let directory = std::env::temp_dir().join(format!(
+            "zailon-cleanup-guard-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("partial"), b"temporary").unwrap();
+        {
+            let _cleanup = DirectoryCleanupGuard::new(directory.clone());
+            assert!(directory.join("partial").is_file());
+        }
+        assert!(!directory.exists());
+    }
+
+    #[test]
+    fn identifies_fomod_module_config_paths_case_insensitively() {
+        assert!(is_fomod_module_config_path("fomod/ModuleConfig.xml"));
+        assert!(is_fomod_module_config_path(
+            "package\\FOMOD\\moduleconfig.XML"
+        ));
+        assert!(!is_fomod_module_config_path("fomod/info.xml"));
+        assert!(!is_fomod_module_config_path("not-fomod/ModuleConfig.xml"));
+        assert!(!is_fomod_module_config_path("ModuleConfig.xml"));
+    }
+
+    #[test]
+    fn generic_import_blocks_fomod_zips_and_extracted_folders_without_mutating_sources() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-fomod-import-guard-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let archive = root.join("fomod-package.bin");
+        write_addon_zip(
+            &archive,
+            &[
+                ("wrapper/FOMOD/ModuleConfig.XML", "<config />"),
+                ("payload/mod.archive", "mod data"),
+            ],
+        );
+        let archive_before = fs::read(&archive).unwrap();
+        assert!(archive_file_has_fomod_module_config(&archive).unwrap());
+        assert!(validate_generic_mod_import_source(&archive, "Test game").is_err());
+        let copied_archive = root.join("copied.bin");
+        assert!(copy_tree(&archive, &copied_archive).is_err());
+        assert!(!copied_archive.exists());
+        assert_eq!(fs::read(&archive).unwrap(), archive_before);
+
+        let extracted = root.join("extracted");
+        fs::create_dir_all(extracted.join("fomod")).unwrap();
+        fs::write(extracted.join("fomod/ModuleConfig.xml"), b"<config />").unwrap();
+        let config_before = fs::read(extracted.join("fomod/ModuleConfig.xml")).unwrap();
+        assert!(has_extracted_fomod_module_config(&extracted).unwrap());
+        assert!(validate_generic_mod_import_source(&extracted, "Cyberpunk 2077").is_err());
+        let copied_folder = root.join("copied-folder");
+        assert!(copy_tree(&extracted, &copied_folder).is_err());
+        assert!(!copied_folder.exists());
+        assert_eq!(
+            fs::read(extracted.join("fomod/ModuleConfig.xml")).unwrap(),
+            config_before
+        );
+
+        let cancel = AtomicBool::new(false);
+        let content = root.join("secure-content");
+        fs::create_dir_all(&content).unwrap();
+        let mut security = test_security_context(&root, &content, "Cyberpunk 2077", "quarantine");
+        assert!(
+            copy_tree_cancellable_secure(&extracted, &content, &cancel, &mut security).is_err()
+        );
+        assert!(fs::read_dir(&content).unwrap().next().is_none());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn scanning_a_collection_blocks_only_its_extracted_fomod_candidate() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-fomod-collection-scan-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let collection = root.join("collection");
+        let ordinary = collection.join("ordinary-mod");
+        let fomod = collection.join("fomod-mod");
+        fs::create_dir_all(&ordinary).unwrap();
+        fs::write(ordinary.join("regular.pak"), b"regular mod").unwrap();
+        fs::create_dir_all(fomod.join("fomod")).unwrap();
+        fs::create_dir_all(fomod.join("archive/pc/mod")).unwrap();
+        fs::write(fomod.join("fomod/ModuleConfig.xml"), b"<config />").unwrap();
+        fs::write(
+            fomod.join("archive/pc/mod/variant.archive"),
+            b"fomod variant",
+        )
+        .unwrap();
+
+        let roots = import_candidate_roots(&collection);
+        assert_eq!(roots.len(), 2);
+        assert!(roots.iter().any(|candidate| candidate == &ordinary));
+        assert!(roots.iter().any(|candidate| candidate == &fomod));
+        assert!(!roots.iter().any(|candidate| candidate == &collection));
+        assert!(!roots
+            .iter()
+            .any(|candidate| candidate.starts_with(&fomod) && candidate != &fomod));
+
+        let candidates = scan_mod_import(
+            vec![collection.to_string_lossy().to_string()],
+            "Cyberpunk 2077".into(),
+        )
+        .unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(
+            candidates
+                .iter()
+                .filter(|candidate| candidate.import_blocked_reason.is_some())
+                .count(),
+            1
+        );
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.name == "ordinary-mod"
+                && candidate.import_blocked_reason.is_none()));
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.import_blocked_reason.is_some()));
+        assert!(fomod.join("fomod/ModuleConfig.xml").is_file());
+        assert!(ordinary.join("regular.pak").is_file());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn generic_import_blocks_subfolders_inside_an_extracted_fomod() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-fomod-subfolder-guard-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let mod_root = root.join("Extracted Mod");
+        let content_subfolder = mod_root.join("archive/pc/mod");
+        fs::create_dir_all(mod_root.join("fomod")).unwrap();
+        fs::create_dir_all(&content_subfolder).unwrap();
+        fs::write(mod_root.join("fomod/ModuleConfig.xml"), b"<config />").unwrap();
+        fs::write(content_subfolder.join("variant.archive"), b"content").unwrap();
+
+        assert!(has_extracted_fomod_context(&mod_root).unwrap());
+        assert!(has_extracted_fomod_context(&content_subfolder).unwrap());
+        assert!(validate_generic_mod_import_source(&content_subfolder, "Cyberpunk 2077").is_err());
+        let nested_file = content_subfolder.join("variant.archive");
+        assert!(has_extracted_fomod_context(&nested_file).unwrap());
+        assert!(validate_generic_mod_import_source(&nested_file, "Cyberpunk 2077").is_err());
+        let copied_file = root.join("copied-file.archive");
+        assert!(copy_tree(&nested_file, &copied_file).is_err());
+        assert!(!copied_file.exists());
+        let copied = root.join("copied-content");
+        assert!(copy_tree(&content_subfolder, &copied).is_err());
+        assert!(!copied.exists());
+        assert!(mod_root.join("fomod/ModuleConfig.xml").is_file());
+        assert!(content_subfolder.join("variant.archive").is_file());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn generic_import_rejects_an_unreadable_zip_without_copying_it() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-unreadable-zip-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let archive = root.join("broken.zip");
+        fs::write(&archive, b"not a valid zip archive").unwrap();
+        assert!(archive_file_has_fomod_or_is_uninspectable(&archive).unwrap());
+        assert!(validate_generic_mod_import_source(&archive, "Test game").is_err());
+        let candidate = scan_mod_import(
+            vec![archive.to_string_lossy().to_string()],
+            "Cyberpunk 2077".into(),
+        )
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("unreadable ZIP candidate remains visible");
+        assert!(candidate.import_blocked_reason.is_some());
+        assert!(candidate
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("pas pu être inspectée")));
+        let copied = root.join("broken-copy.zip");
+        assert!(copy_tree(&archive, &copied).is_err());
+        assert!(!copied.exists());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn collection_zip_extractor_rejects_case_and_file_parent_collisions() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-collection-path-collision-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let fixtures: [(&str, &[(&str, &str)]); 4] = [
+            (
+                "case",
+                &[("Folder/mod.archive", "one"), ("folder/mod.archive", "two")],
+            ),
+            (
+                "file-first",
+                &[("parent", "file"), ("parent/child.archive", "child")],
+            ),
+            (
+                "file-last",
+                &[("parent/child.archive", "child"), ("parent", "file")],
+            ),
+            ("implicit-parent", &[("parent/child.archive", "child")]),
+        ];
+        for (name, entries) in fixtures {
+            let archive = root.join(format!("{name}.zip"));
+            let contents = entries
+                .iter()
+                .map(|(path, content)| (*path, *content))
+                .collect::<Vec<_>>();
+            write_addon_zip(&archive, &contents);
+            let extraction = root.join(format!("{name}-extracted"));
+            let result = extract_collection_zip(&archive, &extraction);
+            if name == "implicit-parent" {
+                let (extracted, cleanup) = result.expect("implicit parent directories are valid");
+                assert_eq!(
+                    fs::read(extracted.join("parent/child.archive")).unwrap(),
+                    b"child"
+                );
+                drop(cleanup);
+            } else {
+                assert!(result.is_err(), "fixture `{name}` must be rejected");
+                assert!(
+                    !extraction.exists(),
+                    "failed extraction must clean its temporary directory"
+                );
+            }
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn collection_zip_extractor_accepts_implicit_parent_directories() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-collection-implicit-directory-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let archive = root.join("nested.zip");
+        write_addon_zip(&archive, &[("parent/child.archive", "child")]);
+        let extraction = root.join("extracted");
+        let (extracted, cleanup) =
+            extract_collection_zip(&archive, &extraction).expect("extract nested entry");
+        assert_eq!(
+            fs::read(extracted.join("parent/child.archive")).unwrap(),
+            b"child"
+        );
+        drop(cleanup);
+        assert!(
+            !extraction.exists(),
+            "temporary collection extraction is cleaned up"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn collection_zip_extractor_refuses_fomod_before_creating_a_temp_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-collection-fomod-extract-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let archive = root.join("collection-file.zip");
+        write_addon_zip(
+            &archive,
+            &[
+                ("fomod/ModuleConfig.xml", "<config />"),
+                ("fomod/options/variant.archive", "option"),
+            ],
+        );
+        let archive_before = fs::read(&archive).unwrap();
+        let extraction = root.join("temporary-extraction");
+        let error = match extract_collection_zip(&archive, &extraction) {
+            Ok((_path, _cleanup)) => panic!("FOMOD collection ZIP must not be extracted"),
+            Err(error) => error,
+        };
+        assert!(error.contains("FOMOD"));
+        assert!(!extraction.exists());
+        assert_eq!(fs::read(&archive).unwrap(), archive_before);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn generic_import_still_accepts_a_non_fomod_zip_for_other_games() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-generic-zip-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let archive = root.join("ordinary.zip");
+        write_addon_zip(&archive, &[("readme.txt", "plain archive")]);
+        assert!(!archive_file_has_fomod_module_config(&archive).unwrap());
+        assert!(validate_generic_mod_import_source(&archive, "Test game").is_ok());
+        let copied = root.join("ordinary-copy.zip");
+        copy_tree(&archive, &copied).unwrap();
+        assert_eq!(fs::read(&archive).unwrap(), fs::read(&copied).unwrap());
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
@@ -21182,7 +22403,6 @@ mod tests {
             fs::write(mod_root.join(format!("mod-{index:03}.pak")), b"mod")
                 .expect("write mod file");
         }
-
         let candidates = scan_mod_import(
             vec![collection.to_string_lossy().to_string()],
             "Test game".into(),
@@ -22602,9 +23822,14 @@ pub fn run() {
             nte_loader_install,
             nte_loader_uninstall,
             nte_deploy_mod,
+            open77::open77_inspect,
+            open77::open77_launch,
             list_staged_mods,
             scan_mod_import,
             scan_mod_import_background,
+            validate_mod_import_sources,
+            analyze_cyberpunk_fomod,
+            import_cyberpunk_fomod_background,
             toggle_mod,
             delete_mod,
             delete_staged_mod,

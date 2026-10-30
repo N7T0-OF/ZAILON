@@ -2806,6 +2806,7 @@ export const useStore = create<Store>()(persist((set, get) => ({
         set({ notice: `Téléchargement isolé : ${download.warnings.join(' ')}` })
         return
       }
+      await native.validateModImportSources([download.path], game.name)
       const taskId = createId()
       const imported = await native.importModCandidatesBackground(taskId, game.id, [profile.id], [download.path], game.name, game.modsPath || game.installDirectory || '', true, 'quarantine', task => get().upsertBackgroundTask(task))
       await get().registerImportedStages(game.id, profile.id, imported.installedPaths, true)

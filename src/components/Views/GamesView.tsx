@@ -4,7 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getSelectedGame, getSelectedProfile, resolveProfileMods, useStore } from '../../store/useStore'
 import { countActiveMods, countProfileMods } from '../../lib/profileState'
-import { BackgroundTaskSnapshot, CollectionInstallPlan, Mo2ImportOptions, Mo2ImportPreview, Mo2ImportResult, ProfileDeploymentAudit, native, pickExecutable, pickFolder, pickFolders, resourceUrl } from '../../lib/native'
+import { BackgroundTaskSnapshot, CollectionInstallPlan, Mo2ImportOptions, Mo2ImportPreview, Mo2ImportResult, ProfileDeploymentAudit, native, pickExecutable, pickFolder, pickFolders, pickModArchive, resourceUrl } from '../../lib/native'
 import { ModCard } from '../UI/ModCard'
 import { NteGroupCard } from '../UI/NteGroupCard'
 import { FallbackArtwork } from '../UI/FallbackArtwork'
@@ -1118,7 +1118,9 @@ function ModImportDialog({ gameId, profileId, gameName, destination, onClose, on
   // Spec §9 : un import pour un jeu NTE est déployé DANS AuroraMods par
   // hardlinks (layout Aurora) — pas via le déploiement générique au lancement.
   const nteImport = Boolean(importGame && isNteGame({ execPath: importGame.execPath, gameName: importGame.name, nteAllowed: nteModsAllowed(addonCapabilities(addons)) }))
+  const cyberpunkImport = gameName.toLocaleLowerCase().includes('cyberpunk')
   const [candidates, setCandidates] = useState<ModImportCandidate[]>([])
+  const [fomodCandidate, setFomodCandidate] = useState<ModImportCandidate>()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
@@ -1146,15 +1148,23 @@ function ModImportDialog({ gameId, profileId, gameName, destination, onClose, on
       })
       setSelected(current => {
         const next = new Set(current)
-        found.forEach(item => next.add(item.path))
+        found.forEach(item => {
+          if (!item.importBlockedReason) next.add(item.path)
+          else next.delete(item.path)
+        })
         return next
       })
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) } finally { setBusy(false); setTaskId(undefined) }
-  }, [gameName])
+  }, [cyberpunkImport, gameName])
 
   const choose = async () => {
     const paths = await pickFolders('Sélectionnez un dossier contenant tous les mods')
     await analyze(paths)
+  }
+
+  const chooseArchive = async () => {
+    const archivePath = await pickModArchive()
+    if (archivePath) await analyze([archivePath])
   }
 
   useEffect(() => {
@@ -1175,14 +1185,22 @@ function ModImportDialog({ gameId, profileId, gameName, destination, onClose, on
     return () => { disposed = true; unlisten?.() }
   }, [analyze])
 
-  const selectedSensitiveFiles = candidates.filter(item => selected.has(item.path)).flatMap(item => item.sensitiveFiles || [])
+  const importableCandidates = candidates.filter(item => !item.importBlockedReason)
+  const importableSelected = importableCandidates.filter(item => selected.has(item.path))
+  const selectedSensitiveFiles = importableSelected.flatMap(item => item.sensitiveFiles || [])
 
   const executeCommit = async (sensitiveAction: SensitiveImportAction) => {
     if (!destination) { setError('Configurez le dossier Mods du jeu avant l’import.'); return }
-    const paths = candidates.filter(item => selected.has(item.path)).map(item => item.path)
+    const chosenCandidates = candidates.filter(item => selected.has(item.path))
+    if (chosenCandidates.some(item => item.importBlockedReason)) {
+      setError(chosenCandidates.find(item => item.importBlockedReason)?.importBlockedReason || 'Cette source ne peut pas passer par l’import générique.')
+      return
+    }
+    const paths = chosenCandidates.map(item => item.path)
     if (!paths.length) return
     setBusy(true); setError(undefined)
     try {
+      await native.validateModImportSources(paths, gameName)
       const nextTaskId = crypto.randomUUID()
       setTaskId(nextTaskId)
       const result = await native.importModCandidatesBackground(nextTaskId, gameId, [profileId], paths, gameName, destination, deployNow, sensitiveAction, nextTask => {
@@ -1237,16 +1255,169 @@ function ModImportDialog({ gameId, profileId, gameName, destination, onClose, on
   return <div className="fixed inset-0 z-[180] flex items-center justify-center bg-black/70 p-5 backdrop-blur-sm" onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}>
     <section className={`relative flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border bg-[#111414] shadow-2xl transition-colors ${dragActive ? 'border-gold/70 ring-2 ring-gold/20' : 'border-white/[0.1]'}`}>
       {dragActive && <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[#101313]/90 backdrop-blur-sm"><div className="text-center text-gold"><FolderInput size={36} className="mx-auto" /><p className="mt-3 text-sm font-semibold">Déposez le dossier contenant tous vos mods</p><p className="mt-1 text-[11px] text-white/48">Tous les sous-dossiers détectés seront ajoutés, sans limite de nombre.</p></div></div>}
-      <header className="flex items-center gap-3 border-b border-white/[0.07] p-4"><FolderInput size={18} className="text-gold" /><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-white">Import intelligent — {gameName}</h2><p className="mt-0.5 text-[11px] text-white/38">Glissez le dossier racine de votre collection, ou sélectionnez-le. Aucun dossier n’est copié avant confirmation.</p></div><button onClick={onClose} title={busy ? 'Réduire : la tâche continue en arrière-plan' : 'Fermer'} className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><X size={15} /></button></header>
+      <header className="flex items-center gap-3 border-b border-white/[0.07] p-4"><FolderInput size={18} className="text-gold" /><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-white">Import intelligent — {gameName}</h2><p className="mt-0.5 text-[11px] text-white/38">Glissez le dossier racine de votre collection, ou sélectionnez-le. Aucun dossier n’est copié avant confirmation.</p></div>{cyberpunkImport && <button type="button" onClick={() => void chooseArchive()} disabled={busy} className="flex shrink-0 items-center gap-1.5 rounded-lg border border-gold/20 px-2.5 py-2 text-[11px] text-gold/80 hover:bg-gold/[0.05] disabled:opacity-35"><Archive size={13} />ZIP / FOMOD</button>}<button onClick={onClose} title={busy ? 'Réduire : la tâche continue en arrière-plan' : 'Fermer'} className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white"><X size={15} /></button></header>
       <div className="min-h-48 flex-1 overflow-y-auto p-4">
-        {!candidates.length ? <button onClick={() => void choose()} disabled={busy} className="flex min-h-44 w-full flex-col items-center justify-center rounded-xl border border-dashed border-gold/25 bg-gold/[0.015] text-white/50 hover:bg-gold/[0.035]"><FolderPlus size={26} /><span className="mt-3 text-xs font-semibold">Glissez ici le dossier contenant tous les mods</span><span className="mt-1 text-[11px]">ou cliquez pour sélectionner le dossier racine — aucun maximum de mods</span><span className="mt-1 text-[11px] text-white/28">Générique, Cyberpunk, Bethesda, Unreal Pak, XXMI et BepInEx</span></button> : <div className="space-y-2">{visibleCandidates.map(candidate => <label key={candidate.path} className="flex items-start gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"><ZailonSelectionCheckbox checked={selected.has(candidate.path)} onChange={() => setSelected(current => { const next = new Set(current); next.has(candidate.path) ? next.delete(candidate.path) : next.add(candidate.path); return next })} className="mt-1" /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-white/78">{candidate.name}</span><span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[11px] text-white/45">{candidate.detectedFramework !== 'Unknown' ? candidate.detectedFramework : candidate.framework}</span><span className="text-[11px] text-white/30">racine {candidate.rootConfidence}</span></div><p className="mt-1 truncate font-mono text-[11px] text-white/30" title={candidate.sourcePath}>{candidate.sourcePath}</p><p className="mt-1 text-[11px] text-white/42">Racine détectée : <span className="font-mono text-white/55">{candidate.detectedRoot}</span></p>{candidate.relativeGamePaths.length > 0 && <p className="mt-1 text-[11px] text-emerald-100/55">Destination(s) : {candidate.relativeGamePaths.join(' · ')}</p>}{candidate.strippedSegments.length > 0 && <p className="mt-1 text-[11px] text-sky-100/50">Conteneur(s) ignoré(s) : {candidate.strippedSegments.join(' / ')}</p>}<p className="mt-1 text-[11px] text-white/32">{candidate.rootReason}</p>{candidate.sourceUrl && <p className="mt-1 text-[11px] text-emerald-200/55">Source détectée : {candidate.sourceUrl}</p>}{candidate.warnings.map(warning => <p key={warning} className="mt-1 text-[11px] text-amber-200/55">{warning}</p>)}</div><span className="text-[11px] text-white/30">{formatBytes(candidate.sizeBytes)}</span></label>)}{visibleCount < candidates.length && <button onClick={() => setVisibleCount(count => count + 250)} className="w-full rounded-lg border border-white/[0.08] py-2 text-[11px] text-white/45 hover:bg-white/[0.04]">Afficher 250 résultats supplémentaires ({candidates.length - visibleCount} restants)</button>}</div>}
+        {!candidates.length ? <div className="flex min-h-44 flex-col items-center justify-center rounded-xl border border-dashed border-gold/25 bg-gold/[0.015] text-center text-white/50"><FolderPlus size={26} /><span className="mt-3 text-xs font-semibold">Glissez ici le dossier contenant tous les mods</span><button type="button" onClick={() => void choose()} disabled={busy} className="mt-1 text-[11px] text-gold/75 hover:text-gold">ou sélectionnez un dossier racine</button>{cyberpunkImport && <button type="button" onClick={() => void chooseArchive()} disabled={busy} className="mt-2 rounded-lg border border-gold/20 px-3 py-1.5 text-[11px] text-gold/80 hover:bg-gold/[0.05]">Choisir une archive Cyberpunk ZIP / FOMOD</button>}<span className="mt-2 text-[11px] text-white/28">Générique, Cyberpunk, Bethesda, Unreal Pak, XXMI et BepInEx</span></div> : <div className="space-y-2">{visibleCandidates.map(candidate => {
+          const candidateBlocked = Boolean(candidate.importBlockedReason)
+          const cyberpunkZip = cyberpunkImport && candidate.sourcePath.toLocaleLowerCase().endsWith('.zip')
+          return <div key={candidate.path} className="flex items-start gap-3 rounded-xl border border-white/[0.07] bg-white/[0.02] p-3"><ZailonSelectionCheckbox checked={selected.has(candidate.path)} disabled={candidateBlocked} aria-label={`Sélectionner ${candidate.name}`} onChange={() => setSelected(current => { const next = new Set(current); next.has(candidate.path) ? next.delete(candidate.path) : next.add(candidate.path); return next })} className="mt-1" /><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-white/78">{candidate.name}</span><span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[11px] text-white/45">{candidate.detectedFramework !== 'Unknown' ? candidate.detectedFramework : candidate.framework}</span><span className="text-[11px] text-white/30">racine {candidate.rootConfidence}</span>{candidateBlocked && <span className="rounded bg-amber-300/[0.08] px-1.5 py-0.5 text-[10px] text-amber-100/70">Import générique bloqué</span>}{cyberpunkZip && <span className="rounded bg-sky-300/[0.08] px-1.5 py-0.5 text-[10px] text-sky-100/70">Archive — pas un dossier</span>}</div><p className="mt-1 truncate font-mono text-[11px] text-white/30" title={candidate.sourcePath}>{candidate.sourcePath}</p>{candidate.importBlockedReason && <p className="mt-1 text-[11px] leading-relaxed text-amber-100/70">{candidate.importBlockedReason}</p>}<p className="mt-1 text-[11px] text-white/42">Racine détectée : <span className="font-mono text-white/55">{candidate.detectedRoot}</span></p>{candidate.relativeGamePaths.length > 0 && <p className="mt-1 text-[11px] text-emerald-100/55">Destination(s) : {candidate.relativeGamePaths.join(' · ')}</p>}{candidate.strippedSegments.length > 0 && <p className="mt-1 text-[11px] text-sky-100/50">Conteneur(s) ignoré(s) : {candidate.strippedSegments.join(' / ')}</p>}<p className="mt-1 text-[11px] text-white/32">{candidate.rootReason}</p>{candidate.fomod && <div className="mt-2 flex flex-wrap items-center gap-2"><span className={`rounded px-1.5 py-0.5 text-[10px] ${candidate.fomod.supportStatus === 'supported' ? 'bg-emerald-300/[0.08] text-emerald-100/70' : 'bg-amber-300/[0.08] text-amber-100/70'}`}>FOMOD · {candidate.fomod.supportStatus}</span><span className="text-[10px] text-white/35">{candidate.fomod.steps.length} étape(s) · {candidate.fomod.requiredFileCount} règle(s) obligatoire(s)</span><button type="button" onClick={() => setFomodCandidate(candidate)} disabled={busy} className="rounded-lg border border-gold/20 px-2.5 py-1.5 text-[10px] font-semibold text-gold/80 hover:bg-gold/[0.05] disabled:opacity-35">Configurer les options…</button></div>}{cyberpunkZip && !candidate.fomod && <p className="mt-2 text-[11px] text-amber-100/58">Aucun FOMOD détecté. Extrayez cette archive et importez le dossier de contenu ; elle ne sera pas copiée comme un fichier.</p>}{candidate.sourceUrl && <p className="mt-1 text-[11px] text-emerald-200/55">Source détectée : {candidate.sourceUrl}</p>}{candidate.warnings.map(warning => <p key={warning} className="mt-1 text-[11px] text-amber-200/55">{warning}</p>)}</div><span className="text-[11px] text-white/30">{formatBytes(candidate.sizeBytes)}</span></div>
+        })}{visibleCount < candidates.length && <button onClick={() => setVisibleCount(count => count + 250)} className="w-full rounded-lg border border-white/[0.08] py-2 text-[11px] text-white/45 hover:bg-white/[0.04]">Afficher 250 résultats supplémentaires ({candidates.length - visibleCount} restants)</button>}</div>}
         {task && <div className="mt-3 rounded-xl border border-gold/15 bg-gold/[0.025] p-3"><div className="flex items-center justify-between gap-3 text-[11px]"><span className="truncate text-white/62">{task.message}</span><span className="shrink-0 font-mono text-gold/70">{task.total ? `${progress}%` : '…'}</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.06]"><div className="h-full rounded-full bg-gold transition-[width]" style={{ width: `${progress}%` }} /></div><div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-white/32"><span>{task.processed} / {task.total || '?'} · {task.status}</span>{busy && taskId && <button type="button" onClick={cancelTask} className="rounded border border-red-300/15 px-2 py-1 text-red-200/64">Annuler la tâche</button>}</div></div>}
         {candidates.length > 0 && <label className="mt-3 flex cursor-pointer items-start justify-between gap-3 rounded-xl border border-white/[0.07] bg-white/[0.018] p-3 text-[11px] text-white/58"><span><strong className="block text-white/72">Activer pour le prochain lancement</strong><span className="mt-1 block leading-relaxed text-white/34">Les fichiers restent stockés hors du jeu. Au lancement, TemporaryCopy résout les conflits, sauvegarde les originaux, copie chaque fichier vers sa vraie racine, vérifie sa visibilité puis restaure le jeu à sa fermeture. Ce backend n’est pas le VFS de MO2.</span></span><ZailonSwitch checked={deployNow} onChange={setDeployNow} className="mt-0.5" /></label>}
         {error && <p className="mt-3 rounded-lg border border-red-400/15 bg-red-400/[0.04] p-3 text-[11px] text-red-200/70">{error}</p>}
       </div>
-      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] p-4"><div className="flex items-center gap-2"><button onClick={() => void choose()} disabled={busy} className="rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]">Ajouter un dossier racine</button>{candidates.length > 0 && <span className="text-[11px] text-white/32">{candidates.length} mod(s) détecté(s){selectedSensitiveFiles.length ? ` · ${selectedSensitiveFiles.length} sensible(s)` : ''}</span>}</div><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-3 py-2 text-[11px] text-white/45">{busy ? 'Réduire' : 'Fermer'}</button><button onClick={commit} disabled={busy || !selected.size} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-35">{busy ? `${task?.message || 'Tâche en cours…'} ${task?.total ? `${progress}%` : ''}` : `${deployNow ? 'Importer et activer' : 'Stocker'} ${selected.size} mod(s)`}</button></div></footer>
+      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] p-4"><div className="flex items-center gap-2"><button onClick={() => void choose()} disabled={busy} className="rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]">Ajouter un dossier racine</button>{candidates.length > 0 && <span className="text-[11px] text-white/32">{candidates.length} source(s) détectée(s) · {importableSelected.length} sélectionnée(s){candidates.length > importableCandidates.length ? ` · ${candidates.length - importableCandidates.length} bloquée(s)` : ''}{selectedSensitiveFiles.length ? ` · ${selectedSensitiveFiles.length} sensible(s)` : ''}</span>}</div><div className="flex gap-2"><button onClick={onClose} className="rounded-lg px-3 py-2 text-[11px] text-white/45">{busy ? 'Réduire' : 'Fermer'}</button><button onClick={commit} disabled={busy || !importableSelected.length} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-35">{busy ? `${task?.message || 'Tâche en cours…'} ${task?.total ? `${progress}%` : ''}` : `${deployNow ? 'Importer et activer' : 'Stocker'} ${importableSelected.length} mod(s)`}</button></div></footer>
     </section>
+    {fomodCandidate?.fomod && destination && <CyberpunkFomodInstallerDialog
+      candidate={fomodCandidate}
+      gameId={gameId}
+      profileId={profileId}
+      gameName={gameName}
+      destination={destination}
+      deployNow={deployNow}
+      onClose={() => setFomodCandidate(undefined)}
+      onImported={async installedPaths => {
+        await registerImportedStages(gameId, profileId, installedPaths, deployNow)
+        onImported()
+      }}
+    />}
+    {fomodCandidate?.fomod && !destination && <div className="fixed inset-0 z-[240] flex items-center justify-center bg-black/80 p-4"><section role="alertdialog" aria-modal="true" className="w-full max-w-md rounded-2xl border border-amber-300/20 bg-[#101313] p-4"><h2 className="text-sm font-semibold text-white">Dossier Cyberpunk manquant</h2><p className="mt-2 text-xs leading-relaxed text-white/55">Configurez d’abord le dossier du jeu dans ZAILON avant de préparer ce FOMOD.</p><button type="button" onClick={() => setFomodCandidate(undefined)} className="mt-4 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]">Fermer</button></section></div>}
     {sensitivePrompt && <SensitiveFileDecisionDialog files={selectedSensitiveFiles} onClose={closeSensitivePrompt} onDecision={decideSensitiveImport} />}
+  </div>
+}
+
+function CyberpunkFomodInstallerDialog({ candidate, gameId, profileId, gameName, destination, deployNow, onClose, onImported }: {
+  candidate: ModImportCandidate
+  gameId: string
+  profileId: string
+  gameName: string
+  destination: string
+  deployNow: boolean
+  onClose: () => void
+  onImported: (installedPaths: string[]) => Promise<void>
+}) {
+  const plan = candidate.fomod!
+  const upsertBackgroundTask = useStore(state => state.upsertBackgroundTask)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set(
+    plan.steps.flatMap(step => step.groups.flatMap(group => group.options.filter(option => option.selectedByDefault).map(option => option.id))),
+  ))
+  const [stepIndex, setStepIndex] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [task, setTask] = useState<BackgroundTaskSnapshot>()
+  const [taskId, setTaskId] = useState<string>()
+  const [error, setError] = useState<string>()
+  const currentStep = plan.steps[stepIndex]
+  const stepValid = !currentStep || currentStep.groups.every(group => {
+    const count = group.options.filter(option => selectedIds.has(option.id)).length
+    switch (group.selectionType.toLocaleLowerCase()) {
+      case 'selectall': return count === group.options.filter(option => option.selectable).length
+      case 'selectany': return true
+      case 'selectatleastone': return count >= 1
+      case 'selectatmostone': return count <= 1
+      case 'selectexactlyone':
+      case 'selectone': return count === 1
+      default: return false
+    }
+  })
+  const allStepsValid = plan.steps.every(step => step.groups.every(group => {
+    const count = group.options.filter(option => selectedIds.has(option.id)).length
+    const validSelection = (() => {
+      switch (group.selectionType.toLocaleLowerCase()) {
+        case 'selectall': return count === group.options.filter(option => option.selectable).length
+        case 'selectany': return true
+        case 'selectatleastone': return count >= 1
+        case 'selectatmostone': return count <= 1
+        case 'selectexactlyone':
+        case 'selectone': return count === 1
+        default: return false
+      }
+    })()
+    return validSelection
+      && group.options.every(option => !option.required || selectedIds.has(option.id))
+      && group.options.every(option => !selectedIds.has(option.id) || option.selectable)
+  }))
+  const selectedRules = plan.steps.flatMap(step => step.groups.flatMap(group => group.options.filter(option => selectedIds.has(option.id)))).reduce((sum, option) => sum + option.fileCount, 0)
+  const progress = task?.total ? Math.min(100, Math.round(task.processed / task.total * 100)) : 0
+
+  const toggleOption = (groupId: string, selectionType: string, optionId: string, checked: boolean) => {
+    setSelectedIds(current => {
+      const next = new Set(current)
+      const group = plan.steps.flatMap(step => step.groups).find(item => item.id === groupId)
+      if (!group) return next
+      const selectedInGroup = group.options.filter(option => next.has(option.id)).length
+      if (checked) {
+        if (selectionType.toLocaleLowerCase() === 'selectone' || selectionType.toLocaleLowerCase() === 'selectexactlyone') {
+          group.options.forEach(option => next.delete(option.id))
+        }
+        if (selectionType.toLocaleLowerCase() === 'selectatmostone') {
+          group.options.forEach(option => next.delete(option.id))
+        }
+        next.add(optionId)
+      } else {
+        const option = group.options.find(item => item.id === optionId)
+        if (option?.required || (selectionType.toLocaleLowerCase() === 'selectall')) return next
+        if ((selectionType.toLocaleLowerCase() === 'selectone' || selectionType.toLocaleLowerCase() === 'selectexactlyone' || selectionType.toLocaleLowerCase() === 'selectatleastone') && selectedInGroup <= 1) return next
+        next.delete(optionId)
+      }
+      return next
+    })
+  }
+
+  const install = async () => {
+    if (plan.supportStatus === 'unsupported' || !allStepsValid || busy) return
+    setBusy(true)
+    setError(undefined)
+    const nextTaskId = crypto.randomUUID()
+    setTaskId(nextTaskId)
+    try {
+      const result = await native.importCyberpunkFomodBackground(
+        nextTaskId,
+        gameId,
+        profileId,
+        candidate.sourcePath,
+        gameName,
+        destination,
+        deployNow,
+        plan.archiveFingerprint,
+        [...selectedIds],
+        setTask,
+      )
+      await onImported(result.installedPaths)
+      if (result.status === 'CompletedWithWarnings') {
+        window.alert([
+          `${plan.name} a été préparé avec des avertissements.`,
+          ...result.warnings,
+          'Installation dans ZAILON ≠ chargement confirmé par le jeu.',
+        ].join('\n'))
+      } else {
+        window.alert(`${plan.name} a été staged dans le profil. Le chargement/runtime du jeu n’est pas vérifié.`)
+      }
+      onClose()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBusy(false)
+      setTaskId(undefined)
+    }
+  }
+
+  return <div className="fixed inset-0 z-[240] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md" onMouseDown={event => { if (event.target === event.currentTarget && !busy) onClose() }}>
+    <section role="dialog" aria-modal="true" aria-labelledby="cyberpunk-fomod-title" className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/[0.1] bg-[#101313] shadow-2xl">
+      <header className="flex items-start gap-3 border-b border-white/[0.07] p-4"><Archive size={18} className="mt-0.5 text-gold" /><div className="min-w-0 flex-1"><h2 id="cyberpunk-fomod-title" className="text-sm font-semibold text-white">Installer · {plan.name}</h2><p className="mt-1 text-[11px] text-white/42">{plan.author || 'Auteur non déclaré'}{plan.version ? ` · v${plan.version}` : ''} · ZIP d’origine inchangé · scripts jamais exécutés</p></div><button type="button" onClick={onClose} disabled={busy} aria-label="Fermer l’installateur FOMOD" className="rounded-lg p-2 text-white/38 hover:bg-white/[0.06] disabled:opacity-30"><X size={15} /></button></header>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className={`mb-3 rounded-lg border p-3 text-[11px] leading-relaxed ${plan.supportStatus === 'unsupported' ? 'border-red-300/18 bg-red-300/[0.04] text-red-100/68' : plan.supportStatus === 'partial' ? 'border-amber-300/16 bg-amber-300/[0.035] text-amber-100/64' : 'border-emerald-300/15 bg-emerald-300/[0.03] text-emerald-100/60'}`}><strong className="font-semibold">Support {plan.supportStatus}.</strong> {plan.supportStatus === 'unsupported' ? 'Ce FOMOD contient des conditions ou scripts que ZAILON ne sait pas évaluer ; l’installation est bloquée pour éviter un mauvais choix.' : 'Les règles déclaratives statiques sont analysées. Les dépendances du jeu et l’état runtime ne sont pas validés par cet assistant.'}{plan.warnings.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4">{plan.warnings.slice(0, 6).map(warning => <li key={warning}>{warning}</li>)}</ul>}</div>
+        {plan.steps.length > 0 && <><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div className="flex flex-wrap gap-1">{plan.steps.map((step, index) => <button key={step.id} type="button" onClick={() => setStepIndex(index)} disabled={busy || plan.supportStatus !== 'supported'} aria-current={index === stepIndex ? 'step' : undefined} className={`rounded-md px-2 py-1.5 text-[10px] ${index === stepIndex ? 'bg-gold/15 text-gold' : 'text-white/40 hover:bg-white/[0.04]'}`}>{index + 1}. {step.name}</button>)}</div><span className="text-[10px] text-white/35">Étape {stepIndex + 1} / {plan.steps.length}</span></div>
+          <div className="space-y-3">          {currentStep?.groups.map(group => <section key={group.id} className="rounded-xl border border-white/[0.08] bg-white/[0.018] p-3"><div className="flex flex-wrap items-baseline justify-between gap-2"><h3 className="text-xs font-semibold text-white/75">{group.name}</h3><span className="text-[10px] text-white/34">{group.selectionType}</span></div><div className="mt-2 space-y-2">{group.options.map(option => <label key={option.id} className={`flex gap-3 rounded-lg border p-2.5 ${selectedIds.has(option.id) ? 'border-gold/20 bg-gold/[0.025]' : 'border-white/[0.05] bg-black/10'} ${!option.selectable ? 'opacity-45' : ''}`}><ZailonSelectionCheckbox checked={selectedIds.has(option.id)} disabled={busy || !option.selectable || group.selectionType.toLocaleLowerCase() === 'selectall'} onChange={checked => toggleOption(group.id, group.selectionType, option.id, checked)} aria-label={`${option.name}${option.required ? ' (obligatoire)' : ''}`} className="mt-0.5" />{option.imageDataUrl && <img src={option.imageDataUrl} alt="" className="h-16 w-20 shrink-0 rounded-md border border-white/[0.06] object-cover" />}<span className="min-w-0 flex-1"><strong className="block text-[11px] text-white/72">{option.name}{option.required && <span className="ml-1 text-gold/70">obligatoire</span>}</strong>{option.description && <span className="mt-1 block whitespace-pre-wrap text-[11px] leading-relaxed text-white/40">{option.description}</span>}{option.targets.length > 0 && <span className="mt-1 block text-[10px] text-white/32">Racines : {option.targets.join(' · ')}</span>}</span><span className="shrink-0 text-[10px] text-white/30">{option.fileCount} règle(s)</span></label>)}</div></section>)}
+</div>
+          {!stepValid && <p className="mt-3 text-[11px] text-amber-100/70">Complétez les choix obligatoires de cette étape avant de continuer.</p>}
+        </>}
+        {plan.steps.length === 0 && <p className="rounded-lg border border-white/[0.07] p-3 text-xs text-white/50">Aucune étape optionnelle. Les fichiers marqués requis par le FOMOD peuvent être préparés.</p>}
+        <div className="mt-3 grid gap-2 sm:grid-cols-3"><Metric label="Options sélectionnées" value={String(selectedIds.size)} /><Metric label="Règles de fichiers choisies" value={String(selectedRules + plan.requiredFileCount)} /><Metric label="Archive" value={formatBytes(candidate.sizeBytes)} /></div>
+        {task && <div className="mt-3 rounded-lg border border-gold/15 bg-gold/[0.025] p-3"><div className="flex items-center justify-between gap-3 text-[11px]"><span className="truncate text-white/62">{task.message}</span><span className="text-gold/70">{task.total ? `${progress}%` : '…'}</span></div><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.06]"><div className="h-full bg-gold transition-[width]" style={{ width: `${progress}%` }} /></div>{taskId && <button type="button" onClick={() => void native.cancelBackgroundTask(taskId)} className="mt-2 rounded border border-red-300/15 px-2 py-1 text-[10px] text-red-100/70">Annuler la préparation</button>}</div>}
+        {error && <p className="mt-3 rounded-lg border border-red-300/15 bg-red-300/[0.04] p-3 text-[11px] text-red-100/70">{error}</p>}
+      </div>
+      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.07] p-4"><button type="button" onClick={() => setStepIndex(index => Math.max(0, index - 1))} disabled={busy || stepIndex === 0} className="rounded-lg border border-white/[0.09] px-3 py-2 text-[11px] text-white/48 disabled:opacity-30">← Retour</button><div className="flex gap-2"><button type="button" onClick={onClose} disabled={busy} className="rounded-lg px-3 py-2 text-[11px] text-white/45 disabled:opacity-30">Annuler</button>{stepIndex < plan.steps.length - 1 && plan.steps.length > 0 ? <button type="button" onClick={() => setStepIndex(index => Math.min(plan.steps.length - 1, index + 1))} disabled={busy || !stepValid || plan.supportStatus !== 'supported'} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-35">Suivant →</button> : <button type="button" onClick={() => void install()} disabled={busy || !allStepsValid || plan.supportStatus !== 'supported'} className="rounded-lg bg-gold px-4 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)] disabled:opacity-35">{busy ? 'Préparation…' : deployNow ? 'Préparer et activer' : 'Préparer dans le profil'}</button>}</div></footer>
+    </section>
   </div>
 }
 

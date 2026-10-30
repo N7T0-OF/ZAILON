@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Experimental
+
+- **Passerelle OPEN//77 pour Cyberpunk 2077** : ZAILON détecte ou laisse choisir `Open77Launcher.exe`, calcule localement les empreintes du launcher et du jeu, lit le journal de projection OPEN//77, signale les fichiers également revendiqués par le profil ZAILON actif et ouvre l’accueil, les Mods ou le diagnostic officiel `--detect-only` avec la bonne installation. Aucun identifiant, paquet privé ou fichier OPEN//77 n’est copié ni modifié par ZAILON. L’intégration reste expérimentale tant qu’un parcours réel complet avec un compte Alpha et un serveur n’a pas été validé.
+- **Import ZIP/FOMOD Cyberpunk — tranche expérimentale** : un assistant permet de choisir les options statiques reconnues d’un FOMOD et de préparer uniquement leurs fichiers dans le store ZAILON. Les règles XML inconnues ou ambiguës sont bloquées plutôt qu’interprétées; les sources ZIP/dossiers extraits restent intactes, l’import générique des ZIP Cyberpunk et dossiers FOMOD est bloqué, tout comme l’auto-extraction catalogue/Collection des FOMOD. Les ZIP illisibles restent visibles comme candidats bloqués et le scan d’une collection mixte conserve ses mods voisins normaux. Les règles conditionnelles, scripts, intégration runtime en jeu et compatibilité MO2/Vortex ne sont pas validés.
+
 ## [1.155.0] - 2026-08-21
 
 ### Fixed

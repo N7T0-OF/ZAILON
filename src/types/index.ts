@@ -582,6 +582,36 @@ export interface GamebananaGame {
 
 export type ExploreSort = 'recent' | 'updated' | 'popular' | 'downloaded'
 
+export interface CyberpunkFomodOption {
+  id: string
+  name: string
+  description?: string | null
+  imageDataUrl?: string | null
+  required: boolean
+  selectable: boolean
+  selectedByDefault: boolean
+  fileCount: number
+  targets: string[]
+}
+
+export interface CyberpunkFomodGroup {
+  id: string
+  name: string
+  selectionType: string
+  options: CyberpunkFomodOption[]
+}
+
+export interface CyberpunkFomodPlan {
+  name: string
+  author?: string | null
+  version?: string | null
+  supportStatus: 'supported' | 'partial' | 'unsupported' | string
+  requiredFileCount: number
+  archiveFingerprint: string
+  steps: Array<{ id: string; name: string; groups: CyberpunkFomodGroup[] }>
+  warnings: string[]
+}
+
 export interface ModImportCandidate {
   id: string
   name: string
@@ -606,6 +636,8 @@ export interface ModImportCandidate {
   warnings: string[]
   sensitiveFiles: SensitiveFileAssessment[]
   recognizedDestinations: string[]
+  fomod?: CyberpunkFomodPlan | null
+  importBlockedReason?: string | null
 }
 
 export type SensitiveRiskLevel = 'Informational' | 'Caution' | 'HighRisk' | 'Blocked'

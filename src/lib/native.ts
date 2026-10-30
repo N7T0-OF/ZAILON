@@ -1,7 +1,7 @@
 import { Channel, convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import type { UpdateChannel } from '../types'
-import type { DownloadedModResult, ModImportCandidate, Profile, ProfileArchiveManifest, ProfileIntegrity, SecureImportResult, SensitiveImportAction } from '../types'
+import type { CyberpunkFomodPlan, DownloadedModResult, ModImportCandidate, Profile, ProfileArchiveManifest, ProfileIntegrity, SecureImportResult, SensitiveImportAction } from '../types'
 import type {
   VisualApplyResult,
   VisualBackendReport,
@@ -462,6 +462,43 @@ export interface NteLoaderUninstallResult {
   restored: string[]
   manifestRemoved: boolean
   message: string
+}
+
+export interface Open77ProjectionEntry {
+  path: string
+  layer: string
+  exists: boolean
+  conflictsWithZailon: boolean
+}
+
+export interface Open77Report {
+  supported: boolean
+  launcherPath?: string | null
+  launcherSha256?: string | null
+  gameRoot: string
+  gameExecutablePath?: string | null
+  gameExecutableSha256?: string | null
+  statePath?: string | null
+  logPath?: string | null
+  projectionEntries: Open77ProjectionEntry[]
+  stackFiles: number
+  worldFiles: number
+  otherFiles: number
+  presentFiles: number
+  missingFiles: number
+  conflictCount: number
+  blockers: string[]
+  warnings: string[]
+  diagnostics: string[]
+  docsUrl: string
+}
+
+export interface Open77LaunchResult {
+  mode: 'home' | 'mods' | 'detect' | string
+  launcherPath: string
+  processId?: number | null
+  exitCode?: number | null
+  output: string
 }
 
 export interface CyberpunkRepairMove {
@@ -1141,6 +1178,16 @@ export const native = {
   addonVerifySignature: (filePath: string, signature: string, publicKey: string) => desktopOnly<boolean>('addon_verify_signature', { filePath, signature, publicKey }),
   listStagedMods: (gameId: string) => desktopOnly<NativeMod[]>('list_staged_mods', { gameId }),
   scanModImport: (paths: string[], gameName: string) => desktopOnly<ModImportCandidate[]>('scan_mod_import', { paths, gameName }),
+  analyzeCyberpunkFomod: (archivePath: string) =>
+    desktopOnly<CyberpunkFomodPlan>('analyze_cyberpunk_fomod', { archivePath }),
+  importCyberpunkFomodBackground: (taskId: string, gameId: string, profileId: string, archivePath: string, gameName: string, destination: string, deployNow: boolean, expectedArchiveFingerprint: string, selectedOptionIds: string[], onProgress: (task: BackgroundTaskSnapshot) => void) => {
+    if (!isTauri()) return Promise.reject(new Error('Cyberpunk FOMOD import is only available in the ZAILON desktop app.'))
+    const channel = new Channel<BackgroundTaskEvent>()
+    channel.onmessage = event => onProgress(event.data.task)
+    return invoke<SecureImportResult>('import_cyberpunk_fomod_background', {
+      taskId, gameId, profileId, archivePath, gameName, destination, deployNow, expectedArchiveFingerprint, selectedOptionIds, onEvent: channel,
+    })
+  },
   scanModImportBackground: (taskId: string, paths: string[], gameName: string, onProgress: (task: BackgroundTaskSnapshot) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Background mod analysis is only available in the ZAILON desktop app.'))
     const channel = new Channel<BackgroundTaskEvent>()
@@ -1193,6 +1240,15 @@ export const native = {
    * jamais un téléchargement, toujours une détection. */
   nteLoaderProbe: (installDir: string) =>
     desktopOnly<NteLoaderProbe>('nte_loader_probe', { installDir }),
+  /** Passerelle OPEN//77 : inspection locale uniquement. Lit le journal de
+   * projection officiel et compare ses chemins au profil ZAILON actif sans
+   * modifier le jeu, le compte ni le store OPEN//77. */
+  open77Inspect: (launcherPath: string | null, gameRoot: string, zailonPaths: string[]) =>
+    desktopOnly<Open77Report>('open77_inspect', { launcherPath, gameRoot, zailonPaths }),
+  /** Ouvre le launcher officiel avec un jeu explicitement ciblé. Les seuls
+   * modes permis sont home, mods et detect (--detect-only, hors réseau). */
+  open77Launch: (launcherPath: string, gameRoot: string, mode: 'home' | 'mods' | 'detect') =>
+    desktopOnly<Open77LaunchResult>('open77_launch', { launcherPath, gameRoot, mode }),
   /** Installe le loader Aurora depuis une source LOCALE (spec §12) : copie
    * les DLL wrapper vers le Win64 du jeu avec sauvegarde, manifest sha256 et
    * rollback — transactionnel, refuse de réinstaller par-dessus un loader
@@ -1324,6 +1380,8 @@ export const native = {
     desktopOnly<string[]>('extract_profile_archive', { archivePath, destination }),
   importModCandidates: (paths: string[], destination: string) =>
     desktopOnly<string[]>('import_mod_candidates', { paths, destination }),
+  validateModImportSources: (paths: string[], gameName: string) =>
+    desktopOnly<void>('validate_mod_import_sources', { paths, gameName }),
   importModCandidatesBackground: (taskId: string, gameId: string, profileIds: string[], paths: string[], gameName: string, destination: string, deployNow: boolean, sensitiveAction: SensitiveImportAction, onProgress: (task: BackgroundTaskSnapshot) => void) => {
     if (!isTauri()) return Promise.reject(new Error('Background mod import is only available in the ZAILON desktop app.'))
     const channel = new Channel<BackgroundTaskEvent>()
@@ -1495,6 +1553,16 @@ export async function pickFolders(title = 'Sélectionnez les dossiers de mods à
   if (!isTauri()) return []
   const selected = await open({ title, directory: true, multiple: true })
   return Array.isArray(selected) ? selected : typeof selected === 'string' ? [selected] : []
+}
+
+export async function pickModArchive() {
+  if (!isTauri()) return null
+  const selected = await open({
+    title: 'Sélectionnez une archive ZIP Cyberpunk',
+    multiple: false,
+    filters: [{ name: 'Archives ZIP', extensions: ['zip'] }],
+  })
+  return typeof selected === 'string' ? selected : null
 }
 
 export async function pickProfileArchive() {

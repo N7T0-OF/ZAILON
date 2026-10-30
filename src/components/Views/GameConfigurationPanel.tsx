@@ -48,6 +48,7 @@ import { formatClock, formatTime } from '../../utils'
 import { GameKeyboardPanel } from './GameKeyboardPanel'
 import { ZailonSwitch } from '../UI/ZailonSwitch'
 import { ZailonInfoPopover } from '../UI/ZailonInfoPopover'
+import { Open77Panel } from './Open77Panel'
 
 const RUNTIME_TYPE_LABELS: Array<[ModRuntimePathType, string]> = [
   ['loader', 'Loader'],
@@ -127,6 +128,7 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
   const frostyEligible = detectModBackend({ execPath: game.execPath, gameName: game.name, nteAllowed: hasNteCap }) === 'frosty'
   const nteEligible = detectModBackend({ execPath: game.execPath, gameName: game.name, nteAllowed: hasNteCap }) === 'nte-pak'
   const reshadeEligible = resolveReShadeTarget(game).confidence >= 0.6
+  const open77Eligible = /cyberpunk(?:\s*2077)?/i.test(`${game.name} ${game.displayName || ''} ${game.execPath || ''}`)
   const setView = useStore(state => state.setView)
   const openAddons = () => setView('addons')
 
@@ -389,6 +391,8 @@ export function GameConfigurationPanel({ game, profile, onBrowseExecutable, onBr
             ))}</ul>}
         </div>
       </ConfigCard>
+
+      {open77Eligible && <Open77Panel game={game} profile={profile} open={open.includes('open77')} onToggle={() => toggle('open77')} />}
 
       <ConfigCard id="compatibilite" title="Compatibilité" icon={Layers3} badge={frameworks.length ? `${frameworks.length} framework(s) détecté(s)` : 'Aucun framework détecté'} open={open.includes('compatibilite')} onToggle={() => toggle('compatibilite')}>
         {frameworks.length

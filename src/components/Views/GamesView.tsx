@@ -158,6 +158,8 @@ export function GamesView() {
   const [bulkDialog, setBulkDialog] = useState<'move' | 'copy' | 'delete' | 'tag'>()
   const [tagFilter, setTagFilter] = useState('')
   const [deploymentToolBusy, setDeploymentToolBusy] = useState(false)
+  const [maintenanceOpen, setMaintenanceOpen] = useState(false)
+  const [maintenanceSummary, setMaintenanceSummary] = useState<string>()
   const [diagSection, setDiagSection] = useState<SubSection>('resume')
   const [modDiagnostic, setModDiagnostic] = useState<ModDiagnosticView>()
   const modsListRef = useRef<HTMLDivElement>(null)
@@ -395,7 +397,7 @@ export function GamesView() {
       const reports = await native.repairStagedImports(selectedGame.id, selectedGame.name, staged.map(mod => mod.stageId as string))
       const repaired = reports.filter(report => report.repaired)
       const failed = reports.filter(report => !report.repaired)
-      const moved = repaired.reduce((sum, report) => sum + Math.max(0, report.files_after - report.files_before), 0)
+      const moved = repaired.reduce((sum, report) => sum + Math.max(0, report.filesAfter - report.filesBefore), 0)
       const lines = [`${repaired.length}/${reports.length} paquet(s) re-stagé(s) depuis leur source.`]
       if (moved > 0) lines.push(`${moved} fichier(s) replacé(s) selon leur vraie racine de jeu.`)
       if (failed.length) {
@@ -441,6 +443,95 @@ export function GamesView() {
       ].join('\n'))
     } catch (error) {
       window.alert(`Réparation Cyberpunk annulée : ${String(error)}`)
+    }
+  }
+
+  const runSmartMaintenance = async () => {
+    setDeploymentToolBusy(true)
+    setMaintenanceSummary('Analyse du profil et récupération des paquets en cours…')
+    try {
+      const stageIds = [...new Set(profileMods
+        .filter(mod => mod.storage === 'staged' && mod.stageId)
+        .map(mod => mod.stageId as string))]
+      const recovery = await native.repairStagedQuarantine(selectedGame.id, selectedGame.name, stageIds)
+      await scanMods(selectedGame.id, { force: true })
+
+      const currentArguments = () => {
+        const state = useStore.getState()
+        const game = state.games.find(item => item.id === selectedGame.id) || selectedGame
+        const profile = game.profiles.find(item => item.id === selectedProfile.id) || selectedProfile
+        const mods = resolveProfileMods(game, profile)
+        const enabledModIds = mods
+          .filter(mod => mod.enabled)
+          .map(mod => mod.stageId || (mod.storage === 'staged' ? mod.id : undefined))
+          .filter((id): id is string => Boolean(id))
+        const executableRoot = game.name.toLocaleLowerCase().includes('cyberpunk')
+          && /[\\/]bin[\\/]x64(?:[\\/]|$)/i.test(game.execPath || '')
+          ? game.execPath?.split(/[\\/]bin[\\/]x64/i)[0]
+          : game.execPath?.replace(/[\\/][^\\/]+$/, '')
+        return {
+          enabledModIds,
+          conflictRules: profile.conflictRules || [],
+          gameRoot: game.installDirectory || executableRoot || undefined,
+        }
+      }
+
+      let input = currentArguments()
+      let audit = await native.auditProfileDeployment(
+        selectedGame.id,
+        selectedProfile.id,
+        input.enabledModIds,
+        input.conflictRules,
+        input.gameRoot,
+      )
+      const brokenIds = audit.packages
+        .filter(pkg => !pkg.deployable && stageIds.includes(pkg.packageId))
+        .map(pkg => pkg.packageId)
+      let importRepairs = 0
+      if (brokenIds.length) {
+        const repairs = await native.repairStagedImports(selectedGame.id, selectedGame.name, brokenIds)
+        importRepairs = repairs.filter(report => report.repaired).length
+      }
+
+      let structureRepairs = 0
+      let structureWarnings = 0
+      if (cyberpunkTools) {
+        const preview = await native.previewCyberpunkStructureRepair(selectedGame.id)
+        structureWarnings = preview.items.reduce((sum, item) => sum + item.conflicts.length, 0)
+        if (preview.items.length && structureWarnings === 0) {
+          const result = await native.applyCyberpunkStructureRepair(
+            selectedGame.id,
+            preview.items.map(item => item.stageId),
+          )
+          structureRepairs = result.packagesRepaired
+        }
+      }
+
+      await scanMods(selectedGame.id, { force: true })
+      await deduplicateStagedMods(selectedGame.id)
+      input = currentArguments()
+      audit = await native.auditProfileDeployment(
+        selectedGame.id,
+        selectedProfile.id,
+        input.enabledModIds,
+        input.conflictRules,
+        input.gameRoot,
+      )
+      const summary = [
+        audit.deployable
+          ? 'Profil prêt : la copie intelligente temporaire sera appliquée automatiquement au lancement.'
+          : `Maintenance terminée : ${audit.brokenReferences} référence(s) demandent encore une intervention manuelle.`,
+        `${recovery.recoveredFiles} fichier(s) vérifié(s) récupéré(s) depuis la quarantaine · ${recovery.isolatedPackages} paquet(s) sensible(s) conservé(s) isolé(s).`,
+        `${importRepairs} import(s) reconstitué(s) · ${structureRepairs} racine(s) Cyberpunk réparée(s).`,
+        `${audit.virtualFileCount} fichier(s) composent maintenant la carte virtuelle du profil.`,
+        structureWarnings ? `${structureWarnings} collision(s) de structure n’ont pas été modifiées automatiquement.` : '',
+        recovery.errors.length ? `${recovery.errors.length} avertissement(s) : ${recovery.errors.slice(0, 2).join(' · ')}` : '',
+      ].filter(Boolean).join('\n')
+      setMaintenanceSummary(summary)
+    } catch (error) {
+      setMaintenanceSummary(`Maintenance interrompue : ${String(error)}`)
+    } finally {
+      setDeploymentToolBusy(false)
     }
   }
 
@@ -518,17 +609,12 @@ export function GamesView() {
       {tab === 'mods' && <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.05] p-3">
           <button onClick={() => setImportOpen(true)} className="flex items-center gap-1.5 rounded-lg bg-gold px-3 py-2 text-[11px] font-semibold text-[var(--zailon-accent-text)]"><FolderInput size={13} /> Importer des dossiers</button>
-          <button onClick={() => void scanMods(selectedGame.id)} disabled={!!activeSession && runtimeActivity.scans !== 'normal'} title={activeSession && runtimeActivity.scans !== 'normal' ? 'En pause — jeu actif (profil Performance). Reprenez après la fermeture du jeu.' : 'Analyser le dossier Mods'} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05] disabled:cursor-not-allowed disabled:opacity-40"><RefreshCw size={13} /> Analyser</button>
-          <button onClick={() => void deduplicateStagedMods(selectedGame.id)} className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05]"><Boxes size={13} /> Nettoyer les doublons</button>
-          <button onClick={() => void purgeUnreferencedStagedMods(selectedGame.id)} className="flex items-center gap-1.5 rounded-lg border border-red-300/12 px-3 py-2 text-[11px] text-red-100/58 hover:bg-red-300/[0.05]"><Trash2 size={13} /> Purger les paquets retirés</button>
-          <button onClick={() => void repairStagedImports()} title="Re-stager chaque paquet importé depuis sa source enregistrée (racines de jeu corrigées)" className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/60 hover:bg-white/[0.05]"><RotateCcw size={13} />Réparer les racines des imports</button>
+          <button onClick={() => { setMaintenanceSummary(undefined); setMaintenanceOpen(true) }} className="flex items-center gap-1.5 rounded-lg border border-gold/25 bg-gold/[0.045] px-3 py-2 text-xs font-semibold text-gold hover:bg-gold/[0.09]"><Sparkles size={14} />Assistant mods</button>
           {fiveMProfiles && selectedGame.provider === 'FiveM Client' && <button onClick={() => setFivemReShadeOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-sky-300/18 bg-sky-300/[0.035] px-3 py-2 text-[11px] text-sky-100/68 hover:bg-sky-300/[0.07]"><ShieldCheck size={13} />ReShade FiveM</button>}
           {fiveMProfiles && selectedGame.provider === 'FiveM Client' && <button onClick={() => setFivemPackOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-sky-300/18 bg-sky-300/[0.035] px-3 py-2 text-[11px] text-sky-100/68 hover:bg-sky-300/[0.07]"><Boxes size={13} />Packs graphiques</button>}
           {fiveMProfiles && selectedGame.provider === 'FiveM Client' && <button onClick={() => setFivemAssistantOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-sky-300/18 bg-sky-300/[0.035] px-3 py-2 text-[11px] text-sky-100/68 hover:bg-sky-300/[0.07]"><Sparkles size={13} />Assistant FiveM</button>}
           {vortexImport && <button onClick={() => setVortexOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-sky-300/18 bg-sky-300/[0.035] px-3 py-2 text-[11px] text-sky-100/68 hover:bg-sky-300/[0.07]"><Download size={13} />Importer depuis Vortex</button>}
           {frostyImport && <button onClick={() => setFrostyOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-sky-300/18 bg-sky-300/[0.035] px-3 py-2 text-[11px] text-sky-100/68 hover:bg-sky-300/[0.07]"><Download size={13} />Importer depuis Frosty</button>}
-          {cyberpunkTools && <button onClick={() => void repairCyberpunkStructure()} className="flex items-center gap-1.5 rounded-lg border border-amber-300/18 bg-amber-300/[0.035] px-3 py-2 text-[11px] text-amber-100/68 hover:bg-amber-300/[0.07]"><Wrench size={13} />Réparer les racines Cyberpunk</button>}
-          {bulkHistory.some(operation => operation.gameId === selectedGame.id && operation.undoable) && <button onClick={() => void undoLastBulkOperation()} title="Annuler la dernière opération groupée" className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-2 text-[11px] text-white/55 hover:bg-white/[0.05]"><RotateCcw size={13} />Annuler</button>}
           <label className="flex items-center gap-2 rounded-lg border border-white/[0.08] px-2.5 text-[11px] text-white/55"><input ref={selectAllRef} type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedModIds(current => { const next = new Set(current); if (allVisibleSelected) filteredMods.forEach(mod => next.delete(mod.id)); else filteredMods.forEach(mod => next.add(mod.id)); return next })} className="accent-gold" />Tout visible <span className="text-white/30">{selectedVisible}/{filteredMods.length}</span></label>
           {availableTags.length > 0 && <select value={tagFilter} onChange={event => setTagFilter(event.target.value)} className="rounded-lg border border-white/[0.08] bg-[#101313] px-2 py-2 text-[11px] text-white/58"><option value="">Toutes les étiquettes</option>{availableTags.map(tag => <option key={tag.id} value={tag.id}>{tag.label}</option>)}</select>}
           <div className="relative ml-auto"><Search size={12} className="absolute left-2.5 top-2.5 text-white/30" /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Rechercher" className="w-44 rounded-lg border border-white/[0.07] bg-white/[0.03] py-2 pl-7 pr-2 text-[11px] text-white/70 outline-none focus:border-gold/30" /></div>
@@ -566,6 +652,73 @@ export function GamesView() {
       clearBulkSelection(); setBulkDialog(undefined)
     }} />}
     {modDiagnostic && <ModDiagnosticDialog diagnostic={modDiagnostic} onClose={() => setModDiagnostic(undefined)} onOpenFiles={() => { setModDiagnostic(undefined); setDiagSection('files'); setTab('diagnostic') }} />}
+    {maintenanceOpen && <ModMaintenanceDialog
+      busy={deploymentToolBusy}
+      summary={maintenanceSummary}
+      cyberpunk={cyberpunkTools}
+      canUndo={bulkHistory.some(operation => operation.gameId === selectedGame.id && operation.undoable)}
+      scanDisabled={!!activeSession && runtimeActivity.scans !== 'normal'}
+      onClose={() => setMaintenanceOpen(false)}
+      onAutomatic={() => void runSmartMaintenance()}
+      onScan={() => void scanMods(selectedGame.id, { force: true })}
+      onRepairImports={() => void repairStagedImports()}
+      onRepairCyberpunk={() => void repairCyberpunkStructure()}
+      onDeduplicate={() => void deduplicateStagedMods(selectedGame.id)}
+      onPurge={() => void purgeUnreferencedStagedMods(selectedGame.id)}
+      onUndo={() => void undoLastBulkOperation()}
+    />}
+  </div>
+}
+
+function ModMaintenanceDialog({ busy, summary, cyberpunk, canUndo, scanDisabled, onClose, onAutomatic, onScan, onRepairImports, onRepairCyberpunk, onDeduplicate, onPurge, onUndo }: {
+  busy: boolean
+  summary?: string
+  cyberpunk: boolean
+  canUndo: boolean
+  scanDisabled: boolean
+  onClose: () => void
+  onAutomatic: () => void
+  onScan: () => void
+  onRepairImports: () => void
+  onRepairCyberpunk: () => void
+  onDeduplicate: () => void
+  onPurge: () => void
+  onUndo: () => void
+}) {
+  const [mode, setMode] = useState<'automatic' | 'manual'>('automatic')
+  return <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" onMouseDown={event => { if (event.target === event.currentTarget && !busy) onClose() }}>
+    <div role="dialog" aria-modal="true" aria-labelledby="mod-maintenance-title" className="w-full max-w-2xl overflow-hidden rounded-2xl border border-white/[0.1] bg-[#101313] shadow-2xl">
+      <div className="flex items-start justify-between border-b border-white/[0.07] px-5 py-4">
+        <div><p id="mod-maintenance-title" className="flex items-center gap-2 text-base font-bold text-white"><Sparkles size={17} className="text-gold" />Assistant mods</p><p className="mt-1 text-xs leading-relaxed text-white/45">Analyse, réparation des imports et préparation du profil depuis un seul endroit.</p></div>
+        <button type="button" onClick={onClose} disabled={busy} aria-label="Fermer" className="rounded-lg p-2 text-white/35 hover:bg-white/[0.06] hover:text-white disabled:opacity-30"><X size={16} /></button>
+      </div>
+      <div className="space-y-4 p-5">
+        <div className="grid grid-cols-2 rounded-xl border border-white/[0.08] bg-black/20 p-1">
+          <button type="button" onClick={() => setMode('automatic')} className={`rounded-lg px-3 py-2.5 text-xs font-semibold ${mode === 'automatic' ? 'bg-gold text-[var(--zailon-accent-text)]' : 'text-white/48 hover:text-white'}`}>Automatique</button>
+          <button type="button" onClick={() => setMode('manual')} className={`rounded-lg px-3 py-2.5 text-xs font-semibold ${mode === 'manual' ? 'bg-white/[0.09] text-white' : 'text-white/48 hover:text-white'}`}>Manuel</button>
+        </div>
+
+        <div className="rounded-xl border border-emerald-300/15 bg-emerald-300/[0.045] p-3">
+          <p className="flex items-center gap-2 text-xs font-semibold text-emerald-100"><ShieldCheck size={15} />Copie intelligente active</p>
+          <p className="mt-1 text-xs leading-relaxed text-emerald-100/58">Au clic sur Jouer, ZAILON compose la carte virtuelle, copie uniquement les fichiers gagnants dans le jeu, vérifie leur empreinte puis restaure les fichiers d’origine à la fermeture — comme un déploiement MO2, sans exécuter les outils importés.</p>
+        </div>
+
+        {mode === 'automatic' ? <div className="space-y-3">
+          <div className="rounded-xl border border-white/[0.07] bg-white/[0.025] p-4 text-xs leading-relaxed text-white/55">L’assistant récupère les plugins dont le chemin et le SHA-256 sont validés, reconstruit les manifestes, corrige les racines sans collision, analyse les doublons et contrôle la carte virtuelle finale. Les paquets sensibles non autorisés restent isolés sans bloquer les autres mods.</div>
+          <button type="button" onClick={onAutomatic} disabled={busy} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gold px-4 py-3 text-sm font-bold text-[var(--zailon-accent-text)] shadow-lg shadow-gold/10 disabled:cursor-wait disabled:opacity-55">{busy ? <Loader2 size={17} className="animate-spin" /> : <Sparkles size={17} />}{busy ? 'Maintenance intelligente en cours…' : 'Analyser et appliquer les corrections sûres'}</button>
+          <p className="text-center text-xs text-white/32">La purge définitive des paquets retirés reste volontairement manuelle.</p>
+        </div> : <div className="grid gap-2 sm:grid-cols-2">
+          <button type="button" onClick={onScan} disabled={busy || scanDisabled} className="flex items-center justify-center gap-2 rounded-xl border border-white/[0.09] px-3 py-3 text-xs font-semibold text-white/58 hover:bg-white/[0.05] disabled:opacity-35"><RefreshCw size={15} />Analyser les mods</button>
+          <button type="button" onClick={onRepairImports} disabled={busy} className="flex items-center justify-center gap-2 rounded-xl border border-white/[0.09] px-3 py-3 text-xs font-semibold text-white/58 hover:bg-white/[0.05] disabled:opacity-35"><RotateCcw size={15} />Réparer les racines des imports</button>
+          {cyberpunk && <button type="button" onClick={onRepairCyberpunk} disabled={busy} className="flex items-center justify-center gap-2 rounded-xl border border-white/[0.09] px-3 py-3 text-xs font-semibold text-white/58 hover:bg-white/[0.05] disabled:opacity-35"><Wrench size={15} />Réparer les racines Cyberpunk</button>}
+          <button type="button" onClick={onDeduplicate} disabled={busy} className="flex items-center justify-center gap-2 rounded-xl border border-white/[0.09] px-3 py-3 text-xs font-semibold text-white/58 hover:bg-white/[0.05] disabled:opacity-35"><Boxes size={15} />Nettoyer les doublons</button>
+          {canUndo && <button type="button" onClick={onUndo} disabled={busy} className="flex items-center justify-center gap-2 rounded-xl border border-white/[0.09] px-3 py-3 text-xs font-semibold text-white/58 hover:bg-white/[0.05] disabled:opacity-35"><RotateCcw size={15} />Annuler la dernière opération</button>}
+          <button type="button" onClick={onPurge} disabled={busy} className="flex items-center justify-center gap-2 rounded-xl border border-red-300/15 px-3 py-3 text-xs font-semibold text-red-100/65 hover:bg-red-300/[0.06]"><Trash2 size={15} />Purger les paquets retirés</button>
+        </div>}
+
+        {summary && <pre className={`max-h-44 whitespace-pre-wrap rounded-xl border p-3 font-sans text-xs leading-relaxed ${summary.startsWith('Profil prêt') ? 'border-emerald-300/15 bg-emerald-300/[0.04] text-emerald-100/72' : 'border-amber-300/15 bg-amber-300/[0.04] text-amber-100/72'}`}>{summary}</pre>}
+      </div>
+    </div>
   </div>
 }
 

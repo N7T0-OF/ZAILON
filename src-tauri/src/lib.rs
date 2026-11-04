@@ -4602,8 +4602,15 @@ fn cyberpunk_relative_destination(source: &Path) -> Option<PathBuf> {
         (&["tools"], &["tools"]),
         (&["bin"], &["bin"]),
     ];
-    for (index, _) in lower.iter().enumerate() {
-        for (signature, normalized) in signatures {
+    // Les signatures sont classées de la plus précise à la plus générique.
+    // Il faut donc les tester AVANT les segments du chemin : dans
+    // `.../mods/Mon Mod/red4ext/plugins/...`, le dossier `mods` est un
+    // conteneur de bibliothèque et `red4ext/plugins` est la vraie racine jeu.
+    // L'ancienne boucle choisissait le premier segment rencontré et envoyait
+    // alors les DLL vers `mods/...`, où l'adaptateur de sécurité devait les
+    // isoler.
+    for (signature, normalized) in signatures {
+        for (index, _) in lower.iter().enumerate() {
             if index + signature.len() > lower.len()
                 || !lower[index..index + signature.len()]
                     .iter()
@@ -9432,6 +9439,7 @@ fn prepare_temporary_copy(
 fn prepare_profile_deployment(
     app: &AppHandle,
     game_id: &str,
+    game_name: &str,
     profile_id: &str,
     game_root: &Path,
     enabled_mod_ids: &[String],
@@ -9449,6 +9457,18 @@ fn prepare_profile_deployment(
     );
     let game_root = fs::canonicalize(game_root)
         .map_err(|_| "Le dossier d’installation du jeu est introuvable.".to_string())?;
+    let quarantine_root = update_data_root(app)?.join("quarantine");
+    let mut automatic_recoveries = Vec::new();
+    for package_id in enabled_mod_ids {
+        let Some(stage) = staged_package_directory(app, game_id, package_id) else {
+            continue;
+        };
+        let recovered =
+            recover_adapter_plugins_from_quarantine(&stage, &quarantine_root, game_name)?;
+        if !recovered.is_empty() {
+            automatic_recoveries.push((package_id.clone(), recovered.len()));
+        }
+    }
     let virtual_map = build_virtual_profile_map(
         app,
         game_id,
@@ -9489,6 +9509,11 @@ fn prepare_profile_deployment(
             .collect::<Vec<_>>(),
     )?;
     diagnostics.extend(virtual_map.diagnostics.clone());
+    for (package_id, recovered) in automatic_recoveries {
+        diagnostics.push(format!(
+            "{package_id} : {recovered} plugin(s) récupéré(s) automatiquement depuis la quarantaine vérifiée.",
+        ));
+    }
     diagnostics.push(format!(
         "Table virtuelle construite : {} fichier(s), {} paquet(s), {} framework(s) fournisseur(s).",
         virtual_map.entries.len(),
@@ -9668,6 +9693,7 @@ async fn launch_game(
     let visual_runtime = visual_state.inner().clone();
     let preparation_app = app.clone();
     let preparation_game_id = game_id.clone();
+    let preparation_game_name = game_name.clone();
     let preparation_profile_id = profile_id.clone();
     let preparation_enabled_mod_ids = enabled_mod_ids.clone();
     let preparation = tauri::async_runtime::spawn_blocking(move || {
@@ -9696,6 +9722,7 @@ async fn launch_game(
         let mut prepared = prepare_profile_deployment(
             &preparation_app,
             &preparation_game_id,
+            &preparation_game_name,
             &preparation_profile_id,
             &game_root_path,
             &preparation_enabled_mod_ids,
@@ -11369,6 +11396,130 @@ fn recover_framework_runtimes_from_quarantine(
     Ok(recovered)
 }
 
+/// Récupère un plugin que l'ancien résolveur avait isolé sous un faux préfixe
+/// `mods/<nom>/...`, uniquement lorsque le nouvel emplacement est explicitement
+/// autorisé par l'adaptateur du jeu. La source reste confinée à la quarantaine,
+/// son SHA-256 est revérifié et ZAILON ne l'exécute jamais.
+fn recover_adapter_plugins_from_quarantine(
+    stage: &Path,
+    quarantine_root: &Path,
+    game_name: &str,
+) -> Result<Vec<String>, String> {
+    let manifest_path = stage.join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).map_err(to_error)?).map_err(to_error)?;
+    let assessments = manifest
+        .get("sensitiveFiles")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| serde_json::from_value::<SensitiveFileAssessment>(value.clone()).ok())
+        .filter(|assessment| assessment.decision.as_deref() == Some("quarantined"))
+        .collect::<Vec<_>>();
+    if assessments.is_empty() || !quarantine_root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let allowed_root = fs::canonicalize(quarantine_root).map_err(to_error)?;
+    let quarantine_paths = manifest
+        .get("quarantinePaths")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str().map(PathBuf::from))
+        .collect::<Vec<_>>();
+    let content = stage.join("content");
+    let mut recovered = Vec::new();
+    for assessment in assessments {
+        let target = normalized_cyberpunk_game_relative(Path::new(&assessment.relative_path));
+        let target_key = deployment_key(&target);
+        let extension = target
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !game_adapter_allows_sensitive(game_name, &target_key, &extension) {
+            continue;
+        }
+        let original_key = deployment_key(Path::new(&assessment.relative_path));
+        let Some(source) = quarantine_paths.iter().find_map(|path| {
+            let canonical = fs::canonicalize(path).ok()?;
+            if !canonical.starts_with(&allowed_root)
+                || !deployment_key(&canonical).ends_with(&original_key)
+            {
+                return None;
+            }
+            file_sha256(&canonical)
+                .ok()
+                .is_some_and(|hash| hash.eq_ignore_ascii_case(&assessment.hash))
+                .then_some(canonical)
+        }) else {
+            continue;
+        };
+        if copy_verified_framework_runtime(&source, &content.join(&target), &assessment.hash)? {
+            recovered.push(target.to_string_lossy().replace('\\', "/"));
+        }
+    }
+    if recovered.is_empty() {
+        return Ok(recovered);
+    }
+    let recovered_keys = recovered
+        .iter()
+        .map(|path| path.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    if let Some(items) = manifest
+        .get_mut("sensitiveFiles")
+        .and_then(|value| value.as_array_mut())
+    {
+        for item in items {
+            let Some(relative) = item.get("relativePath").and_then(|value| value.as_str()) else {
+                continue;
+            };
+            let normalized =
+                deployment_key(&normalized_cyberpunk_game_relative(Path::new(relative)));
+            if recovered_keys.contains(&normalized) {
+                item["decision"] = serde_json::json!("deployed-by-game-adapter-recovery");
+                item["mayDeploy"] = serde_json::json!(true);
+                item["expectedByGameAdapter"] = serde_json::json!(true);
+            }
+        }
+    }
+    let mut diagnostics = manifest
+        .get("diagnostics")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
+    diagnostics.push(serde_json::json!(format!(
+        "Migration automatique : {} plugin(s) restauré(s) depuis la quarantaine après validation du chemin de jeu et du SHA-256. Aucun fichier n’a été exécuté.",
+        recovered.len()
+    )));
+    manifest["diagnostics"] = serde_json::Value::Array(diagnostics);
+    manifest["recoveredAdapterPlugins"] = serde_json::json!(recovered);
+    manifest["lastAdapterPluginRecoveryAt"] = serde_json::json!(unix_timestamp());
+    write_json_atomic(&manifest_path, &manifest)?;
+    Ok(recovered)
+}
+
+fn intentionally_isolated_package(stage: &Path) -> bool {
+    let Ok(payload) = fs::read(stage.join("manifest.json")) else {
+        return false;
+    };
+    let Ok(manifest) = serde_json::from_slice::<serde_json::Value>(&payload) else {
+        return false;
+    };
+    let assessments = manifest
+        .get("sensitiveFiles")
+        .and_then(|value| value.as_array());
+    assessments.is_some_and(|items| {
+        !items.is_empty()
+            && items.iter().all(|item| {
+                matches!(
+                    item.get("decision").and_then(|value| value.as_str()),
+                    Some("quarantined" | "excluded" | "stored-inactive")
+                )
+            })
+    })
+}
+
 fn package_manifest_entries(
     stage: &Path,
     game_id: &str,
@@ -11681,12 +11832,20 @@ fn build_virtual_profile_map(
                         .to_ascii_lowercase()
                         .starts_with("root/")
                 });
-                status.deployable =
-                    status.file_count > 0 && status.normalized && status.identity_matches;
+                let intentionally_isolated =
+                    status.file_count == 0 && intentionally_isolated_package(&stage);
+                status.deployable = (status.file_count > 0 || intentionally_isolated)
+                    && status.normalized
+                    && status.identity_matches;
                 if persist_manifests {
                     status.manifest_exists = true;
                 }
-                if status.file_count == 0 {
+                if intentionally_isolated {
+                    diagnostics.push(format!(
+                        "{} : le contenu sensible reste isolé et ce paquet sans fichier actif ne bloque pas les autres mods.",
+                        package_id
+                    ));
+                } else if status.file_count == 0 {
                     status
                         .errors
                         .push("Le manifeste ne contient aucun fichier déployable.".into());
@@ -14907,6 +15066,69 @@ pub struct StagedImportRepairReport {
     layout: String,
     backup_path: Option<String>,
     error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartPackageRepairReport {
+    packages_checked: usize,
+    packages_repaired: usize,
+    recovered_files: usize,
+    isolated_packages: usize,
+    errors: Vec<String>,
+}
+
+/// Maintenance sûre utilisée par l'assistant Mods : réévalue les fichiers
+/// sensibles avec les chemins normalisés actuels, restaure seulement ceux que
+/// l'adaptateur du jeu autorise explicitement, puis reconstruit les manifestes.
+#[tauri::command]
+fn repair_staged_quarantine(
+    app: AppHandle,
+    game_id: String,
+    game_name: String,
+    stage_ids: Vec<String>,
+) -> Result<SmartPackageRepairReport, String> {
+    let game_id = safe_game_id(&game_id)?.to_string();
+    let quarantine_root = update_data_root(&app)?.join("quarantine");
+    let mut report = SmartPackageRepairReport {
+        packages_checked: 0,
+        packages_repaired: 0,
+        recovered_files: 0,
+        isolated_packages: 0,
+        errors: Vec::new(),
+    };
+    let mut seen = HashSet::new();
+    for raw in stage_ids {
+        let package_id = safe_archive_component(&raw);
+        if !seen.insert(package_id.clone()) {
+            continue;
+        }
+        report.packages_checked += 1;
+        let Some(stage) = staged_package_directory(&app, &game_id, &package_id) else {
+            report
+                .errors
+                .push(format!("{package_id} : paquet physique introuvable."));
+            continue;
+        };
+        match recover_adapter_plugins_from_quarantine(&stage, &quarantine_root, &game_name) {
+            Ok(recovered) => {
+                if !recovered.is_empty() {
+                    report.packages_repaired += 1;
+                    report.recovered_files += recovered.len();
+                }
+                if intentionally_isolated_package(&stage) {
+                    report.isolated_packages += 1;
+                }
+                if let Err(error) = package_manifest_entries(&stage, &game_id, true) {
+                    report.errors.push(format!(
+                        "{package_id} : manifeste non reconstruit ({error})."
+                    ));
+                }
+            }
+            Err(error) => report.errors.push(format!("{package_id} : {error}")),
+        }
+    }
+    Ok(report)
 }
 
 #[tauri::command]
@@ -21113,6 +21335,28 @@ mod tests {
     }
 
     #[test]
+    fn cyberpunk_destination_prefers_the_real_inner_root_over_mods_container() {
+        let plugin = cyberpunk_relative_destination(Path::new(
+            "D:/Library/mods/ACU - Character Preset Manager/red4ext/plugins/ACU/acu_rs.dll",
+        ));
+        assert_eq!(
+            plugin,
+            Some(PathBuf::from("red4ext/plugins/ACU/acu_rs.dll"))
+        );
+        assert!(game_adapter_allows_sensitive(
+            "Cyberpunk 2077",
+            &deployment_key(plugin.as_deref().expect("plugin destination")),
+            "dll"
+        ));
+        assert_eq!(
+            cyberpunk_relative_destination(Path::new(
+                "D:/Library/mods/redscript/engine/tools/scc.exe"
+            )),
+            Some(PathBuf::from("engine/tools/scc.exe"))
+        );
+    }
+
+    #[test]
     fn red4ext_plugin_is_not_mistaken_for_the_red4ext_provider() {
         let root = std::env::temp_dir().join(format!(
             "zailon-red4ext-provider-test-{}-{}",
@@ -23867,6 +24111,7 @@ pub fn run() {
             set_game_process_priority,
             audit_profile_deployment,
             repair_mo2_profile_deployment,
+            repair_staged_quarantine,
             repair_staged_imports,
             sync_profile_state,
             apply_profile_transaction,

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Assistant mods unifié, automatique ou manuel** : les actions « Analyser », « Nettoyer les doublons », « Purger », « Réparer les imports », « Réparer les racines Cyberpunk » et « Annuler » sont regroupées derrière un seul bouton. Le mode automatique récupère les plugins vérifiés, reconstruit les manifestes, corrige les racines sans collision et contrôle la carte virtuelle finale ; le mode manuel conserve chaque action séparée. L’assistant explique également la copie intelligente temporaire appliquée au lancement, avec sauvegarde et restauration des fichiers du jeu.
+
+### Fixed
+
+- **Cyberpunk 2077 — paquets vides ACU, Audioware, NamedSaves et outils redscript** : le résolveur privilégie désormais la vraie racine interne (`red4ext/plugins`, `engine/tools`, etc.) plutôt qu’un dossier conteneur générique nommé `mods`. Au lancement ou depuis l’assistant, les plugins anciennement isolés sont récupérés uniquement après validation du chemin autorisé et de leur SHA-256, sans exécution par ZAILON. Un paquet contenant seulement des fichiers volontairement isolés n’empêche plus les autres mods valides de démarrer ; les exécutables d’outils qui ne sont pas explicitement autorisés restent isolés et non exécutés.
+- **Rapport de réparation des imports** : le compteur des fichiers replacés lit maintenant correctement les champs natifs au format camelCase au lieu d’afficher un résultat incorrect.
+
 ## [1.156.0] - 2026-11-04
 
 **Cyberpunk Advanced** renforce la gestion de Cyberpunk 2077 avec une passerelle sûre vers OPEN//77, une première prise en charge contrôlée des installateurs ZIP/FOMOD et une détection correcte des frameworks déjà présents dans le jeu.

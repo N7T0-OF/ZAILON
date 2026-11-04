@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [1.156.0] - 2026-11-04
+
+**Cyberpunk Advanced** renforce la gestion de Cyberpunk 2077 avec une passerelle sûre vers OPEN//77, une première prise en charge contrôlée des installateurs ZIP/FOMOD et une détection correcte des frameworks déjà présents dans le jeu.
+
 ### Fixed
 
 - **Cyberpunk 2077 — faux blocage ArchiveXL au lancement** : ZAILON ne conclut plus qu’ArchiveXL est absent en se basant uniquement sur les paquets du profil. Le contrôle bloquant est désormais laissé au backend de lancement, qui vérifie ensemble la table virtuelle et la racine physique du jeu, y compris les variantes de casse de `red4ext/plugins/ArchiveXL`. Un ArchiveXL déjà installé dans Cyberpunk satisfait donc correctement les ressources `.xl`, tandis qu’une dépendance réellement absente reste bloquée avant le démarrage.

@@ -21392,6 +21392,28 @@ mod tests {
     }
 
     #[test]
+    fn dependency_diagnostics_accept_archivexl_already_installed_in_game() {
+        let root = std::env::temp_dir().join(format!(
+            "zailon-archivexl-installed-test-{}-{}",
+            unix_timestamp(),
+            std::process::id()
+        ));
+        let archive_xl = root.join("RED4ext/Plugins/ArchiveXL");
+        fs::create_dir_all(&archive_xl).expect("ArchiveXL game folder");
+        fs::write(archive_xl.join("ArchiveXL.dll"), b"fake-archivexl-runtime")
+            .expect("ArchiveXL runtime marker");
+
+        let paths = vec![PathBuf::from("archive/pc/mod/example.archive.xl")];
+        let diagnostics = framework_diagnostics(&root, &paths)
+            .expect("ArchiveXL installed in the game must satisfy an active .xl resource");
+        assert!(diagnostics
+            .iter()
+            .any(|item| item.contains("ArchiveXL : détecté")));
+
+        fs::remove_dir_all(root).expect("remove ArchiveXL regression test");
+    }
+
+    #[test]
     fn temporary_copy_restores_originals_and_captures_overwrite() {
         let root = std::env::temp_dir().join(format!(
             "zailon-rollback-test-{}-{}",

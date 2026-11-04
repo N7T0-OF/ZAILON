@@ -20,7 +20,6 @@ import { BackgroundTaskSnapshot, DeploymentProgressEvent, DetectedGame, Mo2Impor
 import { adapterFor, FALLBACK_ADAPTER, isLauncherBased } from '../lib/launchAdapters'
 import { fetchGamebananaDownload, fetchGamebananaMods, GAMEBANANA_GAMES, searchGamebananaGames } from './gamebanana'
 import { createUserTag, withInferredTags } from '../lib/modCategories'
-import { validateFrameworkHierarchy } from '../lib/frameworkHierarchy'
 import { mergeModCatalogs, reconcileModStates } from '../lib/profileState'
 import { arbitrateInputProfiles, pickPrioritySession, recoveryKind } from '../lib/sessionPriority'
 import { compareFrameworkSets, fingerprintFrameworkSet, hasFrameworkChanges, type FrameworkSnapshot } from '../lib/lastKnownGood'
@@ -2139,19 +2138,13 @@ export const useStore = create<Store>()(persist((set, get) => ({
         get().createRestorePoint(`Avant lancement · ${stamp}`, 'auto')
       }
       const enabledMods = options?.withoutMods ? [] : resolveProfileMods(game, profile).filter(mod => mod.enabled)
-      // Verrou pré-lancement frameworks (spec Cyberpunk RED4ext §5, §36-43) :
-      // on ne lance jamais le jeu avec un framework incomplet (ex. plugins
-      // RED4ext sans le core red4ext/red4ext.dll) — sinon « RED4ext could not
-      // be loaded ». Diagnostic HIÉRARCHIQUE : RED4ext vérifié en premier, la
-      // cause primaire est affichée avant les conséquences (TweakXL/ArchiveXL
-      // ne sont jamais accusés quand RED4ext est la cause commune).
-      if (!options?.withoutMods && game.name.toLocaleLowerCase().includes('cyberpunk')) {
-        const validation = validateFrameworkHierarchy(enabledMods)
-        if (!validation.valid) {
-          set({ notice: `Lancement bloqué — ${validation.blockers.join(' ')} Activez ou placez correctement le framework manquant, ou utilisez « Lancer sans mods » depuis le diagnostic pour diagnostiquer.` })
-          return
-        }
-      }
+      // Le catalogue frontend ne connaît que les paquets du profil : il ne
+      // peut pas conclure qu'un framework est absent du jeu. Le contrôle
+      // bloquant Cyberpunk est donc effectué une seule fois par le backend
+      // `launch_game`, après construction de la table virtuelle ET inspection
+      // insensible à la casse de la racine physique. Cela évite le faux
+      // « ArchiveXL manquant » lorsque le runtime est déjà installé dans le jeu
+      // tout en conservant le blocage natif si la dépendance manque réellement.
       // Last Known Good (§41-42) : si une référence existe et la configuration
       // des frameworks a changé depuis le dernier lancement réussi, on avertit
       // (et on BLOQUE si le profil est verrouillé — pas de remplacement silencieux).

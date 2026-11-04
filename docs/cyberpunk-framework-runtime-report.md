@@ -22,7 +22,7 @@ des **conséquences** (spec §43).
 | État | Sens | Blocage |
 | ---- | ---- | ------- |
 | `ready` | fourni et exposé correctement | non |
-| `missing` | requis par un contenu actif mais aucun mod ne le fournit | oui |
+| `missing` | requis par un contenu actif mais aucun mod du profil ne le fournit ; état physique encore inconnu dans la carte | diagnostic du profil, pas un blocage anticipé |
 | `absent` | non fourni ET non requis par le profil | non |
 | `misplaced` | fourni par signature de fichier mais hors emplacement canonique (ex. `tweakxl.dll` à plat au lieu de `red4ext/plugins/TweakXL/`) | oui |
 | `not-deployed` | présent dans le profil mais absent de la table virtuelle (racine mal exposée) — vérifié quand l'audit est disponible | oui |
@@ -43,8 +43,10 @@ absent, aucun plugin → pas de besoin) ne bloque jamais : il s'affiche
 
 ## Points d'entrée
 
-- **Verrou pré-lancement** (`store/useStore.ts`) : le lancement Cyberpunk est
-  bloqué avec « Framework principal non chargé : X — … Conséquences : … ».
+- **Contrôle bloquant unique** (`launch_game` / `framework_diagnostics` dans
+  `src-tauri/src/lib.rs`) : après construction de la table virtuelle, le backend
+  vérifie les fichiers projetés **et** ceux déjà installés dans la racine réelle
+  de Cyberpunk. Le frontend ne bloque plus sur sa vue incomplète du seul profil.
 - **Carte « Diagnostic hiérarchique · frameworks »**
   (`GameDiagnosticPanel.tsx`, section Frameworks) : les 6 frameworks dans
   l'ordre avec leur état, bannière cause primaire, avertissements Last Known
@@ -71,6 +73,9 @@ global) avant de résoudre les besoins.
 
 - Le chargement **réel** au runtime (Loaded) n'est pas vérifiable avant
   lancement : ZAILON n'affiche jamais « chargé » sans le log du jeu.
+- La carte hiérarchique décrit en priorité le profil et sa table virtuelle. Le
+  verdict bloquant final appartient au backend, seul composant qui peut vérifier
+  qu'ArchiveXL, TweakXL, RED4ext ou redscript existe déjà dans le jeu.
 - « Réparer RED4ext » reconstruit la table virtuelle (audit) mais ne
   télécharge jamais une version sans confirmation explicite.
 - Les règles de besoins Codeware/CET restent non déductibles automatiquement

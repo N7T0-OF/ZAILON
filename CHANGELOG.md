@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cyberpunk 2077 — faux blocage ArchiveXL au lancement** : ZAILON ne conclut plus qu’ArchiveXL est absent en se basant uniquement sur les paquets du profil. Le contrôle bloquant est désormais laissé au backend de lancement, qui vérifie ensemble la table virtuelle et la racine physique du jeu, y compris les variantes de casse de `red4ext/plugins/ArchiveXL`. Un ArchiveXL déjà installé dans Cyberpunk satisfait donc correctement les ressources `.xl`, tandis qu’une dépendance réellement absente reste bloquée avant le démarrage.
+
 ### Experimental
 
 - **Passerelle OPEN//77 pour Cyberpunk 2077** : ZAILON détecte ou laisse choisir `Open77Launcher.exe`, calcule localement les empreintes du launcher et du jeu, lit le journal de projection OPEN//77, signale les fichiers également revendiqués par le profil ZAILON actif et ouvre l’accueil, les Mods ou le diagnostic officiel `--detect-only` avec la bonne installation. Aucun identifiant, paquet privé ou fichier OPEN//77 n’est copié ni modifié par ZAILON. L’intégration reste expérimentale tant qu’un parcours réel complet avec un compte Alpha et un serveur n’a pas été validé.
